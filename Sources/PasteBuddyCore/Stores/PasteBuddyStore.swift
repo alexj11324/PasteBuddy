@@ -1915,20 +1915,25 @@ public final class PasteBuddyStore {
     }
 
     private static func estimatedStorageBytes(for item: ClipboardItem) -> Int {
-        256
-            + item.title.utf8.count
-            + item.sourceAppName.utf8.count
-            + item.deviceName.utf8.count
-            + item.contentType.rawValue.utf8.count
-            + item.labels.reduce(0) { $0 + $1.utf8.count }
-            + item.reuseCategory.rawValue.utf8.count
-            + (item.payload.text?.utf8.count ?? 0)
-            + (item.payload.htmlString?.utf8.count ?? 0)
-            + (item.payload.rtfData?.count ?? 0)
-            + (item.payload.urlString?.utf8.count ?? 0)
-            + item.payload.allFileURLStrings.reduce(0) { $0 + $1.utf8.count }
-            + (item.payload.imageData?.count ?? 0)
-            + (item.payload.ocrText?.utf8.count ?? 0)
+        var estimatedBytes = 256
+        estimatedBytes += item.title.utf8.count
+        estimatedBytes += item.sourceAppName.utf8.count
+        estimatedBytes += item.deviceName.utf8.count
+        estimatedBytes += item.contentType.rawValue.utf8.count
+        estimatedBytes += item.labels.reduce(0) { total, label in
+            total + label.utf8.count
+        }
+        estimatedBytes += item.reuseCategory.rawValue.utf8.count
+        estimatedBytes += item.payload.text?.utf8.count ?? 0
+        estimatedBytes += item.payload.htmlString?.utf8.count ?? 0
+        estimatedBytes += item.payload.rtfData?.count ?? 0
+        estimatedBytes += item.payload.urlString?.utf8.count ?? 0
+        estimatedBytes += item.payload.allFileURLStrings.reduce(0) { total, fileURLString in
+            total + fileURLString.utf8.count
+        }
+        estimatedBytes += item.payload.imageData?.count ?? 0
+        estimatedBytes += item.payload.ocrText?.utf8.count ?? 0
+        return estimatedBytes
     }
 
     private static func deduplicationKey(for item: ClipboardItem) -> String {
