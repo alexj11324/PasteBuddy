@@ -9,8 +9,6 @@ struct ItemListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            FilterBarView(store: store)
-            Divider()
             if store.selectedScope == .pasteStack {
                 if let preview = store.pasteStackPreview {
                     PasteStackPreviewBar(preview: preview)
@@ -470,15 +468,8 @@ private struct ClipboardPreviewTile: View {
                         .strokeBorder(.quaternary)
                 }
 
-            if preview.prefersImageThumbnail,
-               let data = item.payload.imageData,
-               let image = NSImage(data: data) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 64, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .accessibilityHidden(true)
+            if preview.prefersImageThumbnail {
+                ClipboardPreviewThumbnail(item: item)
             } else {
                 VStack(spacing: 4) {
                     Image(systemName: preview.systemImageName)
@@ -531,6 +522,37 @@ private struct ClipboardPreviewTile: View {
     private func nonEmpty(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
+    }
+}
+
+private struct ClipboardPreviewThumbnail: View {
+    private static let maxPixelSize = 160
+    let item: ClipboardItem
+    @State private var thumbnail: NSImage?
+
+    var body: some View {
+        ZStack {
+            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: Self.maxPixelSize) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: item.contentType.systemImageName)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 64, height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityHidden(true)
+        .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: Self.maxPixelSize)) {
+            thumbnail = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: Self.maxPixelSize)
+            guard thumbnail == nil else { return }
+
+            let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item, maxPixelSize: Self.maxPixelSize)
+            guard !Task.isCancelled else { return }
+            thumbnail = loadedThumbnail
+        }
     }
 }
 

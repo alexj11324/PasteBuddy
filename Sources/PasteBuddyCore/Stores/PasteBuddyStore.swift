@@ -47,6 +47,7 @@ public final class PasteBuddyStore {
 
     private var diskStore: EncryptedSnapshotStore
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
+    @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
 
     public nonisolated static var defaultDeviceName: String {
         #if os(macOS)
@@ -134,6 +135,18 @@ public final class PasteBuddyStore {
     }
 
     public var filteredItems: [ClipboardItem] {
+        let cacheKey = filteredItemsCacheKey()
+        if presentationCache.filteredItemsKey == cacheKey {
+            return presentationCache.filteredItems
+        }
+
+        let items = makeFilteredItems(isHistoryAccessLocked: cacheKey.isHistoryAccessLocked)
+        presentationCache.filteredItemsKey = cacheKey
+        presentationCache.filteredItems = items
+        return items
+    }
+
+    private func makeFilteredItems(isHistoryAccessLocked: Bool) -> [ClipboardItem] {
         guard !isHistoryAccessLocked else { return [] }
         let scopedItems: [ClipboardItem]
         switch selectedScope {
@@ -161,11 +174,21 @@ public final class PasteBuddyStore {
     }
 
     public var selectedItemsInDisplayOrder: [ClipboardItem] {
-        let selected = selectedItemIDs
-        guard !selected.isEmpty else {
-            return selectedItem.map { [$0] } ?? []
+        let cacheKey = selectedItemsCacheKey()
+        if presentationCache.selectedItemsKey == cacheKey {
+            return presentationCache.selectedItemsInDisplayOrder
         }
-        return filteredItems.filter { selected.contains($0.id) }
+
+        let selected = selectedItemIDs
+        let items: [ClipboardItem]
+        if selected.isEmpty {
+            items = selectedItem.map { [$0] } ?? []
+        } else {
+            items = filteredItems.filter { selected.contains($0.id) }
+        }
+        presentationCache.selectedItemsKey = cacheKey
+        presentationCache.selectedItemsInDisplayOrder = items
+        return items
     }
 
     public var hasMultipleSelectedItems: Bool {
@@ -210,17 +233,11 @@ public final class PasteBuddyStore {
     }
 
     public var availableSourceApps: [String] {
-        guard !isHistoryAccessLocked else { return [] }
-        return Array(Set((snapshot.items + pasteStackItems).map(\.sourceAppName)))
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .sorted()
+        availableFilterValues().sourceApps
     }
 
     public var availableDevices: [String] {
-        guard !isHistoryAccessLocked else { return [] }
-        return Array(Set((snapshot.items + pasteStackItems).map(\.deviceName)))
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .sorted()
+        availableFilterValues().devices
     }
 
     public var hasActiveFilters: Bool {
@@ -1964,6 +1981,76 @@ public final class PasteBuddyStore {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    private func filteredItemsCacheKey() -> PasteBuddyFilteredItemsCacheKey {
+        PasteBuddyFilteredItemsCacheKey(
+            presentationRevision: presentationRevision,
+            isHistoryAccessLocked: isHistoryAccessLocked,
+            dateFilterTimeBucket: dateFilterTimeBucket()
+        )
+    }
+
+    private func selectedItemsCacheKey() -> PasteBuddySelectedItemsCacheKey {
+        PasteBuddySelectedItemsCacheKey(
+            filteredItemsKey: filteredItemsCacheKey(),
+            selectedItemID: selectedItemID,
+            selectedItemIDs: selectedItemIDs
+        )
+    }
+
+    private func availableFilterValues() -> PasteBuddyAvailableFilterValues {
+        let cacheKey = PasteBuddyAvailableFilterValuesCacheKey(
+            presentationRevision: presentationRevision,
+            isHistoryAccessLocked: isHistoryAccessLocked
+        )
+        if presentationCache.availableFilterValuesKey == cacheKey {
+            return presentationCache.availableFilterValues
+        }
+
+        guard !cacheKey.isHistoryAccessLocked else {
+            let values = PasteBuddyAvailableFilterValues()
+            presentationCache.availableFilterValuesKey = cacheKey
+            presentationCache.availableFilterValues = values
+            return values
+        }
+
+        var sourceApps = Set<String>()
+        var devices = Set<String>()
+        for item in snapshot.items {
+            insertNonEmpty(item.sourceAppName, into: &sourceApps)
+            insertNonEmpty(item.deviceName, into: &devices)
+        }
+        for item in pasteStackItems {
+            insertNonEmpty(item.sourceAppName, into: &sourceApps)
+            insertNonEmpty(item.deviceName, into: &devices)
+        }
+
+        let values = PasteBuddyAvailableFilterValues(
+            sourceApps: sourceApps.sorted(),
+            devices: devices.sorted()
+        )
+        presentationCache.availableFilterValuesKey = cacheKey
+        presentationCache.availableFilterValues = values
+        return values
+    }
+
+    private func dateFilterTimeBucket() -> Int? {
+        switch dateFilter {
+        case .any:
+            return nil
+        case .today:
+            let startOfDay = Calendar.current.startOfDay(for: Date())
+            return Int(startOfDay.timeIntervalSinceReferenceDate / 60)
+        case .last7Days:
+            return Int(Date().timeIntervalSinceReferenceDate / 60)
+        }
+    }
+
+    private func insertNonEmpty(_ value: String, into values: inout Set<String>) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        values.insert(trimmed)
+    }
+
     private func filtered(_ items: [ClipboardItem]) -> [ClipboardItem] {
         items.filter { item in
             item.matches(searchQuery) && matchesStructuredFilters(item)
@@ -1987,6 +2074,14 @@ public final class PasteBuddyStore {
     }
 
     private func availableFilterSuggestions() -> [ClipboardFilterDescriptor] {
+        let cacheKey = PasteBuddyFilterSuggestionsCacheKey(
+            presentationRevision: presentationRevision,
+            isHistoryAccessLocked: isHistoryAccessLocked
+        )
+        if presentationCache.filterSuggestionsKey == cacheKey {
+            return presentationCache.filterSuggestions
+        }
+
         let contentTypeSuggestions = ClipboardContentType.allCases
             .filter { $0 != contentTypeFilter }
             .map(filterDescriptor(for:))
@@ -2000,10 +2095,13 @@ public final class PasteBuddyStore {
             .filter { $0 != .any && $0 != dateFilter }
             .map(filterDescriptor(for:))
 
-        return contentTypeSuggestions
+        let suggestions = contentTypeSuggestions
             + sourceAppSuggestions
             + deviceSuggestions
             + dateSuggestions
+        presentationCache.filterSuggestionsKey = cacheKey
+        presentationCache.filterSuggestions = suggestions
+        return suggestions
     }
 
     private func filterDescriptor(for contentType: ClipboardContentType) -> ClipboardFilterDescriptor {
@@ -2055,6 +2153,44 @@ public final class PasteBuddyStore {
         }
         return "#\(raw)"
     }
+}
+
+private struct PasteBuddyPresentationCache {
+    var filteredItemsKey: PasteBuddyFilteredItemsCacheKey?
+    var filteredItems: [ClipboardItem] = []
+    var selectedItemsKey: PasteBuddySelectedItemsCacheKey?
+    var selectedItemsInDisplayOrder: [ClipboardItem] = []
+    var availableFilterValuesKey: PasteBuddyAvailableFilterValuesCacheKey?
+    var availableFilterValues = PasteBuddyAvailableFilterValues()
+    var filterSuggestionsKey: PasteBuddyFilterSuggestionsCacheKey?
+    var filterSuggestions: [ClipboardFilterDescriptor] = []
+}
+
+private struct PasteBuddyFilteredItemsCacheKey: Equatable {
+    var presentationRevision: Int
+    var isHistoryAccessLocked: Bool
+    var dateFilterTimeBucket: Int?
+}
+
+private struct PasteBuddySelectedItemsCacheKey: Equatable {
+    var filteredItemsKey: PasteBuddyFilteredItemsCacheKey
+    var selectedItemID: UUID?
+    var selectedItemIDs: Set<UUID>
+}
+
+private struct PasteBuddyAvailableFilterValuesCacheKey: Equatable {
+    var presentationRevision: Int
+    var isHistoryAccessLocked: Bool
+}
+
+private struct PasteBuddyFilterSuggestionsCacheKey: Equatable {
+    var presentationRevision: Int
+    var isHistoryAccessLocked: Bool
+}
+
+private struct PasteBuddyAvailableFilterValues {
+    var sourceApps: [String] = []
+    var devices: [String] = []
 }
 
 public struct DeletedClipboardItem: Equatable, Sendable {

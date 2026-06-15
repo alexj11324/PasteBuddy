@@ -89,6 +89,79 @@ struct SidebarView: View {
                 }
             }
 
+            Section("Filters") {
+                Menu {
+                    Picker(localized("Type"), selection: $store.contentTypeFilter) {
+                        Text(localized("Any Type")).tag(nil as ClipboardContentType?)
+                        ForEach(ClipboardContentType.allCases) { type in
+                            Text(localized(type.displayName)).tag(Optional(type))
+                        }
+                    }
+                } label: {
+                    SidebarFilterRow(
+                        title: localized("Type"),
+                        value: contentTypeFilterTitle,
+                        systemImageName: "doc.text.magnifyingglass",
+                        isActive: store.contentTypeFilter != nil
+                    )
+                }
+
+                Menu {
+                    Picker(localized("App"), selection: $store.sourceAppFilter) {
+                        Text(localized("Any App")).tag(nil as String?)
+                        ForEach(store.availableSourceApps, id: \.self) { appName in
+                            Text(appName).tag(Optional(appName))
+                        }
+                    }
+                } label: {
+                    SidebarFilterRow(
+                        title: localized("App"),
+                        value: store.sourceAppFilter ?? localized("Any App"),
+                        systemImageName: "app",
+                        isActive: store.sourceAppFilter != nil
+                    )
+                }
+
+                Menu {
+                    Picker(localized("Device"), selection: $store.deviceFilter) {
+                        Text(localized("Any Device")).tag(nil as String?)
+                        ForEach(store.availableDevices, id: \.self) { deviceName in
+                            Text(deviceName).tag(Optional(deviceName))
+                        }
+                    }
+                } label: {
+                    SidebarFilterRow(
+                        title: localized("Device"),
+                        value: store.deviceFilter ?? localized("Any Device"),
+                        systemImageName: "desktopcomputer",
+                        isActive: store.deviceFilter != nil
+                    )
+                }
+
+                Menu {
+                    Picker(localized("Date"), selection: $store.dateFilter) {
+                        ForEach(ClipboardDateFilter.allCases) { filter in
+                            Text(localized(filter.displayName)).tag(filter)
+                        }
+                    }
+                } label: {
+                    SidebarFilterRow(
+                        title: localized("Date"),
+                        value: localized(store.dateFilter.displayName),
+                        systemImageName: "calendar",
+                        isActive: store.dateFilter != .any
+                    )
+                }
+
+                if store.hasActiveFilters {
+                    Button {
+                        store.clearFilters()
+                    } label: {
+                        Label(localized("Clear Filters"), systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                }
+            }
+
             Section("Privacy") {
                 Button {
                     store.toggleCapturePaused()
@@ -163,6 +236,13 @@ struct SidebarView: View {
         return localized("Paste Stack (%d)", store.pasteStackItems.count)
     }
 
+    private var contentTypeFilterTitle: String {
+        guard let contentTypeFilter = store.contentTypeFilter else {
+            return localized("Any Type")
+        }
+        return localized(contentTypeFilter.displayName)
+    }
+
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
@@ -173,6 +253,30 @@ struct SidebarView: View {
             locale: Locale.current,
             arguments: arguments
         )
+    }
+}
+
+private struct SidebarFilterRow: View {
+    let title: String
+    let value: String
+    let systemImageName: String
+    let isActive: Bool
+
+    var body: some View {
+        Label {
+            HStack {
+                Text(title)
+                Spacer(minLength: 8)
+                Text(value)
+                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+            }
+        } icon: {
+            Image(systemName: systemImageName)
+                .foregroundStyle(isActive ? Color.accentColor : .secondary)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

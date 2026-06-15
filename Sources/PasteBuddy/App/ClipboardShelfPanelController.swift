@@ -17,8 +17,7 @@ final class ClipboardShelfPanelController {
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appResignActiveObserver: NSObjectProtocol?
     private var screenParametersObserver: NSObjectProtocol?
-    private var outsideClickEventTap: CFMachPort?
-    private var outsideClickRunLoopSource: CFRunLoopSource?
+    private var ignoreOutsideClicksUntil: Date?
 
     init(
         store: PasteBuddyStore,
@@ -45,14 +44,14 @@ final class ClipboardShelfPanelController {
     func show() {
         let panel = panel ?? makePanel()
         self.panel = panel
+        ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = bottomAttachedFrame(for: panel)
         panel.setFrame(hiddenFrame(for: finalFrame), display: false)
-        startOutsideClickMonitoring(for: panel)
-        startFocusMonitoring(for: panel)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         animate(panel, to: finalFrame)
+        installDismissalMonitoringAfterPresentation(for: panel)
     }
 
     func hide() {
@@ -126,7 +125,7 @@ final class ClipboardShelfPanelController {
     }
 
     private func hiddenFrame(for frame: NSRect) -> NSRect {
-        let screen = activeScreen()
+        let screen = screen(containing: frame) ?? activeScreen()
         return NSRect(
             x: frame.minX,
             y: screen.frame.minY - frame.height,
@@ -163,6 +162,17 @@ final class ClipboardShelfPanelController {
         }
     }
 
+    private func installDismissalMonitoringAfterPresentation(for panel: NSPanel) {
+        Task { @MainActor [weak self, weak panel] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self, let panel, self.panel === panel, panel.isVisible else {
+                return
+            }
+            self.startOutsideClickMonitoring(for: panel)
+            self.startFocusMonitoring(for: panel)
+        }
+    }
+
     private func startOutsideClickMonitoring(for panel: NSPanel) {
         stopOutsideClickMonitoring()
 
@@ -183,8 +193,6 @@ final class ClipboardShelfPanelController {
             guard let self, let panel, panel.isVisible else { return }
             self.hideIfOutsideClick(at: NSEvent.mouseLocation)
         }
-
-        startOutsideClickEventTap()
     }
 
     private func stopOutsideClickMonitoring() {
@@ -196,62 +204,6 @@ final class ClipboardShelfPanelController {
             NSEvent.removeMonitor(globalMouseDownMonitor)
             self.globalMouseDownMonitor = nil
         }
-        stopOutsideClickEventTap()
-    }
-
-    private func startOutsideClickEventTap() {
-        stopOutsideClickEventTap()
-
-        let eventMask = (1 << CGEventType.leftMouseDown.rawValue)
-            | (1 << CGEventType.rightMouseDown.rawValue)
-            | (1 << CGEventType.otherMouseDown.rawValue)
-        guard let eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: Self.outsideClickEventTapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            return
-        }
-
-        guard let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0) else {
-            CFMachPortInvalidate(eventTap)
-            return
-        }
-
-        outsideClickEventTap = eventTap
-        outsideClickRunLoopSource = runLoopSource
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: eventTap, enable: true)
-    }
-
-    private func stopOutsideClickEventTap() {
-        if let outsideClickRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), outsideClickRunLoopSource, .commonModes)
-            self.outsideClickRunLoopSource = nil
-        }
-        if let outsideClickEventTap {
-            CFMachPortInvalidate(outsideClickEventTap)
-            self.outsideClickEventTap = nil
-        }
-    }
-
-    private static let outsideClickEventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
-        guard type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown,
-              let userInfo else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        let controller = Unmanaged<ClipboardShelfPanelController>
-            .fromOpaque(userInfo)
-            .takeUnretainedValue()
-        let location = event.location
-        Task { @MainActor in
-            controller.hideIfOutsideClick(atCGEventLocation: location)
-        }
-        return Unmanaged.passUnretained(event)
     }
 
     private func startFocusMonitoring(for panel: NSPanel) {
@@ -321,14 +273,11 @@ final class ClipboardShelfPanelController {
 
     private func hideIfOutsideClick(at location: CGPoint) {
         guard let panel, panel.isVisible else { return }
-        if !panel.frame.contains(location) {
-            hide()
+        if let ignoreOutsideClicksUntil, Date() < ignoreOutsideClicksUntil {
+            return
         }
-    }
-
-    private func hideIfOutsideClick(atCGEventLocation location: CGPoint) {
-        guard let panel, panel.isVisible else { return }
-        if !panelFrameInCGCoordinates(panel).contains(location) {
+        ignoreOutsideClicksUntil = nil
+        if !panel.frame.contains(location) {
             hide()
         }
     }
@@ -338,17 +287,6 @@ final class ClipboardShelfPanelController {
             return NSEvent.mouseLocation
         }
         return window.convertPoint(toScreen: event.locationInWindow)
-    }
-
-    private func panelFrameInCGCoordinates(_ panel: NSPanel) -> CGRect {
-        let frame = panel.frame
-        let screen = panel.screen ?? activeScreen()
-        return CGRect(
-            x: frame.minX,
-            y: screen.frame.maxY - frame.maxY,
-            width: frame.width,
-            height: frame.height
-        )
     }
 
     private static func isMenuWindow(_ window: NSWindow?) -> Bool {
@@ -367,6 +305,16 @@ final class ClipboardShelfPanelController {
             return mainScreen
         }
         return NSScreen.screens[0]
+    }
+
+    private func screen(containing frame: NSRect) -> NSScreen? {
+        let bestMatch = NSScreen.screens.max { lhs, rhs in
+            lhs.frame.intersection(frame).area < rhs.frame.intersection(frame).area
+        }
+        guard let bestMatch, bestMatch.frame.intersection(frame).area > 0 else {
+            return nil
+        }
+        return bestMatch
     }
 }
 
@@ -390,6 +338,13 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+}
+
+private extension NSRect {
+    var area: CGFloat {
+        guard !isNull else { return 0 }
+        return width * height
     }
 }
 

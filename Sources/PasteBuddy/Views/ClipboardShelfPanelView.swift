@@ -1,8 +1,17 @@
 import AppKit
-import ImageIO
 import PasteBuddyCore
 import SwiftUI
 import UniformTypeIdentifiers
+
+private enum ClipboardShelfMetrics {
+    static let cardWidth: CGFloat = 240
+    static let cardHeight: CGFloat = 240
+    static let cardHeaderHeight: CGFloat = 58
+    static let cardPreviewHeight: CGFloat = 126
+    static let cardCornerRadius: CGFloat = 17
+    static let shelfVerticalPadding: CGFloat = 6
+    static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
+}
 
 struct ClipboardShelfPanelView: View {
     @Bindable var store: PasteBuddyStore
@@ -104,7 +113,12 @@ struct ClipboardShelfPanelView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
-                .pasteBuddyGlassButton()
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.primary)
+                .frame(width: 34, height: 38)
+                .contentShape(Rectangle())
                 .help(localized("Add item or pinboard"))
 
                 Menu {
@@ -136,7 +150,12 @@ struct ClipboardShelfPanelView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                 }
-                .pasteBuddyGlassButton()
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.primary)
+                .frame(width: 34, height: 38)
+                .contentShape(Rectangle())
                 .help(localized("More actions"))
             }
             .controlSize(.large)
@@ -265,7 +284,7 @@ struct ClipboardShelfPanelView: View {
         let pinboards = store.snapshot.pinboards
         let defaultPasteFormat = store.defaultPasteFormat
 
-        return ScrollView(.horizontal) {
+        return HiddenScrollerHorizontalScrollView {
             HStack(alignment: .bottom, spacing: 20) {
                 if isShowingLaunchAtLoginPrompt {
                     LaunchAtLoginShelfCard(store: store) {
@@ -306,7 +325,7 @@ struct ClipboardShelfPanelView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
         }
-        .scrollIndicators(.hidden)
+        .frame(height: ClipboardShelfMetrics.shelfHeight)
     }
 
     private var keyboardShortcuts: some View {
@@ -609,18 +628,27 @@ private struct ShelfCollectionChip: View {
                         .foregroundStyle(isSelected ? color : .secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(color.opacity(isSelected ? 0.18 : 0.10), in: Capsule())
+                        .background {
+                            if isSelected {
+                                Capsule().fill(color.opacity(0.18))
+                            }
+                        }
                 }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .frame(height: 38)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(isSelected ? color.opacity(0.95) : Color.white.opacity(0.24), lineWidth: isSelected ? 2 : 1)
+            .background {
+                if isSelected {
+                    Capsule().fill(.regularMaterial)
+                }
             }
-            .shadow(color: .black.opacity(isSelected ? 0.12 : 0.04), radius: isSelected ? 8 : 3, y: 2)
+            .overlay {
+                if isSelected {
+                    Capsule().strokeBorder(color.opacity(0.95), lineWidth: 2)
+                }
+            }
+            .shadow(color: .black.opacity(isSelected ? 0.12 : 0), radius: isSelected ? 8 : 0, y: 2)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -660,16 +688,14 @@ private struct ClipboardShelfCard: View {
     let onDelete: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            ClipboardShelfCardVisual(item: item, isSelected: isSelected)
-                .equatable()
-        }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
+        ClipboardShelfCardVisual(item: item, isSelected: isSelected)
+            .equatable()
+            .onTapGesture {
+                onSelect()
+            }
+            .onTapGesture(count: 2) {
                 onPaste(defaultPasteFormat)
             }
-        )
         .contextMenu {
             contextMenuContent
         }
@@ -677,6 +703,7 @@ private struct ClipboardShelfCard: View {
             ClipboardItemDragProvider.provider(for: draggedItems)
         }
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
         .accessibilityLabel("\(item.title), \(localized(item.contentType.displayName))")
         .accessibilityValue(localized(isSelected ? "Selected" : "Not selected"))
         .accessibilityHint(localized("Press Return to paste."))
@@ -721,13 +748,127 @@ private struct ClipboardShelfCard: View {
     }
 }
 
-private struct ClipboardShelfCardVisual: View, Equatable {
-    private static let cardWidth: CGFloat = 300
-    private static let cardHeight: CGFloat = 240
-    private static let headerHeight: CGFloat = 58
-    private static let previewHeight: CGFloat = 126
-    private static let cornerRadius: CGFloat = 17
+private struct HiddenScrollerHorizontalScrollView<Content: View>: NSViewRepresentable {
+    private let content: Content
 
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> HiddenScrollerHorizontalScrollContainer<Content> {
+        HiddenScrollerHorizontalScrollContainer(rootView: content)
+    }
+
+    func updateNSView(_ nsView: HiddenScrollerHorizontalScrollContainer<Content>, context: Context) {
+        nsView.rootView = content
+    }
+}
+
+private final class HiddenScrollerHorizontalScrollContainer<Content: View>: NSView {
+    private let scrollView = HiddenScrollerNSScrollView()
+    private let hostingView: NSHostingView<Content>
+
+    var rootView: Content {
+        didSet {
+            hostingView.rootView = rootView
+            needsLayout = true
+        }
+    }
+
+    init(rootView: Content) {
+        self.rootView = rootView
+        self.hostingView = NSHostingView(rootView: rootView)
+        super.init(frame: .zero)
+        configureScrollView()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override func layout() {
+        super.layout()
+        scrollView.frame = bounds
+        hostingView.layoutSubtreeIfNeeded()
+
+        let fittingSize = hostingView.fittingSize
+        let documentSize = NSSize(
+            width: max(bounds.width, fittingSize.width),
+            height: max(bounds.height, fittingSize.height)
+        )
+        if hostingView.frame.size != documentSize {
+            hostingView.frame = NSRect(origin: .zero, size: documentSize)
+        }
+        scrollView.clampHorizontalOffset()
+    }
+
+    private func configureScrollView() {
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.horizontalScrollElasticity = .automatic
+        scrollView.verticalScrollElasticity = .none
+        scrollView.usesPredominantAxisScrolling = false
+        scrollView.documentView = hostingView
+        addSubview(scrollView)
+    }
+}
+
+private final class HiddenScrollerNSScrollView: NSScrollView {
+    private static let preciseScrollMultiplier: CGFloat = 1.25
+    private static let wheelLineMultiplier: CGFloat = 64
+
+    override func scrollWheel(with event: NSEvent) {
+        let horizontalDelta = normalizedScrollDelta(event.scrollingDeltaX, for: event)
+        let verticalDelta = normalizedScrollDelta(event.scrollingDeltaY, for: event)
+        guard abs(verticalDelta) > abs(horizontalDelta), verticalDelta != 0 else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        scrollHorizontally(by: -verticalDelta)
+    }
+
+    private func normalizedScrollDelta(_ delta: CGFloat, for event: NSEvent) -> CGFloat {
+        delta * (event.hasPreciseScrollingDeltas ? Self.preciseScrollMultiplier : Self.wheelLineMultiplier)
+    }
+
+    func clampHorizontalOffset() {
+        guard let documentView else { return }
+
+        let clipView = contentView
+        let maxX = max(0, documentView.frame.width - clipView.bounds.width)
+        let currentX = clipView.bounds.origin.x
+        let nextX = min(max(currentX, 0), maxX)
+        guard nextX != currentX else { return }
+
+        clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
+        reflectScrolledClipView(clipView)
+    }
+
+    private func scrollHorizontally(by delta: CGFloat) {
+        guard let documentView else { return }
+
+        let clipView = contentView
+        let maxX = max(0, documentView.frame.width - clipView.bounds.width)
+        let currentX = clipView.bounds.origin.x
+        let nextX = min(max(currentX + delta, 0), maxX)
+        guard nextX != currentX else { return }
+
+        clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
+        reflectScrolledClipView(clipView)
+    }
+}
+
+private struct ClipboardShelfCardVisual: View, Equatable {
     let item: ClipboardItem
     let isSelected: Bool
 
@@ -747,7 +888,7 @@ private struct ClipboardShelfCardVisual: View, Equatable {
         .padding(.leading, 16)
         .padding(.trailing, 12)
         .padding(.vertical, 8)
-        .frame(height: Self.headerHeight)
+        .frame(height: ClipboardShelfMetrics.cardHeaderHeight)
         .background(item.contentType.shelfTint)
     }
 
@@ -757,29 +898,23 @@ private struct ClipboardShelfCardVisual: View, Equatable {
             previewBody
             footer
         }
-        .frame(width: Self.cardWidth, height: Self.cardHeight)
+        .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.cardHeight)
         .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous)
                 .strokeBorder(isSelected ? item.contentType.shelfTint : Color.white.opacity(0.24), lineWidth: isSelected ? 3 : 1)
         }
         .shadow(color: .black.opacity(0.10), radius: 8, y: 4)
-        .contentShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
     }
 
     @ViewBuilder
     private var previewBody: some View {
         let preview = item.visualPreview
 
-        if preview.prefersImageThumbnail,
-           let image = ShelfImageCache.thumbnail(for: item) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(height: Self.previewHeight)
-                .frame(maxWidth: .infinity)
-                .clipped()
+        if preview.prefersImageThumbnail {
+            ShelfThumbnailView(item: item)
         } else {
             VStack(alignment: .leading, spacing: 9) {
                 if item.contentType == .url {
@@ -794,7 +929,7 @@ private struct ClipboardShelfCardVisual: View, Equatable {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(14)
-            .frame(height: Self.previewHeight, alignment: .topLeading)
+            .frame(height: ClipboardShelfMetrics.cardPreviewHeight, alignment: .topLeading)
         }
     }
 
@@ -838,7 +973,7 @@ private struct ClipboardShelfCardVisual: View, Equatable {
     private var footnote: String {
         switch item.contentType {
         case .image:
-            if let imageSize = ShelfImageCache.imageSize(for: item) {
+            if let imageSize = ClipboardImageCache.imageSize(for: item) {
                 return "\(Int(imageSize.width)) x \(Int(imageSize.height))"
             }
             return localized(item.ocrState.displayName)
@@ -916,53 +1051,35 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     }
 }
 
-private enum ShelfImageCache {
-    private static let thumbnailCache = NSCache<NSString, NSImage>()
-    private static let sizeCache = NSCache<NSString, NSValue>()
+private struct ShelfThumbnailView: View {
+    let item: ClipboardItem
+    @State private var thumbnail: NSImage?
 
-    static func thumbnail(for item: ClipboardItem) -> NSImage? {
-        guard let data = item.payload.imageData else { return nil }
-        let key = cacheKey(for: item, data: data)
-        if let cached = thumbnailCache.object(forKey: key) {
-            return cached
+    var body: some View {
+        ZStack {
+            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Rectangle()
+                    .fill(item.contentType.shelfTint.opacity(0.10))
+                Image(systemName: item.contentType.systemImageName)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(item.contentType.shelfTint)
+            }
         }
+        .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .task(id: ClipboardImageCache.thumbnailCacheKey(for: item)) {
+            thumbnail = ClipboardImageCache.cachedThumbnail(for: item)
+            guard thumbnail == nil else { return }
 
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
-            return nil
+            let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item)
+            guard !Task.isCancelled else { return }
+            thumbnail = loadedThumbnail
         }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 640
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return nil
-        }
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        thumbnailCache.setObject(image, forKey: key)
-        return image
-    }
-
-    static func imageSize(for item: ClipboardItem) -> NSSize? {
-        guard let data = item.payload.imageData else { return nil }
-        let key = cacheKey(for: item, data: data)
-        if let cached = sizeCache.object(forKey: key) {
-            return cached.sizeValue
-        }
-
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
-              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat else {
-            return nil
-        }
-        let size = NSSize(width: width, height: height)
-        sizeCache.setObject(NSValue(size: size), forKey: key)
-        return size
-    }
-
-    private static func cacheKey(for item: ClipboardItem, data: Data) -> NSString {
-        "\(item.id.uuidString):\(data.count)" as NSString
     }
 }
 
@@ -970,30 +1087,22 @@ private struct SourceApplicationIconBadge: View {
     let item: ClipboardItem
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         ZStack {
             if let image = SourceApplicationIconResolver.icon(for: item) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .padding(5)
             } else if SourceApplicationIconResolver.hasKnownSource(for: item) {
                 Image(nsImage: SourceApplicationIconResolver.genericApplicationIcon())
                     .resizable()
                     .scaledToFit()
-                    .padding(6)
             } else {
                 Image(systemName: item.contentType.systemImageName)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(item.contentType.shelfTint)
             }
         }
-        .frame(width: 44, height: 44)
-        .background(.white.opacity(0.92), in: shape)
-        .overlay {
-            shape.strokeBorder(.white.opacity(0.28), lineWidth: 1)
-        }
-        .clipShape(shape)
+        .frame(width: 36, height: 36)
         .help(item.sourceAppName)
         .accessibilityLabel(item.sourceAppName)
     }
@@ -1029,7 +1138,7 @@ private enum SourceApplicationIconResolver {
     }
 
     static func genericApplicationIcon() -> NSImage {
-        icon(from: NSWorkspace.shared.icon(for: .applicationBundle))
+        ClipboardImageCache.genericAppIcon()
     }
 
     private static func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
