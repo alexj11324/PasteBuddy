@@ -11,8 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: write
-  contents: read
+  contents: write
   id-token: write
 
 env:
@@ -64,11 +63,16 @@ jobs:
           chmod 600 "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
           echo "ASC_API_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
 
+      - name: Resolve previous CI build number
+        run: |
+          git fetch --tags --force
+          ruby -e 'numbers = `git tag --list "ios-build-*"`.lines.filter_map { |line| line[/\Aios-build-(\d+)\s*\z/, 1]&.to_i }; File.open(ENV.fetch("GITHUB_ENV"), "a") { |file| file.puts("CI_BUILD_NUMBER_FLOOR=#{numbers.max || 0}") }'
+
       - name: Resolve next App Store build number
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          MIN_BUILD_NUMBER: ${{ vars.IOS_BUILD_NUMBER }}
+          MIN_BUILD_NUMBER: ${{ env.CI_BUILD_NUMBER_FLOOR }}
         run: |
           build_number="$(ruby .github/scripts/next_app_store_build_number.rb)"
           echo "PB_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
@@ -135,9 +139,13 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
       - name: Persist uploaded build number
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh variable set IOS_BUILD_NUMBER \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "$PB_BUILD_NUMBER"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tag="ios-build-$PB_BUILD_NUMBER"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists locally"
+          else
+            git tag "$tag"
+          fi
+          git push origin "refs/tags/$tag"
