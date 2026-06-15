@@ -12,6 +12,7 @@ key_id = ENV.fetch("ASC_KEY_ID")
 issuer_id = ENV.fetch("ASC_ISSUER_ID")
 private_key_path = ENV.fetch("ASC_API_KEY_PATH")
 app_id = ENV.fetch("ASC_APP_ID")
+minimum_build_number = ENV.fetch("MIN_BUILD_NUMBER", "0").to_i
 
 def jwt(key_id:, issuer_id:, private_key_path:)
   key = OpenSSL::PKey::EC.new(File.read(private_key_path))
@@ -56,4 +57,4 @@ while next_url
   next_url = parsed.dig("links", "next")
 end
 
-puts((versions.max || 0) + 1)
+puts([versions.max || 0, minimum_build_number].max + 1)

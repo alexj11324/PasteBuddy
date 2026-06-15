@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: read
   id-token: write
 
@@ -67,6 +68,7 @@ jobs:
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          MIN_BUILD_NUMBER: ${{ vars.IOS_BUILD_NUMBER }}
         run: |
           build_number="$(ruby .github/scripts/next_app_store_build_number.rb)"
           echo "PB_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
@@ -131,3 +133,11 @@ jobs:
             -authenticationKeyPath "$ASC_API_KEY_PATH" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Persist uploaded build number
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh variable set IOS_BUILD_NUMBER \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$PB_BUILD_NUMBER"

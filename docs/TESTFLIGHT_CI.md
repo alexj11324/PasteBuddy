@@ -9,8 +9,10 @@ The workflow:
 1. Authenticates to Google Cloud with GitHub OIDC.
 2. Restores the App Store Connect API key from Google Secret Manager.
 3. Queries App Store Connect for the latest uploaded build on app `6780560937`.
-4. Archives `PasteBuddyiOS` with `CURRENT_PROJECT_VERSION` set to the next integer.
-5. Uploads the archive to App Store Connect for TestFlight processing.
+4. Compares that number with GitHub repository variable `IOS_BUILD_NUMBER`.
+5. Archives `PasteBuddyiOS` with `CURRENT_PROJECT_VERSION` set to the next integer.
+6. Uploads the archive to App Store Connect for TestFlight processing.
+7. Persists the uploaded build number back to `IOS_BUILD_NUMBER`.
 
 Required GitHub Actions secrets:
 
@@ -30,3 +32,5 @@ The Apple team ID and App Store Connect app ID are committed in the workflow bec
 - App Store Connect app ID: `6780560937`
 
 The build number is not committed back to the repository. It is resolved at upload time from App Store Connect, then incremented by one.
+
+`IOS_BUILD_NUMBER` stores the last successful CI-uploaded build number. The workflow uses `max(App Store Connect latest, IOS_BUILD_NUMBER) + 1`, which avoids a duplicate build number if App Store Connect has accepted an upload but has not listed the new build yet.

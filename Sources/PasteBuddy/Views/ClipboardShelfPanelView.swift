@@ -266,7 +266,7 @@ struct ClipboardShelfPanelView: View {
         let defaultPasteFormat = store.defaultPasteFormat
 
         return ScrollView(.horizontal) {
-            HStack(alignment: .bottom, spacing: 14) {
+            HStack(alignment: .bottom, spacing: 20) {
                 if isShowingLaunchAtLoginPrompt {
                     LaunchAtLoginShelfCard(store: store) {
                         isShowingLaunchAtLoginPrompt = false
@@ -569,8 +569,8 @@ private struct LaunchAtLoginShelfCard: View {
             .pasteBuddyGlassButton()
             .help(LaunchAtLoginService.isAvailable ? "Toggle launch at login" : "Launch at login is unavailable in this build")
         }
-        .padding(18)
-        .frame(width: 200, height: 210)
+        .padding(20)
+        .frame(width: 240, height: 230)
         .pasteBuddyGlassSurface(cornerRadius: 18, interactive: true)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Open at login")
@@ -722,6 +722,12 @@ private struct ClipboardShelfCard: View {
 }
 
 private struct ClipboardShelfCardVisual: View, Equatable {
+    private static let cardWidth: CGFloat = 300
+    private static let cardHeight: CGFloat = 240
+    private static let headerHeight: CGFloat = 58
+    private static let previewHeight: CGFloat = 126
+    private static let cornerRadius: CGFloat = 17
+
     let item: ClipboardItem
     let isSelected: Bool
 
@@ -729,19 +735,19 @@ private struct ClipboardShelfCardVisual: View, Equatable {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(localized(item.contentType.displayName))
-                    .font(.callout.weight(.bold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                 Text(relativeDate)
-                    .font(.caption)
+                    .font(.callout.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 10)
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
         .padding(.vertical, 8)
-        .frame(height: 46)
+        .frame(height: Self.headerHeight)
         .background(item.contentType.shelfTint)
     }
 
@@ -751,15 +757,15 @@ private struct ClipboardShelfCardVisual: View, Equatable {
             previewBody
             footer
         }
-        .frame(width: 188, height: 166)
+        .frame(width: Self.cardWidth, height: Self.cardHeight)
         .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                 .strokeBorder(isSelected ? item.contentType.shelfTint : Color.white.opacity(0.24), lineWidth: isSelected ? 3 : 1)
         }
         .shadow(color: .black.opacity(0.10), radius: 8, y: 4)
-        .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -771,24 +777,24 @@ private struct ClipboardShelfCardVisual: View, Equatable {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()
-                .frame(height: 72)
+                .frame(height: Self.previewHeight)
                 .frame(maxWidth: .infinity)
                 .clipped()
         } else {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 9) {
                 if item.contentType == .url {
                     Image(systemName: "link.circle.fill")
-                        .font(.system(size: 24))
+                        .font(.system(size: 30))
                         .foregroundStyle(item.contentType.shelfTint)
                 }
                 Text(preview.body)
-                    .font(item.contentType == .text ? .caption.monospaced() : .caption)
+                    .font(item.contentType == .text ? .callout.monospaced() : .callout)
                     .foregroundStyle(.primary)
                     .lineLimit(footerTitle == nil ? 4 : 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(10)
-            .frame(height: 72, alignment: .topLeading)
+            .padding(14)
+            .frame(height: Self.previewHeight, alignment: .topLeading)
         }
     }
 
@@ -796,7 +802,7 @@ private struct ClipboardShelfCardVisual: View, Equatable {
         VStack(alignment: .leading, spacing: footerTitle == nil ? 0 : 4) {
             if let footerTitle {
                 Text(footerTitle)
-                    .font(.caption.weight(.semibold))
+                    .font(.callout.weight(.semibold))
                     .lineLimit(1)
             }
             HStack {
@@ -805,11 +811,11 @@ private struct ClipboardShelfCardVisual: View, Equatable {
                 Spacer(minLength: 8)
                 Text(footnote)
             }
-            .font(.caption)
+            .font(.callout)
             .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
     }
 
@@ -964,7 +970,7 @@ private struct SourceApplicationIconBadge: View {
     let item: ClipboardItem
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         ZStack {
             if let image = SourceApplicationIconResolver.icon(for: item) {
                 Image(nsImage: image)
@@ -978,11 +984,11 @@ private struct SourceApplicationIconBadge: View {
                     .padding(6)
             } else {
                 Image(systemName: item.contentType.systemImageName)
-                    .font(.callout.weight(.semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(item.contentType.shelfTint)
             }
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 44, height: 44)
         .background(.white.opacity(0.92), in: shape)
         .overlay {
             shape.strokeBorder(.white.opacity(0.28), lineWidth: 1)

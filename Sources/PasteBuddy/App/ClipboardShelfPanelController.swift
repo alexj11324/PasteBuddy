@@ -170,10 +170,10 @@ final class ClipboardShelfPanelController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] event in
             guard let self, let panel, panel.isVisible else { return event }
-            if event.window === panel || Self.isMenuWindow(event.window) {
+            if Self.isMenuWindow(event.window) {
                 return event
             }
-            self.hide()
+            self.hideIfOutsideClick(at: self.screenLocation(for: event))
             return event
         }
 
@@ -247,8 +247,9 @@ final class ClipboardShelfPanelController {
         let controller = Unmanaged<ClipboardShelfPanelController>
             .fromOpaque(userInfo)
             .takeUnretainedValue()
+        let location = event.location
         Task { @MainActor in
-            controller.hideIfOutsideClick(at: NSEvent.mouseLocation)
+            controller.hideIfOutsideClick(atCGEventLocation: location)
         }
         return Unmanaged.passUnretained(event)
     }
@@ -323,6 +324,31 @@ final class ClipboardShelfPanelController {
         if !panel.frame.contains(location) {
             hide()
         }
+    }
+
+    private func hideIfOutsideClick(atCGEventLocation location: CGPoint) {
+        guard let panel, panel.isVisible else { return }
+        if !panelFrameInCGCoordinates(panel).contains(location) {
+            hide()
+        }
+    }
+
+    private func screenLocation(for event: NSEvent) -> CGPoint {
+        guard let window = event.window else {
+            return NSEvent.mouseLocation
+        }
+        return window.convertPoint(toScreen: event.locationInWindow)
+    }
+
+    private func panelFrameInCGCoordinates(_ panel: NSPanel) -> CGRect {
+        let frame = panel.frame
+        let screen = panel.screen ?? activeScreen()
+        return CGRect(
+            x: frame.minX,
+            y: screen.frame.maxY - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
     }
 
     private static func isMenuWindow(_ window: NSWindow?) -> Bool {
