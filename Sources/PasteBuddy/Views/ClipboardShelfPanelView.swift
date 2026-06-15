@@ -1142,6 +1142,7 @@ private struct PasteBuddyGlassContainer<Content: View>: View {
     }
 
     var body: some View {
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             GlassEffectContainer(spacing: spacing) {
                 content
@@ -1149,6 +1150,9 @@ private struct PasteBuddyGlassContainer<Content: View>: View {
         } else {
             content
         }
+        #else
+        content
+        #endif
     }
 }
 
@@ -1156,6 +1160,7 @@ private extension View {
     @ViewBuilder
     func pasteBuddyBottomSheetSurface(cornerRadius: CGFloat, showsStroke: Bool = true) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             self
                 .glassEffect(.regular, in: shape)
@@ -1179,11 +1184,24 @@ private extension View {
                     }
                 }
         }
+        #else
+        self
+            .background(.ultraThinMaterial, in: shape)
+            .clipShape(shape)
+            .overlay(alignment: .top) {
+                if showsStroke {
+                    Rectangle()
+                        .fill(.white.opacity(0.30))
+                        .frame(height: 1)
+                }
+            }
+        #endif
     }
 
     @ViewBuilder
     func pasteBuddyGlassSurface(cornerRadius: CGFloat, interactive: Bool = false, showsStroke: Bool = true) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             self
                 .glassEffect((interactive ? Glass.regular.interactive() : .regular), in: shape)
@@ -1201,15 +1219,28 @@ private extension View {
                     }
                 }
         }
+        #else
+        self
+            .background(.ultraThinMaterial, in: shape)
+            .overlay {
+                if showsStroke {
+                    shape.strokeBorder(.white.opacity(0.30), lineWidth: 1)
+                }
+            }
+        #endif
     }
 
     @ViewBuilder
     func pasteBuddyGlassButton() -> some View {
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             self.buttonStyle(.glass)
         } else {
             self.buttonStyle(.borderless)
         }
+        #else
+        self.buttonStyle(.borderless)
+        #endif
     }
 }
 
