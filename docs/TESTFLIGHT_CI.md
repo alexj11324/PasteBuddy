@@ -2,6 +2,8 @@
 
 Pushing to `main` runs `.github/workflows/testflight.yml`.
 
+The workflow runs on GitHub's `macos-26` image so archives are built with Xcode 26 and the iOS 26 SDK required by App Store Connect.
+
 The workflow:
 
 1. Authenticates to Google Cloud with GitHub OIDC.

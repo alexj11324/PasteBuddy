@@ -15,6 +15,7 @@ permissions:
   id-token: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   ASC_APP_ID: "6780560937"
   ASC_TEAM_ID: "72UN4PF4BL"
   GCP_PROJECT_ID: general-secrets-store
@@ -28,7 +29,7 @@ env:
 jobs:
   upload:
     name: Build and Upload
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
