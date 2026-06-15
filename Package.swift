@@ -52,6 +52,11 @@ let package = Package(
             name: "PasteBuddyCoreTests",
             dependencies: ["PasteBuddyCore", "PasteBuddyMobile"],
             swiftSettings: pasteBuddySwiftSettings
+        ),
+        .testTarget(
+            name: "PasteBuddyAppTests",
+            dependencies: ["PasteBuddy"],
+            swiftSettings: pasteBuddySwiftSettings
         )
     ],
     swiftLanguageModes: [.v5, .v6]

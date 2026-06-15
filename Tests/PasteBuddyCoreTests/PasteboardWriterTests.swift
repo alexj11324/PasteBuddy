@@ -532,6 +532,46 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "wait for active target")
     }
 
+    func testAsyncDirectPasteWaitsForTargetActivationWithoutBlockingMainActor() async throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyAsyncDirectWait-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Async Wait",
+            payload: ClipboardPayload(text: "async wait for active target")
+        )
+        let targetBundleIdentifier = "com.example.AsyncTarget"
+        var activeBundleIdentifier = "com.example.Other"
+        var sentPasteEvent = false
+        let activationTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            activeBundleIdentifier = targetBundleIdentifier
+        }
+
+        let result = await PasteboardWriter.pasteToFrontmostAppAsync(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                activeBundleIdentifier
+            },
+            options: PasteboardWriter.DirectPasteOptions(activationWaitTimeout: 0.12),
+            prepareForPaste: {},
+            sendPasteEvent: {
+                XCTAssertEqual(activeBundleIdentifier, targetBundleIdentifier)
+                sentPasteEvent = true
+            }
+        )
+        await activationTask.value
+
+        XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
+        XCTAssertTrue(sentPasteEvent)
+        XCTAssertEqual(pasteboard.string(forType: .string), "async wait for active target")
+    }
+
     func testDirectPasteCopiesOnlyWhenTargetDoesNotBecomeActive() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectNoTarget-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }
@@ -567,6 +607,41 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "copy without wrong paste")
     }
 
+    func testAsyncDirectPasteCopiesOnlyWhenTargetDoesNotBecomeActive() async throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyAsyncDirectNoTarget-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Async No Target",
+            payload: ClipboardPayload(text: "async copy without wrong paste")
+        )
+        var preparedTarget = false
+
+        let result = await PasteboardWriter.pasteToFrontmostAppAsync(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            targetBundleIdentifier: "com.example.Target",
+            activeApplicationBundleIdentifier: {
+                "com.example.Other"
+            },
+            options: PasteboardWriter.DirectPasteOptions(activationWaitTimeout: 0.01),
+            prepareForPaste: {
+                preparedTarget = true
+            },
+            sendPasteEvent: {
+                XCTFail("Command-V should not be sent when the target app is not active.")
+            }
+        )
+
+        XCTAssertTrue(preparedTarget)
+        XCTAssertEqual(result.outcome, .copiedOnlyNoTargetApplication)
+        XCTAssertEqual(result.itemCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "async copy without wrong paste")
+    }
+
     func testDirectPasteHonorsDispatchDelayBeforeSendingPasteEvent() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectDelay-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }
@@ -594,6 +669,35 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
         XCTAssertGreaterThanOrEqual(elapsed, 0.02)
         XCTAssertEqual(pasteboard.string(forType: .string), "delayed paste")
+    }
+
+    func testAsyncDirectPasteHonorsDispatchDelayBeforeSendingPasteEvent() async throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyAsyncDirectDelay-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Async Delayed",
+            payload: ClipboardPayload(text: "async delayed paste")
+        )
+        let start = Date()
+        var sendDate: Date?
+
+        let result = await PasteboardWriter.pasteToFrontmostAppAsync(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            options: PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0.03),
+            sendPasteEvent: {
+                sendDate = Date()
+            }
+        )
+
+        let elapsed = try XCTUnwrap(sendDate).timeIntervalSince(start)
+        XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
+        XCTAssertGreaterThanOrEqual(elapsed, 0.02)
+        XCTAssertEqual(pasteboard.string(forType: .string), "async delayed paste")
     }
 
     func testDirectPasteEmptySelectionReportsNoOp() throws {

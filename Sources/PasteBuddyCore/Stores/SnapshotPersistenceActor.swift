@@ -43,11 +43,44 @@ public actor ClipboardRepositorySyncActor {
     }
 
     @discardableResult
+    public func synchronize(with snapshot: PasteBuddySnapshot) throws -> ClipboardRepositorySyncSummary {
+        try repository.synchronize(with: snapshot)
+    }
+
+    @discardableResult
     public func insertOrTouchItem(_ item: ClipboardItem) throws -> ClipboardItem {
         try repository.insertOrTouchItem(item)
     }
 
+    public func upsertItem(_ item: ClipboardItem, snapshotOrder: Int? = nil) throws {
+        try repository.upsertItem(item, snapshotOrder: snapshotOrder)
+    }
+
     public func updateOCRText(_ text: String, for itemID: UUID) throws {
         try repository.updateOCRText(text, for: itemID)
+    }
+
+    public func deleteItems(_ ids: [UUID]) throws {
+        try repository.deleteItems(ids)
+    }
+
+    public func upsertPinboardMemberships(_ pinboards: [Pinboard]) throws {
+        try repository.upsertPinboardMemberships(pinboards)
+    }
+
+    public func hydrateAssets(for item: ClipboardItem) throws -> ClipboardItem {
+        try repository.hydrateAssets(for: item)
+    }
+
+    public func imageData(for item: ClipboardItem) throws -> Data? {
+        try repository.imageData(for: item)
+    }
+
+    public func rtfData(for item: ClipboardItem) throws -> Data? {
+        try repository.rtfData(for: item)
+    }
+
+    public func exportSnapshot() throws -> PasteBuddySnapshot {
+        try repository.exportSnapshot()
     }
 }

@@ -136,6 +136,47 @@ public enum PasteboardWriter {
     }
 
     @discardableResult
+    public static func pasteToFrontmostAppAsync(
+        _ item: ClipboardItem,
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general,
+        isAccessibilityTrusted: Bool = AccessibilityPermissionService.isTrusted,
+        targetBundleIdentifier: String? = nil,
+        activeApplicationBundleIdentifier: (() -> String?)? = nil,
+        options: DirectPasteOptions = .default,
+        prepareForPaste: (() -> Void)? = nil,
+        sendPasteEvent: (() -> Void)? = nil
+    ) async -> DirectPasteResult {
+        copy(item, format: format, to: pasteboard)
+        guard isAccessibilityTrusted else {
+            return DirectPasteResult(
+                outcome: .copiedOnlyAccessibilityRequired,
+                itemCount: 1,
+                format: format
+            )
+        }
+        prepareForPaste?()
+        guard await waitForTargetApplicationIfNeededAsync(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+            timeout: options.activationWaitTimeout
+        ) else {
+            return DirectPasteResult(
+                outcome: .copiedOnlyNoTargetApplication,
+                itemCount: 1,
+                format: format
+            )
+        }
+        await waitBeforePasteEventAsync(options.pasteDispatchDelay)
+        if let sendPasteEvent {
+            sendPasteEvent()
+        } else {
+            sendCommandV()
+        }
+        return DirectPasteResult(outcome: .pastedToFrontmostApp, itemCount: 1, format: format)
+    }
+
+    @discardableResult
     public static func pasteToFrontmostApp(
         _ items: [ClipboardItem],
         format: PasteFormat = .original,
@@ -192,6 +233,63 @@ public enum PasteboardWriter {
         return DirectPasteResult(outcome: .pastedToFrontmostApp, itemCount: items.count, format: format)
     }
 
+    @discardableResult
+    public static func pasteToFrontmostAppAsync(
+        _ items: [ClipboardItem],
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general,
+        isAccessibilityTrusted: Bool = AccessibilityPermissionService.isTrusted,
+        targetBundleIdentifier: String? = nil,
+        activeApplicationBundleIdentifier: (() -> String?)? = nil,
+        options: DirectPasteOptions = .default,
+        prepareForPaste: (() -> Void)? = nil,
+        sendPasteEvent: (() -> Void)? = nil
+    ) async -> DirectPasteResult {
+        guard !items.isEmpty else {
+            return DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
+        }
+        if items.count == 1, let item = items.first {
+            return await pasteToFrontmostAppAsync(
+                item,
+                format: format,
+                to: pasteboard,
+                isAccessibilityTrusted: isAccessibilityTrusted,
+                targetBundleIdentifier: targetBundleIdentifier,
+                activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+                options: options,
+                prepareForPaste: prepareForPaste,
+                sendPasteEvent: sendPasteEvent
+            )
+        }
+        copy(items, format: format, to: pasteboard)
+        guard isAccessibilityTrusted else {
+            return DirectPasteResult(
+                outcome: .copiedOnlyAccessibilityRequired,
+                itemCount: items.count,
+                format: format
+            )
+        }
+        prepareForPaste?()
+        guard await waitForTargetApplicationIfNeededAsync(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+            timeout: options.activationWaitTimeout
+        ) else {
+            return DirectPasteResult(
+                outcome: .copiedOnlyNoTargetApplication,
+                itemCount: items.count,
+                format: format
+            )
+        }
+        await waitBeforePasteEventAsync(options.pasteDispatchDelay)
+        if let sendPasteEvent {
+            sendPasteEvent()
+        } else {
+            sendCommandV()
+        }
+        return DirectPasteResult(outcome: .pastedToFrontmostApp, itemCount: items.count, format: format)
+    }
+
     public static func plainText(for item: ClipboardItem) -> String {
         ClipboardPlainTextRenderer.plainText(for: item)
     }
@@ -217,7 +315,30 @@ public enum PasteboardWriter {
                 return true
             }
             guard Date() < deadline else { break }
-            runMainRunLoopSlice(until: min(deadline, Date().addingTimeInterval(0.005)))
+            sleepBriefly(until: min(deadline, Date().addingTimeInterval(0.005)))
+        } while true
+
+        return normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier
+    }
+
+    private static func waitForTargetApplicationIfNeededAsync(
+        targetBundleIdentifier: String?,
+        activeApplicationBundleIdentifier: (() -> String?)?,
+        timeout: TimeInterval
+    ) async -> Bool {
+        guard let targetBundleIdentifier = normalizedBundleIdentifier(targetBundleIdentifier),
+              let activeApplicationBundleIdentifier
+        else {
+            return true
+        }
+
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        repeat {
+            if normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier {
+                return true
+            }
+            guard Date() < deadline else { break }
+            await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005)))
         } while true
 
         return normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier
@@ -227,12 +348,32 @@ public enum PasteboardWriter {
         guard delay > 0 else { return }
         let deadline = Date().addingTimeInterval(delay)
         repeat {
-            runMainRunLoopSlice(until: min(deadline, Date().addingTimeInterval(0.005)))
+            sleepBriefly(until: min(deadline, Date().addingTimeInterval(0.005)))
         } while Date() < deadline
     }
 
-    private static func runMainRunLoopSlice(until deadline: Date) {
-        RunLoop.current.run(mode: .default, before: deadline)
+    private static func waitBeforePasteEventAsync(_ delay: TimeInterval) async {
+        guard delay > 0 else { return }
+        let deadline = Date().addingTimeInterval(delay)
+        repeat {
+            await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005)))
+        } while Date() < deadline
+    }
+
+    private static func sleepBriefly(until deadline: Date) {
+        let interval = deadline.timeIntervalSinceNow
+        guard interval > 0 else { return }
+        Thread.sleep(forTimeInterval: interval)
+    }
+
+    private static func sleepAsync(until deadline: Date) async {
+        let interval = deadline.timeIntervalSinceNow
+        guard interval > 0 else { return }
+        try? await Task.sleep(nanoseconds: nanoseconds(for: interval))
+    }
+
+    private static func nanoseconds(for interval: TimeInterval) -> UInt64 {
+        UInt64(max(0, interval) * 1_000_000_000)
     }
 
     private static func normalizedBundleIdentifier(_ value: String?) -> String? {

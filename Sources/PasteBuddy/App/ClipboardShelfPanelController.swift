@@ -9,8 +9,8 @@ final class ClipboardShelfPanelController {
     private static let panelCornerRadius: CGFloat = 28
 
     private let store: PasteBuddyStore
-    private let directPasteItem: (ClipboardItem, PasteFormat) -> DirectPasteResult
-    private let directPasteItems: ([ClipboardItem], PasteFormat) -> DirectPasteResult
+    private let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
+    private let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     private var panel: ClipboardShelfPanel?
     private var localMouseDownMonitor: Any?
     private var globalMouseDownMonitor: Any?
@@ -21,8 +21,8 @@ final class ClipboardShelfPanelController {
 
     init(
         store: PasteBuddyStore,
-        directPasteItem: @escaping (ClipboardItem, PasteFormat) -> DirectPasteResult,
-        directPasteItems: @escaping ([ClipboardItem], PasteFormat) -> DirectPasteResult
+        directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
+        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     ) {
         self.store = store
         self.directPasteItem = directPasteItem
@@ -122,7 +122,10 @@ final class ClipboardShelfPanelController {
             rootView: ClipboardShelfPanelView(
                 store: store,
                 directPasteItem: directPasteItem,
-                directPasteItems: directPasteItems
+                directPasteItems: directPasteItems,
+                reloadClipboardHistory: { [store] in
+                    await store.loadAsync()
+                }
             ) { [weak self] in
                 self?.hide()
             }
@@ -401,9 +404,17 @@ private extension NSRect {
 
 @MainActor
 final class PasteBuddyPanelHotKeyController {
+    private var registration: PasteBuddyCarbonHotKeyRegistration?
+
+    init(onToggle: @escaping @MainActor () -> Void) {
+        registration = PasteBuddyCarbonHotKeyRegistration(onToggle: onToggle)
+    }
+}
+
+private final class PasteBuddyCarbonHotKeyRegistration {
     private let onToggle: @MainActor () -> Void
-    nonisolated(unsafe) private var hotKeyRef: EventHotKeyRef?
-    nonisolated(unsafe) private var eventHandler: EventHandlerRef?
+    private var hotKeyRef: EventHotKeyRef?
+    private var eventHandler: EventHandlerRef?
 
     init(onToggle: @escaping @MainActor () -> Void) {
         self.onToggle = onToggle
@@ -446,12 +457,10 @@ final class PasteBuddyPanelHotKeyController {
                     return noErr
                 }
 
-                let controller = Unmanaged<PasteBuddyPanelHotKeyController>
+                let registration = Unmanaged<PasteBuddyCarbonHotKeyRegistration>
                     .fromOpaque(userData)
                     .takeUnretainedValue()
-                Task { @MainActor in
-                    controller.onToggle()
-                }
+                registration.handlePressedHotKey()
                 return noErr
             },
             1,
@@ -475,6 +484,12 @@ final class PasteBuddyPanelHotKeyController {
             0,
             &hotKeyRef
         )
+    }
+
+    private func handlePressedHotKey() {
+        Task { @MainActor [onToggle] in
+            onToggle()
+        }
     }
 }
 

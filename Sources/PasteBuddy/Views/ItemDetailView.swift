@@ -4,7 +4,7 @@ import SwiftUI
 
 struct ItemDetailView: View {
     @Bindable var store: PasteBuddyStore
-    let directPasteItem: (ClipboardItem, PasteFormat) -> DirectPasteResult
+    let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     @State private var draftTitle = ""
     @State private var draftLabels = ""
     @State private var draftText = ""
@@ -115,9 +115,7 @@ struct ItemDetailView: View {
                 }
 
                 Button {
-                    store.recordDirectPasteResult(
-                        directPasteItem(item, store.defaultPasteFormat)
-                    )
+                    pasteItem(item, format: store.defaultPasteFormat)
                 } label: {
                     Label("Paste to Active App", systemImage: "arrow.down.doc")
                 }
@@ -135,9 +133,7 @@ struct ItemDetailView: View {
                         PasteboardWriter.copy(item, format: .plainText)
                     }
                     Button("Paste as Plain Text") {
-                        store.recordDirectPasteResult(
-                            directPasteItem(item, .plainText)
-                        )
+                        pasteItem(item, format: .plainText)
                     }
 
                     Menu("Pin") {
@@ -217,8 +213,8 @@ struct ItemDetailView: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         case .image:
             VStack(alignment: .leading, spacing: 12) {
-                if item.payload.imageData != nil {
-                    CachedDetailImagePreview(item: item)
+                if item.payload.hasImageAsset {
+                    CachedDetailImagePreview(item: item, imageDataProvider: store.imageData)
                         .id(ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: 1_600))
                 }
 
@@ -313,6 +309,13 @@ struct ItemDetailView: View {
         NSLocalizedString(key, comment: "")
     }
 
+    private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
+        Task { @MainActor in
+            let result = await directPasteItem(item, format)
+            store.recordDirectPasteResult(result)
+        }
+    }
+
     private func rerunOCR(for item: ClipboardItem) {
         guard let imageData = item.payload.imageData else { return }
         rerunningOCRItemIDs.insert(item.id)
@@ -341,11 +344,17 @@ struct ItemDetailView: View {
 
 private struct CachedDetailImagePreview: View {
     let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     @State private var image: NSImage?
+    @State private var loadedImageData: Data?
 
     var body: some View {
         Group {
-            if let image = image ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize) {
+            if let image = image ?? ClipboardImageCache.cachedThumbnail(
+                for: item,
+                imageData: loadedImageData,
+                maxPixelSize: maxPixelSize
+            ) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -366,10 +375,25 @@ private struct CachedDetailImagePreview: View {
         .accessibilityLabel(localized("Captured image preview"))
         .accessibilityHint(localized("Recognized local OCR text appears below the image when available."))
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
-            image = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)
+            image = ClipboardImageCache.cachedThumbnail(
+                for: item,
+                imageData: loadedImageData,
+                maxPixelSize: maxPixelSize
+            )
             guard image == nil else { return }
 
-            let loadedImage = await ClipboardImageCache.thumbnail(for: item, maxPixelSize: maxPixelSize)
+            let imageData: Data?
+            if let loadedImageData {
+                imageData = loadedImageData
+            } else {
+                imageData = await imageDataProvider(item)
+            }
+            loadedImageData = imageData
+            let loadedImage = await ClipboardImageCache.thumbnail(
+                for: item,
+                imageData: imageData,
+                maxPixelSize: maxPixelSize
+            )
             guard !Task.isCancelled else { return }
             image = loadedImage
         }

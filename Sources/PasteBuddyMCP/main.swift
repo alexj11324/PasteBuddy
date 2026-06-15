@@ -37,7 +37,7 @@ private final class PasteBuddyMCPServer {
             case "ping":
                 return successResponse(id: id, result: [:])
             case "tools/list":
-                return successResponse(id: id, result: ["tools": try toolDefinitions()])
+                return successResponse(id: id, result: ["tools": try await toolDefinitions()])
             case "tools/call":
                 return successResponse(id: id, result: try await callTool(params: request["params"] as? [String: Any] ?? [:]))
             default:
@@ -65,8 +65,8 @@ private final class PasteBuddyMCPServer {
         ]
     }
 
-    private func toolDefinitions() throws -> [[String: Any]] {
-        let store = loadStore()
+    private func toolDefinitions() async throws -> [[String: Any]] {
+        let store = await loadStore()
         guard store.snapshot.mcp.isServerEnabled else { return [] }
 
         return MCPToolName.allCases
@@ -157,7 +157,7 @@ private final class PasteBuddyMCPServer {
             throw MCPToolServiceError.missingArgument("name")
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
-        let store = loadStore()
+        let store = await loadStore()
         let service = MCPToolService(store: store)
 
         do {
@@ -204,9 +204,9 @@ private final class PasteBuddyMCPServer {
         }
     }
 
-    private func loadStore() -> PasteBuddyStore {
+    private func loadStore() async -> PasteBuddyStore {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         return store
     }
 

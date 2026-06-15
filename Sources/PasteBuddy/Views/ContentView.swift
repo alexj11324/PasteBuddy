@@ -3,15 +3,15 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var store: PasteBuddyStore
-    let directPasteItem: (ClipboardItem, PasteFormat) -> DirectPasteResult
-    let directPasteItems: ([ClipboardItem], PasteFormat) -> DirectPasteResult
+    let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
+    let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let currentExternalApplication: () -> ExternalApplicationIdentity?
     @State private var isShowingNewTextItem = false
 
     init(
         store: PasteBuddyStore,
-        directPasteItem: @escaping (ClipboardItem, PasteFormat) -> DirectPasteResult,
-        directPasteItems: @escaping ([ClipboardItem], PasteFormat) -> DirectPasteResult,
+        directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
+        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
         currentExternalApplication: @escaping () -> ExternalApplicationIdentity? = { nil }
     ) {
         self.store = store

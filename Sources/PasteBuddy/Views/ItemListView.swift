@@ -4,11 +4,11 @@ import SwiftUI
 
 struct ItemListView: View {
     @Bindable var store: PasteBuddyStore
-    let directPasteItem: (ClipboardItem, PasteFormat) -> DirectPasteResult
-    let directPasteItems: ([ClipboardItem], PasteFormat) -> DirectPasteResult
+    let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
+    let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
 
     var body: some View {
-        let items = store.filteredItemsSnapshot
+        let items = store.mainListItemsSnapshot
 
         VStack(spacing: 0) {
             if store.selectedScope == .pasteStack {
@@ -22,7 +22,7 @@ struct ItemListView: View {
             }
             List(selection: selectedIDsBinding) {
                 ForEach(items) { item in
-                    ClipboardItemRow(item: item)
+                    ClipboardItemRow(item: item, imageDataProvider: store.imageData)
                         .tag(item.id)
                         .onDrag {
                             ClipboardItemDragProvider.provider(for: draggableItems(for: item))
@@ -35,14 +35,10 @@ struct ItemListView: View {
                                 PasteboardWriter.copy(item, format: .plainText)
                             }
                             Button("Paste to Active App") {
-                                store.recordDirectPasteResult(
-                                    directPasteItem(item, store.defaultPasteFormat)
-                                )
+                                pasteItem(item, format: store.defaultPasteFormat)
                             }
                             Button("Paste as Plain Text") {
-                                store.recordDirectPasteResult(
-                                    directPasteItem(item, .plainText)
-                                )
+                                pasteItem(item, format: .plainText)
                             }
                             if let url = item.openableURL {
                                 Button("Open") {
@@ -103,9 +99,7 @@ struct ItemListView: View {
                 .disabled(!hasSelectedItems)
 
                 Button {
-                    store.recordDirectPasteResult(
-                        directPasteItems(store.selectedItemsInDisplayOrder, store.defaultPasteFormat)
-                    )
+                    pasteSelectedItems(format: store.defaultPasteFormat)
                 } label: {
                     Label(pasteTitle, systemImage: "arrow.down.doc")
                 }
@@ -113,9 +107,7 @@ struct ItemListView: View {
 
                 Menu {
                     Button {
-                        store.recordDirectPasteResult(
-                            directPasteItems(store.selectedItemsInDisplayOrder, .plainText)
-                        )
+                        pasteSelectedItems(format: .plainText)
                     } label: {
                         Label("Plain Text Paste", systemImage: "textformat")
                     }
@@ -133,9 +125,7 @@ struct ItemListView: View {
 
                         Button {
                             if let item = store.pasteNextStackItem() {
-                                store.recordDirectPasteResult(
-                                    directPasteItem(item, store.defaultPasteFormat)
-                                )
+                                pasteItem(item, format: store.defaultPasteFormat)
                             }
                         } label: {
                             Label("Paste Next", systemImage: "forward.end")
@@ -172,6 +162,22 @@ struct ItemListView: View {
             store.isPasteStackActive ? localized("Paste Stack - Collecting") : localized("Paste Stack")
         case .pinboard(let id):
             store.snapshot.pinboards.first(where: { $0.id == id })?.name ?? localized("Pinboard")
+        }
+    }
+
+    private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
+        Task { @MainActor in
+            let result = await directPasteItem(item, format)
+            store.recordDirectPasteResult(result)
+        }
+    }
+
+    private func pasteSelectedItems(format: PasteFormat) {
+        let items = store.selectedItemsInDisplayOrder
+        guard !items.isEmpty else { return }
+        Task { @MainActor in
+            let result = await directPasteItems(items, format)
+            store.recordDirectPasteResult(result)
         }
     }
 
@@ -385,12 +391,13 @@ private struct PasteOrderChip: View {
 
 struct ClipboardItemRow: View {
     let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
 
     var body: some View {
         let preview = item.visualPreview
 
         HStack(alignment: .top, spacing: 12) {
-            ClipboardPreviewTile(item: item, preview: preview)
+            ClipboardPreviewTile(item: item, preview: preview, imageDataProvider: imageDataProvider)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -460,6 +467,7 @@ struct ClipboardItemRow: View {
 private struct ClipboardPreviewTile: View {
     let item: ClipboardItem
     let preview: ClipboardVisualPreview
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
 
     var body: some View {
         ZStack {
@@ -471,7 +479,7 @@ private struct ClipboardPreviewTile: View {
                 }
 
             if preview.prefersImageThumbnail {
-                ClipboardPreviewThumbnail(item: item)
+                ClipboardPreviewThumbnail(item: item, imageDataProvider: imageDataProvider)
             } else {
                 VStack(spacing: 4) {
                     Image(systemName: preview.systemImageName)
@@ -530,11 +538,17 @@ private struct ClipboardPreviewTile: View {
 private struct ClipboardPreviewThumbnail: View {
     private static let maxPixelSize = 160
     let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     @State private var thumbnail: NSImage?
+    @State private var loadedImageData: Data?
 
     var body: some View {
         ZStack {
-            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: Self.maxPixelSize) {
+            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(
+                for: item,
+                imageData: loadedImageData,
+                maxPixelSize: Self.maxPixelSize
+            ) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -548,10 +562,25 @@ private struct ClipboardPreviewThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .accessibilityHidden(true)
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: Self.maxPixelSize)) {
-            thumbnail = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: Self.maxPixelSize)
+            thumbnail = ClipboardImageCache.cachedThumbnail(
+                for: item,
+                imageData: loadedImageData,
+                maxPixelSize: Self.maxPixelSize
+            )
             guard thumbnail == nil else { return }
 
-            let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item, maxPixelSize: Self.maxPixelSize)
+            let imageData: Data?
+            if let loadedImageData {
+                imageData = loadedImageData
+            } else {
+                imageData = await imageDataProvider(item)
+            }
+            loadedImageData = imageData
+            let loadedThumbnail = await ClipboardImageCache.thumbnail(
+                for: item,
+                imageData: imageData,
+                maxPixelSize: Self.maxPixelSize
+            )
             guard !Task.isCancelled else { return }
             thumbnail = loadedThumbnail
         }

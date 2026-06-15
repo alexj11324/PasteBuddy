@@ -16,8 +16,9 @@ private enum ClipboardShelfMetrics {
 
 struct ClipboardShelfPanelView: View {
     @Bindable var store: PasteBuddyStore
-    let directPasteItem: (ClipboardItem, PasteFormat) -> DirectPasteResult
-    let directPasteItems: ([ClipboardItem], PasteFormat) -> DirectPasteResult
+    let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
+    let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
+    let reloadClipboardHistory: @MainActor () async -> Void
     let onDismiss: () -> Void
 
     @FocusState private var isSearchFocused: Bool
@@ -126,8 +127,7 @@ struct ClipboardShelfPanelView: View {
                     filtersMenu
                     Divider()
                     Button {
-                        store.load()
-                        refreshShelfItems()
+                        reloadHistory()
                     } label: {
                         Label("Reload clipboard history", systemImage: "arrow.clockwise")
                     }
@@ -309,6 +309,7 @@ struct ClipboardShelfPanelView: View {
                     ForEach(renderedItems) { item in
                         ClipboardShelfCard(
                             item: item,
+                            imageDataProvider: store.imageData,
                             draggedItems: draggableItems(for: item),
                             isSelected: currentSelectedItemIDs.contains(item.id) || currentSelectedItemID == item.id,
                             defaultPasteFormat: defaultPasteFormat,
@@ -318,6 +319,9 @@ struct ClipboardShelfPanelView: View {
                             },
                             onPaste: { format in
                                 pasteItem(item, format: format)
+                            },
+                            onCopy: { format in
+                                copyItem(item, format: format)
                             },
                             onPin: { pinboardID in
                                 store.pinItem(item.id, to: pinboardID)
@@ -467,14 +471,36 @@ struct ClipboardShelfPanelView: View {
     private func pasteSelected(format: PasteFormat) {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
-        store.recordDirectPasteResult(directPasteItems(items, format))
-        onDismiss()
+        Task { @MainActor in
+            let hydratedItems = await store.hydratedItems(for: items)
+            let result = await directPasteItems(hydratedItems, format)
+            store.recordDirectPasteResult(result)
+            onDismiss()
+        }
     }
 
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
-        store.recordDirectPasteResult(directPasteItem(item, format))
-        onDismiss()
+        Task { @MainActor in
+            let hydratedItem = await store.hydratedItem(for: item)
+            let result = await directPasteItem(hydratedItem, format)
+            store.recordDirectPasteResult(result)
+            onDismiss()
+        }
+    }
+
+    private func copyItem(_ item: ClipboardItem, format: PasteFormat) {
+        Task { @MainActor in
+            let hydratedItem = await store.hydratedItem(for: item)
+            PasteboardWriter.copy(hydratedItem, format: format)
+        }
+    }
+
+    private func reloadHistory() {
+        Task { @MainActor in
+            await reloadClipboardHistory()
+            refreshShelfItems()
+        }
     }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -732,17 +758,19 @@ private struct ShelfSelectedCountChip: View {
 
 private struct ClipboardShelfCard: View {
     let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let draggedItems: [ClipboardItem]
     let isSelected: Bool
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
     let onSelect: () -> Void
     let onPaste: (PasteFormat) -> Void
+    let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        ClipboardShelfCardVisual(item: item, isSelected: isSelected)
+        ClipboardShelfCardVisual(item: item, imageDataProvider: imageDataProvider, isSelected: isSelected)
             .onTapGesture {
                 onSelect()
             }
@@ -772,10 +800,10 @@ private struct ClipboardShelfCard: View {
                 onPaste(.plainText)
             }
             Button("Copy") {
-                PasteboardWriter.copy(item)
+                onCopy(.original)
             }
             Button("Copy as Plain Text") {
-                PasteboardWriter.copy(item, format: .plainText)
+                onCopy(.plainText)
             }
             if let url = item.openableURL {
                 Button("Open") {
@@ -923,6 +951,7 @@ private final class HiddenScrollerNSScrollView: NSScrollView {
 
 private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let isSelected: Bool
 
     private var header: some View {
@@ -967,7 +996,7 @@ private struct ClipboardShelfCardVisual: View {
         let preview = item.visualPreview
 
         if preview.prefersImageThumbnail {
-            ShelfThumbnailView(item: item)
+            ShelfThumbnailView(item: item, imageDataProvider: imageDataProvider)
         } else {
             VStack(alignment: .leading, spacing: 9) {
                 if item.contentType == .url {
@@ -1098,11 +1127,13 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
 
 private struct ShelfThumbnailView: View {
     let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     @State private var thumbnail: NSImage?
+    @State private var loadedImageData: Data?
 
     var body: some View {
         ZStack {
-            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item) {
+            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -1118,10 +1149,17 @@ private struct ShelfThumbnailView: View {
         .frame(maxWidth: .infinity)
         .clipped()
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item)) {
-            thumbnail = ClipboardImageCache.cachedThumbnail(for: item)
+            thumbnail = ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData)
             guard thumbnail == nil else { return }
 
-            let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item)
+            let imageData: Data?
+            if let loadedImageData {
+                imageData = loadedImageData
+            } else {
+                imageData = await imageDataProvider(item)
+            }
+            loadedImageData = imageData
+            let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item, imageData: imageData)
             guard !Task.isCancelled else { return }
             thumbnail = loadedThumbnail
         }

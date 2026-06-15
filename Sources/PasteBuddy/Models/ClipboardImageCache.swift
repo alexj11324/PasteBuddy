@@ -17,15 +17,16 @@ enum ClipboardImageCache {
     }()
     private static let genericApplicationIcon = icon(from: NSWorkspace.shared.icon(for: .applicationBundle))
 
-    static func cachedThumbnail(for item: ClipboardItem, maxPixelSize: Int = 640) -> NSImage? {
-        guard let data = item.payload.imageData else { return nil }
-        let key = thumbnailCacheKey(for: item, data: data, maxPixelSize: maxPixelSize)
+    static func cachedThumbnail(for item: ClipboardItem, imageData: Data? = nil, maxPixelSize: Int = 640) -> NSImage? {
+        guard let key = thumbnailCacheKeyObject(for: item, maxPixelSize: maxPixelSize) else { return nil }
         return thumbnailCache.object(forKey: key)
     }
 
-    static func thumbnail(for item: ClipboardItem, maxPixelSize: Int = 640) async -> NSImage? {
-        guard let data = item.payload.imageData else { return nil }
-        let key = thumbnailCacheKey(for: item, data: data, maxPixelSize: maxPixelSize)
+    static func thumbnail(for item: ClipboardItem, imageData: Data? = nil, maxPixelSize: Int = 640) async -> NSImage? {
+        guard let data = imageData ?? item.payload.imageData,
+              let key = thumbnailCacheKeyObject(for: item, maxPixelSize: maxPixelSize) else {
+            return nil
+        }
         if let cached = thumbnailCache.object(forKey: key) {
             return cached
         }
@@ -41,13 +42,17 @@ enum ClipboardImageCache {
     }
 
     static func thumbnailCacheKey(for item: ClipboardItem, maxPixelSize: Int = 640) -> String? {
-        guard let data = item.payload.imageData else { return nil }
-        return thumbnailCacheKey(for: item, data: data, maxPixelSize: maxPixelSize) as String
+        thumbnailCacheKeyObject(for: item, maxPixelSize: maxPixelSize).map { $0 as String }
+    }
+
+    private static func thumbnailCacheKeyObject(for item: ClipboardItem, maxPixelSize: Int = 640) -> NSString? {
+        guard item.payload.hasImageAsset else { return nil }
+        return cacheKey(for: item, suffix: "thumb:\(maxPixelSize)")
     }
 
     static func imageSize(for item: ClipboardItem) -> NSSize? {
         guard let data = item.payload.imageData else { return nil }
-        let key = cacheKey(for: item, data: data, suffix: "size")
+        let key = cacheKey(for: item, suffix: "size")
         if let cached = sizeCache.object(forKey: key) {
             return cached.sizeValue
         }
@@ -67,12 +72,10 @@ enum ClipboardImageCache {
         genericApplicationIcon
     }
 
-    private static func cacheKey(for item: ClipboardItem, data: Data, suffix: String) -> NSString {
-        "\(item.id.uuidString):\(item.updatedAt.timeIntervalSince1970):\(data.count):\(suffix)" as NSString
-    }
-
-    private static func thumbnailCacheKey(for item: ClipboardItem, data: Data, maxPixelSize: Int) -> NSString {
-        cacheKey(for: item, data: data, suffix: "thumb:\(maxPixelSize)")
+    private static func cacheKey(for item: ClipboardItem, suffix: String) -> NSString {
+        let assetComponent = item.payload.imageAssetID ?? "inline"
+        let byteCount = item.payload.imageData?.count ?? item.payload.imageByteCount ?? 0
+        return "\(item.id.uuidString):\(item.updatedAt.timeIntervalSince1970):\(assetComponent):\(byteCount):\(suffix)" as NSString
     }
 
     nonisolated private static func decodeThumbnail(from data: Data, maxPixelSize: Int) -> CGImage? {

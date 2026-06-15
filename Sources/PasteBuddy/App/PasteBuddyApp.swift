@@ -2,9 +2,16 @@ import AppKit
 import PasteBuddyCore
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    var flushPendingSave: (() async -> Void)?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        PasteBuddyLifecycleFlush.flushForTermination(flushPendingSave)
     }
 }
 
@@ -13,9 +20,10 @@ struct PasteBuddyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.scenePhase) private var scenePhase
     @State private var store = PasteBuddyStore()
     @State private var monitor: ClipboardMonitor?
-    @State private var didLoadStore = false
+    @State private var storeLoadGate = PasteBuddyRuntimeLoadGate()
     @State private var shelfPanelController: ClipboardShelfPanelController?
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
@@ -31,15 +39,17 @@ struct PasteBuddyApp: App {
             ContentView(
                 store: store,
                 directPasteItem: { item, format in
-                    Self.pasteItemToTarget(
-                        item,
+                    let hydratedItem = await store.hydratedItem(for: item)
+                    return await Self.pasteItemToTarget(
+                        hydratedItem,
                         format: format,
                         tracker: frontmostApplicationTracker
                     )
                 },
                 directPasteItems: { items, format in
-                    Self.pasteItemsToTarget(
-                        items,
+                    let hydratedItems = await store.hydratedItems(for: items)
+                    return await Self.pasteItemsToTarget(
+                        hydratedItems,
                         format: format,
                         tracker: frontmostApplicationTracker
                     )
@@ -50,17 +60,24 @@ struct PasteBuddyApp: App {
             )
                 .frame(minWidth: 980, minHeight: 620)
                 .task {
-                    startRuntimeIfNeeded()
+                    await startRuntimeIfNeeded()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    flushPendingSaveIfNeeded(for: phase)
                 }
         }
         .commands {
             CommandMenu("Clipboard") {
                 Button("New Text Item") {
-                    presentNewTextItemPanel()
+                    Task { @MainActor in
+                        await presentNewTextItemPanel()
+                    }
                 }
 
                 Button("Open Clipboard Shelf") {
-                    toggleClipboardShelf()
+                    Task { @MainActor in
+                        await toggleClipboardShelf()
+                    }
                 }
                 .keyboardShortcut("v", modifiers: [.command, .shift])
 
@@ -93,14 +110,16 @@ struct PasteBuddyApp: App {
                 .pasteBuddyKeyboardShortcut(store.snapshot.shortcuts.activatePasteStack)
 
                 Button("Paste Next Stack Item") {
-                    if let item = store.pasteNextStackItem() {
-                        store.recordDirectPasteResult(
-                            Self.pasteItemToTarget(
-                                item,
-                                format: store.defaultPasteFormat,
-                                tracker: frontmostApplicationTracker
+                    Task { @MainActor in
+                        if let item = store.pasteNextStackItem() {
+                            store.recordDirectPasteResult(
+                                await Self.pasteItemToTarget(
+                                    item,
+                                    format: store.defaultPasteFormat,
+                                    tracker: frontmostApplicationTracker
+                                )
                             )
-                        )
+                        }
                     }
                 }
                 .pasteBuddyKeyboardShortcut(store.snapshot.shortcuts.pasteNextStackItem)
@@ -121,13 +140,16 @@ struct PasteBuddyApp: App {
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
                 Button("Paste PasteBuddy Item") {
-                    store.recordDirectPasteResult(
-                        Self.pasteItemsToTarget(
-                            store.selectedItemsInDisplayOrder,
-                            format: store.defaultPasteFormat,
-                            tracker: frontmostApplicationTracker
+                    Task { @MainActor in
+                        let items = store.selectedItemsInDisplayOrder
+                        store.recordDirectPasteResult(
+                            await Self.pasteItemsToTarget(
+                                items,
+                                format: store.defaultPasteFormat,
+                                tracker: frontmostApplicationTracker
+                            )
                         )
-                    )
+                    }
                 }
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
@@ -138,13 +160,16 @@ struct PasteBuddyApp: App {
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
                 Button("Paste PasteBuddy Item as Plain Text") {
-                    store.recordDirectPasteResult(
-                        Self.pasteItemsToTarget(
-                            store.selectedItemsInDisplayOrder,
-                            format: .plainText,
-                            tracker: frontmostApplicationTracker
+                    Task { @MainActor in
+                        let items = store.selectedItemsInDisplayOrder
+                        store.recordDirectPasteResult(
+                            await Self.pasteItemsToTarget(
+                                items,
+                                format: .plainText,
+                                tracker: frontmostApplicationTracker
+                            )
                         )
-                    )
+                    }
                 }
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
@@ -153,7 +178,9 @@ struct PasteBuddyApp: App {
 
                     ForEach(1...9, id: \.self) { index in
                         Button("Quick Paste \(index)") {
-                            quickPaste(index, format: store.defaultPasteFormat)
+                            Task { @MainActor in
+                                await quickPaste(index, format: store.defaultPasteFormat)
+                            }
                         }
                         .keyboardShortcut(
                             digitKeyEquivalent(index),
@@ -166,7 +193,9 @@ struct PasteBuddyApp: App {
 
                     ForEach(1...9, id: \.self) { index in
                         Button("Quick Paste \(index) as Plain Text") {
-                            quickPaste(index, format: .plainText)
+                            Task { @MainActor in
+                                await quickPaste(index, format: .plainText)
+                            }
                         }
                         .keyboardShortcut(
                             digitKeyEquivalent(index),
@@ -185,7 +214,9 @@ struct PasteBuddyApp: App {
 
             CommandMenu("Pinboard") {
                 Button("New Pinboard") {
-                    createNewPinboard()
+                    Task { @MainActor in
+                        await createNewPinboard()
+                    }
                 }
 
                 Divider()
@@ -224,12 +255,16 @@ struct PasteBuddyApp: App {
             Divider()
 
             Button("Show Clipboard Shelf") {
-                toggleClipboardShelf()
+                Task { @MainActor in
+                    await toggleClipboardShelf()
+                }
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
 
             Button("Open PasteBuddy") {
-                openMainWindow()
+                Task { @MainActor in
+                    await openMainWindow()
+                }
             }
 
             Menu("Open Settings") {
@@ -257,14 +292,16 @@ struct PasteBuddyApp: App {
                 store.togglePasteStack()
             }
             Button("Paste Next Stack Item") {
-                if let item = store.pasteNextStackItem() {
-                    store.recordDirectPasteResult(
-                        Self.pasteItemToTarget(
-                            item,
-                            format: store.defaultPasteFormat,
-                            tracker: frontmostApplicationTracker
+                Task { @MainActor in
+                    if let item = store.pasteNextStackItem() {
+                        store.recordDirectPasteResult(
+                            await Self.pasteItemToTarget(
+                                item,
+                                format: store.defaultPasteFormat,
+                                tracker: frontmostApplicationTracker
+                            )
                         )
-                    )
+                    }
                 }
             }
             .disabled(store.pasteStackItems.isEmpty)
@@ -305,8 +342,8 @@ struct PasteBuddyApp: App {
         localized("%@ Settings", localized(destination.displayName))
     }
 
-    private func openMainWindow() {
-        startRuntimeIfNeeded()
+    private func openMainWindow() async {
+        await startRuntimeIfNeeded()
         openWindow(id: "main")
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -329,9 +366,15 @@ struct PasteBuddyApp: App {
         return !selectedIDs.isEmpty && !Set(pinboard.itemIDs).isDisjoint(with: selectedIDs)
     }
 
-    private func presentNewTextItemPanel() {
-        startRuntimeIfNeeded()
-        openMainWindow()
+    private func flushPendingSaveIfNeeded(for phase: ScenePhase) {
+        guard phase == .inactive || phase == .background else { return }
+        Task { @MainActor in
+            await store.flushPendingSave()
+        }
+    }
+
+    private func presentNewTextItemPanel() async {
+        await openMainWindow()
 
         let titleField = NSTextField(string: "")
         titleField.placeholderString = localized("Title")
@@ -369,9 +412,8 @@ struct PasteBuddyApp: App {
         }
     }
 
-    private func createNewPinboard() {
-        startRuntimeIfNeeded()
-        openMainWindow()
+    private func createNewPinboard() async {
+        await openMainWindow()
         store.createPinboard()
     }
 
@@ -393,18 +435,20 @@ struct PasteBuddyApp: App {
         }
     }
 
-    private func toggleClipboardShelf() {
-        startRuntimeIfNeeded()
+    private func toggleClipboardShelf() async {
+        await startRuntimeIfNeeded()
         frontmostApplicationTracker.recordCurrentFrontmostApplication()
         shelfPanelController?.toggle()
     }
 
-    private func startRuntimeIfNeeded() {
+    private func startRuntimeIfNeeded() async {
         frontmostApplicationTracker.start()
+        appDelegate.flushPendingSave = { [store] in
+            await store.flushPendingSave()
+        }
 
-        if !didLoadStore {
-            store.load()
-            didLoadStore = true
+        await storeLoadGate.loadIfNeeded {
+            await store.loadAsync()
         }
 
         if monitor == nil {
@@ -417,10 +461,12 @@ struct PasteBuddyApp: App {
             shelfPanelController = ClipboardShelfPanelController(
                 store: store,
                 directPasteItem: { item, format in
-                    Self.pasteItemToTarget(item, format: format, tracker: frontmostApplicationTracker)
+                    let hydratedItem = await store.hydratedItem(for: item)
+                    return await Self.pasteItemToTarget(hydratedItem, format: format, tracker: frontmostApplicationTracker)
                 },
                 directPasteItems: { items, format in
-                    Self.pasteItemsToTarget(items, format: format, tracker: frontmostApplicationTracker)
+                    let hydratedItems = await store.hydratedItems(for: items)
+                    return await Self.pasteItemsToTarget(hydratedItems, format: format, tracker: frontmostApplicationTracker)
                 }
             )
         }
@@ -432,11 +478,12 @@ struct PasteBuddyApp: App {
         }
     }
 
-    private func quickPaste(_ index: Int, format: PasteFormat) {
+    private func quickPaste(_ index: Int, format: PasteFormat) async {
         guard let item = store.quickPasteItem(atOneBasedIndex: index) else { return }
+        let hydratedItem = await store.hydratedItem(for: item)
         store.recordDirectPasteResult(
-            Self.pasteItemToTarget(
-                item,
+            await Self.pasteItemToTarget(
+                hydratedItem,
                 format: format,
                 tracker: frontmostApplicationTracker
             )
@@ -451,9 +498,9 @@ struct PasteBuddyApp: App {
         _ item: ClipboardItem,
         format: PasteFormat,
         tracker: FrontmostApplicationTracker
-    ) -> DirectPasteResult {
+    ) async -> DirectPasteResult {
         guard AccessibilityPermissionService.isTrusted else {
-            return PasteboardWriter.pasteToFrontmostApp(item, format: format)
+            return await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
         }
         guard let target = tracker.currentExternalApplication(),
               let targetBundleIdentifier = target.bundleIdentifier else {
@@ -464,7 +511,7 @@ struct PasteBuddyApp: App {
                 format: format
             )
         }
-        return PasteboardWriter.pasteToFrontmostApp(
+        return await PasteboardWriter.pasteToFrontmostAppAsync(
             item,
             format: format,
             targetBundleIdentifier: targetBundleIdentifier,
@@ -482,12 +529,12 @@ struct PasteBuddyApp: App {
         _ items: [ClipboardItem],
         format: PasteFormat,
         tracker: FrontmostApplicationTracker
-    ) -> DirectPasteResult {
+    ) async -> DirectPasteResult {
         guard !items.isEmpty else {
             return DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
         }
         guard AccessibilityPermissionService.isTrusted else {
-            return PasteboardWriter.pasteToFrontmostApp(items, format: format)
+            return await PasteboardWriter.pasteToFrontmostAppAsync(items, format: format)
         }
         guard let target = tracker.currentExternalApplication(),
               let targetBundleIdentifier = target.bundleIdentifier else {
@@ -498,7 +545,7 @@ struct PasteBuddyApp: App {
                 format: format
             )
         }
-        return PasteboardWriter.pasteToFrontmostApp(
+        return await PasteboardWriter.pasteToFrontmostAppAsync(
             items,
             format: format,
             targetBundleIdentifier: targetBundleIdentifier,
@@ -510,6 +557,43 @@ struct PasteBuddyApp: App {
                 tracker.activateLastExternalApplication()
             }
         )
+    }
+}
+
+@MainActor
+final class PasteBuddyRuntimeLoadGate {
+    private var didLoadStore = false
+
+    func loadIfNeeded(_ loadAsync: () async -> Void) async {
+        guard !didLoadStore else { return }
+        didLoadStore = true
+        await loadAsync()
+    }
+}
+
+@MainActor
+enum PasteBuddyLifecycleFlush {
+    static let terminationTimeout: TimeInterval = 0.25
+
+    static func flushForTermination(
+        _ flushPendingSave: (() async -> Void)?,
+        timeout: TimeInterval = 0.25
+    ) {
+        guard let flushPendingSave else { return }
+
+        var didFinish = false
+        Task { @MainActor in
+            await flushPendingSave()
+            didFinish = true
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while !didFinish && Date() < deadline {
+            RunLoop.current.run(
+                mode: .default,
+                before: min(deadline, Date().addingTimeInterval(0.01))
+            )
+        }
     }
 }
 

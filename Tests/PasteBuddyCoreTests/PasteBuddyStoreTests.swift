@@ -3222,6 +3222,215 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(exported.general.launchAtLoginEnabled)
     }
 
+    func testGRDBRepositoryStoresImageAndRTFAssetsOutsidePayloadJSONAndKeepsPagesLightweight() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let imageData = Data(repeating: 0x7A, count: 16_384)
+        let rtfData = Data("{\\rtf1\\ansi VIP launch reply}".utf8)
+        let item = ClipboardItem(
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Launch Asset",
+            payload: ClipboardPayload(
+                text: "Launch copy",
+                htmlString: "<p>Launch copy</p>",
+                rtfData: rtfData,
+                imageData: imageData,
+                ocrText: "Hero screenshot OCR"
+            ),
+            ocrState: .completed(Date(timeIntervalSince1970: 100))
+        )
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+
+        let payloadJSON = try database.payloadJSONForTesting(itemID: item.id)
+        XCTAssertFalse(payloadJSON.contains("imageData"))
+        XCTAssertFalse(payloadJSON.contains("rtfData"))
+        XCTAssertFalse(payloadJSON.contains(imageData.base64EncodedString()))
+        XCTAssertFalse(payloadJSON.contains(rtfData.base64EncodedString()))
+
+        let assetRows = try database.assetRowsForTesting()
+        XCTAssertEqual(Set(assetRows.map(\.kind)), Set(["image", "rtf"]))
+        XCTAssertEqual(Set(assetRows.map(\.byteCount)), Set([imageData.count, rtfData.count]))
+        XCTAssertTrue(assetRows.contains { $0.data == imageData })
+        XCTAssertTrue(assetRows.contains { $0.data == rtfData })
+
+        let pageItem = try XCTUnwrap(repository.fetchPage().first)
+        XCTAssertNil(pageItem.payload.imageData)
+        XCTAssertNil(pageItem.payload.rtfData)
+        XCTAssertNotNil(pageItem.payload.imageAssetID)
+        XCTAssertNotNil(pageItem.payload.rtfAssetID)
+        XCTAssertEqual(pageItem.payload.imageByteCount, imageData.count)
+        XCTAssertEqual(pageItem.payload.rtfByteCount, rtfData.count)
+        XCTAssertTrue(pageItem.matches("hero screenshot"))
+
+        let exportedItem = try XCTUnwrap(repository.exportSnapshot().items.first)
+        XCTAssertEqual(exportedItem.payload.imageData, imageData)
+        XCTAssertEqual(exportedItem.payload.rtfData, rtfData)
+        XCTAssertTrue(exportedItem.matches("hero screenshot"))
+    }
+
+    func testStoreHydratesRepositoryBackedLightweightAssetsForPreviewAndPaste() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let imageData = Data(repeating: 0x32, count: 8_192)
+        let rtfData = Data("{\\rtf1 asset backed copy}".utf8)
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Asset Backed",
+            payload: ClipboardPayload(
+                text: "Asset backed body",
+                rtfData: rtfData,
+                imageData: imageData,
+                ocrText: "Asset OCR"
+            ),
+            ocrState: .completed(Date(timeIntervalSince1970: 200))
+        )
+        let snapshot = PasteBuddySnapshot(items: [item])
+        try harness.snapshotStore.save(snapshot)
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        let lightweightItem = try XCTUnwrap(store.filteredItems.first)
+        XCTAssertNil(lightweightItem.payload.imageData)
+        XCTAssertNil(lightweightItem.payload.rtfData)
+        XCTAssertNotNil(lightweightItem.payload.imageAssetID)
+        XCTAssertNotNil(lightweightItem.payload.rtfAssetID)
+
+        let hydratedImageData = await store.imageData(for: lightweightItem)
+        XCTAssertEqual(hydratedImageData, imageData)
+
+        let hydratedItem = await store.hydratedItem(for: lightweightItem)
+        XCTAssertEqual(hydratedItem.payload.imageData, imageData)
+        XCTAssertEqual(hydratedItem.payload.rtfData, rtfData)
+        XCTAssertTrue(hydratedItem.matches("asset ocr"))
+    }
+
+    func testRepositoryBackedStoreWritesAssetReferencesToDiskSnapshotAndHydratesOnReload() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let imageData = Data(repeating: 0x51, count: 12_288)
+        let rtfData = Data("{\\rtf1 disk stripped asset}".utf8)
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let standardSnapshotStore = EncryptedSnapshotStore(
+            fileURL: harness.directory.appendingPathComponent("clipboard-standard.pbstore"),
+            storageMode: .standard
+        )
+        let store = PasteBuddyStore(
+            diskStore: standardSnapshotStore,
+            clipboardRepository: repository
+        )
+
+        let captured = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Disk Asset",
+            payload: ClipboardPayload(
+                text: "Disk asset body",
+                rtfData: rtfData,
+                imageData: imageData,
+                ocrText: "Disk OCR"
+            ),
+            ocrState: .completed(Date(timeIntervalSince1970: 300))
+        ))
+
+        let persistedData = try Data(contentsOf: standardSnapshotStore.fileURL)
+        let persistedString = String(decoding: persistedData, as: UTF8.self)
+        XCTAssertFalse(persistedString.contains("imageData"))
+        XCTAssertFalse(persistedString.contains("rtfData"))
+        XCTAssertFalse(persistedString.contains(imageData.base64EncodedString()))
+        XCTAssertFalse(persistedString.contains(rtfData.base64EncodedString()))
+
+        let diskSnapshot = try standardSnapshotStore.load()
+        let diskItem = try XCTUnwrap(diskSnapshot.items.first)
+        XCTAssertEqual(diskItem.id, captured.id)
+        XCTAssertNil(diskItem.payload.imageData)
+        XCTAssertNil(diskItem.payload.rtfData)
+        XCTAssertNotNil(diskItem.payload.imageAssetID)
+        XCTAssertNotNil(diskItem.payload.rtfAssetID)
+
+        let reloaded = PasteBuddyStore(
+            diskStore: standardSnapshotStore,
+            clipboardRepository: repository
+        )
+        reloaded.load()
+
+        let reloadedItem = try XCTUnwrap(reloaded.snapshot.items.first)
+        XCTAssertEqual(reloadedItem.payload.imageData, imageData)
+        XCTAssertEqual(reloadedItem.payload.rtfData, rtfData)
+        XCTAssertTrue(reloadedItem.matches("disk ocr"))
+    }
+
+    func testGRDBRepositoryMigratesLegacySnapshotInlineAssetsIntoAssetRows() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let imageData = Data(repeating: 0x44, count: 4_096)
+        let rtfData = Data("{\\rtf1 legacy rich body}".utf8)
+        let legacySnapshotJSON = Data("""
+        {
+          "items": [
+            {
+              "id": "11111111-1111-1111-1111-111111111111",
+              "createdAt": 100,
+              "updatedAt": 100,
+              "sourceAppName": "Preview",
+              "deviceName": "Test Mac",
+              "contentType": "mixed",
+              "title": "Legacy Inline Asset",
+              "payload": {
+                "text": "Legacy searchable body",
+                "rtfData": "\(rtfData.base64EncodedString())",
+                "imageData": "\(imageData.base64EncodedString())",
+                "ocrText": "Legacy OCR words"
+              },
+              "ocrState": {
+                "completed": {
+                  "_0": 100
+                }
+              }
+            }
+          ],
+          "pinboards": []
+        }
+        """.utf8)
+        let snapshot = try JSONDecoder.pasteBuddy.decode(PasteBuddySnapshot.self, from: legacySnapshotJSON)
+        let legacyItem = try XCTUnwrap(snapshot.items.first)
+        XCTAssertEqual(legacyItem.payload.imageData, imageData)
+        XCTAssertEqual(legacyItem.payload.rtfData, rtfData)
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+
+        try repository.replaceAll(with: snapshot)
+
+        let payloadJSON = try database.payloadJSONForTesting(itemID: legacyItem.id)
+        XCTAssertFalse(payloadJSON.contains("imageData"))
+        XCTAssertFalse(payloadJSON.contains("rtfData"))
+        XCTAssertEqual(try database.assetRowsForTesting().count, 2)
+
+        let exportedItem = try XCTUnwrap(repository.exportSnapshot().items.first)
+        XCTAssertEqual(exportedItem.payload.imageData, imageData)
+        XCTAssertEqual(exportedItem.payload.rtfData, rtfData)
+        XCTAssertTrue(exportedItem.matches("legacy ocr"))
+    }
+
     func testGRDBRepositoryOCRUpdateRefreshesFullTextIndex() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -3245,6 +3454,8 @@ final class PasteBuddyStoreTests: XCTestCase {
 
         let matches = try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "receipt total"))
         XCTAssertEqual(matches.map(\.id), [image.id])
+        XCTAssertEqual(matches.first?.searchDocument.contentHash, image.searchDocument.contentHash)
+        XCTAssertNotEqual(matches.first?.searchDocument.searchHash, image.searchDocument.searchHash)
         guard case .completed = matches.first?.ocrState else {
             return XCTFail("Expected the stored OCR state to be completed.")
         }
@@ -3292,7 +3503,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(exported.security.requiresBiometricUnlock)
     }
 
-    func testStoreUsesSQLiteRepositoryForPagedHistoryAndSearch() throws {
+    func testQueryAndPasteStackStateKeepRepositorySyncedToDataRevision() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -3310,7 +3521,12 @@ final class PasteBuddyStoreTests: XCTestCase {
                 payload: ClipboardPayload(text: index == 124 ? "sqlite-only search needle" : "body \(index)")
             )
         }
-        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+        let pinboard = Pinboard(
+            name: "Repository Scope",
+            colorHex: "#4EA7FC",
+            itemIDs: [items[3].id, items[4].id]
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items, pinboards: [pinboard]))
 
         let store = PasteBuddyStore(
             diskStore: harness.snapshotStore,
@@ -3318,12 +3534,36 @@ final class PasteBuddyStoreTests: XCTestCase {
         )
         store.load()
 
-        XCTAssertEqual(store.filteredItems.count, 100)
-        XCTAssertEqual(store.filteredItems.first?.title, "Item 0")
+        let loadedDataRevision = store.dataRevision
+        let loadedQueryRevision = store.queryRevision
+
+        XCTAssertEqual(store.repositorySyncedDataRevision, loadedDataRevision)
 
         store.searchQuery = "sqlite-only search needle"
 
+        XCTAssertEqual(store.dataRevision, loadedDataRevision)
+        XCTAssertGreaterThan(store.queryRevision, loadedQueryRevision)
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
         XCTAssertEqual(store.filteredItems.map(\.id), [items[124].id])
+
+        store.searchQuery = ""
+        store.contentTypeFilter = .text
+
+        XCTAssertEqual(store.dataRevision, loadedDataRevision)
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertEqual(store.filteredItems.count, 100)
+
+        store.selectedScope = .pinboard(pinboard.id)
+
+        XCTAssertEqual(store.dataRevision, loadedDataRevision)
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertEqual(store.mainListItemsSnapshot.map(\.id), [items[3].id, items[4].id])
+
+        store.startPasteStack()
+        store.reversePasteStackDirection()
+
+        XCTAssertEqual(store.dataRevision, loadedDataRevision)
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
 
         let captured = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Terminal",
@@ -3333,10 +3573,82 @@ final class PasteBuddyStoreTests: XCTestCase {
             payload: ClipboardPayload(text: "fresh repository sync target")
         ))
 
+        XCTAssertGreaterThan(store.dataRevision, loadedDataRevision)
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
         XCTAssertEqual(
             try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "fresh repository sync target")).map(\.id),
             [captured.id]
         )
+    }
+
+    func testHistoryMainListUsesStableFullHistoryWhenRepositoryWindowIsLimited() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 3_000_000)
+        let items = (0..<125).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "History Item \(index)",
+                payload: ClipboardPayload(text: "history body \(index)")
+            )
+        }
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        XCTAssertEqual(store.mainListItemsSnapshot.count, 125)
+        XCTAssertEqual(store.mainListItemsSnapshot.first?.title, "History Item 0")
+        XCTAssertEqual(store.mainListItemsSnapshot.last?.title, "History Item 124")
+        XCTAssertEqual(store.filteredItems.count, 100)
+
+        store.searchQuery = "history body"
+
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertEqual(store.mainListItemsSnapshot.count, 125)
+        XCTAssertEqual(store.filteredItems.count, 100)
+    }
+
+    func testQuickPasteKeepsOneThroughNineLimitWithRepositoryBackedHistory() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 4_000_000)
+        let items = (0..<125).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "QuickPaste Item \(index)",
+                payload: ClipboardPayload(text: "quick paste body \(index)")
+            )
+        }
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        XCTAssertEqual(store.mainListItemsSnapshot.count, 125)
+        XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 1)?.id, items[0].id)
+        XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 9)?.id, items[8].id)
+        XCTAssertNil(store.quickPasteItem(atOneBasedIndex: 10))
     }
 }
 

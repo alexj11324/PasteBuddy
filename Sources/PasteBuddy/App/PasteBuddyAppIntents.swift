@@ -25,7 +25,7 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
         let result = try service.searchClipboard(query: query, limit: limit ?? 5)
         return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
@@ -45,7 +45,7 @@ struct PasteBuddyCreateTextItemIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
         do {
             let summary = try service.createTextItem(text: text, title: title)
@@ -71,7 +71,7 @@ struct PasteBuddyCopyFirstMatchIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
         let result = try service.transferFirstMatchingItem(
             query: query,
@@ -97,17 +97,17 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
-        var pasteResult: DirectPasteResult?
-        let result = try service.transferFirstMatchingItem(
-            query: query,
-            format: plainText == true ? .plainText : store.defaultPasteFormat,
+        let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
+        let item = try service.firstMatchingItem(query: query)
+        let result = AutomationItemTransferResult(
+            item: item,
+            format: format,
             destination: .frontmostApp
-        ) { item, format in
-            pasteResult = PasteboardWriter.pasteToFrontmostApp(item, format: format)
-        }
-        return .result(dialog: IntentDialog(stringLiteral: pasteResult?.statusMessage ?? result.displaySummary))
+        )
+        let pasteResult = await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
+        return .result(dialog: IntentDialog(stringLiteral: pasteResult.statusMessage.isEmpty ? result.displaySummary : pasteResult.statusMessage))
     }
 }
 
@@ -124,7 +124,7 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
         do {
             let pinboard = try service.createPinboard(name: name, colorHex: colorHex)
@@ -156,7 +156,7 @@ struct PasteBuddyCreateContentItemIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
         do {
             let result = try service.createContentItem(
@@ -187,7 +187,7 @@ struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = PasteBuddyStore()
-        store.load()
+        await store.loadAsync()
         let service = AutomationActionService(store: store)
         do {
             let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)

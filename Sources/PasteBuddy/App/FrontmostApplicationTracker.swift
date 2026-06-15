@@ -8,15 +8,17 @@ struct ExternalApplicationIdentity {
 
 @MainActor
 final class FrontmostApplicationTracker {
-    nonisolated(unsafe) private var activationObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
     private weak var lastExternalApplication: NSRunningApplication?
     private let selfBundleIdentifiers = Set(
         [Bundle.main.bundleIdentifier, "com.pastebuddy.app"].compactMap(\.self)
     )
 
     deinit {
-        if let activationObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        MainActor.assumeIsolated {
+            if let activationObserver {
+                NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+            }
         }
     }
 

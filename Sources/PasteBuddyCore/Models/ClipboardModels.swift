@@ -265,25 +265,35 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
     public var text: String?
     public var htmlString: String?
     public var rtfData: Data?
+    public var rtfAssetID: String?
+    public var rtfByteCount: Int?
     public var urlString: String?
     public var fileURLString: String?
     public var fileURLStrings: [String]
     public var imageData: Data?
+    public var imageAssetID: String?
+    public var imageByteCount: Int?
     public var ocrText: String?
 
     public init(
         text: String? = nil,
         htmlString: String? = nil,
         rtfData: Data? = nil,
+        rtfAssetID: String? = nil,
+        rtfByteCount: Int? = nil,
         urlString: String? = nil,
         fileURLString: String? = nil,
         fileURLStrings: [String] = [],
         imageData: Data? = nil,
+        imageAssetID: String? = nil,
+        imageByteCount: Int? = nil,
         ocrText: String? = nil
     ) {
         self.text = text
         self.htmlString = htmlString
         self.rtfData = rtfData
+        self.rtfAssetID = rtfAssetID
+        self.rtfByteCount = rtfData?.count ?? rtfByteCount
         self.urlString = urlString
         self.fileURLString = fileURLString
         self.fileURLStrings = Self.normalizedFileURLStrings(
@@ -291,6 +301,8 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
             additional: fileURLStrings
         )
         self.imageData = imageData
+        self.imageAssetID = imageAssetID
+        self.imageByteCount = imageData?.count ?? imageByteCount
         self.ocrText = ocrText
     }
 
@@ -298,10 +310,14 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
         case text
         case htmlString
         case rtfData
+        case rtfAssetID
+        case rtfByteCount
         case urlString
         case fileURLString
         case fileURLStrings
         case imageData
+        case imageAssetID
+        case imageByteCount
         case ocrText
     }
 
@@ -310,6 +326,8 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
         text = try container.decodeIfPresent(String.self, forKey: .text)
         htmlString = try container.decodeIfPresent(String.self, forKey: .htmlString)
         rtfData = try container.decodeIfPresent(Data.self, forKey: .rtfData)
+        rtfAssetID = try container.decodeIfPresent(String.self, forKey: .rtfAssetID)
+        rtfByteCount = try container.decodeIfPresent(Int.self, forKey: .rtfByteCount) ?? rtfData?.count
         urlString = try container.decodeIfPresent(String.self, forKey: .urlString)
         fileURLString = try container.decodeIfPresent(String.self, forKey: .fileURLString)
         let decodedFileURLStrings = try container.decodeIfPresent([String].self, forKey: .fileURLStrings) ?? []
@@ -318,6 +336,8 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
             additional: decodedFileURLStrings
         )
         imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        imageAssetID = try container.decodeIfPresent(String.self, forKey: .imageAssetID)
+        imageByteCount = try container.decodeIfPresent(Int.self, forKey: .imageByteCount) ?? imageData?.count
         ocrText = try container.decodeIfPresent(String.self, forKey: .ocrText)
     }
 
@@ -326,13 +346,25 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
         try container.encodeIfPresent(text, forKey: .text)
         try container.encodeIfPresent(htmlString, forKey: .htmlString)
         try container.encodeIfPresent(rtfData, forKey: .rtfData)
+        try container.encodeIfPresent(rtfAssetID, forKey: .rtfAssetID)
+        try container.encodeIfPresent(rtfData?.count ?? rtfByteCount, forKey: .rtfByteCount)
         try container.encodeIfPresent(urlString, forKey: .urlString)
         try container.encodeIfPresent(fileURLString, forKey: .fileURLString)
         if !fileURLStrings.isEmpty {
             try container.encode(fileURLStrings, forKey: .fileURLStrings)
         }
         try container.encodeIfPresent(imageData, forKey: .imageData)
+        try container.encodeIfPresent(imageAssetID, forKey: .imageAssetID)
+        try container.encodeIfPresent(imageData?.count ?? imageByteCount, forKey: .imageByteCount)
         try container.encodeIfPresent(ocrText, forKey: .ocrText)
+    }
+
+    public var hasRTFAsset: Bool {
+        rtfData?.isEmpty == false || rtfAssetID?.isEmpty == false || (rtfByteCount ?? 0) > 0
+    }
+
+    public var hasImageAsset: Bool {
+        imageData?.isEmpty == false || imageAssetID?.isEmpty == false || (imageByteCount ?? 0) > 0
     }
 
     public var allFileURLStrings: [String] {
@@ -412,20 +444,84 @@ public struct ClipboardSearchDocument: Codable, Equatable, Sendable {
     public var previewHeadline: String
     public var previewBody: String
     public var storageBytes: Int
-    public var dedupeHash: String
+    public var contentHash: String
+    public var searchHash: String
+    public var dedupeHash: String {
+        get { contentHash }
+        set { contentHash = newValue }
+    }
 
     public init(
         normalizedText: String,
         previewHeadline: String,
         previewBody: String,
         storageBytes: Int,
-        dedupeHash: String
+        dedupeHash: String,
+        contentHash: String? = nil,
+        searchHash: String? = nil
     ) {
         self.normalizedText = normalizedText
         self.previewHeadline = previewHeadline
         self.previewBody = previewBody
         self.storageBytes = storageBytes
-        self.dedupeHash = dedupeHash
+        self.contentHash = contentHash ?? dedupeHash
+        self.searchHash = searchHash ?? Self.searchDocumentHash(
+            normalizedText: normalizedText,
+            previewHeadline: previewHeadline,
+            previewBody: previewBody
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case normalizedText
+        case previewHeadline
+        case previewBody
+        case storageBytes
+        case dedupeHash
+        case contentHash
+        case searchHash
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        normalizedText = try container.decodeIfPresent(String.self, forKey: .normalizedText) ?? ""
+        previewHeadline = try container.decodeIfPresent(String.self, forKey: .previewHeadline) ?? ""
+        previewBody = try container.decodeIfPresent(String.self, forKey: .previewBody) ?? ""
+        storageBytes = try container.decodeIfPresent(Int.self, forKey: .storageBytes) ?? 0
+        let legacyDedupeHash = try container.decodeIfPresent(String.self, forKey: .dedupeHash)
+        contentHash = try container.decodeIfPresent(String.self, forKey: .contentHash)
+            ?? legacyDedupeHash
+            ?? ""
+        searchHash = try container.decodeIfPresent(String.self, forKey: .searchHash)
+            ?? Self.searchDocumentHash(
+                normalizedText: normalizedText,
+                previewHeadline: previewHeadline,
+                previewBody: previewBody
+            )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(normalizedText, forKey: .normalizedText)
+        try container.encode(previewHeadline, forKey: .previewHeadline)
+        try container.encode(previewBody, forKey: .previewBody)
+        try container.encode(storageBytes, forKey: .storageBytes)
+        try container.encode(contentHash, forKey: .dedupeHash)
+        try container.encode(contentHash, forKey: .contentHash)
+        try container.encode(searchHash, forKey: .searchHash)
+    }
+
+    public static func searchDocumentHash(
+        normalizedText: String,
+        previewHeadline: String,
+        previewBody: String
+    ) -> String {
+        var hasher = SHA256()
+        for value in [normalizedText, previewHeadline, previewBody] {
+            hasher.update(data: Data(value.utf8))
+            hasher.update(data: Data([0]))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -565,6 +661,15 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         case searchDocument
     }
 
+    private struct SearchDocumentHashPresence: Decodable {
+        var contentHash: String?
+        var searchHash: String?
+
+        var hasModernHashes: Bool {
+            contentHash?.isEmpty == false && searchHash?.isEmpty == false
+        }
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -580,17 +685,23 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         reuseCategory = try container.decodeIfPresent(ClipboardReuseCategory.self, forKey: .reuseCategory)
             ?? Self.inferredReuseCategory(contentType: contentType, payload: payload)
         ocrState = try container.decodeIfPresent(OCRState.self, forKey: .ocrState) ?? .notNeeded
-        searchDocument = try container.decodeIfPresent(ClipboardSearchDocument.self, forKey: .searchDocument)
-            ?? Self.makeSearchDocument(
-                title: title,
-                labels: labels,
-                sourceAppName: sourceAppName,
-                deviceName: deviceName,
-                contentType: contentType,
-                reuseCategory: reuseCategory,
-                payload: payload,
-                ocrState: ocrState
-            )
+        let rebuiltSearchDocument = Self.makeSearchDocument(
+            title: title,
+            labels: labels,
+            sourceAppName: sourceAppName,
+            deviceName: deviceName,
+            contentType: contentType,
+            reuseCategory: reuseCategory,
+            payload: payload,
+            ocrState: ocrState
+        )
+        let hashPresence = try container.decodeIfPresent(SearchDocumentHashPresence.self, forKey: .searchDocument)
+        if let decodedSearchDocument = try container.decodeIfPresent(ClipboardSearchDocument.self, forKey: .searchDocument),
+           hashPresence?.hasModernHashes == true {
+            searchDocument = decodedSearchDocument
+        } else {
+            searchDocument = rebuiltSearchDocument
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -629,7 +740,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         switch contentType {
         case .text:
             let body = searchDocument.previewBody.nilIfEmpty ?? title
-            let detail = payload.htmlString?.isEmpty == false || payload.rtfData?.isEmpty == false ? "Rich text available" : nil
+            let detail = payload.htmlString?.isEmpty == false || payload.hasRTFAsset ? "Rich text available" : nil
             return ClipboardVisualPreview(
                 headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
                 body: body,
@@ -670,7 +781,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 detail: ocrState.displayName,
                 badgeText: contentType.displayName,
                 systemImageName: "photo",
-                prefersImageThumbnail: payload.imageData?.isEmpty == false
+                prefersImageThumbnail: payload.hasImageAsset
             )
         case .mixed:
             let body = searchDocument.previewBody.nilIfEmpty ?? title
@@ -684,7 +795,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             if !payload.allFileURLStrings.isEmpty {
                 detailParts.append("\(payload.allFileURLStrings.count) file\(payload.allFileURLStrings.count == 1 ? "" : "s")")
             }
-            if payload.imageData?.isEmpty == false {
+            if payload.hasImageAsset {
                 detailParts.append("image")
             }
             return ClipboardVisualPreview(
@@ -693,7 +804,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 detail: detailParts.isEmpty ? nil : detailParts.joined(separator: ", "),
                 badgeText: contentType.displayName,
                 systemImageName: "square.stack.3d.up",
-                prefersImageThumbnail: payload.imageData?.isEmpty == false
+                prefersImageThumbnail: payload.hasImageAsset
             )
         }
     }
@@ -728,7 +839,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         var types: Set<ClipboardContentType> = [.mixed]
         if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            || payload.rtfData?.isEmpty == false {
+            || payload.hasRTFAsset {
             types.insert(.text)
         }
         if !payload.allURLStrings.isEmpty {
@@ -737,7 +848,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         if !payload.allFileURLStrings.isEmpty {
             types.insert(.file)
         }
-        if payload.imageData?.isEmpty == false {
+        if payload.hasImageAsset {
             types.insert(.image)
         }
         return types
@@ -825,7 +936,12 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 reuseCategory: reuseCategory,
                 payload: payload
             ),
-            dedupeHash: deduplicationHash(contentType: contentType, payload: payload)
+            dedupeHash: deduplicationHash(contentType: contentType, payload: payload),
+            searchHash: ClipboardSearchDocument.searchDocumentHash(
+                normalizedText: normalizedText,
+                previewHeadline: title.singleLinePreview,
+                previewBody: previewBody.singleLinePreview
+            )
         )
     }
 
@@ -841,25 +957,25 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             hasher.update(data: Data(value.utf8))
             hasher.update(data: Data([0]))
         }
-        func update(_ data: Data?) {
-            if let data {
-                hasher.update(data: data)
-            }
-            hasher.update(data: Data([0]))
-        }
 
         update(contentType.rawValue)
         update(payload.text ?? "")
         update(payload.htmlString ?? "")
-        update(payload.rtfData)
+        update(binaryHash(data: payload.rtfData, assetID: payload.rtfAssetID))
         update(payload.urlString ?? "")
         for fileURLString in payload.allFileURLStrings {
             update(fileURLString)
         }
-        update(payload.imageData)
-        update(payload.ocrText ?? "")
+        update(binaryHash(data: payload.imageData, assetID: payload.imageAssetID))
 
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func binaryHash(data: Data?, assetID: String?) -> String {
+        if let data {
+            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+        return assetID ?? ""
     }
 
     public static func estimatedStorageBytes(
@@ -880,10 +996,10 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         estimatedBytes += reuseCategory.rawValue.utf8.count
         estimatedBytes += payload.text?.utf8.count ?? 0
         estimatedBytes += payload.htmlString?.utf8.count ?? 0
-        estimatedBytes += payload.rtfData?.count ?? 0
+        estimatedBytes += payload.rtfData?.count ?? payload.rtfByteCount ?? 0
         estimatedBytes += payload.urlString?.utf8.count ?? 0
         estimatedBytes += payload.allFileURLStrings.reduce(0) { $0 + $1.utf8.count }
-        estimatedBytes += payload.imageData?.count ?? 0
+        estimatedBytes += payload.imageData?.count ?? payload.imageByteCount ?? 0
         estimatedBytes += payload.ocrText?.utf8.count ?? 0
         return estimatedBytes
     }
@@ -896,7 +1012,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         case .image, .file:
             return .asset
         case .mixed:
-            if payload.imageData != nil || !payload.allFileURLStrings.isEmpty {
+            if payload.hasImageAsset || !payload.allFileURLStrings.isEmpty {
                 return .asset
             }
             return .general

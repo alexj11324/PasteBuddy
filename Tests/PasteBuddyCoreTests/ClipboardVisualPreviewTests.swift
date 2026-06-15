@@ -35,6 +35,37 @@ final class ClipboardVisualPreviewTests: XCTestCase {
             item.searchDocument.dedupeHash,
             ClipboardItem.deduplicationHash(contentType: item.contentType, payload: item.payload)
         )
+        XCTAssertEqual(item.searchDocument.dedupeHash, item.searchDocument.contentHash)
+        XCTAssertFalse(item.searchDocument.searchHash.isEmpty)
+    }
+
+    func testContentHashIgnoresOCRAndSearchOnlyMetadataWhileSearchHashTracksOCR() {
+        let imageData = Data([0x01, 0x02, 0x03, 0x04])
+        let pending = ClipboardItem(
+            sourceAppName: "Screenshot",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Pending OCR",
+            labels: ["Inbox"],
+            reuseCategory: .asset,
+            payload: ClipboardPayload(imageData: imageData),
+            ocrState: .pending(Date(timeIntervalSince1970: 100))
+        )
+        let completed = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Alex iPhone",
+            contentType: .image,
+            title: "Receipt",
+            labels: ["Finance"],
+            reuseCategory: .general,
+            payload: ClipboardPayload(imageData: imageData, ocrText: "Receipt total 42 dollars"),
+            ocrState: .completed(Date(timeIntervalSince1970: 200))
+        )
+
+        XCTAssertEqual(pending.searchDocument.contentHash, completed.searchDocument.contentHash)
+        XCTAssertEqual(pending.searchDocument.dedupeHash, pending.searchDocument.contentHash)
+        XCTAssertNotEqual(pending.searchDocument.searchHash, completed.searchDocument.searchHash)
+        XCTAssertTrue(completed.searchDocument.normalizedText.contains("receipt total"))
     }
 
     func testLegacyDecodedItemRebuildsMissingSearchDocument() throws {
