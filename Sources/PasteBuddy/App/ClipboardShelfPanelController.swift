@@ -46,11 +46,22 @@ final class ClipboardShelfPanelController {
         self.panel = panel
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = bottomAttachedFrame(for: panel)
-        panel.setFrame(hiddenFrame(for: finalFrame), display: false)
+        if shouldReduceShelfMotion {
+            panel.setFrame(finalFrame, display: false)
+        } else {
+            panel.setFrame(hiddenFrame(for: finalFrame), display: false)
+        }
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
-        animate(panel, to: finalFrame)
+        if shouldReduceShelfMotion {
+            panel.setFrame(finalFrame, display: true)
+            postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
+        } else {
+            animate(panel, to: finalFrame) { [weak self] in
+                self?.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
+            }
+        }
         installDismissalMonitoringAfterPresentation(for: panel)
     }
 
@@ -59,13 +70,19 @@ final class ClipboardShelfPanelController {
         stopOutsideClickMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
+        let completion: @MainActor @Sendable () -> Void = { [weak self, weak panel] in
+            panel?.orderOut(nil)
+            self?.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+        }
+
+        guard !shouldReduceShelfMotion else {
+            completion()
+            return
+        }
+
         let hiddenFrame = hiddenFrame(for: panel.frame)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(hiddenFrame, display: true)
-        } completionHandler: {
-            panel.orderOut(nil)
+        animate(panel, to: hiddenFrame, duration: 0.16) {
+            completion()
         }
     }
 
@@ -98,6 +115,9 @@ final class ClipboardShelfPanelController {
         panel.ignoresMouseEvents = false
         panel.minSize = NSSize(width: 760, height: 250)
         panel.setAccessibilityLabel(shelfTitle)
+        panel.onCancel = { [weak self] in
+            self?.hide()
+        }
         let hostingView = FirstMouseHostingView(
             rootView: ClipboardShelfPanelView(
                 store: store,
@@ -145,18 +165,31 @@ final class ClipboardShelfPanelController {
         return min(max(preferredHeight, minimumHeight), maximumHeight)
     }
 
-    private func animate(_ panel: NSPanel, to frame: NSRect) {
+    private func animate(
+        _ panel: NSPanel,
+        to frame: NSRect,
+        duration: TimeInterval = 0.18,
+        completion: (@MainActor @Sendable () -> Void)? = nil
+    ) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
+            context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(frame, display: true)
+        } completionHandler: {
+            Task { @MainActor in
+                completion?()
+            }
         }
     }
 
     private func positionVisiblePanel(_ panel: NSPanel) {
         let finalFrame = bottomAttachedFrame(for: panel)
         if panel.isVisible {
-            animate(panel, to: finalFrame)
+            if shouldReduceShelfMotion {
+                panel.setFrame(finalFrame, display: true)
+            } else {
+                animate(panel, to: finalFrame)
+            }
         } else {
             panel.setFrame(finalFrame, display: false)
         }
@@ -294,6 +327,22 @@ final class ClipboardShelfPanelController {
         return String(describing: type(of: window)).contains("Menu")
     }
 
+    private var shouldReduceShelfMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private func postVoiceOverAnnouncement(_ message: String) {
+        guard NSWorkspace.shared.isVoiceOverEnabled else { return }
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSNumber(value: NSAccessibilityPriorityLevel.medium.rawValue)
+            ]
+        )
+    }
+
     private func activeScreen() -> NSScreen {
         let mouseLocation = NSEvent.mouseLocation
         if let screen = NSScreen.screens.first(where: { screen in
@@ -319,11 +368,13 @@ final class ClipboardShelfPanelController {
 }
 
 private final class ClipboardShelfPanel: NSPanel {
+    var onCancel: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) {
-        orderOut(nil)
+        onCancel?()
     }
 }
 
@@ -351,8 +402,8 @@ private extension NSRect {
 @MainActor
 final class PasteBuddyPanelHotKeyController {
     private let onToggle: @MainActor () -> Void
-    private var hotKeyRef: EventHotKeyRef?
-    private var eventHandler: EventHandlerRef?
+    nonisolated(unsafe) private var hotKeyRef: EventHotKeyRef?
+    nonisolated(unsafe) private var eventHandler: EventHandlerRef?
 
     init(onToggle: @escaping @MainActor () -> Void) {
         self.onToggle = onToggle

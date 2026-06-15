@@ -47,7 +47,17 @@ public final class PasteBuddyStore {
 
     private var diskStore: EncryptedSnapshotStore
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
+    @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor
+    @ObservationIgnored private let clipboardRepository: ClipboardItemRepository?
+    @ObservationIgnored private let repositorySyncActor: ClipboardRepositorySyncActor?
+    @ObservationIgnored private var repositorySyncedPresentationRevision: Int?
     @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
+    @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
+    @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
+    @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
+
+    private static let defaultHistoryPageLimit = 100
+    private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
 
     public nonisolated static var defaultDeviceName: String {
         #if os(macOS)
@@ -63,8 +73,11 @@ public final class PasteBuddyStore {
 
     public init(
         diskStore: EncryptedSnapshotStore? = nil,
+        clipboardRepository: ClipboardItemRepository? = nil,
+        saveDebounceNanoseconds: UInt64? = nil,
         historyUnlockAuthenticator: any HistoryUnlockAuthenticating = SystemHistoryUnlockAuthenticator()
     ) {
+        let usesDefaultDiskStore = diskStore == nil
         let resolvedDiskStore: EncryptedSnapshotStore
         if let diskStore {
             resolvedDiskStore = diskStore
@@ -80,10 +93,28 @@ public final class PasteBuddyStore {
                 )
             }
         }
+        let resolvedClipboardRepository: ClipboardItemRepository?
+        if let clipboardRepository {
+            resolvedClipboardRepository = clipboardRepository
+        } else if diskStore == nil {
+            do {
+                resolvedClipboardRepository = ClipboardItemRepository(
+                    database: try PasteBuddyDatabase(fileURL: PasteBuddyDatabase.defaultDatabaseURL())
+                )
+            } catch {
+                resolvedClipboardRepository = nil
+            }
+        } else {
+            resolvedClipboardRepository = nil
+        }
         var initialSnapshot = PasteBuddySnapshot()
         initialSnapshot.security.storageMode = resolvedDiskStore.storageMode
         self.diskStore = resolvedDiskStore
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
+        self.persistenceActor = SnapshotPersistenceActor(diskStore: resolvedDiskStore)
+        self.clipboardRepository = resolvedClipboardRepository
+        self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
+        self.saveDebounceNanoseconds = saveDebounceNanoseconds ?? (usesDefaultDiskStore ? Self.defaultSaveDebounceNanoseconds : nil)
         self.snapshot = initialSnapshot
         self.selectedScope = .history
         self.selectedItemID = nil
@@ -118,6 +149,38 @@ public final class PasteBuddyStore {
             } else {
                 historyUnlockedAt = Date()
             }
+            refreshDerivedDocumentsIfNeeded()
+            rebuildDedupeIndex()
+            syncClipboardRepositoryFromSnapshot()
+            selectedItemID = filteredItems.first?.id
+            selectedItemIDs = selectedItemID.map { [$0] } ?? []
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func loadAsync() async {
+        do {
+            let result = try await persistenceActor.load()
+            snapshot = result.snapshot
+            if let loadedStorageMode = result.loadedStorageMode {
+                snapshot.security.storageMode = loadedStorageMode
+                diskStore.storageMode = loadedStorageMode
+            } else {
+                diskStore.storageMode = snapshot.security.storageMode
+            }
+            if snapshot.security.requiresBiometricUnlock {
+                lockHistory()
+            } else {
+                historyUnlockedAt = Date()
+            }
+            refreshDerivedDocumentsIfNeeded()
+            rebuildDedupeIndex()
+            if let repositorySyncActor {
+                try await repositorySyncActor.replaceAll(with: snapshot)
+                repositorySyncedPresentationRevision = presentationRevision
+                presentationCache = PasteBuddyPresentationCache()
+            }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
@@ -126,11 +189,81 @@ public final class PasteBuddyStore {
     }
 
     public func save() {
+        guard let saveDebounceNanoseconds else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(delayNanoseconds: saveDebounceNanoseconds)
+    }
+
+    private func saveAndFlush() {
+        guard saveDebounceNanoseconds != nil else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(delayNanoseconds: 0)
+    }
+
+    public func flushPendingSave() async {
+        pendingSaveTask?.cancel()
+        pendingSaveTask = nil
+        do {
+            try await persistenceActor.save(snapshot, storageMode: snapshot.security.storageMode)
+            if let repositorySyncActor {
+                try await repositorySyncActor.replaceAll(with: snapshot)
+                repositorySyncedPresentationRevision = presentationRevision
+                presentationCache = PasteBuddyPresentationCache()
+            }
+            diskStore.storageMode = snapshot.security.storageMode
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveImmediately() {
         do {
             diskStore.storageMode = snapshot.security.storageMode
             try diskStore.save(snapshot)
+            syncClipboardRepositoryFromSnapshot()
         } catch {
             lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func scheduleSave(delayNanoseconds: UInt64) {
+        let snapshotToSave = snapshot
+        let revisionToSync = presentationRevision
+        pendingSaveTask?.cancel()
+        pendingSaveTask = Task { [persistenceActor, repositorySyncActor] in
+            if delayNanoseconds > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: delayNanoseconds)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            do {
+                try await persistenceActor.save(snapshotToSave, storageMode: snapshotToSave.security.storageMode)
+                if let repositorySyncActor {
+                    try await repositorySyncActor.replaceAll(with: snapshotToSave)
+                }
+                await MainActor.run {
+                    guard self.presentationRevision == revisionToSync else { return }
+                    self.repositorySyncedPresentationRevision = revisionToSync
+                    self.presentationCache = PasteBuddyPresentationCache()
+                    self.pendingSaveTask = nil
+                    self.diskStore.storageMode = snapshotToSave.security.storageMode
+                    self.lastErrorMessage = nil
+                }
+            } catch {
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
+                    self.repositorySyncedPresentationRevision = nil
+                    self.pendingSaveTask = nil
+                    self.lastErrorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -146,20 +279,30 @@ public final class PasteBuddyStore {
         return items
     }
 
+    public var filteredItemsSnapshot: [ClipboardItem] {
+        filteredItems
+    }
+
     private func makeFilteredItems(isHistoryAccessLocked: Bool) -> [ClipboardItem] {
         guard !isHistoryAccessLocked else { return [] }
         let scopedItems: [ClipboardItem]
         switch selectedScope {
         case .history:
+            if let databaseItems = databaseFilteredItems(pinboardID: nil) {
+                return databaseItems
+            }
             scopedItems = snapshot.items
             return filtered(scopedItems).sorted { $0.createdAt > $1.createdAt }
         case .pasteStack:
             return filtered(pasteStackItemsInPasteOrder)
         case .pinboard(let id):
+            if let databaseItems = databaseFilteredItems(pinboardID: id) {
+                return databaseItems
+            }
             guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
                 return []
             }
-            let itemByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+            let itemByID = cachedItemByID()
             scopedItems = pinboard.itemIDs.compactMap { itemByID[$0] }
             return filtered(scopedItems)
         }
@@ -279,15 +422,39 @@ public final class PasteBuddyStore {
     }
 
     public var cloudSyncPreflightReport: CloudSyncPreflightReport {
-        CloudSyncPreflightReport(configuration: snapshot.sync)
+        let key = PasteBuddyReportCacheKey(presentationRevision: presentationRevision)
+        if presentationCache.cloudSyncPreflightReportKey == key,
+           let report = presentationCache.cloudSyncPreflightReport {
+            return report
+        }
+        let report = CloudSyncPreflightReport(configuration: snapshot.sync)
+        presentationCache.cloudSyncPreflightReportKey = key
+        presentationCache.cloudSyncPreflightReport = report
+        return report
     }
 
     public var mobileGuidanceReport: MobileIntegrationGuidanceReport {
-        snapshot.mobile.guidanceReport
+        let key = PasteBuddyReportCacheKey(presentationRevision: presentationRevision)
+        if presentationCache.mobileGuidanceReportKey == key,
+           let report = presentationCache.mobileGuidanceReport {
+            return report
+        }
+        let report = snapshot.mobile.guidanceReport
+        presentationCache.mobileGuidanceReportKey = key
+        presentationCache.mobileGuidanceReport = report
+        return report
     }
 
     public var privacyPostureReport: PrivacyPostureReport {
-        snapshot.privacyPostureReport()
+        let key = PasteBuddyReportCacheKey(presentationRevision: presentationRevision, timeBucket: Int(Date().timeIntervalSinceReferenceDate / 60))
+        if presentationCache.privacyPostureReportKey == key,
+           let report = presentationCache.privacyPostureReport {
+            return report
+        }
+        let report = snapshot.privacyPostureReport()
+        presentationCache.privacyPostureReportKey = key
+        presentationCache.privacyPostureReport = report
+        return report
     }
 
     public var macMenuBarStatus: MacMenuBarStatus {
@@ -295,7 +462,15 @@ public final class PasteBuddyStore {
     }
 
     public var accessibilityLocalizationQualityReport: AccessibilityLocalizationQualityReport {
-        snapshot.accessibilityLocalizationQualityReport()
+        let key = PasteBuddyReportCacheKey(presentationRevision: presentationRevision)
+        if presentationCache.accessibilityLocalizationQualityReportKey == key,
+           let report = presentationCache.accessibilityLocalizationQualityReport {
+            return report
+        }
+        let report = snapshot.accessibilityLocalizationQualityReport()
+        presentationCache.accessibilityLocalizationQualityReportKey = key
+        presentationCache.accessibilityLocalizationQualityReport = report
+        return report
     }
 
     public var defaultPasteFormat: PasteFormat {
@@ -367,12 +542,17 @@ public final class PasteBuddyStore {
     }
 
     public var storageUsageReport: StorageUsageReport {
+        let cacheKey = PasteBuddyReportCacheKey(presentationRevision: presentationRevision)
+        if presentationCache.storageUsageReportKey == cacheKey,
+           let report = presentationCache.storageUsageReport {
+            return report
+        }
         let pinnedItemIDs = Set(snapshot.pinboards.flatMap(\.itemIDs))
         let pinnedItems = snapshot.items.filter { pinnedItemIDs.contains($0.id) }
         let unpinnedItems = snapshot.items.filter { !pinnedItemIDs.contains($0.id) }
         let pinnedBytes = pinnedItems.reduce(0) { $0 + Self.estimatedStorageBytes(for: $1) }
         let unpinnedBytes = unpinnedItems.reduce(0) { $0 + Self.estimatedStorageBytes(for: $1) }
-        return StorageUsageReport(
+        let report = StorageUsageReport(
             itemCount: snapshot.items.count,
             pinnedItemCount: pinnedItems.count,
             unpinnedItemCount: unpinnedItems.count,
@@ -381,6 +561,9 @@ public final class PasteBuddyStore {
             unpinnedEstimatedBytes: unpinnedBytes,
             maxStorageBytes: snapshot.storage.maxStorageBytes
         )
+        presentationCache.storageUsageReportKey = cacheKey
+        presentationCache.storageUsageReport = report
+        return report
     }
 
     public func clearFilters() {
@@ -436,17 +619,23 @@ public final class PasteBuddyStore {
     @discardableResult
     public func addCapturedItem(_ item: ClipboardItem, maxItems: Int? = nil) -> ClipboardItem {
         let storedItem: ClipboardItem
-        let newDeduplicationKey = Self.deduplicationKey(for: item)
-        if let existingIndex = snapshot.items.firstIndex(where: {
-            $0.contentType == item.contentType && Self.deduplicationKey(for: $0) == newDeduplicationKey
-        }) {
+        var preparedItem = item
+        preparedItem.refreshSearchDocument()
+        if dedupeIndex.count != snapshot.items.count {
+            rebuildDedupeIndex()
+        }
+        let newDeduplicationKey = Self.deduplicationKey(for: preparedItem)
+        if let existingID = dedupeIndex[newDeduplicationKey],
+           let existingIndex = snapshot.items.firstIndex(where: { $0.id == existingID }) {
             snapshot.items[existingIndex].updatedAt = Date()
+            snapshot.items[existingIndex].refreshSearchDocument()
             snapshot.items.move(fromOffsets: IndexSet(integer: existingIndex), toOffset: 0)
             storedItem = snapshot.items[0]
         } else {
-            snapshot.items.insert(item, at: 0)
-            storedItem = item
+            snapshot.items.insert(preparedItem, at: 0)
+            storedItem = preparedItem
         }
+        dedupeIndex[newDeduplicationKey] = storedItem.id
         if isPasteStackActive {
             appendToPasteStack(storedItem)
         }
@@ -495,6 +684,8 @@ public final class PasteBuddyStore {
         snapshot.items[index].payload.ocrText = text
         snapshot.items[index].ocrState = .completed(Date())
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
+        rebuildDedupeIndex()
         save()
     }
 
@@ -503,6 +694,8 @@ public final class PasteBuddyStore {
         snapshot.items[index].payload.ocrText = nil
         snapshot.items[index].ocrState = .pending(Date())
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
+        rebuildDedupeIndex()
         save()
     }
 
@@ -510,6 +703,7 @@ public final class PasteBuddyStore {
         guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].ocrState = .failed(Date(), message)
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
         save()
     }
 
@@ -712,49 +906,49 @@ public final class PasteBuddyStore {
     public func pauseCaptureIndefinitely() {
         snapshot.privacy.isCapturePaused = true
         snapshot.privacy.capturePauseUntil = nil
-        save()
+        saveAndFlush()
     }
 
     public func pauseCapture(for interval: TimeInterval, now: Date = Date()) {
         snapshot.privacy.isCapturePaused = false
         snapshot.privacy.capturePauseUntil = now.addingTimeInterval(max(0, interval))
-        save()
+        saveAndFlush()
     }
 
     public func resumeCapture() {
         snapshot.privacy.isCapturePaused = false
         snapshot.privacy.capturePauseUntil = nil
-        save()
+        saveAndFlush()
     }
 
     public func toggleOCR() {
         snapshot.privacy.runLocalOCRAfterImageCapture.toggle()
-        save()
+        saveAndFlush()
     }
 
     public func toggleTextCapture() {
         snapshot.privacy.captureText.toggle()
-        save()
+        saveAndFlush()
     }
 
     public func toggleURLCapture() {
         snapshot.privacy.captureURLs.toggle()
-        save()
+        saveAndFlush()
     }
 
     public func toggleFileCapture() {
         snapshot.privacy.captureFiles.toggle()
-        save()
+        saveAndFlush()
     }
 
     public func toggleImageCapture() {
         snapshot.privacy.captureImages.toggle()
-        save()
+        saveAndFlush()
     }
 
     public func toggleSensitiveTextBlocking() {
         snapshot.privacy.blockLikelySensitiveText.toggle()
-        save()
+        saveAndFlush()
     }
 
     public func excludeCurrentApplication(named appName: String, bundleIdentifier: String? = nil) {
@@ -772,18 +966,18 @@ public final class PasteBuddyStore {
             changed = snapshot.privacy.excludedBundleIdentifiers.insert(trimmedBundleIdentifier).inserted || changed
         }
         if changed {
-            save()
+            saveAndFlush()
         }
     }
 
     public func removeExcludedApplication(_ appName: String) {
         snapshot.privacy.excludedApplicationNames.remove(appName)
-        save()
+        saveAndFlush()
     }
 
     public func removeExcludedBundleIdentifier(_ bundleIdentifier: String) {
         snapshot.privacy.excludedBundleIdentifiers.remove(bundleIdentifier)
-        save()
+        saveAndFlush()
     }
 
     @discardableResult
@@ -802,7 +996,7 @@ public final class PasteBuddyStore {
             contentTypes: contentTypes
         )
         snapshot.privacy.customCaptureRules.append(rule)
-        save()
+        saveAndFlush()
         return rule
     }
 
@@ -832,19 +1026,19 @@ public final class PasteBuddyStore {
             snapshot.privacy.customCaptureRules[index].contentTypes = contentTypes
         }
         snapshot.privacy.customCaptureRules[index].updatedAt = Date()
-        save()
+        saveAndFlush()
     }
 
     public func setCaptureRule(_ id: UUID, enabled isEnabled: Bool) {
         guard let index = snapshot.privacy.customCaptureRules.firstIndex(where: { $0.id == id }) else { return }
         snapshot.privacy.customCaptureRules[index].isEnabled = isEnabled
         snapshot.privacy.customCaptureRules[index].updatedAt = Date()
-        save()
+        saveAndFlush()
     }
 
     public func removeCaptureRule(_ id: UUID) {
         snapshot.privacy.customCaptureRules.removeAll { $0.id == id }
-        save()
+        saveAndFlush()
     }
 
     public func setAlwaysPasteAsPlainText(_ isEnabled: Bool) {
@@ -1207,12 +1401,12 @@ public final class PasteBuddyStore {
         } else {
             historyUnlockedAt = Date()
         }
-        save()
+        saveAndFlush()
     }
 
     public func updateBiometricGracePeriodSeconds(_ value: TimeInterval) {
         snapshot.security.biometricGracePeriodSeconds = max(0, value)
-        save()
+        saveAndFlush()
     }
 
     public func clearUnpinnedHistory() {
@@ -1226,23 +1420,26 @@ public final class PasteBuddyStore {
     public func clearHistory(includePinned: Bool) {
         if includePinned {
             snapshot.items.removeAll()
+            dedupeIndex.removeAll()
             pasteStackItems.removeAll()
             for index in snapshot.pinboards.indices {
                 snapshot.pinboards[index].itemIDs.removeAll()
                 snapshot.pinboards[index].updatedAt = Date()
             }
             selectSingleItem(nil)
-            save()
+            saveAndFlush()
             return
         }
 
         let pinnedItemIDs = Set(snapshot.pinboards.flatMap(\.itemIDs))
         snapshot.items.removeAll { !pinnedItemIDs.contains($0.id) }
+        rebuildDedupeIndex()
+        let remainingIDs = Set(snapshot.items.map(\.id))
         pasteStackItems.removeAll { item in
-            !snapshot.items.contains(where: { $0.id == item.id })
+            !remainingIDs.contains(item.id)
         }
         selectSingleItem(filteredItems.first?.id)
-        save()
+        saveAndFlush()
     }
 
     public func configureCloudKitSync(
@@ -1778,6 +1975,7 @@ public final class PasteBuddyStore {
         guard !trimmed.isEmpty else { return }
         snapshot.items[index].title = trimmed
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -1786,6 +1984,7 @@ public final class PasteBuddyStore {
         guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].labels = ClipboardItem.normalizedLabels(labels)
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -1807,6 +2006,7 @@ public final class PasteBuddyStore {
         guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].reuseCategory = category
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -1821,6 +2021,8 @@ public final class PasteBuddyStore {
         guard snapshot.items[index].contentType == .text else { return }
         snapshot.items[index].payload.text = text
         snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
+        rebuildDedupeIndex()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -1884,6 +2086,28 @@ public final class PasteBuddyStore {
         }
     }
 
+    private func refreshDerivedDocumentsIfNeeded() {
+        var changed = false
+        for index in snapshot.items.indices {
+            let currentDocument = snapshot.items[index].searchDocument
+            snapshot.items[index].refreshSearchDocument()
+            if snapshot.items[index].searchDocument != currentDocument {
+                changed = true
+            }
+        }
+        if changed {
+            presentationCache = PasteBuddyPresentationCache()
+        }
+    }
+
+    private func rebuildDedupeIndex() {
+        var nextIndex: [PasteBuddyDedupeKey: UUID] = [:]
+        for item in snapshot.items {
+            nextIndex[Self.deduplicationKey(for: item), default: item.id] = item.id
+        }
+        dedupeIndex = nextIndex
+    }
+
     private func pruneHistory(now: Date = Date(), maxItems: Int? = nil) {
         let pinnedItemIDs = Set(snapshot.pinboards.flatMap(\.itemIDs))
         let maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(maxItems ?? snapshot.storage.maxHistoryItems)
@@ -1919,66 +2143,60 @@ public final class PasteBuddyStore {
             }
         }
 
+        let remainingIDs = Set(snapshot.items.map(\.id))
         pasteStackItems.removeAll { stackItem in
-            !snapshot.items.contains(where: { $0.id == stackItem.id })
+            !remainingIDs.contains(stackItem.id)
         }
-        if let selectedItemID, !snapshot.items.contains(where: { $0.id == selectedItemID }) {
+        if let selectedItemID, !remainingIDs.contains(selectedItemID) {
             selectSingleItem(filteredItems.first?.id)
         } else {
+            let pasteStackIDs = Set(pasteStackItems.map(\.id))
             selectedItemIDs = Set(selectedItemIDs.filter { id in
-                snapshot.items.contains(where: { $0.id == id }) || pasteStackItems.contains(where: { $0.id == id })
+                remainingIDs.contains(id) || pasteStackIDs.contains(id)
             })
         }
+        rebuildDedupeIndex()
     }
 
     private static func estimatedStorageBytes(for item: ClipboardItem) -> Int {
-        var estimatedBytes = 256
-        estimatedBytes += item.title.utf8.count
-        estimatedBytes += item.sourceAppName.utf8.count
-        estimatedBytes += item.deviceName.utf8.count
-        estimatedBytes += item.contentType.rawValue.utf8.count
-        estimatedBytes += item.labels.reduce(0) { total, label in
-            total + label.utf8.count
-        }
-        estimatedBytes += item.reuseCategory.rawValue.utf8.count
-        estimatedBytes += item.payload.text?.utf8.count ?? 0
-        estimatedBytes += item.payload.htmlString?.utf8.count ?? 0
-        estimatedBytes += item.payload.rtfData?.count ?? 0
-        estimatedBytes += item.payload.urlString?.utf8.count ?? 0
-        estimatedBytes += item.payload.allFileURLStrings.reduce(0) { total, fileURLString in
-            total + fileURLString.utf8.count
-        }
-        estimatedBytes += item.payload.imageData?.count ?? 0
-        estimatedBytes += item.payload.ocrText?.utf8.count ?? 0
-        return estimatedBytes
+        item.searchDocument.storageBytes
     }
 
-    private static func deduplicationKey(for item: ClipboardItem) -> String {
-        var hasher = SHA256()
-        func update(_ value: String) {
-            hasher.update(data: Data(value.utf8))
-            hasher.update(data: Data([0]))
-        }
-        func update(_ data: Data?) {
-            if let data {
-                hasher.update(data: data)
-            }
-            hasher.update(data: Data([0]))
-        }
+    private static func deduplicationKey(for item: ClipboardItem) -> PasteBuddyDedupeKey {
+        PasteBuddyDedupeKey(contentType: item.contentType, hash: item.searchDocument.dedupeHash)
+    }
 
-        update(item.contentType.rawValue)
-        update(item.payload.text ?? "")
-        update(item.payload.htmlString ?? "")
-        update(item.payload.rtfData)
-        update(item.payload.urlString ?? "")
-        for fileURLString in item.payload.allFileURLStrings {
-            update(fileURLString)
+    private func syncClipboardRepositoryFromSnapshot() {
+        guard let clipboardRepository else { return }
+        do {
+            try clipboardRepository.replaceAll(with: snapshot)
+            repositorySyncedPresentationRevision = presentationRevision
+            presentationCache = PasteBuddyPresentationCache()
+        } catch {
+            repositorySyncedPresentationRevision = nil
+            lastErrorMessage = error.localizedDescription
         }
-        update(item.payload.imageData)
-        update(item.payload.ocrText ?? "")
+    }
 
-        let digest = hasher.finalize()
-        return digest.map { String(format: "%02x", $0) }.joined()
+    private func databaseFilteredItems(pinboardID: UUID?) -> [ClipboardItem]? {
+        guard let clipboardRepository,
+              repositorySyncedPresentationRevision == presentationRevision else {
+            return nil
+        }
+        do {
+            return try clipboardRepository.fetchPage(ClipboardItemPageRequest(
+                searchQuery: searchQuery,
+                contentType: contentTypeFilter,
+                sourceAppName: sourceAppFilter,
+                deviceName: deviceFilter,
+                dateFilter: dateFilter,
+                pinboardID: pinboardID,
+                limit: Self.defaultHistoryPageLimit
+            ))
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     private func filteredItemsCacheKey() -> PasteBuddyFilteredItemsCacheKey {
@@ -1987,6 +2205,17 @@ public final class PasteBuddyStore {
             isHistoryAccessLocked: isHistoryAccessLocked,
             dateFilterTimeBucket: dateFilterTimeBucket()
         )
+    }
+
+    private func cachedItemByID() -> [UUID: ClipboardItem] {
+        let key = PasteBuddyReportCacheKey(presentationRevision: presentationRevision)
+        if presentationCache.itemByIDKey == key {
+            return presentationCache.itemByID
+        }
+        let index = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        presentationCache.itemByIDKey = key
+        presentationCache.itemByID = index
+        return index
     }
 
     private func selectedItemsCacheKey() -> PasteBuddySelectedItemsCacheKey {
@@ -2015,9 +2244,19 @@ public final class PasteBuddyStore {
 
         var sourceApps = Set<String>()
         var devices = Set<String>()
-        for item in snapshot.items {
-            insertNonEmpty(item.sourceAppName, into: &sourceApps)
-            insertNonEmpty(item.deviceName, into: &devices)
+        if let clipboardRepository,
+           repositorySyncedPresentationRevision == presentationRevision {
+            do {
+                sourceApps.formUnion(try clipboardRepository.availableSourceApps())
+                devices.formUnion(try clipboardRepository.availableDevices())
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+        } else {
+            for item in snapshot.items {
+                insertNonEmpty(item.sourceAppName, into: &sourceApps)
+                insertNonEmpty(item.deviceName, into: &devices)
+            }
         }
         for item in pasteStackItems {
             insertNonEmpty(item.sourceAppName, into: &sourceApps)
@@ -2164,6 +2403,18 @@ private struct PasteBuddyPresentationCache {
     var availableFilterValues = PasteBuddyAvailableFilterValues()
     var filterSuggestionsKey: PasteBuddyFilterSuggestionsCacheKey?
     var filterSuggestions: [ClipboardFilterDescriptor] = []
+    var itemByIDKey: PasteBuddyReportCacheKey?
+    var itemByID: [UUID: ClipboardItem] = [:]
+    var storageUsageReportKey: PasteBuddyReportCacheKey?
+    var storageUsageReport: StorageUsageReport?
+    var cloudSyncPreflightReportKey: PasteBuddyReportCacheKey?
+    var cloudSyncPreflightReport: CloudSyncPreflightReport?
+    var mobileGuidanceReportKey: PasteBuddyReportCacheKey?
+    var mobileGuidanceReport: MobileIntegrationGuidanceReport?
+    var privacyPostureReportKey: PasteBuddyReportCacheKey?
+    var privacyPostureReport: PrivacyPostureReport?
+    var accessibilityLocalizationQualityReportKey: PasteBuddyReportCacheKey?
+    var accessibilityLocalizationQualityReport: AccessibilityLocalizationQualityReport?
 }
 
 private struct PasteBuddyFilteredItemsCacheKey: Equatable {
@@ -2188,9 +2439,24 @@ private struct PasteBuddyFilterSuggestionsCacheKey: Equatable {
     var isHistoryAccessLocked: Bool
 }
 
+private struct PasteBuddyReportCacheKey: Equatable {
+    var presentationRevision: Int
+    var timeBucket: Int?
+
+    init(presentationRevision: Int, timeBucket: Int? = nil) {
+        self.presentationRevision = presentationRevision
+        self.timeBucket = timeBucket
+    }
+}
+
 private struct PasteBuddyAvailableFilterValues {
     var sourceApps: [String] = []
     var devices: [String] = []
+}
+
+private struct PasteBuddyDedupeKey: Hashable {
+    var contentType: ClipboardContentType
+    var hash: String
 }
 
 public struct DeletedClipboardItem: Equatable, Sendable {

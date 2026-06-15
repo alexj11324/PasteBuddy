@@ -440,6 +440,162 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "prepared paste")
     }
 
+    func testDirectPasteDoesNotPrepareTargetWhenAccessibilityIsDenied() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectNoPrepare-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Copy Only",
+            payload: ClipboardPayload(text: "copy only")
+        )
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: false,
+            prepareForPaste: { XCTFail("Target activation should not run without Accessibility trust.") },
+            sendPasteEvent: { XCTFail("Command-V should not be sent without Accessibility trust.") }
+        )
+
+        XCTAssertEqual(result.outcome, .copiedOnlyAccessibilityRequired)
+        XCTAssertEqual(pasteboard.string(forType: .string), "copy only")
+    }
+
+    func testDirectPastePreparesTargetOnceForMultipleItemsBeforeSendingPasteEvent() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectMultiPrepare-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let first = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first prepared")
+        )
+        let second = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Second",
+            payload: ClipboardPayload(urlString: "https://example.com/prepared")
+        )
+        var events: [String] = []
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            [first, second],
+            format: .plainText,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            prepareForPaste: { events.append("prepare") },
+            sendPasteEvent: { events.append("send") }
+        )
+
+        XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
+        XCTAssertEqual(events, ["prepare", "send"])
+        XCTAssertEqual(pasteboard.string(forType: .string), "first prepared\nhttps://example.com/prepared")
+    }
+
+    func testDirectPasteWaitsForTargetActivationBeforeSendingPasteEvent() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectWait-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Wait",
+            payload: ClipboardPayload(text: "wait for active target")
+        )
+        let targetBundleIdentifier = "com.example.Target"
+        var activeProbeCount = 0
+        var sentPasteEvent = false
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                activeProbeCount += 1
+                return activeProbeCount >= 2 ? targetBundleIdentifier : "com.example.Other"
+            },
+            options: PasteboardWriter.DirectPasteOptions(activationWaitTimeout: 0.08),
+            prepareForPaste: {},
+            sendPasteEvent: {
+                XCTAssertGreaterThan(activeProbeCount, 1)
+                sentPasteEvent = true
+            }
+        )
+
+        XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
+        XCTAssertTrue(sentPasteEvent)
+        XCTAssertEqual(pasteboard.string(forType: .string), "wait for active target")
+    }
+
+    func testDirectPasteCopiesOnlyWhenTargetDoesNotBecomeActive() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectNoTarget-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "No Target",
+            payload: ClipboardPayload(text: "copy without wrong paste")
+        )
+        var preparedTarget = false
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            targetBundleIdentifier: "com.example.Target",
+            activeApplicationBundleIdentifier: {
+                "com.example.Other"
+            },
+            options: PasteboardWriter.DirectPasteOptions(activationWaitTimeout: 0.01),
+            prepareForPaste: {
+                preparedTarget = true
+            },
+            sendPasteEvent: {
+                XCTFail("Command-V should not be sent when the target app is not active.")
+            }
+        )
+
+        XCTAssertTrue(preparedTarget)
+        XCTAssertEqual(result.outcome, .copiedOnlyNoTargetApplication)
+        XCTAssertEqual(result.itemCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "copy without wrong paste")
+    }
+
+    func testDirectPasteHonorsDispatchDelayBeforeSendingPasteEvent() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectDelay-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Delayed",
+            payload: ClipboardPayload(text: "delayed paste")
+        )
+        let start = Date()
+        var sendDate: Date?
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            options: PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0.03),
+            sendPasteEvent: {
+                sendDate = Date()
+            }
+        )
+
+        let elapsed = try XCTUnwrap(sendDate).timeIntervalSince(start)
+        XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
+        XCTAssertGreaterThanOrEqual(elapsed, 0.02)
+        XCTAssertEqual(pasteboard.string(forType: .string), "delayed paste")
+    }
+
     func testDirectPasteEmptySelectionReportsNoOp() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectEmpty-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }

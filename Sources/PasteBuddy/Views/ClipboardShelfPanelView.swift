@@ -11,6 +11,7 @@ private enum ClipboardShelfMetrics {
     static let cardCornerRadius: CGFloat = 17
     static let shelfVerticalPadding: CGFloat = 6
     static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
+    static let renderLimit = 200
 }
 
 struct ClipboardShelfPanelView: View {
@@ -213,6 +214,10 @@ struct ClipboardShelfPanelView: View {
         selectedItemsInDisplayOrder.count
     }
 
+    private var renderedShelfItems: [ClipboardItem] {
+        Array(shelfItems.prefix(ClipboardShelfMetrics.renderLimit))
+    }
+
     private var activeFilterStrip: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
@@ -279,13 +284,15 @@ struct ClipboardShelfPanelView: View {
 
     private var shelf: some View {
         let items = shelfItems
+        let renderedItems = renderedShelfItems
+        let overflowCount = max(0, items.count - renderedItems.count)
         let currentSelectedItemID = selectedItemID
         let currentSelectedItemIDs = selectedItemIDs
         let pinboards = store.snapshot.pinboards
         let defaultPasteFormat = store.defaultPasteFormat
 
         return HiddenScrollerHorizontalScrollView {
-            HStack(alignment: .bottom, spacing: 20) {
+            LazyHStack(alignment: .bottom, spacing: 20) {
                 if isShowingLaunchAtLoginPrompt {
                     LaunchAtLoginShelfCard(store: store) {
                         isShowingLaunchAtLoginPrompt = false
@@ -299,7 +306,7 @@ struct ClipboardShelfPanelView: View {
                         systemImageName: emptySystemImage
                     )
                 } else {
-                    ForEach(items) { item in
+                    ForEach(renderedItems) { item in
                         ClipboardShelfCard(
                             item: item,
                             draggedItems: draggableItems(for: item),
@@ -318,6 +325,13 @@ struct ClipboardShelfPanelView: View {
                             onDelete: {
                                 store.removeItem(item.id)
                             }
+                        )
+                    }
+
+                    if overflowCount > 0 {
+                        ShelfOverflowStatusCard(
+                            shownCount: renderedItems.count,
+                            remainingCount: overflowCount
                         )
                     }
                 }
@@ -385,7 +399,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func selectOffset(_ offset: Int) {
-        let items = shelfItems
+        let items = renderedShelfItems
         guard !items.isEmpty else { return }
         let currentID = selectedItemID ?? selectedItemIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
@@ -413,15 +427,16 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func selectItem(_ item: ClipboardItem) {
+        let items = renderedShelfItems
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if flags.contains(.shift),
            let anchorID = selectionAnchorID ?? selectedItemID,
-           let anchorIndex = shelfItems.firstIndex(where: { $0.id == anchorID }),
-           let itemIndex = shelfItems.firstIndex(where: { $0.id == item.id }) {
+           let anchorIndex = items.firstIndex(where: { $0.id == anchorID }),
+           let itemIndex = items.firstIndex(where: { $0.id == item.id }) {
             let lowerBound = min(anchorIndex, itemIndex)
             let upperBound = max(anchorIndex, itemIndex)
-            let ids = Set(shelfItems[lowerBound...upperBound].map(\.id))
+            let ids = Set(items[lowerBound...upperBound].map(\.id))
             setSelectedItemIDs(ids)
             return
         }
@@ -465,9 +480,9 @@ struct ClipboardShelfPanelView: View {
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
         let ids = selectedItemIDs
         guard !ids.isEmpty else {
-            return selectedItemID.flatMap { id in shelfItems.first { $0.id == id } }.map { [$0] } ?? []
+            return selectedItemID.flatMap { id in renderedShelfItems.first { $0.id == id } }.map { [$0] } ?? []
         }
-        return shelfItems.filter { ids.contains($0.id) }
+        return renderedShelfItems.filter { ids.contains($0.id) }
     }
 
     private func selectSingleItem(_ id: UUID?) {
@@ -522,11 +537,12 @@ struct ClipboardShelfPanelView: View {
         let items = store.filteredItems
         shelfItems = items
 
-        let itemIDs = Set(items.map(\.id))
+        let renderedItems = Array(items.prefix(ClipboardShelfMetrics.renderLimit))
+        let itemIDs = Set(renderedItems.map(\.id))
         let validSelectedIDs = store.selectedItemIDs.intersection(itemIDs)
         if !validSelectedIDs.isEmpty {
             selectedItemIDs = validSelectedIDs
-            selectedItemID = items.first(where: { validSelectedIDs.contains($0.id) })?.id
+            selectedItemID = renderedItems.first(where: { validSelectedIDs.contains($0.id) })?.id
             store.setSelectedItemIDs(validSelectedIDs)
             if selectionAnchorID.map({ !itemIDs.contains($0) }) == true {
                 selectionAnchorID = validSelectedIDs.first
@@ -537,7 +553,7 @@ struct ClipboardShelfPanelView: View {
             store.selectSingleItem(selectedID)
             selectionAnchorID = selectedID
         } else {
-            let firstID = items.first?.id
+            let firstID = renderedItems.first?.id
             selectedItemID = firstID
             selectedItemIDs = firstID.map { [$0] } ?? []
             store.selectSingleItem(firstID)
@@ -600,6 +616,44 @@ private struct LaunchAtLoginShelfCard: View {
             return "Unavailable"
         }
         return store.snapshot.general.launchAtLoginEnabled ? "Enabled" : "Enable"
+    }
+}
+
+private struct ShelfOverflowStatusCard: View {
+    let shownCount: Int
+    let remainingCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 28, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(localized("Showing first %d items", shownCount))
+                    .font(.headline)
+                    .lineLimit(2)
+                Text(localized("Refine search or filters to see %d more.", remainingCount))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+        }
+        .padding(20)
+        .frame(width: 240, height: 230)
+        .pasteBuddyGlassSurface(cornerRadius: 18, interactive: true)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(localized("Showing first %d clipboard items. Refine search or filters to see %d more.", shownCount, remainingCount))
+    }
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        String(
+            format: NSLocalizedString(key, comment: ""),
+            locale: Locale.current,
+            arguments: arguments
+        )
     }
 }
 
@@ -689,7 +743,6 @@ private struct ClipboardShelfCard: View {
 
     var body: some View {
         ClipboardShelfCardVisual(item: item, isSelected: isSelected)
-            .equatable()
             .onTapGesture {
                 onSelect()
             }
@@ -868,7 +921,7 @@ private final class HiddenScrollerNSScrollView: NSScrollView {
     }
 }
 
-private struct ClipboardShelfCardVisual: View, Equatable {
+private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let isSelected: Bool
 
@@ -998,19 +1051,11 @@ private struct ClipboardShelfCardVisual: View, Equatable {
         )
     }
 
-    static func == (lhs: ClipboardShelfCardVisual, rhs: ClipboardShelfCardVisual) -> Bool {
-        lhs.renderSignature == rhs.renderSignature && lhs.isSelected == rhs.isSelected
-    }
-
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
-
-    private var renderSignature: ClipboardShelfCardRenderSignature {
-        ClipboardShelfCardRenderSignature(item: item)
-    }
 }
 
 private struct ClipboardShelfCardRenderSignature: Equatable {
@@ -1108,6 +1153,7 @@ private struct SourceApplicationIconBadge: View {
     }
 }
 
+@MainActor
 private enum SourceApplicationIconResolver {
     private static let cache = NSCache<NSString, NSImage>()
 

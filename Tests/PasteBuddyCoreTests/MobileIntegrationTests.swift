@@ -548,9 +548,10 @@ final class MobileIntegrationTests: XCTestCase {
     }
 }
 
+@MainActor
 private func XCTAssertThrowsErrorAsync<T>(
-    _ expression: @autoclosure () async throws -> T,
-    _ handler: (Error) -> Void,
+    _ expression: @MainActor @autoclosure () async throws -> T,
+    _ handler: @MainActor (Error) -> Void,
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {

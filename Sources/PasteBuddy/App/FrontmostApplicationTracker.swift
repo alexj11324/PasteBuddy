@@ -3,11 +3,12 @@ import AppKit
 struct ExternalApplicationIdentity {
     let localizedName: String
     let bundleIdentifier: String?
+    let processIdentifier: pid_t
 }
 
 @MainActor
 final class FrontmostApplicationTracker {
-    private var activationObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var activationObserver: NSObjectProtocol?
     private weak var lastExternalApplication: NSRunningApplication?
     private let selfBundleIdentifiers = Set(
         [Bundle.main.bundleIdentifier, "com.pastebuddy.app"].compactMap(\.self)
@@ -49,8 +50,13 @@ final class FrontmostApplicationTracker {
         }
         return ExternalApplicationIdentity(
             localizedName: application.localizedName ?? "Unknown App",
-            bundleIdentifier: application.bundleIdentifier
+            bundleIdentifier: application.bundleIdentifier,
+            processIdentifier: application.processIdentifier
         )
+    }
+
+    func frontmostApplicationBundleIdentifier() -> String? {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
     @discardableResult

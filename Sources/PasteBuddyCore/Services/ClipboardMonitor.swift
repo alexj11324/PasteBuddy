@@ -11,6 +11,7 @@ public final class ClipboardMonitor {
     private var timer: Timer?
     private var lastChangeCount: Int
     private var lastFingerprint: String?
+    private var pendingCaptureTask: Task<Void, Never>?
 
     public init(
         store: PasteBuddyStore,
@@ -38,11 +39,14 @@ public final class ClipboardMonitor {
     public func stop() {
         timer?.invalidate()
         timer = nil
+        pendingCaptureTask?.cancel()
+        pendingCaptureTask = nil
     }
 
     func pollOnce() {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
+        let changeCount = lastChangeCount
         let privacy = store.snapshot.privacy
         guard !privacy.isCaptureCurrentlyPaused() else { return }
 
@@ -51,30 +55,39 @@ public final class ClipboardMonitor {
         let bundleIdentifier = sourceApplication?.bundleIdentifier
         guard !privacy.excludesApplication(named: sourceApp, bundleIdentifier: bundleIdentifier) else { return }
 
-        guard let item = Self.makeItem(
-            from: pasteboard,
-            sourceApp: sourceApp,
-            sourceBundleIdentifier: bundleIdentifier,
-            privacy: privacy
-        ) else { return }
-        let fingerprint = fingerprint(for: item)
-        guard fingerprint != lastFingerprint else { return }
-        lastFingerprint = fingerprint
+        let pasteboardSnapshot = Self.snapshot(from: pasteboard, captureImages: privacy.captureImages)
+        let cheapFingerprint = Self.cheapFingerprint(changeCount: changeCount, snapshot: pasteboardSnapshot)
+        guard cheapFingerprint != lastFingerprint else { return }
+        lastFingerprint = cheapFingerprint
 
-        let storedItem = store.addCapturedItem(item)
+        pendingCaptureTask?.cancel()
+        pendingCaptureTask = Task { [recognizeText] in
+            guard let item = await Self.makeItem(
+                from: pasteboardSnapshot,
+                sourceApp: sourceApp,
+                sourceBundleIdentifier: bundleIdentifier,
+                privacy: privacy
+            ) else { return }
+            guard !Task.isCancelled else { return }
 
-        if item.contentType == .image,
-           store.snapshot.privacy.runLocalOCRAfterImageCapture,
-           let imageData = item.payload.imageData {
-            Task {
-                do {
-                    let text = try await recognizeText(imageData)
-                    await MainActor.run {
-                        self.store.updateOCRText(text, for: storedItem.id)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.store.markOCRFailed(error.localizedDescription, for: storedItem.id)
+            await MainActor.run {
+                let storedItem = self.store.addCapturedItem(item)
+                self.lastFingerprint = Self.fingerprint(for: item)
+
+                if item.contentType == .image,
+                   self.store.snapshot.privacy.runLocalOCRAfterImageCapture,
+                   let imageData = item.payload.imageData {
+                    Task {
+                        do {
+                            let text = try await recognizeText(imageData)
+                            await MainActor.run {
+                                self.store.updateOCRText(text, for: storedItem.id)
+                            }
+                        } catch {
+                            await MainActor.run {
+                                self.store.markOCRFailed(error.localizedDescription, for: storedItem.id)
+                            }
+                        }
                     }
                 }
             }
@@ -179,17 +192,176 @@ public final class ClipboardMonitor {
         return decision.isAllowed ? item : nil
     }
 
-    private func fingerprint(for item: ClipboardItem) -> String {
-        let data = Data(item.payload.searchableText.utf8) + (item.payload.imageData ?? Data())
+    nonisolated private static func fingerprint(for item: ClipboardItem) -> String {
+        let data = Data(item.searchDocument.normalizedText.utf8) + (item.payload.imageData ?? Data())
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func urls(from pasteboard: NSPasteboard) -> [URL] {
+    private struct PasteboardSnapshot: Sendable {
+        var urls: [URL]
+        var explicitURLString: String?
+        var explicitFileURLString: String?
+        var rawText: String?
+        var htmlString: String?
+        var rtfData: Data?
+        var imageData: Data?
+        var imageDataIsPNG: Bool
+        var pasteboardTypes: [String]
+    }
+
+    private static func snapshot(from pasteboard: NSPasteboard, captureImages: Bool) -> PasteboardSnapshot {
+        let pngData = captureImages ? pasteboard.data(forType: .png).flatMap { $0.isEmpty ? nil : $0 } : nil
+        let tiffData = captureImages && pngData == nil ? pasteboard.data(forType: .tiff).flatMap { $0.isEmpty ? nil : $0 } : nil
+        return PasteboardSnapshot(
+            urls: urls(from: pasteboard),
+            explicitURLString: pasteboard.string(forType: .URL),
+            explicitFileURLString: pasteboard.string(forType: .fileURL),
+            rawText: pasteboard.string(forType: .string),
+            htmlString: pasteboard.string(forType: .html),
+            rtfData: pasteboard.data(forType: .rtf).flatMap { $0.isEmpty ? nil : $0 },
+            imageData: pngData ?? tiffData,
+            imageDataIsPNG: pngData != nil,
+            pasteboardTypes: pasteboard.types?.map(\.rawValue) ?? []
+        )
+    }
+
+    nonisolated private static func cheapFingerprint(changeCount: Int, snapshot: PasteboardSnapshot) -> String {
+        var hasher = SHA256()
+        func update(_ value: String) {
+            hasher.update(data: Data(value.utf8))
+            hasher.update(data: Data([0]))
+        }
+        update(String(changeCount))
+        update(snapshot.pasteboardTypes.joined(separator: "|"))
+        update(snapshot.rawText ?? "")
+        update(snapshot.explicitURLString ?? "")
+        update(snapshot.explicitFileURLString ?? "")
+        update(String(snapshot.imageData?.count ?? 0))
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func makeItem(
+        from snapshot: PasteboardSnapshot,
+        sourceApp: String,
+        sourceBundleIdentifier: String?,
+        privacy: PrivacyConfiguration
+    ) async -> ClipboardItem? {
+        await Task.detached(priority: .userInitiated) {
+            makeItemFromSnapshot(
+                snapshot,
+                sourceApp: sourceApp,
+                sourceBundleIdentifier: sourceBundleIdentifier,
+                privacy: privacy
+            )
+        }.value
+    }
+
+    nonisolated private static func makeItemFromSnapshot(
+        _ snapshot: PasteboardSnapshot,
+        sourceApp: String,
+        sourceBundleIdentifier: String?,
+        privacy: PrivacyConfiguration
+    ) -> ClipboardItem? {
+        let deviceName = Host.current().localizedName ?? "This Mac"
+        var urlStrings = snapshot.urls
+            .filter { !$0.isFileURL }
+            .map(\.absoluteString)
+        var fileURLStrings = snapshot.urls
+            .filter(\.isFileURL)
+            .map(\.absoluteString)
+
+        if let explicitURLString = snapshot.explicitURLString,
+           let explicitURL = URL(string: explicitURLString),
+           !explicitURL.isFileURL {
+            urlStrings.append(explicitURL.absoluteString)
+        }
+        if let explicitFileURLString = snapshot.explicitFileURLString,
+           let explicitFileURL = URL(string: explicitFileURLString) {
+            fileURLStrings.append(explicitFileURL.absoluteString)
+        }
+        urlStrings = normalizedStrings(urlStrings)
+        fileURLStrings = normalizedStrings(fileURLStrings)
+
+        let rawText = snapshot.rawText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        let htmlString = snapshot.htmlString?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        let rtfData = snapshot.rtfData
+        let richTextFallback = htmlString?.pasteBuddyPlainTextFromHTML.nilIfEmpty
+            ?? rtfData.flatMap(plainTextFromRTF)
+
+        var text = nonDuplicateText(
+            rawText ?? richTextFallback,
+            urlStrings: urlStrings,
+            fileURLStrings: fileURLStrings
+        )
+        if text == nil, urlStrings.isEmpty, fileURLStrings.isEmpty,
+           let rawText,
+           let url = URL(string: rawText),
+           url.scheme != nil,
+           url.host() != nil {
+            urlStrings = [url.absoluteString]
+        }
+
+        let imageData: Data?
+        if privacy.captureImages, let sourceData = snapshot.imageData {
+            imageData = snapshot.imageDataIsPNG ? sourceData : pngData(fromImageData: sourceData)
+        } else {
+            imageData = nil
+        }
+
+        if !privacy.captureText {
+            text = nil
+        }
+        if !privacy.captureURLs {
+            urlStrings = []
+        }
+        if !privacy.captureFiles {
+            fileURLStrings = []
+        }
+
+        let payload = ClipboardPayload(
+            text: text,
+            htmlString: privacy.captureText ? htmlString : nil,
+            rtfData: privacy.captureText ? rtfData : nil,
+            urlString: urlStrings.first,
+            fileURLString: fileURLStrings.first,
+            fileURLStrings: fileURLStrings,
+            imageData: imageData
+        )
+        let contentType = contentType(for: payload)
+        guard let contentType, privacy.allowsCapture(of: contentType) else { return nil }
+
+        let item = ClipboardItem(
+            sourceAppName: sourceApp,
+            sourceBundleIdentifier: sourceBundleIdentifier,
+            deviceName: deviceName,
+            contentType: contentType,
+            title: title(for: contentType, payload: payload),
+            payload: payload,
+            ocrState: imageData != nil && privacy.runLocalOCRAfterImageCapture ? .pending(Date()) : .notNeeded
+        )
+        let decision = privacy.captureDecision(
+            for: item,
+            sourceApplicationName: sourceApp,
+            sourceBundleIdentifier: sourceBundleIdentifier
+        )
+        return decision.isAllowed ? item : nil
+    }
+
+    nonisolated private static func pngData(fromImageData data: Data) -> Data? {
+        guard let image = NSImage(data: data) else { return nil }
+        return image.pasteBuddyPNGData()
+    }
+
+    nonisolated private static func urls(from pasteboard: NSPasteboard) -> [URL] {
         (pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]) ?? []
     }
 
-    private static func normalizedStrings(_ values: [String]) -> [String] {
+    nonisolated private static func normalizedStrings(_ values: [String]) -> [String] {
         var seen: Set<String> = []
         var result: [String] = []
         for value in values {
@@ -203,7 +375,7 @@ public final class ClipboardMonitor {
         return result
     }
 
-    private static func nonDuplicateText(
+    nonisolated private static func nonDuplicateText(
         _ candidate: String?,
         urlStrings: [String],
         fileURLStrings: [String]
@@ -219,7 +391,7 @@ public final class ClipboardMonitor {
         return isDuplicate ? nil : candidate
     }
 
-    private static func contentType(for payload: ClipboardPayload) -> ClipboardContentType? {
+    nonisolated private static func contentType(for payload: ClipboardPayload) -> ClipboardContentType? {
         var types: [ClipboardContentType] = []
         if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -239,7 +411,7 @@ public final class ClipboardMonitor {
         return types.count == 1 ? types[0] : .mixed
     }
 
-    private static func title(for contentType: ClipboardContentType, payload: ClipboardPayload) -> String {
+    nonisolated private static func title(for contentType: ClipboardContentType, payload: ClipboardPayload) -> String {
         switch contentType {
         case .text:
             return payload.primaryText.singleLinePreview
@@ -262,7 +434,7 @@ public final class ClipboardMonitor {
         }
     }
 
-    private static func plainTextFromRTF(_ data: Data) -> String? {
+    nonisolated private static func plainTextFromRTF(_ data: Data) -> String? {
         NSAttributedString(rtf: data, documentAttributes: nil)?
             .string
             .trimmingCharacters(in: .whitespacesAndNewlines)

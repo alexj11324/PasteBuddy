@@ -8,6 +8,8 @@ struct ItemListView: View {
     let directPasteItems: ([ClipboardItem], PasteFormat) -> DirectPasteResult
 
     var body: some View {
+        let items = store.filteredItemsSnapshot
+
         VStack(spacing: 0) {
             if store.selectedScope == .pasteStack {
                 if let preview = store.pasteStackPreview {
@@ -19,7 +21,7 @@ struct ItemListView: View {
                 Divider()
             }
             List(selection: selectedIDsBinding) {
-                ForEach(store.filteredItems) { item in
+                ForEach(items) { item in
                     ClipboardItemRow(item: item)
                         .tag(item.id)
                         .onDrag {
@@ -86,7 +88,7 @@ struct ItemListView: View {
             }
         }
         .overlay {
-            if store.filteredItems.isEmpty {
+            if items.isEmpty {
                 ContentUnavailableView(emptyTitle, systemImage: emptySystemImage, description: Text(emptyDescription))
             }
         }

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum ClipboardContentType: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -406,6 +407,28 @@ public struct ClipboardVisualPreview: Equatable, Sendable {
     }
 }
 
+public struct ClipboardSearchDocument: Codable, Equatable, Sendable {
+    public var normalizedText: String
+    public var previewHeadline: String
+    public var previewBody: String
+    public var storageBytes: Int
+    public var dedupeHash: String
+
+    public init(
+        normalizedText: String,
+        previewHeadline: String,
+        previewBody: String,
+        storageBytes: Int,
+        dedupeHash: String
+    ) {
+        self.normalizedText = normalizedText
+        self.previewHeadline = previewHeadline
+        self.previewBody = previewBody
+        self.storageBytes = storageBytes
+        self.dedupeHash = dedupeHash
+    }
+}
+
 public struct PasteOrderPreviewRow: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var position: Int
@@ -483,6 +506,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     public var reuseCategory: ClipboardReuseCategory
     public var payload: ClipboardPayload
     public var ocrState: OCRState
+    public var searchDocument: ClipboardSearchDocument
 
     public init(
         id: UUID = UUID(),
@@ -513,6 +537,16 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         )
         self.payload = payload
         self.ocrState = ocrState
+        self.searchDocument = Self.makeSearchDocument(
+            title: title,
+            labels: self.labels,
+            sourceAppName: sourceAppName,
+            deviceName: deviceName,
+            contentType: contentType,
+            reuseCategory: self.reuseCategory,
+            payload: payload,
+            ocrState: ocrState
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -528,6 +562,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         case reuseCategory
         case payload
         case ocrState
+        case searchDocument
     }
 
     public init(from decoder: Decoder) throws {
@@ -545,6 +580,17 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         reuseCategory = try container.decodeIfPresent(ClipboardReuseCategory.self, forKey: .reuseCategory)
             ?? Self.inferredReuseCategory(contentType: contentType, payload: payload)
         ocrState = try container.decodeIfPresent(OCRState.self, forKey: .ocrState) ?? .notNeeded
+        searchDocument = try container.decodeIfPresent(ClipboardSearchDocument.self, forKey: .searchDocument)
+            ?? Self.makeSearchDocument(
+                title: title,
+                labels: labels,
+                sourceAppName: sourceAppName,
+                deviceName: deviceName,
+                contentType: contentType,
+                reuseCategory: reuseCategory,
+                payload: payload,
+                ocrState: ocrState
+            )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -561,32 +607,31 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         try container.encode(reuseCategory, forKey: .reuseCategory)
         try container.encode(payload, forKey: .payload)
         try container.encode(ocrState, forKey: .ocrState)
+        try container.encode(searchDocument, forKey: .searchDocument)
     }
 
     public var summary: String {
         switch contentType {
         case .text:
-            payload.text?.singleLinePreview ?? title
+            searchDocument.previewBody.nilIfEmpty ?? title
         case .url:
             payload.urlString ?? title
         case .file:
             payload.allFileURLStrings.first.flatMap { URL(string: $0)?.lastPathComponent } ?? title
         case .image:
-            payload.ocrText?.singleLinePreview ?? "Image"
+            payload.ocrText?.singleLinePreview ?? searchDocument.previewBody.nilIfEmpty ?? "Image"
         case .mixed:
-            payload.searchableText.singleLinePreview.nilIfEmpty ?? title
+            searchDocument.previewBody.nilIfEmpty ?? title
         }
     }
 
     public var visualPreview: ClipboardVisualPreview {
         switch contentType {
         case .text:
-            let body = payload.text?.singleLinePreview.nilIfEmpty
-                ?? payload.htmlString?.pasteBuddyPlainTextFromHTML.singleLinePreview.nilIfEmpty
-                ?? title
+            let body = searchDocument.previewBody.nilIfEmpty ?? title
             let detail = payload.htmlString?.isEmpty == false || payload.rtfData?.isEmpty == false ? "Rich text available" : nil
             return ClipboardVisualPreview(
-                headline: title,
+                headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
                 body: body,
                 detail: detail,
                 badgeText: contentType.displayName,
@@ -617,10 +662,10 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 systemImageName: "doc"
             )
         case .image:
-            let body = payload.ocrText?.singleLinePreview.nilIfEmpty
+            let body = searchDocument.previewBody.nilIfEmpty
                 ?? (ocrState.isPending ? "OCR pending" : "Image preview")
             return ClipboardVisualPreview(
-                headline: title,
+                headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
                 body: body,
                 detail: ocrState.displayName,
                 badgeText: contentType.displayName,
@@ -628,7 +673,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 prefersImageThumbnail: payload.imageData?.isEmpty == false
             )
         case .mixed:
-            let body = payload.searchableText.singleLinePreview.nilIfEmpty ?? title
+            let body = searchDocument.previewBody.nilIfEmpty ?? title
             var detailParts: [String] = []
             if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
                 detailParts.append("text")
@@ -643,7 +688,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 detailParts.append("image")
             }
             return ClipboardVisualPreview(
-                headline: title,
+                headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
                 body: body,
                 detail: detailParts.isEmpty ? nil : detailParts.joined(separator: ", "),
                 badgeText: contentType.displayName,
@@ -670,31 +715,12 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     public func matches(_ query: String) -> Bool {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
-        let haystack = [
-            title,
-            labels.joined(separator: "\n"),
-            reuseCategory.displayName,
-            sourceAppName,
-            deviceName,
-            contentType.displayName,
-            payload.searchableText
-        ].joined(separator: "\n")
-        return haystack.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        let normalizedQuery = Self.normalizedSearchString(trimmed)
+        return searchDocument.normalizedText.contains(normalizedQuery)
     }
 
     public var captureRuleSearchText: String {
-        [
-            title,
-            sourceAppName,
-            deviceName,
-            contentType.displayName,
-            reuseCategory.displayName,
-            labels.joined(separator: " "),
-            payload.searchableText
-        ]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+        searchDocument.normalizedText
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
@@ -729,6 +755,137 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             result.append(normalized)
         }
         return result
+    }
+
+    public mutating func refreshSearchDocument() {
+        labels = Self.normalizedLabels(labels)
+        searchDocument = Self.makeSearchDocument(
+            title: title,
+            labels: labels,
+            sourceAppName: sourceAppName,
+            deviceName: deviceName,
+            contentType: contentType,
+            reuseCategory: reuseCategory,
+            payload: payload,
+            ocrState: ocrState
+        )
+    }
+
+    public static func makeSearchDocument(
+        title: String,
+        labels: [String],
+        sourceAppName: String,
+        deviceName: String,
+        contentType: ClipboardContentType,
+        reuseCategory: ClipboardReuseCategory,
+        payload: ClipboardPayload,
+        ocrState: OCRState
+    ) -> ClipboardSearchDocument {
+        let searchablePayloadText = payload.searchableText
+        let previewBody: String
+        switch contentType {
+        case .text:
+            previewBody = payload.text?.singleLinePreview.nilIfEmpty
+                ?? payload.htmlString?.pasteBuddyPlainTextFromHTML.singleLinePreview.nilIfEmpty
+                ?? title
+        case .url:
+            previewBody = payload.urlString ?? title
+        case .file:
+            let fileNames = payload.allFileURLStrings.map { value in
+                URL(string: value)?.lastPathComponent.nilIfEmpty ?? value
+            }
+            previewBody = fileNames.first ?? title
+        case .image:
+            previewBody = payload.ocrText?.singleLinePreview.nilIfEmpty
+                ?? (ocrState.isPending ? "OCR pending" : "Image preview")
+        case .mixed:
+            previewBody = searchablePayloadText.singleLinePreview.nilIfEmpty ?? title
+        }
+
+        let normalizedText = normalizedSearchString([
+            title,
+            labels.joined(separator: " "),
+            reuseCategory.displayName,
+            sourceAppName,
+            deviceName,
+            contentType.displayName,
+            searchablePayloadText
+        ].joined(separator: "\n"))
+
+        return ClipboardSearchDocument(
+            normalizedText: normalizedText,
+            previewHeadline: title.singleLinePreview,
+            previewBody: previewBody.singleLinePreview,
+            storageBytes: estimatedStorageBytes(
+                title: title,
+                labels: labels,
+                sourceAppName: sourceAppName,
+                deviceName: deviceName,
+                contentType: contentType,
+                reuseCategory: reuseCategory,
+                payload: payload
+            ),
+            dedupeHash: deduplicationHash(contentType: contentType, payload: payload)
+        )
+    }
+
+    public static func normalizedSearchString(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+    }
+
+    public static func deduplicationHash(contentType: ClipboardContentType, payload: ClipboardPayload) -> String {
+        var hasher = SHA256()
+        func update(_ value: String) {
+            hasher.update(data: Data(value.utf8))
+            hasher.update(data: Data([0]))
+        }
+        func update(_ data: Data?) {
+            if let data {
+                hasher.update(data: data)
+            }
+            hasher.update(data: Data([0]))
+        }
+
+        update(contentType.rawValue)
+        update(payload.text ?? "")
+        update(payload.htmlString ?? "")
+        update(payload.rtfData)
+        update(payload.urlString ?? "")
+        for fileURLString in payload.allFileURLStrings {
+            update(fileURLString)
+        }
+        update(payload.imageData)
+        update(payload.ocrText ?? "")
+
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func estimatedStorageBytes(
+        title: String,
+        labels: [String],
+        sourceAppName: String,
+        deviceName: String,
+        contentType: ClipboardContentType,
+        reuseCategory: ClipboardReuseCategory,
+        payload: ClipboardPayload
+    ) -> Int {
+        var estimatedBytes = 256
+        estimatedBytes += title.utf8.count
+        estimatedBytes += sourceAppName.utf8.count
+        estimatedBytes += deviceName.utf8.count
+        estimatedBytes += contentType.rawValue.utf8.count
+        estimatedBytes += labels.reduce(0) { $0 + $1.utf8.count }
+        estimatedBytes += reuseCategory.rawValue.utf8.count
+        estimatedBytes += payload.text?.utf8.count ?? 0
+        estimatedBytes += payload.htmlString?.utf8.count ?? 0
+        estimatedBytes += payload.rtfData?.count ?? 0
+        estimatedBytes += payload.urlString?.utf8.count ?? 0
+        estimatedBytes += payload.allFileURLStrings.reduce(0) { $0 + $1.utf8.count }
+        estimatedBytes += payload.imageData?.count ?? 0
+        estimatedBytes += payload.ocrText?.utf8.count ?? 0
+        return estimatedBytes
     }
 
     public static func inferredReuseCategory(

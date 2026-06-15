@@ -15,7 +15,7 @@ public enum AccessibilityPermissionService {
     @discardableResult
     public static func requestTrustPrompt() -> Bool {
         #if os(macOS)
-        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        let promptKey = "AXTrustedCheckOptionPrompt"
         let options = [promptKey: true] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
         #else

@@ -54,11 +54,36 @@ struct PasteBuddyApp: App {
                 }
         }
         .commands {
-            CommandGroup(after: .pasteboard) {
-                Button("Show/Hide Clipboard Shelf") {
+            CommandMenu("Clipboard") {
+                Button("New Text Item") {
+                    presentNewTextItemPanel()
+                }
+
+                Button("Open Clipboard Shelf") {
                     toggleClipboardShelf()
                 }
                 .keyboardShortcut("v", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button(localized(store.isCapturePaused ? "Resume Capture" : "Pause Capture")) {
+                    store.toggleCapturePaused()
+                }
+
+                Button("Pause Capture for 15 Minutes") {
+                    store.pauseCapture(for: 15 * 60)
+                }
+
+                Button("Pause Capture for 1 Hour") {
+                    store.pauseCapture(for: 60 * 60)
+                }
+
+                Divider()
+
+                Button("Clear Filters") {
+                    clearSearchAndFilters()
+                }
+                .disabled(!canClearSearchAndFilters)
 
                 Divider()
 
@@ -156,6 +181,34 @@ struct PasteBuddyApp: App {
                 }
                 .keyboardShortcut("z", modifiers: [.command])
                 .disabled(!store.canUndoDelete)
+            }
+
+            CommandMenu("Pinboard") {
+                Button("New Pinboard") {
+                    createNewPinboard()
+                }
+
+                Divider()
+
+                Menu("Pin Selected To") {
+                    if store.snapshot.pinboards.isEmpty {
+                        Button("No Pinboards Available") {}
+                            .disabled(true)
+                    } else {
+                        ForEach(store.snapshot.pinboards) { pinboard in
+                            Button("Pin to \(pinboard.name)") {
+                                pinSelectedItems(to: pinboard.id)
+                            }
+                            .disabled(!canPinSelection)
+                        }
+                    }
+                }
+                .disabled(!canPinSelection)
+
+                Button("Unpin from Current Pinboard") {
+                    unpinSelectedItemsFromCurrentPinboard()
+                }
+                .disabled(!canUnpinSelectionFromCurrentPinboard)
             }
         }
 
@@ -258,6 +311,88 @@ struct PasteBuddyApp: App {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private var canClearSearchAndFilters: Bool {
+        store.hasActiveFilters || !store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canPinSelection: Bool {
+        !store.selectedItemsInDisplayOrder.isEmpty && !store.snapshot.pinboards.isEmpty
+    }
+
+    private var canUnpinSelectionFromCurrentPinboard: Bool {
+        guard case .pinboard(let pinboardID) = store.selectedScope,
+              let pinboard = store.snapshot.pinboards.first(where: { $0.id == pinboardID })
+        else {
+            return false
+        }
+        let selectedIDs = Set(store.selectedItemsInDisplayOrder.map(\.id))
+        return !selectedIDs.isEmpty && !Set(pinboard.itemIDs).isDisjoint(with: selectedIDs)
+    }
+
+    private func presentNewTextItemPanel() {
+        startRuntimeIfNeeded()
+        openMainWindow()
+
+        let titleField = NSTextField(string: "")
+        titleField.placeholderString = localized("Title")
+        titleField.frame = NSRect(x: 0, y: 0, width: 460, height: 24)
+
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 180))
+        textView.isRichText = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 460, height: 180))
+        scrollView.borderType = .bezelBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = textView
+
+        let stack = NSStackView(views: [titleField, scrollView])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.frame = NSRect(x: 0, y: 0, width: 460, height: 220)
+        titleField.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        scrollView.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        scrollView.heightAnchor.constraint(equalToConstant: 180).isActive = true
+
+        let alert = NSAlert()
+        alert.messageText = localized("New Text Item")
+        alert.informativeText = localized("Create a local encrypted PasteBuddy text item.")
+        alert.accessoryView = stack
+        alert.addButton(withTitle: localized("Create"))
+        alert.addButton(withTitle: localized("Cancel"))
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard store.createTextItem(text: textView.string, title: titleField.stringValue) != nil else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    private func createNewPinboard() {
+        startRuntimeIfNeeded()
+        openMainWindow()
+        store.createPinboard()
+    }
+
+    private func clearSearchAndFilters() {
+        store.searchQuery = ""
+        store.clearFilters()
+    }
+
+    private func pinSelectedItems(to pinboardID: UUID) {
+        let itemIDs = store.selectedItemsInDisplayOrder.map(\.id)
+        guard !itemIDs.isEmpty else { return }
+        store.pinItems(itemIDs, to: pinboardID)
+    }
+
+    private func unpinSelectedItemsFromCurrentPinboard() {
+        guard case .pinboard(let pinboardID) = store.selectedScope else { return }
+        for itemID in store.selectedItemsInDisplayOrder.map(\.id) {
+            store.removeItem(itemID, fromPinboard: pinboardID)
+        }
+    }
+
     private func toggleClipboardShelf() {
         startRuntimeIfNeeded()
         frontmostApplicationTracker.recordCurrentFrontmostApplication()
@@ -320,7 +455,8 @@ struct PasteBuddyApp: App {
         guard AccessibilityPermissionService.isTrusted else {
             return PasteboardWriter.pasteToFrontmostApp(item, format: format)
         }
-        guard tracker.currentExternalApplication() != nil else {
+        guard let target = tracker.currentExternalApplication(),
+              let targetBundleIdentifier = target.bundleIdentifier else {
             PasteboardWriter.copy(item, format: format)
             return DirectPasteResult(
                 outcome: .copiedOnlyNoTargetApplication,
@@ -331,6 +467,11 @@ struct PasteBuddyApp: App {
         return PasteboardWriter.pasteToFrontmostApp(
             item,
             format: format,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                tracker.frontmostApplicationBundleIdentifier()
+            },
+            options: PasteboardWriter.userConfiguredDirectPasteOptions,
             prepareForPaste: {
                 tracker.activateLastExternalApplication()
             }
@@ -348,7 +489,8 @@ struct PasteBuddyApp: App {
         guard AccessibilityPermissionService.isTrusted else {
             return PasteboardWriter.pasteToFrontmostApp(items, format: format)
         }
-        guard tracker.currentExternalApplication() != nil else {
+        guard let target = tracker.currentExternalApplication(),
+              let targetBundleIdentifier = target.bundleIdentifier else {
             PasteboardWriter.copy(items, format: format)
             return DirectPasteResult(
                 outcome: .copiedOnlyNoTargetApplication,
@@ -359,6 +501,11 @@ struct PasteBuddyApp: App {
         return PasteboardWriter.pasteToFrontmostApp(
             items,
             format: format,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                tracker.frontmostApplicationBundleIdentifier()
+            },
+            options: PasteboardWriter.userConfiguredDirectPasteOptions,
             prepareForPaste: {
                 tracker.activateLastExternalApplication()
             }

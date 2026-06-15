@@ -10,7 +10,7 @@ private final class PasteBuddyMCPServer {
         return encoder
     }()
 
-    func run() {
+    func run() async {
         while let line = readLine() {
             guard let data = line.data(using: .utf8),
                   let request = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -19,12 +19,12 @@ private final class PasteBuddyMCPServer {
             guard request["id"] != nil else {
                 continue
             }
-            let response = handle(request)
+            let response = await handle(request)
             write(response)
         }
     }
 
-    private func handle(_ request: [String: Any]) -> [String: Any] {
+    private func handle(_ request: [String: Any]) async -> [String: Any] {
         let id = request["id"] ?? NSNull()
         guard let method = request["method"] as? String else {
             return errorResponse(id: id, code: -32600, message: "Invalid JSON-RPC request.")
@@ -39,7 +39,7 @@ private final class PasteBuddyMCPServer {
             case "tools/list":
                 return successResponse(id: id, result: ["tools": try toolDefinitions()])
             case "tools/call":
-                return successResponse(id: id, result: try callTool(params: request["params"] as? [String: Any] ?? [:]))
+                return successResponse(id: id, result: try await callTool(params: request["params"] as? [String: Any] ?? [:]))
             default:
                 return errorResponse(id: id, code: -32601, message: "Method not found: \(method).")
             }
@@ -151,7 +151,7 @@ private final class PasteBuddyMCPServer {
         }
     }
 
-    private func callTool(params: [String: Any]) throws -> [String: Any] {
+    private func callTool(params: [String: Any]) async throws -> [String: Any] {
         guard let name = params["name"] as? String,
               let tool = MCPToolName(rawValue: name) else {
             throw MCPToolServiceError.missingArgument("name")
@@ -160,42 +160,48 @@ private final class PasteBuddyMCPServer {
         let store = loadStore()
         let service = MCPToolService(store: store)
 
-        let payload: Encodable
-        switch tool {
-        case .searchHistory:
-            payload = try service.searchHistory(
-                query: requiredString("query", in: arguments),
-                limit: intValue("limit", in: arguments) ?? 5
-            )
-        case .retrieveItem:
-            payload = try service.retrieveItem(
-                itemID: try requiredUUID("itemID", in: arguments),
-                includeImageData: boolValue("includeImageData", in: arguments) ?? false
-            )
-        case .listPinboards:
-            payload = try service.listPinboards()
-        case .createPinboard:
-            payload = try service.createPinboard(
-                name: requiredString("name", in: arguments),
-                colorHex: arguments["colorHex"] as? String
-            )
-        case .pinFirstMatch:
-            payload = try service.pinFirstMatch(
-                query: requiredString("query", in: arguments),
-                pinboardID: uuidValue("pinboardID", in: arguments),
-                pinboardName: arguments["pinboardName"] as? String
-            )
-        }
+        do {
+            let payload: Encodable
+            switch tool {
+            case .searchHistory:
+                payload = try service.searchHistory(
+                    query: requiredString("query", in: arguments),
+                    limit: intValue("limit", in: arguments) ?? 5
+                )
+            case .retrieveItem:
+                payload = try service.retrieveItem(
+                    itemID: try requiredUUID("itemID", in: arguments),
+                    includeImageData: boolValue("includeImageData", in: arguments) ?? false
+                )
+            case .listPinboards:
+                payload = try service.listPinboards()
+            case .createPinboard:
+                payload = try service.createPinboard(
+                    name: requiredString("name", in: arguments),
+                    colorHex: arguments["colorHex"] as? String
+                )
+            case .pinFirstMatch:
+                payload = try service.pinFirstMatch(
+                    query: requiredString("query", in: arguments),
+                    pinboardID: uuidValue("pinboardID", in: arguments),
+                    pinboardName: arguments["pinboardName"] as? String
+                )
+            }
 
-        let json = try jsonString(payload)
-        return [
-            "content": [
-                [
-                    "type": "text",
-                    "text": json
+            await store.flushPendingSave()
+            let json = try jsonString(payload)
+            return [
+                "content": [
+                    [
+                        "type": "text",
+                        "text": json
+                    ]
                 ]
             ]
-        ]
+        } catch {
+            await store.flushPendingSave()
+            throw error
+        }
     }
 
     private func loadStore() -> PasteBuddyStore {
@@ -294,14 +300,14 @@ private struct AnyEncodable: Encodable {
 @main
 private struct PasteBuddyMCPMain {
     @MainActor
-    static func main() {
+    static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if !arguments.isEmpty {
             handleCommandLine(arguments)
             return
         }
 
-        PasteBuddyMCPServer().run()
+        await PasteBuddyMCPServer().run()
     }
 
     private static func handleCommandLine(_ arguments: [String]) {

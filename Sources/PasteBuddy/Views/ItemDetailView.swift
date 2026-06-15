@@ -217,14 +217,9 @@ struct ItemDetailView: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         case .image:
             VStack(alignment: .leading, spacing: 12) {
-                if let data = item.payload.imageData, let image = NSImage(data: data) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 360)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .accessibilityLabel(localized("Captured image preview"))
-                        .accessibilityHint(localized("Recognized local OCR text appears below the image when available."))
+                if item.payload.imageData != nil {
+                    CachedDetailImagePreview(item: item)
+                        .id(ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: 1_600))
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -340,6 +335,68 @@ struct ItemDetailView: View {
                     rerunningOCRItemIDs.remove(item.id)
                 }
             }
+        }
+    }
+}
+
+private struct CachedDetailImagePreview: View {
+    let item: ClipboardItem
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image = image ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 360)
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(item.contentType.detailPreviewTint.opacity(0.10))
+                    Image(systemName: "photo")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(item.contentType.detailPreviewTint)
+                }
+                .frame(height: 220)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel(localized("Captured image preview"))
+        .accessibilityHint(localized("Recognized local OCR text appears below the image when available."))
+        .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
+            image = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)
+            guard image == nil else { return }
+
+            let loadedImage = await ClipboardImageCache.thumbnail(for: item, maxPixelSize: maxPixelSize)
+            guard !Task.isCancelled else { return }
+            image = loadedImage
+        }
+    }
+
+    private var maxPixelSize: Int {
+        1_600
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
+    }
+}
+
+private extension ClipboardContentType {
+    var detailPreviewTint: Color {
+        switch self {
+        case .text:
+            .blue
+        case .url:
+            .teal
+        case .image:
+            .green
+        case .file:
+            .orange
+        case .mixed:
+            .purple
         }
     }
 }

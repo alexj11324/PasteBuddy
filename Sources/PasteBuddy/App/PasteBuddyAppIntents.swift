@@ -3,9 +3,9 @@ import AppIntents
 import PasteBuddyCore
 
 extension AutomationContentKind: AppEnum {
-    public static var typeDisplayRepresentation: TypeDisplayRepresentation = "PasteBuddy Content Type"
+    public static let typeDisplayRepresentation: TypeDisplayRepresentation = "PasteBuddy Content Type"
 
-    public static var caseDisplayRepresentations: [AutomationContentKind: DisplayRepresentation] = [
+    public static let caseDisplayRepresentations: [AutomationContentKind: DisplayRepresentation] = [
         .text: "Text",
         .url: "URL",
         .fileURL: "File URL"
@@ -13,8 +13,8 @@ extension AutomationContentKind: AppEnum {
 }
 
 struct PasteBuddySearchClipboardIntent: AppIntent {
-    static var title: LocalizedStringResource = "Search PasteBuddy Clipboard"
-    static var description = IntentDescription("Search local PasteBuddy clipboard history and return matching item titles.")
+    static let title: LocalizedStringResource = "Search PasteBuddy Clipboard"
+    static let description = IntentDescription("Search local PasteBuddy clipboard history and return matching item titles.")
 
     @Parameter(title: "Query")
     var query: String
@@ -33,8 +33,8 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
 }
 
 struct PasteBuddyCreateTextItemIntent: AppIntent {
-    static var title: LocalizedStringResource = "Create PasteBuddy Text Item"
-    static var description = IntentDescription("Create a local encrypted PasteBuddy text item.")
+    static let title: LocalizedStringResource = "Create PasteBuddy Text Item"
+    static let description = IntentDescription("Create a local encrypted PasteBuddy text item.")
 
     @Parameter(title: "Text")
     var text: String
@@ -47,14 +47,20 @@ struct PasteBuddyCreateTextItemIntent: AppIntent {
         let store = PasteBuddyStore()
         store.load()
         let service = AutomationActionService(store: store)
-        let summary = try service.createTextItem(text: text, title: title)
-        return .result(dialog: IntentDialog(stringLiteral: "Created PasteBuddy item: \(summary.title)."))
+        do {
+            let summary = try service.createTextItem(text: text, title: title)
+            await store.flushPendingSave()
+            return .result(dialog: IntentDialog(stringLiteral: "Created PasteBuddy item: \(summary.title)."))
+        } catch {
+            await store.flushPendingSave()
+            throw error
+        }
     }
 }
 
 struct PasteBuddyCopyFirstMatchIntent: AppIntent {
-    static var title: LocalizedStringResource = "Copy First PasteBuddy Match"
-    static var description = IntentDescription("Find the first matching local PasteBuddy item and copy it to the clipboard.")
+    static let title: LocalizedStringResource = "Copy First PasteBuddy Match"
+    static let description = IntentDescription("Find the first matching local PasteBuddy item and copy it to the clipboard.")
 
     @Parameter(title: "Query")
     var query: String
@@ -79,8 +85,8 @@ struct PasteBuddyCopyFirstMatchIntent: AppIntent {
 }
 
 struct PasteBuddyPasteFirstMatchIntent: AppIntent {
-    static var title: LocalizedStringResource = "Paste First PasteBuddy Match"
-    static var description = IntentDescription("Find the first matching local PasteBuddy item and insert it into the frontmost app.")
+    static let title: LocalizedStringResource = "Paste First PasteBuddy Match"
+    static let description = IntentDescription("Find the first matching local PasteBuddy item and insert it into the frontmost app.")
 
     @Parameter(title: "Query")
     var query: String
@@ -106,8 +112,8 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
 }
 
 struct PasteBuddyCreatePinboardIntent: AppIntent {
-    static var title: LocalizedStringResource = "Create PasteBuddy Pinboard"
-    static var description = IntentDescription("Create a local encrypted PasteBuddy pinboard.")
+    static let title: LocalizedStringResource = "Create PasteBuddy Pinboard"
+    static let description = IntentDescription("Create a local encrypted PasteBuddy pinboard.")
 
     @Parameter(title: "Name")
     var name: String
@@ -120,14 +126,20 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
         let store = PasteBuddyStore()
         store.load()
         let service = AutomationActionService(store: store)
-        let pinboard = try service.createPinboard(name: name, colorHex: colorHex)
-        return .result(dialog: IntentDialog(stringLiteral: "Created PasteBuddy pinboard: \(pinboard.name)."))
+        do {
+            let pinboard = try service.createPinboard(name: name, colorHex: colorHex)
+            await store.flushPendingSave()
+            return .result(dialog: IntentDialog(stringLiteral: "Created PasteBuddy pinboard: \(pinboard.name)."))
+        } catch {
+            await store.flushPendingSave()
+            throw error
+        }
     }
 }
 
 struct PasteBuddyCreateContentItemIntent: AppIntent {
-    static var title: LocalizedStringResource = "Create PasteBuddy Content Item"
-    static var description = IntentDescription("Create a local encrypted PasteBuddy text, URL, or file URL item and optionally save it to a pinboard.")
+    static let title: LocalizedStringResource = "Create PasteBuddy Content Item"
+    static let description = IntentDescription("Create a local encrypted PasteBuddy text, URL, or file URL item and optionally save it to a pinboard.")
 
     @Parameter(title: "Content Type")
     var contentKind: AutomationContentKind
@@ -146,19 +158,25 @@ struct PasteBuddyCreateContentItemIntent: AppIntent {
         let store = PasteBuddyStore()
         store.load()
         let service = AutomationActionService(store: store)
-        let result = try service.createContentItem(
-            kind: contentKind,
-            value: value,
-            title: title,
-            pinboardName: pinboardName
-        )
-        return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
+        do {
+            let result = try service.createContentItem(
+                kind: contentKind,
+                value: value,
+                title: title,
+                pinboardName: pinboardName
+            )
+            await store.flushPendingSave()
+            return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
+        } catch {
+            await store.flushPendingSave()
+            throw error
+        }
     }
 }
 
 struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
-    static var title: LocalizedStringResource = "Save PasteBuddy Match to Pinboard"
-    static var description = IntentDescription("Find the first matching local PasteBuddy item and save it to a named pinboard.")
+    static let title: LocalizedStringResource = "Save PasteBuddy Match to Pinboard"
+    static let description = IntentDescription("Find the first matching local PasteBuddy item and save it to a named pinboard.")
 
     @Parameter(title: "Query")
     var query: String
@@ -171,13 +189,19 @@ struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
         let store = PasteBuddyStore()
         store.load()
         let service = AutomationActionService(store: store)
-        let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
-        return .result(dialog: IntentDialog(stringLiteral: "Saved \(result.item.title) to \(result.pinboard.name)."))
+        do {
+            let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
+            await store.flushPendingSave()
+            return .result(dialog: IntentDialog(stringLiteral: "Saved \(result.item.title) to \(result.pinboard.name)."))
+        } catch {
+            await store.flushPendingSave()
+            throw error
+        }
     }
 }
 
 struct PasteBuddyAppShortcuts: AppShortcutsProvider {
-    static var shortcutTileColor: ShortcutTileColor = .blue
+    static let shortcutTileColor: ShortcutTileColor = .blue
 
     static var appShortcuts: [AppShortcut] {
         AppShortcut(

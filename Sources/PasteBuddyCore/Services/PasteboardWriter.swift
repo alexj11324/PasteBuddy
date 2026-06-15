@@ -4,6 +4,32 @@ import Foundation
 
 @MainActor
 public enum PasteboardWriter {
+    public struct DirectPasteOptions: Equatable, Sendable {
+        public static let activationWaitTimeoutDefault: TimeInterval = 0.12
+        public static let pasteDispatchDelayDefault: TimeInterval = 0
+        public static let pasteDispatchDelayUserDefaultsKey = "PasteBuddyDirectPasteDelaySeconds"
+
+        public var activationWaitTimeout: TimeInterval
+        public var pasteDispatchDelay: TimeInterval
+
+        public init(
+            activationWaitTimeout: TimeInterval = Self.activationWaitTimeoutDefault,
+            pasteDispatchDelay: TimeInterval = Self.pasteDispatchDelayDefault
+        ) {
+            self.activationWaitTimeout = max(0, min(activationWaitTimeout, 1))
+            self.pasteDispatchDelay = max(0, min(pasteDispatchDelay, 2))
+        }
+
+        public static let `default` = DirectPasteOptions()
+    }
+
+    public static var userConfiguredDirectPasteOptions: DirectPasteOptions {
+        let configuredDelay = UserDefaults.standard.object(
+            forKey: DirectPasteOptions.pasteDispatchDelayUserDefaultsKey
+        ) as? TimeInterval
+        return DirectPasteOptions(pasteDispatchDelay: configuredDelay ?? DirectPasteOptions.pasteDispatchDelayDefault)
+    }
+
     public static func copy(_ item: ClipboardItem, format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
         pasteboard.clearContents()
         if format == .plainText {
@@ -74,6 +100,9 @@ public enum PasteboardWriter {
         format: PasteFormat = .original,
         to pasteboard: NSPasteboard = .general,
         isAccessibilityTrusted: Bool = AccessibilityPermissionService.isTrusted,
+        targetBundleIdentifier: String? = nil,
+        activeApplicationBundleIdentifier: (() -> String?)? = nil,
+        options: DirectPasteOptions = .default,
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) -> DirectPasteResult {
@@ -86,6 +115,18 @@ public enum PasteboardWriter {
             )
         }
         prepareForPaste?()
+        guard waitForTargetApplicationIfNeeded(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+            timeout: options.activationWaitTimeout
+        ) else {
+            return DirectPasteResult(
+                outcome: .copiedOnlyNoTargetApplication,
+                itemCount: 1,
+                format: format
+            )
+        }
+        waitBeforePasteEvent(options.pasteDispatchDelay)
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -100,6 +141,9 @@ public enum PasteboardWriter {
         format: PasteFormat = .original,
         to pasteboard: NSPasteboard = .general,
         isAccessibilityTrusted: Bool = AccessibilityPermissionService.isTrusted,
+        targetBundleIdentifier: String? = nil,
+        activeApplicationBundleIdentifier: (() -> String?)? = nil,
+        options: DirectPasteOptions = .default,
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) -> DirectPasteResult {
@@ -112,6 +156,9 @@ public enum PasteboardWriter {
                 format: format,
                 to: pasteboard,
                 isAccessibilityTrusted: isAccessibilityTrusted,
+                targetBundleIdentifier: targetBundleIdentifier,
+                activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+                options: options,
                 prepareForPaste: prepareForPaste,
                 sendPasteEvent: sendPasteEvent
             )
@@ -125,6 +172,18 @@ public enum PasteboardWriter {
             )
         }
         prepareForPaste?()
+        guard waitForTargetApplicationIfNeeded(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+            timeout: options.activationWaitTimeout
+        ) else {
+            return DirectPasteResult(
+                outcome: .copiedOnlyNoTargetApplication,
+                itemCount: items.count,
+                format: format
+            )
+        }
+        waitBeforePasteEvent(options.pasteDispatchDelay)
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -139,6 +198,47 @@ public enum PasteboardWriter {
 
     public static func plainText(for items: [ClipboardItem]) -> String {
         ClipboardPlainTextRenderer.plainText(for: items)
+    }
+
+    private static func waitForTargetApplicationIfNeeded(
+        targetBundleIdentifier: String?,
+        activeApplicationBundleIdentifier: (() -> String?)?,
+        timeout: TimeInterval
+    ) -> Bool {
+        guard let targetBundleIdentifier = normalizedBundleIdentifier(targetBundleIdentifier),
+              let activeApplicationBundleIdentifier
+        else {
+            return true
+        }
+
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        repeat {
+            if normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier {
+                return true
+            }
+            guard Date() < deadline else { break }
+            runMainRunLoopSlice(until: min(deadline, Date().addingTimeInterval(0.005)))
+        } while true
+
+        return normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier
+    }
+
+    private static func waitBeforePasteEvent(_ delay: TimeInterval) {
+        guard delay > 0 else { return }
+        let deadline = Date().addingTimeInterval(delay)
+        repeat {
+            runMainRunLoopSlice(until: min(deadline, Date().addingTimeInterval(0.005)))
+        } while Date() < deadline
+    }
+
+    private static func runMainRunLoopSlice(until deadline: Date) {
+        RunLoop.current.run(mode: .default, before: deadline)
+    }
+
+    private static func normalizedBundleIdentifier(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed.lowercased()
     }
 
     private static func sendCommandV() {

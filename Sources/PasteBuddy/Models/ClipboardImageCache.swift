@@ -2,9 +2,19 @@ import AppKit
 import ImageIO
 import PasteBuddyCore
 
+@MainActor
 enum ClipboardImageCache {
-    private static let thumbnailCache = NSCache<NSString, NSImage>()
-    private static let sizeCache = NSCache<NSString, NSValue>()
+    private static let thumbnailCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 320
+        cache.totalCostLimit = 96 * 1024 * 1024
+        return cache
+    }()
+    private static let sizeCache: NSCache<NSString, NSValue> = {
+        let cache = NSCache<NSString, NSValue>()
+        cache.countLimit = 1_024
+        return cache
+    }()
     private static let genericApplicationIcon = icon(from: NSWorkspace.shared.icon(for: .applicationBundle))
 
     static func cachedThumbnail(for item: ClipboardItem, maxPixelSize: Int = 640) -> NSImage? {
@@ -26,7 +36,7 @@ enum ClipboardImageCache {
             return nil
         }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        thumbnailCache.setObject(image, forKey: key)
+        thumbnailCache.setObject(image, forKey: key, cost: decodedImageCost(cgImage))
         return image
     }
 
@@ -58,14 +68,14 @@ enum ClipboardImageCache {
     }
 
     private static func cacheKey(for item: ClipboardItem, data: Data, suffix: String) -> NSString {
-        "\(item.id.uuidString):\(data.count):\(item.updatedAt.timeIntervalSinceReferenceDate):\(suffix)" as NSString
+        "\(item.id.uuidString):\(item.updatedAt.timeIntervalSince1970):\(data.count):\(suffix)" as NSString
     }
 
     private static func thumbnailCacheKey(for item: ClipboardItem, data: Data, maxPixelSize: Int) -> NSString {
         cacheKey(for: item, data: data, suffix: "thumb:\(maxPixelSize)")
     }
 
-    private static func decodeThumbnail(from data: Data, maxPixelSize: Int) -> CGImage? {
+    nonisolated private static func decodeThumbnail(from data: Data, maxPixelSize: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return nil
         }
@@ -75,6 +85,11 @@ enum ClipboardImageCache {
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    nonisolated private static func decodedImageCost(_ image: CGImage) -> Int {
+        let byteCount = image.bytesPerRow * image.height
+        return max(byteCount, 1)
     }
 
     private static func icon(from image: NSImage) -> NSImage {

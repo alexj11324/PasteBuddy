@@ -35,6 +35,7 @@ public struct MobileItemProviderImportConfiguration: Sendable {
     }
 }
 
+@MainActor
 public enum MobileItemProviderAdapter {
     public static func firstSupportedInput(
         from providers: [NSItemProvider],
@@ -137,7 +138,30 @@ public enum MobileItemProviderAdapter {
     }
 
     private static func loadStringOrURL(from provider: NSItemProvider, type: UTType) async throws -> String? {
-        let item = try await loadItem(from: provider, typeIdentifier: type.identifier)
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { item, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: normalizedStringOrURL(from: item))
+            }
+        }
+    }
+
+    private static func loadData(from provider: NSItemProvider, type: UTType) async throws -> Data? {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: data)
+                }
+            }
+        }
+    }
+
+    nonisolated private static func normalizedStringOrURL(from item: NSSecureCoding?) -> String? {
         if let string = item as? String {
             return string.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         }
@@ -154,30 +178,6 @@ public enum MobileItemProviderAdapter {
             return nsURL.absoluteString
         }
         return nil
-    }
-
-    private static func loadData(from provider: NSItemProvider, type: UTType) async throws -> Data? {
-        try await withCheckedThrowingContinuation { continuation in
-            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: data)
-                }
-            }
-        }
-    }
-
-    private static func loadItem(from provider: NSItemProvider, typeIdentifier: String) async throws -> NSSecureCoding? {
-        try await withCheckedThrowingContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: item)
-                }
-            }
-        }
     }
 }
 

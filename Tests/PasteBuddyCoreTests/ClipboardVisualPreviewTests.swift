@@ -2,6 +2,65 @@ import XCTest
 @testable import PasteBuddyCore
 
 final class ClipboardVisualPreviewTests: XCTestCase {
+    func testSearchDocumentPrecomputesNormalizedTextPreviewBytesAndDedupeHash() {
+        let rtf = Data("{\\rtf1\\ansi Launch body}".utf8)
+        let item = ClipboardItem(
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Résumé Template",
+            labels: ["VIP Client"],
+            payload: ClipboardPayload(
+                htmlString: "<p>Résumé <strong>Launch</strong></p>",
+                rtfData: rtf
+            )
+        )
+
+        XCTAssertTrue(item.matches("resume launch"))
+        XCTAssertTrue(item.searchDocument.normalizedText.contains("vip client"))
+        XCTAssertTrue(item.visualPreview.body.contains("Launch"))
+        XCTAssertEqual(
+            item.searchDocument.storageBytes,
+            ClipboardItem.estimatedStorageBytes(
+                title: item.title,
+                labels: item.labels,
+                sourceAppName: item.sourceAppName,
+                deviceName: item.deviceName,
+                contentType: item.contentType,
+                reuseCategory: item.reuseCategory,
+                payload: item.payload
+            )
+        )
+        XCTAssertEqual(
+            item.searchDocument.dedupeHash,
+            ClipboardItem.deduplicationHash(contentType: item.contentType, payload: item.payload)
+        )
+    }
+
+    func testLegacyDecodedItemRebuildsMissingSearchDocument() throws {
+        let legacyJSON = Data("""
+        {
+          "sourceAppName": "Notes",
+          "deviceName": "Test Mac",
+          "contentType": "text",
+          "title": "Legacy Note",
+          "labels": ["Archive"],
+          "payload": {
+            "text": "Legacy searchable body"
+          }
+        }
+        """.utf8)
+
+        let item = try JSONDecoder().decode(ClipboardItem.self, from: legacyJSON)
+
+        XCTAssertTrue(item.matches("legacy searchable"))
+        XCTAssertTrue(item.matches("archive"))
+        XCTAssertEqual(item.visualPreview.headline, "Legacy Note")
+        XCTAssertEqual(item.visualPreview.body, "Legacy searchable body")
+        XCTAssertGreaterThan(item.searchDocument.storageBytes, "Legacy searchable body".utf8.count)
+        XCTAssertFalse(item.searchDocument.dedupeHash.isEmpty)
+    }
+
     func testLinkPreviewUsesHostAndOriginalURL() {
         let item = ClipboardItem(
             sourceAppName: "Safari",
