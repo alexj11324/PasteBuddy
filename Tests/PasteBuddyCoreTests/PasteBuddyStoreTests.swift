@@ -1,0 +1,3041 @@
+import XCTest
+@testable import PasteBuddyCore
+
+#if canImport(CloudKit)
+import CloudKit
+#endif
+
+@MainActor
+final class PasteBuddyStoreTests: XCTestCase {
+    func testSearchMatchesStoredOCRMetadata() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let imageItem = ClipboardItem(
+            sourceAppName: "Screenshot",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot or image",
+            payload: ClipboardPayload(imageData: Data([0x01, 0x02]), ocrText: "Quarterly launch checklist"),
+            ocrState: .completed(Date())
+        )
+
+        store.addCapturedItem(imageItem)
+        store.searchQuery = "launch checklist"
+
+        XCTAssertEqual(store.filteredItems.map(\.id), [imageItem.id])
+    }
+
+    func testMarkOCRPendingClearsCompletedStateForRerun() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let imageItem = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Screenshot",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot or image",
+            payload: ClipboardPayload(imageData: Data([0x01, 0x02]), ocrText: "old garbled OCR"),
+            ocrState: .completed(Date())
+        ))
+
+        store.markOCRPending(for: imageItem.id)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+        guard case .pending = reloaded.snapshot.items.first?.ocrState else {
+            return XCTFail("Expected OCR to be pending after manual rerun.")
+        }
+        XCTAssertNil(reloaded.snapshot.items.first?.payload.ocrText)
+    }
+
+    func testSearchCoversTextURLsFilenamesLabelsPinboardsAndMissingOptionalMetadata() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let text = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Meeting Template",
+            payload: ClipboardPayload(text: "Customer reply body")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Launch Link",
+            payload: ClipboardPayload(urlString: "https://example.com/roadmap")
+        ))
+        let file = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Proposal",
+            payload: ClipboardPayload(fileURLString: "file:///Users/example/Brief.pdf")
+        ))
+        let imageWithoutOCR = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Pending Screenshot",
+            payload: ClipboardPayload(imageData: Data([0xff])),
+            ocrState: .failed(Date(), "Vision unavailable")
+        ))
+        store.setLabels(["VIP Client"], for: text.id)
+
+        store.searchQuery = "vip client"
+        XCTAssertEqual(store.filteredItems.map(\.id), [text.id])
+
+        store.searchQuery = "roadmap"
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Launch Link"])
+
+        store.searchQuery = "Brief.pdf"
+        XCTAssertEqual(store.filteredItems.map(\.id), [file.id])
+
+        store.searchQuery = "Pending Screenshot"
+        XCTAssertEqual(store.filteredItems.map(\.id), [imageWithoutOCR.id])
+
+        store.createPinboard(named: "Research")
+        let pinboardID = store.snapshot.pinboards.last!.id
+        store.pinItem(file.id, to: pinboardID)
+        store.selectedScope = .pinboard(pinboardID)
+        store.searchQuery = "Brief.pdf"
+
+        XCTAssertEqual(store.filteredItems.map(\.id), [file.id])
+    }
+
+    func testPinnedItemsSurviveHistoryRetentionPruning() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinned = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pinned",
+            payload: ClipboardPayload(text: "keep me")
+        )
+        let recent = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Recent",
+            payload: ClipboardPayload(text: "new item")
+        )
+
+        store.addCapturedItem(pinned)
+        let pinboardID = store.snapshot.pinboards[0].id
+        store.selectedItemID = pinned.id
+        store.pinSelectedItem(to: pinboardID)
+        store.addCapturedItem(recent, maxItems: 1)
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == pinned.id }))
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == recent.id }))
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [pinned.id])
+    }
+
+    func testDuplicateCapturedItemMovesExistingItemToTopWithoutCreatingNewHistory() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let original = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original",
+            payload: ClipboardPayload(text: "same payload")
+        ))
+        let other = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Other",
+            payload: ClipboardPayload(urlString: "https://example.com")
+        ))
+
+        let recaptured = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Duplicate",
+            payload: ClipboardPayload(text: "same payload")
+        ))
+
+        XCTAssertEqual(store.snapshot.items.count, 2)
+        XCTAssertEqual(recaptured.id, original.id)
+        XCTAssertEqual(store.snapshot.items.map(\.id), [original.id, other.id])
+        XCTAssertEqual(store.selectedItemID, original.id)
+        XCTAssertGreaterThanOrEqual(recaptured.updatedAt, original.updatedAt)
+    }
+
+    func testPresentationRevisionDoesNotChangeForSelectionOnlyUpdates() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let first = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first payload")
+        ))
+        let second = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Second",
+            payload: ClipboardPayload(urlString: "https://example.com")
+        ))
+        let revisionAfterContentLoad = store.presentationRevision
+
+        store.selectSingleItem(first.id)
+        store.selectSingleItem(second.id)
+        store.selectSingleItem(second.id)
+
+        XCTAssertEqual(store.presentationRevision, revisionAfterContentLoad)
+
+        store.searchQuery = "second"
+
+        XCTAssertGreaterThan(store.presentationRevision, revisionAfterContentLoad)
+    }
+
+    func testImageDeduplicationUsesImageBytesWhenOCRTextIsEmpty() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let first = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "First Image",
+            payload: ClipboardPayload(imageData: Data([0x01, 0x02]))
+        ))
+        let second = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Second Image",
+            payload: ClipboardPayload(imageData: Data([0x03, 0x04]))
+        ))
+        let duplicateFirst = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "First Image Again",
+            payload: ClipboardPayload(imageData: Data([0x01, 0x02]))
+        ))
+
+        XCTAssertEqual(store.snapshot.items.count, 2)
+        XCTAssertEqual(duplicateFirst.id, first.id)
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == second.id }))
+    }
+
+    func testPinboardRenameAndRemovalKeepHistoryItem() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.createPinboard(named: "Launch")
+        let pinboardID = store.snapshot.pinboards.last!.id
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Launch Note",
+            payload: ClipboardPayload(text: "Keep the history copy")
+        ))
+
+        store.pinItem(item.id, to: pinboardID)
+        store.renamePinboard(pinboardID, to: "Launch Assets")
+        store.removeItem(item.id, fromPinboard: pinboardID)
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == item.id }))
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboardID })?.name, "Launch Assets")
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboardID })?.itemIDs, [])
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertTrue(reloaded.snapshot.items.contains(where: { $0.id == item.id }))
+        XCTAssertEqual(reloaded.snapshot.pinboards.first(where: { $0.id == pinboardID })?.name, "Launch Assets")
+        XCTAssertEqual(reloaded.snapshot.pinboards.first(where: { $0.id == pinboardID })?.itemIDs, [])
+    }
+
+    func testPinboardRecolorAndReorderPersistThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let favoritesID = store.snapshot.pinboards[0].id
+        store.createPinboard(named: "Research")
+        let researchID = store.snapshot.pinboards.last!.id
+        store.createPinboard(named: "Launch")
+        let launchID = store.snapshot.pinboards.last!.id
+
+        store.updatePinboardColor(researchID, to: "f25f5c")
+        store.movePinboards(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+
+        XCTAssertEqual(store.snapshot.pinboards.map(\.id), [launchID, favoritesID, researchID])
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
+
+        store.snapshot.sync = SyncConfiguration(
+            provider: .cloudKit,
+            isCloudSyncEnabled: true,
+            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            isCloudKitCapabilityConfigured: true
+        )
+        let package = try CloudSyncPackageBuilder(encryptor: harness.encryptionService)
+            .makeUploadPackage(from: store.snapshot)
+        let packageString = String(decoding: try JSONEncoder.pasteBuddy.encode(package), as: UTF8.self)
+        XCTAssertFalse(packageString.contains("Research"))
+        XCTAssertFalse(packageString.contains("Launch"))
+        let decrypted = try harness.encryptionService.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
+        XCTAssertEqual(decrypted.pinboards.map(\.id), [launchID, favoritesID, researchID])
+        XCTAssertEqual(decrypted.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.pinboards.map(\.id), [launchID, favoritesID, researchID])
+        XCTAssertEqual(reloaded.snapshot.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
+    }
+
+    func testPinboardItemReorderControlsDisplayOrder() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let first = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
+        ))
+        let second = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "second")
+        ))
+
+        store.pinItem(first.id, to: pinboardID)
+        store.pinItem(second.id, to: pinboardID)
+        store.selectedScope = .pinboard(pinboardID)
+
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Second", "First"])
+
+        store.moveItems(inPinboard: pinboardID, fromOffsets: IndexSet(integer: 1), toOffset: 0)
+
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [first.id, second.id])
+        XCTAssertEqual(store.filteredItems.map(\.title), ["First", "Second"])
+    }
+
+    func testMoveItemBetweenPinboardsRemovesSourceAndPreservesHistory() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let sourceID = store.snapshot.pinboards[0].id
+        store.createPinboard(named: "Destination")
+        let destinationID = store.snapshot.pinboards.last!.id
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Move Me",
+            payload: ClipboardPayload(text: "move me")
+        ))
+        store.pinItem(item.id, to: sourceID)
+
+        store.movePinboardItem(item.id, from: sourceID, to: destinationID)
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == item.id }))
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == sourceID })?.itemIDs, [])
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == destinationID })?.itemIDs, [item.id])
+    }
+
+    func testBatchPinningSupportsDropOrderAndDoesNotDuplicateExistingItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let now = Date()
+        let older = store.addCapturedItem(ClipboardItem(
+            createdAt: now.addingTimeInterval(-2),
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Older",
+            payload: ClipboardPayload(text: "older")
+        ))
+        let newer = store.addCapturedItem(ClipboardItem(
+            createdAt: now.addingTimeInterval(-1),
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Newer",
+            payload: ClipboardPayload(text: "newer")
+        ))
+        let existing = store.addCapturedItem(ClipboardItem(
+            createdAt: now,
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Existing",
+            payload: ClipboardPayload(imageData: Data([0x01]))
+        ))
+        store.pinItem(existing.id, to: pinboardID)
+        store.setSelectedItemIDs([older.id, newer.id])
+
+        store.pinItems(store.selectedItemsInDisplayOrder.map(\.id), to: pinboardID)
+        store.pinItems([newer.id, older.id, newer.id], to: pinboardID)
+
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [newer.id, older.id, existing.id])
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.pinboards[0].itemIDs, [newer.id, older.id, existing.id])
+    }
+
+    func testRetentionPrunesOldUnpinnedItemsButKeepsPinnedItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let oldDate = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
+        let oldPinned = store.addCapturedItem(ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Old Pinned",
+            payload: ClipboardPayload(text: "old pinned")
+        ))
+        let oldUnpinned = store.addCapturedItem(ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Old Unpinned",
+            payload: ClipboardPayload(text: "old unpinned")
+        ))
+        let fresh = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Fresh",
+            payload: ClipboardPayload(text: "fresh")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        store.pinItem(oldPinned.id, to: pinboardID)
+
+        store.updateRetentionDays(7)
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == oldPinned.id }))
+        XCTAssertFalse(store.snapshot.items.contains(where: { $0.id == oldUnpinned.id }))
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == fresh.id }))
+    }
+
+    func testClearUnpinnedHistoryPreservesPinnedItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinned = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pinned",
+            payload: ClipboardPayload(text: "pinned")
+        ))
+        let unpinned = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Unpinned",
+            payload: ClipboardPayload(text: "unpinned")
+        ))
+        store.pinItem(pinned.id, to: store.snapshot.pinboards[0].id)
+
+        store.clearUnpinnedHistory()
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == pinned.id }))
+        XCTAssertFalse(store.snapshot.items.contains(where: { $0.id == unpinned.id }))
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [pinned.id])
+    }
+
+    func testClearAllHistoryIncludingPinnedItemsRequiresExplicitAction() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinned = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pinned",
+            payload: ClipboardPayload(text: "pinned")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Unpinned",
+            payload: ClipboardPayload(text: "unpinned")
+        ))
+        store.pinItem(pinned.id, to: store.snapshot.pinboards[0].id)
+
+        store.clearHistory(includePinned: true)
+
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [])
+        XCTAssertNil(store.selectedItemID)
+    }
+
+    func testStorageLimitPrunesOldUnpinnedItemsButPreservesPinnedItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let oldPinned = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Pinned Large",
+            payload: ClipboardPayload(imageData: Data(repeating: 0x01, count: 400_000))
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Older Large",
+            payload: ClipboardPayload(imageData: Data(repeating: 0x02, count: 600_000))
+        ))
+        let newest = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Newest Large",
+            payload: ClipboardPayload(imageData: Data(repeating: 0x03, count: 300_000))
+        ))
+        store.pinItem(oldPinned.id, to: store.snapshot.pinboards[0].id)
+
+        store.updateMaxStorageBytes(1 * 1_024 * 1_024)
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == oldPinned.id }))
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == newest.id }))
+        XCTAssertEqual(store.snapshot.items.count, 2)
+        XCTAssertLessThanOrEqual(store.storageUsageReport.estimatedBytes, store.snapshot.storage.maxStorageBytes)
+    }
+
+    func testStorageUsageReportBreaksOutPinnedUnpinnedAndRichPayloadBytes() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinned = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Rich Pinned",
+            payload: ClipboardPayload(
+                text: "rich body",
+                htmlString: "<strong>rich body</strong>",
+                rtfData: Data("{\\rtf1 rich body}".utf8)
+            )
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Files",
+            payload: ClipboardPayload(
+                fileURLStrings: [
+                    "file:///Users/example/Report.pdf",
+                    "file:///Users/example/Brief.txt"
+                ]
+            )
+        ))
+        store.pinItem(pinned.id, to: store.snapshot.pinboards[0].id)
+
+        let report = store.storageUsageReport
+
+        XCTAssertEqual(report.itemCount, 2)
+        XCTAssertEqual(report.pinnedItemCount, 1)
+        XCTAssertEqual(report.unpinnedItemCount, 1)
+        XCTAssertGreaterThan(report.pinnedEstimatedBytes, "rich body".utf8.count)
+        XCTAssertGreaterThan(report.unpinnedEstimatedBytes, "file:///Users/example/Report.pdf".utf8.count)
+        XCTAssertEqual(report.estimatedBytes, report.pinnedEstimatedBytes + report.unpinnedEstimatedBytes)
+        XCTAssertFalse(report.isOverLimit)
+    }
+
+    func testStorageSettingsPersistThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.updateMaxHistoryItems(250)
+        store.updateRetentionDays(14)
+        store.updateMaxStorageBytes(256 * 1_024 * 1_024)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.storage.maxHistoryItems, 250)
+        XCTAssertEqual(reloaded.snapshot.storage.retentionDays, 14)
+        XCTAssertEqual(reloaded.snapshot.storage.maxStorageBytes, 256 * 1_024 * 1_024)
+    }
+
+    func testGeneralSettingsPersistThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setLaunchAtLoginEnabled(true, applySystemRegistration: false)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertTrue(reloaded.snapshot.general.launchAtLoginEnabled)
+
+        reloaded.setLaunchAtLoginEnabled(false, applySystemRegistration: false)
+
+        XCTAssertFalse(reloaded.snapshot.general.launchAtLoginEnabled)
+    }
+
+    func testMacMenuBarStatusReflectsCaptureLaunchAndSettingsDestinations() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var status = store.macMenuBarStatus
+
+        XCTAssertEqual(status.title, "PasteBuddy Active")
+        XCTAssertEqual(status.systemImageName, "doc.on.clipboard")
+        XCTAssertEqual(status.captureStatusLine, "Capture active")
+        XCTAssertEqual(status.captureActionTitle, "Pause Capture")
+        XCTAssertEqual(status.launchAtLoginStatusLine, "Launch at Login: Off")
+        XCTAssertEqual(status.settingsDestinations, MacSettingsDestination.allCases)
+
+        store.setLaunchAtLoginEnabled(true, applySystemRegistration: false)
+        store.pauseCaptureIndefinitely()
+        status = store.macMenuBarStatus
+
+        XCTAssertEqual(status.title, "PasteBuddy Paused")
+        XCTAssertEqual(status.systemImageName, "pause.circle.fill")
+        XCTAssertEqual(status.captureStatusLine, "Capture paused")
+        XCTAssertEqual(status.captureActionTitle, "Resume Capture")
+        XCTAssertEqual(status.launchAtLoginStatusLine, "Launch at Login: On")
+        XCTAssertTrue(status.captureDetail.contains("until you resume"))
+
+        store.requestSettingsDestination(.privacy)
+        XCTAssertEqual(store.requestedSettingsDestination, .privacy)
+        store.clearRequestedSettingsDestination()
+        XCTAssertNil(store.requestedSettingsDestination)
+    }
+
+    func testPastePlainTextDefaultPersistsThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        XCTAssertEqual(store.defaultPasteFormat, .original)
+
+        store.setAlwaysPasteAsPlainText(true)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertTrue(reloaded.snapshot.paste.alwaysPasteAsPlainText)
+        XCTAssertEqual(reloaded.defaultPasteFormat, .plainText)
+    }
+
+    func testDirectPasteResultIsTransientUIState() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let result = DirectPasteResult(
+            outcome: .copiedOnlyAccessibilityRequired,
+            itemCount: 2,
+            format: .plainText,
+            occurredAt: Date(timeIntervalSince1970: 10)
+        )
+
+        store.recordDirectPasteResult(result)
+
+        XCTAssertEqual(store.lastDirectPasteResult, result)
+        XCTAssertTrue(store.lastDirectPasteResult?.statusMessage.contains("Grant Accessibility access") ?? false)
+        let guidance = try XCTUnwrap(store.lastDirectPasteResult?.permissionGuidance)
+        XCTAssertEqual(guidance.actionTitle, "Request Accessibility Access")
+        XCTAssertTrue(guidance.detail.contains("copied your selection"))
+        XCTAssertTrue(guidance.detail.contains("Command-V"))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertNil(reloaded.lastDirectPasteResult)
+
+        store.clearDirectPasteResult()
+
+        XCTAssertNil(store.lastDirectPasteResult)
+    }
+
+    func testShortcutConfigurationPersistsAndResets() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "Command+Option+1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "Command+Option+Control+1-9")
+
+        store.setQuickPasteShortcutsEnabled(false)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertFalse(reloaded.snapshot.shortcuts.isQuickPasteEnabled)
+
+        reloaded.resetShortcutConfiguration()
+
+        XCTAssertTrue(reloaded.snapshot.shortcuts.isQuickPasteEnabled)
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "Command+Shift+V")
+    }
+
+    func testShortcutCustomizationPersistsAndSupportsClearedBindings() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+
+        store.setShortcutBinding(
+            .pasteSelectedItem,
+            key: "p",
+            modifiers: [.shift, .command, .command]
+        )
+        store.clearShortcutBinding(.pasteSelectedPlainText)
+        store.setQuickPasteModifiers([.control, .command])
+        store.setQuickPasteModifiers([.shift], plainText: true)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.key, "p")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.command, .shift])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "Command+Shift+P")
+        XCTAssertFalse(reloaded.snapshot.shortcuts.pasteSelectedPlainText.isEnabled)
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedPlainText.displayName, "Not set")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.command, .control])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.plainTextQuickPasteModifiers, [.shift])
+    }
+
+    func testShortcutBindingNormalizesWhitespaceKeyAndModifierOrder() {
+        let binding = ShortcutBinding(
+            key: "  Return  ",
+            modifiers: [.shift, .command, .option, .command]
+        )
+
+        XCTAssertEqual(binding.key, "r")
+        XCTAssertEqual(binding.modifiers, [.command, .option, .shift])
+        XCTAssertEqual(binding.displayName, "Command+Option+Shift+R")
+
+        let cleared = ShortcutBinding(key: "   ", modifiers: [.control])
+
+        XCTAssertNil(cleared.key)
+        XCTAssertFalse(cleared.isEnabled)
+        XCTAssertEqual(cleared.displayName, "Not set")
+    }
+
+    func testFreeTrialLifecyclePersistsThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        store.startFreeTrial(days: 14, now: now)
+
+        XCTAssertEqual(store.snapshot.entitlement.plan, .trial)
+        XCTAssertEqual(store.snapshot.entitlement.status, .trialing)
+        XCTAssertTrue(store.snapshot.entitlement.isTrialActive(now: now.addingTimeInterval(60)))
+        XCTAssertTrue(store.snapshot.entitlement.hasFullAccess(now: now.addingTimeInterval(60)))
+        let activeOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(60))
+        XCTAssertEqual(activeOverview.trialState, .active)
+        XCTAssertTrue(activeOverview.trialSummary.contains("14 days remaining"))
+        XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("When the trial ends"))
+        XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("limited mode"))
+        XCTAssertTrue(activeOverview.crossDeviceStatement.contains("Mac, iPhone, and iPad"))
+        XCTAssertEqual(activeOverview.purchaseOptions.map(\.plan), [.monthly, .annual, .lifetime, .family])
+        XCTAssertTrue(activeOverview.billingSafetyStatement.contains("encrypted entitlement metadata"))
+
+        let endingSoonOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(12 * 24 * 60 * 60))
+        XCTAssertEqual(endingSoonOverview.trialState, .endingSoon)
+
+        let endedOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(15 * 24 * 60 * 60))
+        XCTAssertEqual(endedOverview.trialState, .ended)
+        XCTAssertTrue(endedOverview.trialSummary.contains("Trial ended"))
+        XCTAssertTrue(endedOverview.trialOutcomeStatement.contains("do not delete local encrypted clipboard data"))
+
+        store.cancelFreeTrial(now: now.addingTimeInterval(120))
+
+        XCTAssertEqual(store.snapshot.entitlement.status, .canceled)
+        XCTAssertFalse(store.snapshot.entitlement.hasFullAccess(now: now.addingTimeInterval(180)))
+        let canceledOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(180))
+        XCTAssertEqual(canceledOverview.trialState, .canceled)
+        XCTAssertTrue(canceledOverview.trialSummary.contains("Trial canceled"))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.entitlement.plan, .trial)
+        XCTAssertEqual(reloaded.snapshot.entitlement.status, .canceled)
+        let trialCanceledAt = try XCTUnwrap(reloaded.snapshot.entitlement.trialCanceledAt)
+        XCTAssertEqual(trialCanceledAt.timeIntervalSince1970, now.addingTimeInterval(120).timeIntervalSince1970, accuracy: 0.001)
+    }
+
+    func testPaidPlansUnlockAllDevicesAndCanExpire() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let now = Date()
+        let renewal = now.addingTimeInterval(30 * 24 * 60 * 60)
+
+        store.activatePersonalPlan(.monthly, purchasedAt: now, currentPeriodEndsAt: renewal)
+
+        XCTAssertEqual(store.snapshot.entitlement.plan, .monthly)
+        XCTAssertEqual(store.snapshot.entitlement.status, .active)
+        XCTAssertTrue(store.snapshot.entitlement.unlocksAllDevicesForAccount)
+        XCTAssertTrue(store.snapshot.entitlement.hasActivePaidAccess(now: now.addingTimeInterval(60)))
+        let activeOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(60))
+        XCTAssertEqual(activeOverview.accessState, "Unlocked")
+        XCTAssertEqual(activeOverview.trialState, .converted)
+        XCTAssertTrue(activeOverview.crossDeviceStatement.contains("same paid feature set"))
+        XCTAssertTrue(activeOverview.crossDeviceStatement.contains("Mac, iPhone, and iPad"))
+
+        store.markEntitlementExpired(at: now.addingTimeInterval(120))
+
+        XCTAssertEqual(store.snapshot.entitlement.status, .expired)
+        XCTAssertFalse(store.snapshot.entitlement.hasFullAccess(now: now.addingTimeInterval(180)))
+        let expiredOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(180))
+        XCTAssertEqual(expiredOverview.accessState, "Limited")
+        XCTAssertTrue(expiredOverview.crossDeviceStatement.contains("No active paid entitlement"))
+    }
+
+    func testRestorePurchasesStatePersistsThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let startedAt = Date()
+        let restoredAt = startedAt.addingTimeInterval(30)
+
+        store.markRestorePurchasesStarted(at: startedAt)
+        let restoringOverview = store.snapshot.entitlement.personalOverview(now: startedAt.addingTimeInterval(1))
+        XCTAssertTrue(restoringOverview.restoreSummary.contains("checking StoreKit"))
+        XCTAssertTrue(restoringOverview.restoreActionStatement.contains("verified active entitlement"))
+
+        store.markRestorePurchasesRestored(at: restoredAt)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        if case .restored(let date) = reloaded.snapshot.entitlement.restoreState {
+            XCTAssertEqual(date.timeIntervalSince1970, restoredAt.timeIntervalSince1970, accuracy: 0.001)
+        } else {
+            XCTFail("Expected restored purchase state.")
+        }
+
+        let restoredOverview = reloaded.snapshot.entitlement.personalOverview(now: restoredAt.addingTimeInterval(1))
+        XCTAssertTrue(restoredOverview.restoreSummary.contains("Restore completed"))
+        XCTAssertTrue(restoredOverview.restoreActionStatement.contains("Mac, iPhone, or iPad") || restoredOverview.restoreActionStatement.contains("supported devices"))
+    }
+
+    func testSecuritySettingsToggleEncryptionAndTouchIDHistoryLock() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        harness.snapshotStore.storageMode = .standard
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            historyUnlockAuthenticator: FakeHistoryUnlockAuthenticator(result: true)
+        )
+
+        store.createTextItem(text: "clipboard content", title: "Visible Secret")
+
+        XCTAssertEqual(store.snapshot.security.storageMode, .standard)
+        XCTAssertFalse(store.snapshot.security.requiresBiometricUnlock)
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Visible Secret"])
+
+        store.setBiometricHistoryLockEnabled(true)
+
+        XCTAssertTrue(store.snapshot.security.requiresBiometricUnlock)
+        XCTAssertTrue(store.isHistoryAccessLocked)
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        XCTAssertEqual(store.historyAccessStatusLine, "History locked until Touch ID unlock")
+
+        let didUnlock = await store.unlockHistoryWithTouchID()
+
+        XCTAssertTrue(didUnlock)
+        XCTAssertFalse(store.isHistoryAccessLocked)
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Visible Secret"])
+
+        store.setHistoryEncryptionEnabled(true)
+
+        XCTAssertEqual(store.snapshot.security.storageMode, .encrypted)
+        XCTAssertEqual(harness.snapshotStore.storageMode, .encrypted)
+        let encryptedRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
+        XCTAssertFalse(encryptedRaw.contains("Visible Secret"))
+        XCTAssertFalse(encryptedRaw.contains("clipboard content"))
+
+        store.setHistoryEncryptionEnabled(false)
+
+        XCTAssertEqual(store.snapshot.security.storageMode, .standard)
+        XCTAssertEqual(harness.snapshotStore.storageMode, .standard)
+        let standardRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
+        XCTAssertTrue(standardRaw.contains("Visible Secret"))
+        XCTAssertTrue(standardRaw.contains("clipboard content"))
+    }
+
+    func testTeamPlanSeatBillingMetadataPersistsThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+
+        store.configureTeamPlan(
+            teamName: "Acme Design",
+            seatCount: 12,
+            assignedSeatCount: 5,
+            pricePerSeatCents: 1_500,
+            billingCurrencyCode: "usd",
+            singleInvoiceEnabled: true,
+            managedDistributionEnabled: true,
+            adminEmailAddress: "admin@example.com"
+        )
+
+        XCTAssertEqual(store.snapshot.entitlement.plan, .team)
+        XCTAssertEqual(store.snapshot.entitlement.status, .active)
+        XCTAssertTrue(store.snapshot.entitlement.hasFullAccess())
+        XCTAssertEqual(store.snapshot.entitlement.team?.displayName, "Acme Design")
+        XCTAssertEqual(store.snapshot.entitlement.team?.billingCurrencyCode, "USD")
+        XCTAssertEqual(store.snapshot.entitlement.team?.monthlyInvoiceCents, 18_000)
+        XCTAssertEqual(store.snapshot.entitlement.team?.availableSeatCount, 7)
+        XCTAssertTrue(store.snapshot.entitlement.team?.singleInvoiceEnabled == true)
+        XCTAssertTrue(store.snapshot.entitlement.team?.managedDistributionEnabled == true)
+        XCTAssertFalse(store.snapshot.entitlement.plan.isPersonalPaidPlan)
+
+        let overview = try XCTUnwrap(store.snapshot.entitlement.teamOverview)
+        XCTAssertEqual(overview.teamName, "Acme Design")
+        XCTAssertEqual(overview.adminSummary, "Admin: admin@example.com")
+        XCTAssertEqual(overview.seatSummary, "5/12 seats assigned, 7 available")
+        XCTAssertTrue(overview.billingSummary.contains("Single invoice"))
+        XCTAssertTrue(overview.billingSummary.contains("USD 180.00"))
+        XCTAssertTrue(overview.distributionSummary.contains("Managed distribution enabled"))
+        XCTAssertTrue(overview.primaryValueStatement.contains("shared pinboards"))
+        XCTAssertTrue(overview.primaryValueStatement.contains("ideas, links, files"))
+        XCTAssertTrue(overview.purchasePositioning.contains("distinct from personal"))
+        XCTAssertTrue(overview.purchasePositioning.contains("seat billing"))
+        XCTAssertEqual(
+            overview.valuePropositions.map(\.id),
+            ["shared-pinboards", "stay-in-sync", "admin-seat-state"]
+        )
+
+        store.updateTeamSeatAssignment(20)
+
+        XCTAssertEqual(store.snapshot.entitlement.team?.assignedSeatCount, 12)
+        XCTAssertEqual(store.snapshot.entitlement.team?.availableSeatCount, 0)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.entitlement.plan, .team)
+        XCTAssertEqual(reloaded.snapshot.entitlement.team?.assignedSeatCount, 12)
+        XCTAssertEqual(reloaded.snapshot.entitlement.team?.adminEmailAddress, "admin@example.com")
+    }
+
+    func testSnapshotDecodingDefaultsMissingEntitlement() throws {
+        let data = Data(#"{"schemaVersion":1}"#.utf8)
+
+        let snapshot = try JSONDecoder().decode(PasteBuddySnapshot.self, from: data)
+
+        XCTAssertEqual(snapshot.entitlement.plan, .free)
+        XCTAssertEqual(snapshot.entitlement.status, .inactive)
+        XCTAssertFalse(snapshot.entitlement.hasFullAccess())
+    }
+
+    func testClipboardItemDecodingDefaultsMissingLabels() throws {
+        let data = Data(#"{"sourceAppName":"Notes","deviceName":"Test Mac","contentType":"text","title":"Legacy","payload":{"text":"legacy body"}}"#.utf8)
+
+        let item = try JSONDecoder().decode(ClipboardItem.self, from: data)
+
+        XCTAssertEqual(item.title, "Legacy")
+        XCTAssertEqual(item.labels, [])
+        XCTAssertEqual(item.reuseCategory, .snippet)
+        XCTAssertEqual(item.payload.text, "legacy body")
+    }
+
+    func testQuickPasteItemUsesCurrentVisibleOrder() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let oldDate = Calendar.current.date(byAdding: .hour, value: -2, to: Date())!
+        _ = store.addCapturedItem(ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Older",
+            payload: ClipboardPayload(text: "older")
+        ))
+        let newer = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Newer",
+            payload: ClipboardPayload(text: "newer")
+        ))
+
+        XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 1)?.id, newer.id)
+        XCTAssertNil(store.quickPasteItem(atOneBasedIndex: 10))
+
+        store.searchQuery = "older"
+
+        XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 1)?.title, "Older")
+        XCTAssertNil(store.quickPasteItem(atOneBasedIndex: 2))
+    }
+
+    func testSelectedItemsFollowCurrentDisplayOrder() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let oldDate = Calendar.current.date(byAdding: .hour, value: -2, to: Date())!
+        let first = store.addCapturedItem(ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Older",
+            payload: ClipboardPayload(text: "older")
+        ))
+        let second = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Newer",
+            payload: ClipboardPayload(text: "newer")
+        ))
+
+        store.setSelectedItemIDs([first.id, second.id])
+
+        XCTAssertEqual(store.selectedItemsInDisplayOrder.map(\.title), ["Newer", "Older"])
+    }
+
+    func testSelectedPasteOrderPreviewExplainsVisibleOrderAndPlainTextFallback() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let older = store.addCapturedItem(ClipboardItem(
+            createdAt: Date().addingTimeInterval(-2),
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Older",
+            payload: ClipboardPayload(text: "older body")
+        ))
+        let newer = store.addCapturedItem(ClipboardItem(
+            createdAt: Date(),
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: Data([0x01]), ocrText: "newer image")
+        ))
+        store.setSelectedItemIDs([older.id, newer.id])
+
+        let preview = try XCTUnwrap(store.selectedPasteOrderPreview)
+
+        XCTAssertEqual(preview.rows.map(\.id), [newer.id, older.id])
+        XCTAssertEqual(preview.rows.map(\.position), [1, 2])
+        XCTAssertEqual(preview.rows.map(\.contentType), [.image, .text])
+        XCTAssertTrue(preview.fallbackDescription?.contains("plain text") ?? false)
+        XCTAssertTrue(preview.fallbackDescription?.contains("visible order") ?? false)
+    }
+
+    func testCreateTextItemAddsManualHistoryEntryAndPinsInCurrentPinboard() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.createPinboard(named: "Drafts")
+        let pinboardID = store.snapshot.pinboards.last!.id
+
+        let created = try XCTUnwrap(store.createTextItem(
+            text: "Reusable reply template",
+            title: "Reply Template",
+            sourceAppName: "PasteBuddy",
+            deviceName: "Test Mac"
+        ))
+
+        XCTAssertEqual(created.contentType, .text)
+        XCTAssertEqual(store.snapshot.items.first?.id, created.id)
+        XCTAssertEqual(store.snapshot.items.first?.payload.text, "Reusable reply template")
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboardID })?.itemIDs, [created.id])
+        XCTAssertEqual(store.selectedItem?.id, created.id)
+    }
+
+    func testEditTextItemUpdatesPayloadAndSearchableTextWithoutChangingTitle() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Friendly Title",
+            payload: ClipboardPayload(text: "before")
+        ))
+
+        store.updateTextItem(item.id, to: "after edit")
+        store.searchQuery = "after edit"
+
+        XCTAssertEqual(store.snapshot.items.first?.title, "Friendly Title")
+        XCTAssertEqual(store.snapshot.items.first?.payload.text, "after edit")
+        XCTAssertEqual(store.filteredItems.map(\.id), [item.id])
+    }
+
+    func testItemLabelsAreSearchableNormalizedEncryptedAndPersisted() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Roadmap",
+            payload: ClipboardPayload(text: "ordinary body")
+        ))
+
+        store.setLabels([" customer ", "Customer", "", "Launch Plan"], for: item.id)
+        store.searchQuery = "launch plan"
+
+        XCTAssertEqual(store.snapshot.items.first?.labels, ["customer", "Launch Plan"])
+        XCTAssertEqual(store.filteredItems.map(\.id), [item.id])
+
+        let rawStoreData = try Data(contentsOf: harness.snapshotStore.fileURL)
+        let rawStoreText = String(decoding: rawStoreData, as: UTF8.self)
+        XCTAssertFalse(rawStoreText.contains("Launch Plan"))
+        XCTAssertFalse(rawStoreText.contains("customer"))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.items.first?.labels, ["customer", "Launch Plan"])
+    }
+
+    func testRenamedTitlesAndLabelsPreservePayloadAppearInPinboardsAndSyncEncrypted() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original Title",
+            payload: ClipboardPayload(text: "Original copied body")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        store.pinItem(item.id, to: pinboardID)
+
+        store.renameItem(item.id, to: "Client Launch Board")
+        store.setLabels([" Important ", "Launch", "important"], for: item.id)
+
+        let updated = try XCTUnwrap(store.snapshot.items.first)
+        XCTAssertEqual(updated.title, "Client Launch Board")
+        XCTAssertEqual(updated.payload.text, "Original copied body")
+        XCTAssertEqual(updated.labels, ["Important", "Launch"])
+        XCTAssertEqual(updated.visualPreview.headline, "Client Launch Board")
+
+        store.searchQuery = "client launch"
+        XCTAssertEqual(store.filteredItems.map(\.id), [item.id])
+        store.searchQuery = "important"
+        XCTAssertEqual(store.filteredItems.map(\.id), [item.id])
+
+        store.selectedScope = .pinboard(pinboardID)
+        store.searchQuery = "launch"
+        XCTAssertEqual(store.filteredItems.map(\.id), [item.id])
+
+        store.snapshot.sync = SyncConfiguration(
+            provider: .cloudKit,
+            isCloudSyncEnabled: true,
+            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            isCloudKitCapabilityConfigured: true
+        )
+        let package = try CloudSyncPackageBuilder(encryptor: harness.encryptionService)
+            .makeUploadPackage(from: store.snapshot)
+        let packageString = String(decoding: try JSONEncoder.pasteBuddy.encode(package), as: UTF8.self)
+        XCTAssertFalse(packageString.contains("Client Launch Board"))
+        XCTAssertFalse(packageString.contains("Important"))
+        let decrypted = try harness.encryptionService.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
+        XCTAssertEqual(decrypted.items.first?.title, "Client Launch Board")
+        XCTAssertEqual(decrypted.items.first?.labels, ["Important", "Launch"])
+        XCTAssertEqual(decrypted.pinboards.first?.itemIDs, [item.id])
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.items.first?.title, "Client Launch Board")
+        XCTAssertEqual(reloaded.snapshot.items.first?.labels, ["Important", "Launch"])
+    }
+
+    func testItemLabelsStayInPasteStackWhenEditedAndCanBeRemoved() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startPasteStack()
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Stacked",
+            payload: ClipboardPayload(text: "stacked body")
+        ))
+
+        store.addLabel("Reusable", to: item.id)
+        XCTAssertEqual(store.pasteStackItems.first?.labels, ["Reusable"])
+
+        store.removeLabel("reusable", from: item.id)
+        XCTAssertEqual(store.snapshot.items.first?.labels, [])
+        XCTAssertEqual(store.pasteStackItems.first?.labels, [])
+    }
+
+    func testReusableContentCategoryIsInferredAndSearchable() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let color = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Design",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Brand Color",
+            payload: ClipboardPayload(text: "#70C1B3")
+        ))
+        let code = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Editor",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Swift Helper",
+            payload: ClipboardPayload(text: "func makeTitle() -> String { return \"PasteBuddy\" }")
+        ))
+        let template = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Mail",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Reply Template",
+            payload: ClipboardPayload(text: "Hi {{name}}, thanks for reaching out.")
+        ))
+
+        XCTAssertEqual(color.reuseCategory, .color)
+        XCTAssertEqual(code.reuseCategory, .code)
+        XCTAssertEqual(template.reuseCategory, .template)
+
+        store.searchQuery = "code"
+        XCTAssertEqual(store.filteredItems.map(\.id), [code.id])
+    }
+
+    func testReusableContentCategoryCanBeOverriddenEncryptedAndSyncedToPasteStack() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startPasteStack()
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Reusable Note",
+            payload: ClipboardPayload(text: "Reusable note body")
+        ))
+
+        store.setReuseCategory(.template, for: item.id)
+
+        XCTAssertEqual(store.snapshot.items.first?.reuseCategory, .template)
+        XCTAssertEqual(store.pasteStackItems.first?.reuseCategory, .template)
+
+        let rawStoreData = try Data(contentsOf: harness.snapshotStore.fileURL)
+        let rawStoreText = String(decoding: rawStoreData, as: UTF8.self)
+        XCTAssertFalse(rawStoreText.contains("template"))
+        XCTAssertFalse(rawStoreText.contains("Reusable Note"))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.items.first?.reuseCategory, .template)
+    }
+
+    func testReusablePinboardSupportsMixedSnippetTemplateCodeColorAndAssetCollections() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.createPinboard(named: "Reusable Kit")
+        let pinboardID = store.snapshot.pinboards.last!.id
+        let richSnippet = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "VIP Rich Snippet",
+            payload: ClipboardPayload(
+                text: "VIP launch reply",
+                htmlString: "<strong>VIP launch reply</strong>",
+                rtfData: Data("{\\rtf1 VIP launch reply}".utf8)
+            )
+        ))
+        let link = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Research Link",
+            payload: ClipboardPayload(urlString: "https://example.com/research")
+        ))
+        let imageAsset = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Launch Image Asset",
+            payload: ClipboardPayload(imageData: Data([0x01, 0x02]), ocrText: "Hero asset copy"),
+            ocrState: .completed(Date())
+        ))
+        let fileAsset = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Design Files",
+            payload: ClipboardPayload(fileURLStrings: [
+                "file:///Users/example/Logo.sketch",
+                "file:///Users/example/Palette.ase"
+            ])
+        ))
+        let color = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Design",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Brand Color",
+            payload: ClipboardPayload(text: "#70C1B3")
+        ))
+        let code = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Xcode",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Badge Helper",
+            payload: ClipboardPayload(text: "func makeBadge() -> String { return \"VIP\" }")
+        ))
+        let template = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Mail",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Reply Template",
+            payload: ClipboardPayload(text: "Hi {{name}}, here is the launch update.")
+        ))
+
+        store.pinItems(
+            [richSnippet.id, link.id, imageAsset.id, fileAsset.id, color.id, code.id, template.id],
+            to: pinboardID
+        )
+        store.selectedScope = .pinboard(pinboardID)
+
+        XCTAssertEqual(richSnippet.reuseCategory, .snippet)
+        XCTAssertEqual(link.reuseCategory, .general)
+        XCTAssertEqual(imageAsset.reuseCategory, .asset)
+        XCTAssertEqual(fileAsset.reuseCategory, .asset)
+        XCTAssertEqual(color.reuseCategory, .color)
+        XCTAssertEqual(code.reuseCategory, .code)
+        XCTAssertEqual(template.reuseCategory, .template)
+        XCTAssertEqual(store.filteredItems.map(\.id), [
+            richSnippet.id,
+            link.id,
+            imageAsset.id,
+            fileAsset.id,
+            color.id,
+            code.id,
+            template.id
+        ])
+        XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 1)?.id, richSnippet.id)
+
+        store.searchQuery = "template"
+        XCTAssertEqual(store.filteredItems.map(\.id), [template.id])
+        store.searchQuery = "asset"
+        XCTAssertEqual(Set(store.filteredItems.map(\.id)), Set([imageAsset.id, fileAsset.id]))
+
+        let rawStoreText = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
+        XCTAssertFalse(rawStoreText.contains("VIP launch reply"))
+        XCTAssertFalse(rawStoreText.contains("#70C1B3"))
+        XCTAssertFalse(rawStoreText.contains("Reusable Kit"))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+        let reloadedPinboard = try XCTUnwrap(reloaded.snapshot.pinboards.first(where: { $0.id == pinboardID }))
+        let reloadedRichSnippet = try XCTUnwrap(reloaded.snapshot.items.first(where: { $0.id == richSnippet.id }))
+        let reloadedFileAsset = try XCTUnwrap(reloaded.snapshot.items.first(where: { $0.id == fileAsset.id }))
+
+        XCTAssertEqual(reloadedPinboard.itemIDs, [
+            richSnippet.id,
+            link.id,
+            imageAsset.id,
+            fileAsset.id,
+            color.id,
+            code.id,
+            template.id
+        ])
+        XCTAssertEqual(reloadedRichSnippet.payload.htmlString, "<strong>VIP launch reply</strong>")
+        XCTAssertEqual(reloadedRichSnippet.payload.rtfData, Data("{\\rtf1 VIP launch reply}".utf8))
+        XCTAssertEqual(reloadedFileAsset.payload.allFileURLStrings, [
+            "file:///Users/example/Logo.sketch",
+            "file:///Users/example/Palette.ase"
+        ])
+    }
+
+    func testUndoDeletionRestoresItemAndPinboardMembership() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Restore Me",
+            payload: ClipboardPayload(text: "restore me")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        store.pinItem(item.id, to: pinboardID)
+
+        store.removeItem(item.id)
+
+        XCTAssertFalse(store.snapshot.items.contains(where: { $0.id == item.id }))
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [])
+        XCTAssertTrue(store.canUndoDelete)
+
+        store.undoLastDeletion()
+
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == item.id }))
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [item.id])
+        XCTAssertFalse(store.canUndoDelete)
+        XCTAssertEqual(store.selectedItem?.id, item.id)
+    }
+
+    func testRemoveSelectedItemsIsUndoableAsAGroup() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let now = Date()
+        let older = store.addCapturedItem(ClipboardItem(
+            createdAt: now.addingTimeInterval(-1),
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Older",
+            payload: ClipboardPayload(text: "older")
+        ))
+        let newer = store.addCapturedItem(ClipboardItem(
+            createdAt: now,
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Newer",
+            payload: ClipboardPayload(text: "newer")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        store.pinItem(older.id, to: pinboardID)
+        store.pinItem(newer.id, to: pinboardID)
+        store.setSelectedItemIDs([older.id, newer.id])
+        XCTAssertEqual(store.selectedItemsInDisplayOrder.map(\.id), [newer.id, older.id])
+
+        store.removeSelectedItems()
+
+        XCTAssertEqual(store.snapshot.items.map(\.id), [])
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [])
+        XCTAssertEqual(store.lastDeletedItems.map(\.item.id), [newer.id, older.id])
+        XCTAssertTrue(store.canUndoDelete)
+
+        store.undoLastDeletion()
+
+        XCTAssertEqual(store.snapshot.items.map(\.id), [newer.id, older.id])
+        XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [newer.id, older.id])
+        XCTAssertEqual(store.selectedItem?.id, newer.id)
+        XCTAssertFalse(store.canUndoDelete)
+    }
+
+    func testOpenableURLIsAvailableForLinksAndFilesOnly() {
+        let link = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Example",
+            payload: ClipboardPayload(urlString: "https://example.com/path")
+        )
+        let file = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Report",
+            payload: ClipboardPayload(fileURLString: "file:///Users/example/report.pdf")
+        )
+        let text = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Text",
+            payload: ClipboardPayload(text: "hello")
+        )
+
+        XCTAssertEqual(link.openableURL?.absoluteString, "https://example.com/path")
+        XCTAssertEqual(file.openableURL?.absoluteString, "file:///Users/example/report.pdf")
+        XCTAssertNil(text.openableURL)
+    }
+
+    func testPrivacySettingsPersistThroughEncryptedStore() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.toggleCapturePaused()
+        store.toggleOCR()
+        store.toggleTextCapture()
+        store.toggleURLCapture()
+        store.toggleFileCapture()
+        store.toggleImageCapture()
+        store.toggleSensitiveTextBlocking()
+        store.excludeCurrentApplication(named: "Password Vault", bundleIdentifier: "com.example.password-vault")
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertTrue(reloaded.snapshot.privacy.isCapturePaused)
+        XCTAssertFalse(reloaded.snapshot.privacy.runLocalOCRAfterImageCapture)
+        XCTAssertFalse(reloaded.snapshot.privacy.captureText)
+        XCTAssertFalse(reloaded.snapshot.privacy.captureURLs)
+        XCTAssertFalse(reloaded.snapshot.privacy.captureFiles)
+        XCTAssertFalse(reloaded.snapshot.privacy.captureImages)
+        XCTAssertFalse(reloaded.snapshot.privacy.blockLikelySensitiveText)
+        XCTAssertTrue(reloaded.snapshot.privacy.excludedApplicationNames.contains("Password Vault"))
+        XCTAssertTrue(reloaded.snapshot.privacy.excludedBundleIdentifiers.contains("com.example.password-vault"))
+    }
+
+    func testCustomCaptureRulesPersistEncryptedAndCanBeToggled() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let rule = try XCTUnwrap(store.addCaptureRule(
+            name: "Payroll drafts",
+            condition: .containsText,
+            pattern: "do-not-save-payroll",
+            contentTypes: [.text]
+        ))
+
+        store.setCaptureRule(rule.id, enabled: false)
+
+        let raw = try Data(contentsOf: harness.snapshotStore.fileURL)
+        let rawString = String(decoding: raw, as: UTF8.self)
+        XCTAssertFalse(rawString.contains("Payroll drafts"))
+        XCTAssertFalse(rawString.contains("do-not-save-payroll"))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.privacy.customCaptureRules.count, 1)
+        XCTAssertEqual(reloaded.snapshot.privacy.customCaptureRules[0].name, "Payroll drafts")
+        XCTAssertEqual(reloaded.snapshot.privacy.customCaptureRules[0].condition, .containsText)
+        XCTAssertEqual(reloaded.snapshot.privacy.customCaptureRules[0].pattern, "do-not-save-payroll")
+        XCTAssertEqual(reloaded.snapshot.privacy.customCaptureRules[0].contentTypes, [.text])
+        XCTAssertFalse(reloaded.snapshot.privacy.customCaptureRules[0].isEnabled)
+
+        reloaded.removeCaptureRule(rule.id)
+
+        XCTAssertTrue(reloaded.snapshot.privacy.customCaptureRules.isEmpty)
+    }
+
+    func testTimedCapturePauseExpiresAndResumeClearsPauseUntil() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let now = Date()
+
+        store.pauseCapture(for: 15 * 60, now: now)
+
+        XCTAssertFalse(store.snapshot.privacy.isCapturePaused)
+        XCTAssertTrue(store.snapshot.privacy.isCaptureCurrentlyPaused(now: now.addingTimeInterval(60)))
+        XCTAssertFalse(store.snapshot.privacy.isCaptureCurrentlyPaused(now: now.addingTimeInterval(16 * 60)))
+
+        store.resumeCapture()
+
+        XCTAssertFalse(store.isCapturePaused)
+        XCTAssertNil(store.snapshot.privacy.capturePauseUntil)
+    }
+
+    func testPrivacyPostureReportCoversSurfacesBoundariesAndPausedState() {
+        let now = Date()
+        let pauseUntil = now.addingTimeInterval(900)
+        let payrollRule = CaptureRule(
+            name: "Payroll",
+            condition: .containsText,
+            pattern: "payroll",
+            contentTypes: [.text]
+        )
+        var snapshot = PasteBuddySnapshot()
+        snapshot.privacy = PrivacyConfiguration(
+            capturePauseUntil: pauseUntil,
+            captureText: false,
+            customCaptureRules: [payrollRule]
+        )
+        snapshot.sync = SyncConfiguration(
+            provider: .cloudKit,
+            isCloudSyncEnabled: true,
+            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            isCloudKitCapabilityConfigured: true
+        )
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.searchHistory])
+
+        let report = snapshot.privacyPostureReport(now: now)
+
+        XCTAssertEqual(report.captureStatus, .pausedUntil(pauseUntil))
+        XCTAssertEqual(report.protectedSurfaces, Set(PrivacyProtectedSurface.allCases))
+        XCTAssertEqual(report.disabledContentTypes, [.text])
+        XCTAssertEqual(report.activeCustomCaptureRuleCount, 1)
+        XCTAssertTrue(report.sensitiveTextBlockingEnabled)
+        XCTAssertTrue(report.coverageStatement.contains("history"))
+        XCTAssertTrue(report.coverageStatement.contains("pinboards"))
+        XCTAssertTrue(report.coverageStatement.contains("Shortcuts"))
+        XCTAssertTrue(report.coverageStatement.contains("keyboard"))
+        XCTAssertTrue(report.coverageStatement.contains("MCP"))
+        XCTAssertTrue(report.localBoundaryStatement.contains("local encrypted snapshot"))
+        XCTAssertTrue(report.syncBoundaryStatement.contains("private iCloud"))
+        XCTAssertTrue(report.syncBoundaryStatement.contains("must not downgrade to plaintext"))
+        XCTAssertTrue(report.vendorServerStatement.contains("does not send clipboard payloads to vendor servers"))
+        XCTAssertTrue(report.mcpBoundaryStatement.contains("per-tool opt-in"))
+    }
+
+    func testManualTextCreationRespectsPrivacyRulesBeforeHistoryPinboardsAndSearch() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboard = store.createPinboard(named: "Drafts")
+        _ = store.addCaptureRule(
+            name: "No payroll drafts",
+            condition: .containsText,
+            pattern: "payroll",
+            contentTypes: [.text]
+        )
+
+        XCTAssertNil(store.createTextItem(
+            text: "payroll draft for review",
+            title: "Payroll",
+            sourceAppName: "PasteBuddy",
+            deviceName: "Test Mac"
+        ))
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs, [])
+        XCTAssertTrue(store.lastErrorMessage?.contains("No payroll drafts") ?? false)
+
+        store.toggleTextCapture()
+
+        XCTAssertNil(store.createTextItem(
+            text: "Reusable reply template",
+            title: "Reply",
+            sourceAppName: "PasteBuddy",
+            deviceName: "Test Mac"
+        ))
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs, [])
+        XCTAssertTrue(store.lastErrorMessage?.contains("Text capture is disabled") ?? false)
+    }
+
+    func testPrivacyConfigurationCaptureRules() {
+        let privacy = PrivacyConfiguration(
+            captureText: false,
+            captureURLs: false,
+            captureFiles: false,
+            captureImages: false
+        )
+
+        XCTAssertFalse(privacy.allowsCapture(of: .text))
+        XCTAssertFalse(privacy.allowsCapture(of: .url))
+        XCTAssertFalse(privacy.allowsCapture(of: .file))
+        XCTAssertFalse(privacy.allowsCapture(of: .image))
+    }
+
+    func testSensitiveContentDetectorBlocksLikelySecretsButAllowsNormalText() {
+        XCTAssertTrue(SensitiveContentDetector.isLikelySensitive("api_key = sk_live_51ABCDEF0123456789"))
+        XCTAssertTrue(SensitiveContentDetector.isLikelySensitive("One-time code: 483920"))
+        XCTAssertTrue(SensitiveContentDetector.isLikelySensitive("card 4111 1111 1111 1111"))
+        XCTAssertFalse(SensitiveContentDetector.isLikelySensitive("Quarterly launch checklist and copy notes"))
+    }
+
+    func testPrivacyConfigurationExcludesSensitiveAppsByBundleIdentifier() {
+        let privacy = PrivacyConfiguration()
+
+        XCTAssertTrue(privacy.excludesApplication(named: "Renamed Vault", bundleIdentifier: "com.1password.1password"))
+        XCTAssertTrue(privacy.excludesApplication(named: "Passwords", bundleIdentifier: nil))
+        XCTAssertFalse(privacy.excludesApplication(named: "Notes", bundleIdentifier: "com.apple.Notes"))
+    }
+
+    func testCustomCaptureRulesMatchTextSourceBundleURLAndFiles() {
+        let textRule = CaptureRule(
+            name: "Internal payroll",
+            condition: .containsText,
+            pattern: "payroll",
+            contentTypes: [.text]
+        )
+        let bundleRule = CaptureRule(
+            name: "Private browser",
+            condition: .sourceBundleIdentifier,
+            pattern: "com.private.browser"
+        )
+        let urlRule = CaptureRule(
+            name: "Staging host",
+            condition: .urlHost,
+            pattern: "staging.example.com",
+            contentTypes: [.url]
+        )
+        let fileRule = CaptureRule(
+            name: "Raw keys",
+            condition: .fileExtension,
+            pattern: ".pem",
+            contentTypes: [.file]
+        )
+        let regexRule = CaptureRule(
+            name: "Ticket IDs",
+            condition: .regularExpression,
+            pattern: #"INC-\d{4}"#
+        )
+        let privacy = PrivacyConfiguration(customCaptureRules: [
+            textRule,
+            bundleRule,
+            urlRule,
+            fileRule,
+            regexRule
+        ])
+
+        let text = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Comp Plan",
+            payload: ClipboardPayload(text: "Payroll draft")
+        )
+        let url = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Staging",
+            payload: ClipboardPayload(urlString: "https://staging.example.com/admin")
+        )
+        let file = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Key",
+            payload: ClipboardPayload(fileURLString: "file:///Users/test/key.pem")
+        )
+        let ticket = ClipboardItem(
+            sourceAppName: "Messages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Incident",
+            payload: ClipboardPayload(text: "INC-4821 needs review")
+        )
+        let allowed = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Lunch",
+            payload: ClipboardPayload(text: "menu")
+        )
+
+        XCTAssertEqual(privacy.blockingCaptureRule(for: text)?.id, textRule.id)
+        XCTAssertEqual(privacy.blockingCaptureRule(for: allowed, sourceBundleIdentifier: "com.private.browser")?.id, bundleRule.id)
+        XCTAssertEqual(privacy.blockingCaptureRule(for: url)?.id, urlRule.id)
+        XCTAssertEqual(privacy.blockingCaptureRule(for: file)?.id, fileRule.id)
+        XCTAssertEqual(privacy.blockingCaptureRule(for: ticket)?.id, regexRule.id)
+        XCTAssertNil(privacy.blockingCaptureRule(for: allowed, sourceBundleIdentifier: "com.apple.Notes"))
+    }
+
+    func testSyncDefaultsToLocalOnlyWithoutPlaintextFallback() {
+        let sync = PasteBuddySnapshot().sync
+
+        XCTAssertEqual(sync.provider, .none)
+        XCTAssertFalse(sync.isCloudSyncEnabled)
+        XCTAssertFalse(sync.isSharedPinboardsEnabled)
+        XCTAssertFalse(sync.allowsPlaintextFallback)
+        XCTAssertEqual(sync.readiness, .localOnly)
+        XCTAssertFalse(sync.readiness.canAttemptCloudSync)
+    }
+
+    func testCloudSyncRequiresEncryptedCloudKitConfiguration() {
+        var sync = SyncConfiguration(
+            provider: .cloudKit,
+            isCloudSyncEnabled: true,
+            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1
+        )
+
+        XCTAssertEqual(sync.readiness, .blocked([.cloudKitCapability]))
+        XCTAssertFalse(sync.readiness.canAttemptCloudSync)
+
+        sync.isCloudKitCapabilityConfigured = true
+
+        XCTAssertEqual(sync.readiness, .ready)
+        XCTAssertTrue(sync.readiness.canAttemptCloudSync)
+        XCTAssertFalse(sync.allowsPlaintextFallback)
+    }
+
+    func testCloudSyncPreflightExplainsLocalOnlyModeAndEncryptionBoundary() {
+        let report = CloudSyncPreflightReport(configuration: PasteBuddySnapshot().sync)
+
+        XCTAssertEqual(report.readiness, .localOnly)
+        XCTAssertFalse(report.canAttemptCloudSync)
+        XCTAssertFalse(report.hasBlockers)
+        XCTAssertEqual(report.summary, "Local only: CloudKit sync is disabled.")
+        XCTAssertTrue(report.findings.contains { $0.id == "cloud-sync-local-only" })
+        XCTAssertTrue(report.findings.contains { $0.id == "plaintext-fallback-disabled" })
+    }
+
+    func testCloudSyncPreflightReportsMissingRequirementsAndSharedPinboardBlocker() {
+        let sync = SyncConfiguration(
+            provider: .cloudKit,
+            isCloudSyncEnabled: true,
+            isSharedPinboardsEnabled: true
+        )
+
+        let report = CloudSyncPreflightReport(configuration: sync)
+
+        XCTAssertEqual(
+            report.readiness,
+            .blocked([.cloudKitContainerIdentifier, .endToEndKeyHierarchy, .cloudKitCapability])
+        )
+        XCTAssertFalse(report.canAttemptCloudSync)
+        XCTAssertTrue(report.hasBlockers)
+        XCTAssertEqual(report.summary, "CloudKit sync is blocked by 4 required setup items.")
+        XCTAssertTrue(report.findings.contains { $0.id == "missing-cloudkit-container" })
+        XCTAssertTrue(report.findings.contains { $0.id == "missing-end-to-end-key-hierarchy" })
+        XCTAssertTrue(report.findings.contains { $0.id == "missing-cloudkit-capability" })
+        XCTAssertTrue(report.findings.contains { $0.id == "shared-pinboards-blocked" })
+    }
+
+    func testCloudSyncPreflightWarnsWhenReadyButFirstSyncOrConflictReviewIsPending() {
+        var sync = SyncConfiguration(
+            provider: .cloudKit,
+            isCloudSyncEnabled: true,
+            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            isCloudKitCapabilityConfigured: true,
+            lastSyncConflictCount: 2
+        )
+
+        var report = CloudSyncPreflightReport(configuration: sync)
+
+        XCTAssertEqual(report.readiness, .ready)
+        XCTAssertTrue(report.canAttemptCloudSync)
+        XCTAssertFalse(report.hasBlockers)
+        XCTAssertEqual(report.summary, "Encrypted CloudKit sync is ready with 2 warnings.")
+        XCTAssertTrue(report.findings.contains { $0.id == "cloud-sync-ready" })
+        XCTAssertTrue(report.findings.contains { $0.id == "first-sync-pending" })
+        XCTAssertTrue(report.findings.contains { $0.id == "last-sync-conflicts" })
+
+        sync.lastSyncAt = Date()
+        sync.lastSyncConflictCount = 0
+        report = CloudSyncPreflightReport(configuration: sync)
+
+        XCTAssertEqual(report.summary, "Encrypted CloudKit sync is ready.")
+        XCTAssertFalse(report.findings.contains { $0.severity == .warning })
+    }
+
+    func testSharedPinboardsRequireReadyEncryptedSync() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setSharedPinboardsEnabled(true)
+
+        XCTAssertFalse(store.snapshot.sync.isSharedPinboardsEnabled)
+        XCTAssertEqual(store.lastErrorMessage, "Shared pinboards require configured CloudKit sync and end-to-end encryption.")
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+
+        XCTAssertEqual(store.snapshot.sync.readiness, .ready)
+        XCTAssertTrue(store.snapshot.sync.isSharedPinboardsEnabled)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.sync.readiness, .ready)
+        XCTAssertTrue(reloaded.snapshot.sync.isSharedPinboardsEnabled)
+        XCTAssertFalse(reloaded.snapshot.sync.allowsPlaintextFallback)
+    }
+
+    func testSharedPinboardParticipantManagementRequiresEncryptedSync() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+
+        XCTAssertNil(store.sharePinboard(pinboardID))
+        XCTAssertNil(store.snapshot.pinboards[0].sharing)
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+
+        let token = try XCTUnwrap(store.sharePinboard(
+            pinboardID,
+            ownerDisplayName: "Owner Mac",
+            accessMode: .linkAccess,
+            defaultPermission: .readOnly,
+            linkToken: "single-use-share-token"
+        ))
+
+        XCTAssertEqual(token, "single-use-share-token")
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.ownerDisplayName, "Owner Mac")
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.accessMode, .linkAccess)
+        XCTAssertNotNil(store.snapshot.pinboards[0].sharing?.shareLinkTokenHash)
+        XCTAssertNotEqual(store.snapshot.pinboards[0].sharing?.shareLinkTokenHash, token)
+
+        let participant = try XCTUnwrap(store.inviteParticipant(
+            to: pinboardID,
+            displayName: "Collaborator",
+            emailAddress: "collaborator@example.com",
+            permission: .readOnly
+        ))
+
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.participants.count, 1)
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.participants.first?.permission, .readOnly)
+
+        store.updateParticipantPermission(
+            pinboardID: pinboardID,
+            participantID: participant.id,
+            permission: .canEdit
+        )
+
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.participants.first?.permission, .canEdit)
+
+        store.removeParticipant(pinboardID: pinboardID, participantID: participant.id)
+
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.participants, [])
+
+        store.stopSharingPinboard(pinboardID)
+
+        XCTAssertNil(store.snapshot.pinboards[0].sharing)
+    }
+
+    func testDisablingSharedPinboardsStopsSharingAllBoardsAndPersists() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let favoritesID = store.snapshot.pinboards[0].id
+        store.createPinboard(named: "Launch")
+        let launchID = store.snapshot.pinboards.last!.id
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+
+        XCTAssertNotNil(store.sharePinboard(favoritesID, accessMode: .linkAccess, linkToken: "favorites-token"))
+        _ = store.sharePinboard(launchID, defaultPermission: .canEdit)
+        XCTAssertNotNil(store.snapshot.pinboards.first(where: { $0.id == launchID })?.sharing)
+
+        store.setSharedPinboardsEnabled(false)
+
+        XCTAssertFalse(store.snapshot.sync.isSharedPinboardsEnabled)
+        XCTAssertTrue(store.snapshot.pinboards.allSatisfy { $0.sharing == nil })
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertFalse(reloaded.snapshot.sync.isSharedPinboardsEnabled)
+        XCTAssertTrue(reloaded.snapshot.pinboards.allSatisfy { $0.sharing == nil })
+    }
+
+    func testSharedPinboardKeyExchangeWrapsBoardKeyForParticipant() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let acceptedAt = Date(timeIntervalSince1970: 10_000)
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+
+        let keyExchange = try XCTUnwrap(store.sharePinboardWithKeyExchange(
+            pinboardID,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            keyExchangeService: keyExchangeService
+        ))
+        let ownerBoardKey = try keyExchangeService.unwrapOwnerBoardKey(
+            from: keyExchange,
+            ownerIdentity: ownerIdentity
+        )
+        let participant = try XCTUnwrap(store.inviteParticipantWithKeyExchange(
+            to: pinboardID,
+            displayName: "Collaborator",
+            participantPublicKeyData: participantIdentity.publicKeyData,
+            ownerIdentity: ownerIdentity,
+            emailAddress: "collaborator@example.com",
+            permission: .canEdit,
+            keyExchangeService: keyExchangeService
+        ))
+
+        XCTAssertEqual(ownerBoardKey.count, PinboardShareKeyExchangeService.boardKeyByteCount)
+        XCTAssertEqual(participant.keyAgreementPublicKeyData, participantIdentity.publicKeyData)
+        XCTAssertEqual(participant.boardKeyFingerprint, keyExchange.boardKeyFingerprint)
+        XCTAssertNotNil(participant.wrappedBoardKey)
+        XCTAssertNil(participant.acceptedAt)
+        XCTAssertNotEqual(participant.wrappedBoardKey?.sealedBoardKeyData, ownerBoardKey)
+
+        let participantBoardKey = try XCTUnwrap(store.acceptParticipantKeyExchange(
+            pinboardID: pinboardID,
+            participantID: participant.id,
+            participantIdentity: participantIdentity,
+            acceptedAt: acceptedAt,
+            keyExchangeService: keyExchangeService
+        ))
+
+        XCTAssertEqual(participantBoardKey, ownerBoardKey)
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.participants.first?.acceptedAt, acceptedAt)
+        XCTAssertNil(store.lastErrorMessage)
+
+        let raw = try Data(contentsOf: harness.snapshotStore.fileURL)
+        let rawString = String(decoding: raw, as: UTF8.self)
+        XCTAssertFalse(rawString.contains(ownerBoardKey.base64EncodedString()))
+        XCTAssertFalse(rawString.contains(participantIdentity.privateKeyData.base64EncodedString()))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+        let reloadedParticipant = try XCTUnwrap(reloaded.snapshot.pinboards[0].sharing?.participants.first)
+        XCTAssertNotNil(reloaded.snapshot.pinboards[0].sharing?.keyExchange)
+        XCTAssertNotNil(reloadedParticipant.wrappedBoardKey)
+        XCTAssertEqual(reloadedParticipant.acceptedAt, acceptedAt)
+    }
+
+    func testSharedPinboardKeyExchangeRejectsWrongParticipantIdentity() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let wrongIdentity = keyExchangeService.makeIdentity()
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+        _ = try XCTUnwrap(store.sharePinboardWithKeyExchange(
+            pinboardID,
+            ownerIdentity: ownerIdentity,
+            keyExchangeService: keyExchangeService
+        ))
+        let participant = try XCTUnwrap(store.inviteParticipantWithKeyExchange(
+            to: pinboardID,
+            displayName: "Collaborator",
+            participantPublicKeyData: participantIdentity.publicKeyData,
+            ownerIdentity: ownerIdentity,
+            keyExchangeService: keyExchangeService
+        ))
+
+        let boardKey = store.acceptParticipantKeyExchange(
+            pinboardID: pinboardID,
+            participantID: participant.id,
+            participantIdentity: wrongIdentity,
+            keyExchangeService: keyExchangeService
+        )
+
+        XCTAssertNil(boardKey)
+        XCTAssertEqual(store.lastErrorMessage, PinboardShareKeyExchangeError.recipientMismatch.localizedDescription)
+        XCTAssertNil(store.snapshot.pinboards[0].sharing?.participants.first?.acceptedAt)
+    }
+
+    func testSharedPinboardInvitationPackageWrapsBoardKeyForRecipientOnly() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let secretPinboardName = "Confidential launch board \(UUID().uuidString)"
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let createdAt = Date(timeIntervalSince1970: 20_000)
+        let acceptedAt = Date(timeIntervalSince1970: 20_100)
+
+        store.renamePinboard(pinboardID, to: secretPinboardName)
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+
+        let keyExchange = try XCTUnwrap(store.sharePinboardWithKeyExchange(
+            pinboardID,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            keyExchangeService: keyExchangeService
+        ))
+        let ownerBoardKey = try keyExchangeService.unwrapOwnerBoardKey(
+            from: keyExchange,
+            ownerIdentity: ownerIdentity
+        )
+        let participant = try XCTUnwrap(store.inviteParticipantWithKeyExchange(
+            to: pinboardID,
+            displayName: "Collaborator",
+            participantPublicKeyData: participantIdentity.publicKeyData,
+            ownerIdentity: ownerIdentity,
+            permission: .canEdit,
+            keyExchangeService: keyExchangeService
+        ))
+
+        let package = try XCTUnwrap(store.makePinboardInvitationPackage(
+            pinboardID: pinboardID,
+            participantID: participant.id,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            createdAt: createdAt,
+            expiresAt: Date(timeIntervalSince1970: 30_000),
+            invitationService: invitationService
+        ))
+
+        XCTAssertEqual(package.pinboardID, pinboardID)
+        XCTAssertEqual(package.participantID, participant.id)
+        XCTAssertEqual(package.permission, .canEdit)
+        XCTAssertEqual(package.ownerIdentity.displayName, "Owner Mac")
+        XCTAssertEqual(package.recipientIdentity.publicKeyData, participantIdentity.publicKeyData)
+        XCTAssertEqual(package.boardKeyFingerprint, keyExchange.boardKeyFingerprint)
+        XCTAssertNotEqual(package.wrappedBoardKey.sealedBoardKeyData, ownerBoardKey)
+
+        let packageBoardKey = try invitationService.acceptInvitation(
+            package,
+            recipientIdentity: participantIdentity,
+            now: acceptedAt
+        )
+        XCTAssertEqual(packageBoardKey, ownerBoardKey)
+
+        let acceptedBoardKey = try XCTUnwrap(store.acceptPinboardInvitationPackage(
+            package,
+            recipientIdentity: participantIdentity,
+            acceptedAt: acceptedAt,
+            invitationService: invitationService
+        ))
+        XCTAssertEqual(acceptedBoardKey, ownerBoardKey)
+        XCTAssertEqual(store.snapshot.pinboards[0].sharing?.participants.first?.acceptedAt, acceptedAt)
+        XCTAssertNil(store.lastErrorMessage)
+
+        let encodedPackage = try JSONEncoder.pasteBuddy.encode(package)
+        let encodedPackageString = String(decoding: encodedPackage, as: UTF8.self)
+        XCTAssertFalse(encodedPackageString.contains(ownerBoardKey.base64EncodedString()))
+        XCTAssertFalse(encodedPackageString.contains(ownerIdentity.privateKeyData.base64EncodedString()))
+        XCTAssertFalse(encodedPackageString.contains(participantIdentity.privateKeyData.base64EncodedString()))
+        XCTAssertFalse(encodedPackageString.contains(secretPinboardName))
+    }
+
+    func testSharedPinboardInvitationPackageRejectsExpiredOrWrongRecipient() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let wrongIdentity = keyExchangeService.makeIdentity()
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+        _ = try XCTUnwrap(store.sharePinboardWithKeyExchange(
+            pinboardID,
+            ownerIdentity: ownerIdentity,
+            keyExchangeService: keyExchangeService
+        ))
+        let participant = try XCTUnwrap(store.inviteParticipantWithKeyExchange(
+            to: pinboardID,
+            displayName: "Collaborator",
+            participantPublicKeyData: participantIdentity.publicKeyData,
+            ownerIdentity: ownerIdentity,
+            keyExchangeService: keyExchangeService
+        ))
+        let package = try XCTUnwrap(store.makePinboardInvitationPackage(
+            pinboardID: pinboardID,
+            participantID: participant.id,
+            ownerIdentity: ownerIdentity,
+            createdAt: Date(timeIntervalSince1970: 10),
+            expiresAt: Date(timeIntervalSince1970: 100),
+            invitationService: invitationService
+        ))
+
+        let expiredBoardKey = store.acceptPinboardInvitationPackage(
+            package,
+            recipientIdentity: participantIdentity,
+            acceptedAt: Date(timeIntervalSince1970: 101),
+            invitationService: invitationService
+        )
+        XCTAssertNil(expiredBoardKey)
+        XCTAssertEqual(store.lastErrorMessage, PinboardShareInvitationError.expiredInvitation.localizedDescription)
+        XCTAssertNil(store.snapshot.pinboards[0].sharing?.participants.first?.acceptedAt)
+
+        let wrongRecipientBoardKey = store.acceptPinboardInvitationPackage(
+            package,
+            recipientIdentity: wrongIdentity,
+            acceptedAt: Date(timeIntervalSince1970: 50),
+            invitationService: invitationService
+        )
+        XCTAssertNil(wrongRecipientBoardKey)
+        XCTAssertEqual(store.lastErrorMessage, PinboardShareInvitationError.recipientMismatch.localizedDescription)
+        XCTAssertNil(store.snapshot.pinboards[0].sharing?.participants.first?.acceptedAt)
+    }
+
+    func testSharedPinboardInvitationDeliveryFetchesOnlyRecipientPackages() async throws {
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let deliveryService = PinboardShareInvitationDeliveryService(
+            transport: InMemoryPinboardShareInvitationTransport()
+        )
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let otherIdentity = keyExchangeService.makeIdentity()
+        let recipientIdentity = try invitationService.publicIdentity(
+            displayName: "Collaborator",
+            identity: participantIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let otherRecipientIdentity = try invitationService.publicIdentity(
+            displayName: "Other Mac",
+            identity: otherIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let keyExchange = try keyExchangeService.setupOwnerKeyExchange(
+            ownerIdentity: ownerIdentity
+        ).state
+        let package = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .canEdit,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: recipientIdentity,
+            keyExchange: keyExchange,
+            createdAt: Date(timeIntervalSince1970: 2)
+        )
+        let otherPackage = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .readOnly,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: otherRecipientIdentity,
+            keyExchange: keyExchange,
+            createdAt: Date(timeIntervalSince1970: 3)
+        )
+
+        let publishedIdentity = try await deliveryService.publishIdentity(recipientIdentity)
+        _ = try await deliveryService.sendInvitation(package)
+        _ = try await deliveryService.sendInvitation(otherPackage)
+
+        let fetchedPackages = try await deliveryService.fetchInvitations(for: publishedIdentity)
+        let otherFetchedPackages = try await deliveryService.fetchInvitations(for: otherRecipientIdentity)
+
+        XCTAssertEqual(fetchedPackages.map(\.id), [package.id])
+        XCTAssertEqual(otherFetchedPackages.map(\.id), [otherPackage.id])
+    }
+
+    func testSharedPinboardInvitationInboxRefreshStoresRecipientPackagesEncrypted() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let transport = InMemoryPinboardShareInvitationTransport()
+        let deliveryService = PinboardShareInvitationDeliveryService(transport: transport)
+        let inboxRefreshService = PinboardShareInvitationInboxRefreshService(
+            deliveryService: deliveryService,
+            invitationService: invitationService
+        )
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let otherIdentity = keyExchangeService.makeIdentity()
+        let secretPinboardName = "Remote confidential board \(UUID().uuidString)"
+        let keyExchangeSetup = try keyExchangeService.setupOwnerKeyExchange(
+            ownerIdentity: ownerIdentity
+        )
+        let recipientIdentity = try invitationService.publicIdentity(
+            displayName: "Collaborator",
+            identity: participantIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let otherRecipientIdentity = try invitationService.publicIdentity(
+            displayName: "Other",
+            identity: otherIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let package = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .canEdit,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: recipientIdentity,
+            keyExchange: keyExchangeSetup.state,
+            createdAt: Date(timeIntervalSince1970: 2)
+        )
+        let otherPackage = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .readOnly,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: otherRecipientIdentity,
+            keyExchange: keyExchangeSetup.state,
+            createdAt: Date(timeIntervalSince1970: 3)
+        )
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+        _ = try await deliveryService.sendInvitation(package)
+        _ = try await deliveryService.sendInvitation(otherPackage)
+
+        let result = try await inboxRefreshService.refreshPendingInvitations(
+            for: participantIdentity,
+            displayName: "Collaborator",
+            into: store,
+            receivedAt: Date(timeIntervalSince1970: 4)
+        )
+
+        XCTAssertEqual(result.fetchedPackageCount, 1)
+        XCTAssertEqual(result.savedEntries.map(\.id), [package.id])
+        XCTAssertEqual(store.snapshot.pinboardInvitationInbox.pendingEntries.map(\.id), [package.id])
+        XCTAssertEqual(store.snapshot.pinboardInvitationInbox.entries.first?.status, .pending)
+        XCTAssertNil(store.lastErrorMessage)
+
+        let raw = try Data(contentsOf: harness.snapshotStore.fileURL)
+        let rawString = String(decoding: raw, as: UTF8.self)
+        XCTAssertFalse(rawString.contains(keyExchangeSetup.boardKey.base64EncodedString()))
+        XCTAssertFalse(rawString.contains(ownerIdentity.privateKeyData.base64EncodedString()))
+        XCTAssertFalse(rawString.contains(participantIdentity.privateKeyData.base64EncodedString()))
+        XCTAssertFalse(rawString.contains(secretPinboardName))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+        XCTAssertEqual(reloaded.snapshot.pinboardInvitationInbox.entries.map(\.id), [package.id])
+        XCTAssertEqual(reloaded.snapshot.pinboardInvitationInbox.entries.first?.status, .pending)
+    }
+
+    func testAcceptPendingPinboardInvitationUpdatesInboxStatus() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let keyExchangeSetup = try keyExchangeService.setupOwnerKeyExchange(
+            ownerIdentity: ownerIdentity
+        )
+        let recipientIdentity = try invitationService.publicIdentity(
+            displayName: "Collaborator",
+            identity: participantIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let acceptedPackage = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .canEdit,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: recipientIdentity,
+            keyExchange: keyExchangeSetup.state,
+            createdAt: Date(timeIntervalSince1970: 2)
+        )
+        let expiredPackage = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .readOnly,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: recipientIdentity,
+            keyExchange: keyExchangeSetup.state,
+            createdAt: Date(timeIntervalSince1970: 3),
+            expiresAt: Date(timeIntervalSince1970: 5)
+        )
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+        store.savePendingPinboardInvitationPackages(
+            [acceptedPackage, expiredPackage],
+            receivedAt: Date(timeIntervalSince1970: 4)
+        )
+
+        let acceptedBoardKey = try XCTUnwrap(store.acceptPendingPinboardInvitation(
+            invitationID: acceptedPackage.id,
+            recipientIdentity: participantIdentity,
+            acceptedAt: Date(timeIntervalSince1970: 6),
+            invitationService: invitationService
+        ))
+        XCTAssertEqual(acceptedBoardKey, keyExchangeSetup.boardKey)
+        XCTAssertEqual(
+            store.snapshot.pinboardInvitationInbox.entries.first(where: { $0.id == acceptedPackage.id })?.status,
+            .accepted
+        )
+
+        let expiredBoardKey = store.acceptPendingPinboardInvitation(
+            invitationID: expiredPackage.id,
+            recipientIdentity: participantIdentity,
+            acceptedAt: Date(timeIntervalSince1970: 6),
+            invitationService: invitationService
+        )
+        let expiredEntry = try XCTUnwrap(
+            store.snapshot.pinboardInvitationInbox.entries.first(where: { $0.id == expiredPackage.id })
+        )
+
+        XCTAssertNil(expiredBoardKey)
+        XCTAssertEqual(expiredEntry.status, .expired)
+        XCTAssertEqual(expiredEntry.lastErrorMessage, PinboardShareInvitationError.expiredInvitation.localizedDescription)
+    }
+
+    #if canImport(CloudKit)
+    func testCloudKitPinboardShareInvitationRecordsExposeOnlyRoutingMetadataAndWrappedPackage() throws {
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let factory = CloudKitPinboardShareRecordFactory()
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let secretPinboardName = "Board name must not be in invitation record"
+        let keyExchangeSetup = try keyExchangeService.setupOwnerKeyExchange(
+            ownerIdentity: ownerIdentity
+        )
+        let recipientIdentity = try invitationService.publicIdentity(
+            displayName: "Collaborator",
+            identity: participantIdentity,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let package = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .canEdit,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: recipientIdentity,
+            keyExchange: keyExchangeSetup.state,
+            createdAt: Date(timeIntervalSince1970: 200),
+            expiresAt: Date(timeIntervalSince1970: 300)
+        )
+
+        let identityRecord = try factory.makeIdentityRecord(from: recipientIdentity)
+        XCTAssertEqual(identityRecord.recordType, CloudKitPinboardShareRecordFactory.publicIdentityRecordType)
+        XCTAssertEqual(identityRecord.recordID.recordName, recipientIdentity.publicKeyFingerprint)
+        XCTAssertEqual(
+            identityRecord[CloudKitPinboardShareRecordFactory.publicKeyFingerprintField] as? String,
+            recipientIdentity.publicKeyFingerprint
+        )
+        XCTAssertEqual(try factory.makePublicIdentity(from: identityRecord), recipientIdentity)
+
+        let invitationRecord = try factory.makeInvitationRecord(from: package)
+        XCTAssertEqual(invitationRecord.recordType, CloudKitPinboardShareRecordFactory.invitationRecordType)
+        XCTAssertEqual(invitationRecord.recordID.recordName, package.id.uuidString)
+        XCTAssertEqual(
+            invitationRecord[CloudKitPinboardShareRecordFactory.recipientPublicKeyFingerprintField] as? String,
+            recipientIdentity.publicKeyFingerprint
+        )
+        XCTAssertEqual(
+            invitationRecord[CloudKitPinboardShareRecordFactory.permissionField] as? String,
+            PinboardSharePermission.canEdit.rawValue
+        )
+
+        let packageData = try XCTUnwrap(
+            invitationRecord[CloudKitPinboardShareRecordFactory.invitationPackageDataField] as? Data
+        )
+        let packageString = String(decoding: packageData, as: UTF8.self)
+        XCTAssertFalse(packageString.contains(keyExchangeSetup.boardKey.base64EncodedString()))
+        XCTAssertFalse(packageString.contains(ownerIdentity.privateKeyData.base64EncodedString()))
+        XCTAssertFalse(packageString.contains(participantIdentity.privateKeyData.base64EncodedString()))
+        XCTAssertFalse(packageString.contains(secretPinboardName))
+        XCTAssertEqual(try factory.makeInvitationPackage(from: invitationRecord), package)
+    }
+
+    func testCloudKitPinboardShareInvitationSubscriptionIsSilentAndRecipientScoped() throws {
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let factory = CloudKitPinboardShareRecordFactory()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let recipientIdentity = try invitationService.publicIdentity(
+            displayName: "Collaborator",
+            identity: participantIdentity,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let subscription = try factory.makeInvitationSubscription(
+            recipientPublicKeyFingerprint: recipientIdentity.publicKeyFingerprint
+        )
+
+        XCTAssertEqual(
+            subscription.subscriptionID,
+            try factory.makeInvitationSubscriptionID(
+                recipientPublicKeyFingerprint: recipientIdentity.publicKeyFingerprint
+            )
+        )
+        XCTAssertEqual(subscription.recordType, CloudKitPinboardShareRecordFactory.invitationRecordType)
+        XCTAssertTrue(subscription.predicate.predicateFormat.contains(recipientIdentity.publicKeyFingerprint))
+        XCTAssertTrue(subscription.notificationInfo?.shouldSendContentAvailable == true)
+        XCTAssertNil(subscription.notificationInfo?.alertBody)
+        XCTAssertFalse(subscription.subscriptionID.contains(participantIdentity.privateKeyData.base64EncodedString()))
+
+        XCTAssertThrowsError(
+            try factory.makeInvitationSubscription(recipientPublicKeyFingerprint: "   ")
+        )
+    }
+
+    func testCloudKitPinboardShareInvitationNotificationHandlerRefreshesMatchingSubscriptionOnly() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let keyExchangeService = PinboardShareKeyExchangeService()
+        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
+        let transport = InMemoryPinboardShareInvitationTransport()
+        let deliveryService = PinboardShareInvitationDeliveryService(transport: transport)
+        let handler = CloudKitPinboardShareInvitationNotificationHandler(
+            deliveryService: deliveryService,
+            invitationService: invitationService
+        )
+        let factory = CloudKitPinboardShareRecordFactory()
+        let ownerIdentity = keyExchangeService.makeIdentity()
+        let participantIdentity = keyExchangeService.makeIdentity()
+        let otherIdentity = keyExchangeService.makeIdentity()
+        let keyExchange = try keyExchangeService.setupOwnerKeyExchange(
+            ownerIdentity: ownerIdentity
+        ).state
+        let recipientIdentity = try invitationService.publicIdentity(
+            displayName: "Collaborator",
+            identity: participantIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let otherRecipientIdentity = try invitationService.publicIdentity(
+            displayName: "Other",
+            identity: otherIdentity,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let package = try invitationService.makeInvitationPackage(
+            pinboardID: UUID(),
+            participantID: UUID(),
+            permission: .canEdit,
+            ownerIdentity: ownerIdentity,
+            ownerDisplayName: "Owner Mac",
+            recipientIdentity: recipientIdentity,
+            keyExchange: keyExchange,
+            createdAt: Date(timeIntervalSince1970: 2)
+        )
+
+        store.configureCloudKitSync(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            capabilityConfigured: true
+        )
+        store.setSharedPinboardsEnabled(true)
+        _ = try await deliveryService.sendInvitation(package)
+
+        let ignoredResult = try await handler.handleInvitationSubscription(
+            subscriptionID: try factory.makeInvitationSubscriptionID(
+                recipientPublicKeyFingerprint: otherRecipientIdentity.publicKeyFingerprint
+            ),
+            recipientIdentity: participantIdentity,
+            displayName: "Collaborator",
+            store: store,
+            receivedAt: Date(timeIntervalSince1970: 3)
+        )
+        XCTAssertNil(ignoredResult)
+        XCTAssertTrue(store.snapshot.pinboardInvitationInbox.entries.isEmpty)
+
+        let result = try await handler.handleInvitationSubscription(
+            subscriptionID: try factory.makeInvitationSubscriptionID(
+                recipientPublicKeyFingerprint: recipientIdentity.publicKeyFingerprint
+            ),
+            recipientIdentity: participantIdentity,
+            displayName: "Collaborator",
+            store: store,
+            receivedAt: Date(timeIntervalSince1970: 4)
+        )
+
+        XCTAssertEqual(result?.fetchedPackageCount, 1)
+        XCTAssertEqual(result?.savedEntries.map(\.id), [package.id])
+        XCTAssertEqual(store.snapshot.pinboardInvitationInbox.pendingEntries.map(\.id), [package.id])
+    }
+
+    func testCloudKitPinboardShareInvitationNotificationRouteRejectsMalformedSubscriptionID() throws {
+        let factory = CloudKitPinboardShareRecordFactory()
+
+        XCTAssertThrowsError(
+            try factory.makeInvitationNotificationRoute(subscriptionID: "OtherSubscription.abc")
+        )
+        XCTAssertThrowsError(
+            try factory.makeInvitationNotificationRoute(
+                subscriptionID: CloudKitPinboardShareRecordFactory.invitationSubscriptionIDPrefix
+            )
+        )
+    }
+    #endif
+
+    func testPasteStackCollectsCopiesAndPastesTopToBottom() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let first = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
+        )
+        let second = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "second")
+        )
+
+        store.startPasteStack()
+        store.addCapturedItem(first)
+        store.addCapturedItem(second)
+
+        XCTAssertEqual(store.pasteStackItems.map(\.title), ["First", "Second"])
+        XCTAssertEqual(store.pasteNextStackItem()?.title, "First")
+        XCTAssertEqual(store.pasteNextStackItem()?.title, "Second")
+        XCTAssertTrue(store.pasteStackItems.isEmpty)
+    }
+
+    func testPasteStackCanReversePasteDirection() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startPasteStack()
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "second")
+        ))
+
+        store.reversePasteStackDirection()
+
+        XCTAssertEqual(store.pasteStackItemsInPasteOrder.map(\.title), ["Second", "First"])
+        XCTAssertEqual(store.pasteNextStackItem()?.title, "Second")
+        XCTAssertEqual(store.pasteNextStackItem()?.title, "First")
+    }
+
+    func testPasteStackPreviewTracksDirectionManualRemovalAndAutomaticRemoval() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startPasteStack()
+        let first = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "second")
+        ))
+        let third = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Third",
+            payload: ClipboardPayload(text: "third")
+        ))
+
+        XCTAssertEqual(store.pasteStackPreview?.rows.map(\.title), ["First", "Second", "Third"])
+        XCTAssertEqual(store.pasteStackPreview?.nextRow?.title, "First")
+        XCTAssertEqual(store.pasteStackPreview?.direction, .topToBottom)
+        XCTAssertEqual(store.pasteStackPreview?.isCollecting, true)
+
+        store.reversePasteStackDirection()
+        XCTAssertEqual(store.pasteStackPreview?.rows.map(\.title), ["Third", "Second", "First"])
+        XCTAssertEqual(store.pasteStackPreview?.nextRow?.title, "Third")
+
+        store.removeStackItem(third.id)
+        XCTAssertEqual(store.pasteStackPreview?.rows.map(\.title), ["Second", "First"])
+        XCTAssertEqual(store.pasteNextStackItem()?.title, "Second")
+        XCTAssertEqual(store.pasteStackPreview?.rows.map(\.title), ["First"])
+
+        store.removeStackItem(first.id)
+        XCTAssertNil(store.pasteStackPreview)
+    }
+
+    func testPasteStackIsTemporaryWhileHistoryPersistsEncrypted() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startPasteStack()
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Temporary stack item",
+            payload: ClipboardPayload(text: "stored in history but not stack")
+        ))
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertTrue(reloaded.pasteStackItems.isEmpty)
+        XCTAssertEqual(reloaded.snapshot.items.map(\.title), ["Temporary stack item"])
+    }
+
+    func testStructuredFiltersComposeWithKeywordSearch() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Work Mac",
+            contentType: .url,
+            title: "Launch plan",
+            payload: ClipboardPayload(urlString: "https://example.com/launch")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Work Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: Data([0x01]), ocrText: "Launch checklist")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Home Mac",
+            contentType: .text,
+            title: "Launch notes",
+            payload: ClipboardPayload(text: "Launch checklist")
+        ))
+
+        store.searchQuery = "launch"
+        store.contentTypeFilter = .image
+        store.sourceAppFilter = "Preview"
+        store.deviceFilter = "Work Mac"
+
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Screenshot"])
+    }
+
+    func testFilterSuggestionsMatchAvailableStructuredFilters() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Work Mac",
+            contentType: .url,
+            title: "Launch plan",
+            payload: ClipboardPayload(urlString: "https://example.com/launch")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Design iPad",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: Data([0x01]), ocrText: "Launch checklist")
+        ))
+
+        XCTAssertTrue(store.filterSuggestions(matching: "saf", limit: 20).contains {
+            $0.kind == .sourceApp && $0.value == "Safari"
+        })
+        XCTAssertTrue(store.filterSuggestions(matching: "image", limit: 20).contains {
+            $0.kind == .contentType && $0.value == ClipboardContentType.image.rawValue
+        })
+        XCTAssertTrue(store.filterSuggestions(matching: "ipad", limit: 20).contains {
+            $0.kind == .device && $0.value == "Design iPad"
+        })
+        XCTAssertTrue(store.filterSuggestions(matching: "last", limit: 20).contains {
+            $0.kind == .date && $0.value == ClipboardDateFilter.last7Days.rawValue
+        })
+
+        store.sourceAppFilter = "Safari"
+        XCTAssertFalse(store.filterSuggestions(matching: "saf", limit: 20).contains {
+            $0.kind == .sourceApp && $0.value == "Safari"
+        })
+    }
+
+    func testApplyingFilterSuggestionAndClearingSingleFilterUpdatesVisibleResults() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Work Mac",
+            contentType: .url,
+            title: "Launch plan",
+            payload: ClipboardPayload(urlString: "https://example.com/launch")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Work Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: Data([0x01]), ocrText: "Launch checklist")
+        ))
+
+        let imageSuggestion = try XCTUnwrap(store.filterSuggestions(matching: "image", limit: 20).first {
+            $0.kind == .contentType && $0.value == ClipboardContentType.image.rawValue
+        })
+        store.applyFilterSuggestion(imageSuggestion)
+
+        XCTAssertEqual(store.contentTypeFilter, .image)
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Screenshot"])
+        XCTAssertEqual(store.activeFilterSummaries.map(\.id), ["contentType:image"])
+
+        store.clearFilter(.contentType)
+
+        XCTAssertNil(store.contentTypeFilter)
+        XCTAssertTrue(store.activeFilterSummaries.isEmpty)
+        XCTAssertEqual(Set(store.filteredItems.map(\.title)), Set(["Launch plan", "Screenshot"]))
+    }
+
+    func testDateFilterRestrictsOldItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let now = Date()
+        let oldDate = Calendar.current.date(byAdding: .day, value: -10, to: now)!
+
+        store.addCapturedItem(ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Old",
+            payload: ClipboardPayload(text: "old")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            createdAt: now,
+            updatedAt: now,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Fresh",
+            payload: ClipboardPayload(text: "fresh")
+        ))
+
+        store.dateFilter = .last7Days
+
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Fresh"])
+    }
+
+    func testActiveFilterSummariesExposeAllStructuredFiltersAndClearTogether() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Work Mac",
+            contentType: .url,
+            title: "Link",
+            payload: ClipboardPayload(urlString: "https://example.com")
+        ))
+        store.contentTypeFilter = .url
+        store.sourceAppFilter = "Safari"
+        store.deviceFilter = "Work Mac"
+        store.dateFilter = .today
+
+        XCTAssertTrue(store.hasActiveFilters)
+        XCTAssertEqual(
+            Set(store.activeFilterSummaries.map(\.kind)),
+            Set([.contentType, .sourceApp, .device, .date])
+        )
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Link"])
+
+        store.clearFilters()
+
+        XCTAssertFalse(store.hasActiveFilters)
+        XCTAssertTrue(store.activeFilterSummaries.isEmpty)
+        XCTAssertNil(store.contentTypeFilter)
+        XCTAssertNil(store.sourceAppFilter)
+        XCTAssertNil(store.deviceFilter)
+        XCTAssertEqual(store.dateFilter, .any)
+    }
+
+    func testClearFiltersRestoresAllItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Work Mac",
+            contentType: .url,
+            title: "Link",
+            payload: ClipboardPayload(urlString: "https://example.com")
+        ))
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Work Mac",
+            contentType: .text,
+            title: "Text",
+            payload: ClipboardPayload(text: "note")
+        ))
+
+        store.contentTypeFilter = .url
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Link"])
+
+        store.clearFilters()
+        XCTAssertEqual(Set(store.filteredItems.map(\.title)), Set(["Link", "Text"]))
+    }
+}
+
+final class StoreHarness {
+    let directory: URL
+    let encryptionService: EncryptionService
+    let snapshotStore: EncryptedSnapshotStore
+
+    init() throws {
+        directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent("tmp", isDirectory: true)
+            .appendingPathComponent("PasteBuddyStoreTests-\(UUID().uuidString)", isDirectory: true)
+        encryptionService = EncryptionService(
+            service: "com.pastebuddy.store-tests",
+            account: UUID().uuidString,
+            keyID: "test-key"
+        )
+        snapshotStore = EncryptedSnapshotStore(
+            fileURL: directory.appendingPathComponent("clipboard.pbenc"),
+            encryptionService: encryptionService
+        )
+    }
+
+    func cleanup() {
+        try? encryptionService.deleteKeyForTesting()
+        try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+private struct FakeHistoryUnlockAuthenticator: HistoryUnlockAuthenticating {
+    var result: Bool
+
+    func authenticate(reason: String) async throws -> Bool {
+        result
+    }
+}
+
+private actor InMemoryPinboardShareInvitationTransport: PinboardShareInvitationTransport {
+    private var identitiesByFingerprint: [String: PinboardSharePublicIdentity] = [:]
+    private var packages: [PinboardShareInvitationPackage] = []
+
+    func publishIdentity(_ identity: PinboardSharePublicIdentity) async throws -> PinboardSharePublicIdentity {
+        identitiesByFingerprint[identity.publicKeyFingerprint] = identity
+        return identity
+    }
+
+    func saveInvitation(_ package: PinboardShareInvitationPackage) async throws -> PinboardShareInvitationPackage {
+        packages.removeAll { $0.id == package.id }
+        packages.append(package)
+        return package
+    }
+
+    func fetchInvitations(recipientPublicKeyFingerprint: String) async throws -> [PinboardShareInvitationPackage] {
+        packages
+            .filter { $0.recipientIdentity.publicKeyFingerprint == recipientPublicKeyFingerprint }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+}

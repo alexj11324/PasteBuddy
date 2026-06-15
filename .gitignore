@@ -1,0 +1,9 @@
+.build/
+dist/
+tmp/
+.DS_Store
+*.xcuserdata/
+*.xcuserstate
+*.ipa
+*.xcarchive
+*.xcdistributionlogs/

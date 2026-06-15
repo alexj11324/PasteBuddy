@@ -1,0 +1,132 @@
+name: Upload TestFlight
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: testflight-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  ASC_APP_ID: "6780560937"
+  ASC_TEAM_ID: "72UN4PF4BL"
+  GCP_PROJECT_ID: general-secrets-store
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/320884539284/locations/global/workloadIdentityPools/github-actions/providers/pastebuddy
+  GCP_SERVICE_ACCOUNT: pastebuddy-github-actions@general-secrets-store.iam.gserviceaccount.com
+  ASC_API_KEY_SECRET: asc-api-key-664UJQLMB2
+  IOS_PROJECT: PasteBuddyiOS.xcodeproj
+  IOS_SCHEME: PasteBuddyiOS
+  IOS_CONFIGURATION: Release
+
+jobs:
+  upload:
+    name: Build and Upload
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Restore App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          test -n "$ASC_KEY_ID"
+          mkdir -p "$RUNNER_TEMP/asc"
+          gcloud secrets versions access latest \
+            --secret="$ASC_API_KEY_SECRET" \
+            --project="$GCP_PROJECT_ID" \
+            --out-file="$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_API_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Resolve next App Store build number
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          build_number="$(ruby .github/scripts/next_app_store_build_number.rb)"
+          echo "PB_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "Using App Store build number $build_number"
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Archive iOS app
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -project "$IOS_PROJECT" \
+            -scheme "$IOS_SCHEME" \
+            -configuration "$IOS_CONFIGURATION" \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/PasteBuddyiOS.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_API_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CURRENT_PROJECT_VERSION="$PB_BUILD_NUMBER" \
+            archive
+
+      - name: Write export options
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>destination</key>
+              <string>upload</string>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>teamID</key>
+              <string>${ASC_TEAM_ID}</string>
+              <key>uploadSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Upload to App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/PasteBuddyiOS.xcarchive" \
+            -exportPath "$RUNNER_TEMP/TestFlightExport" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_API_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
