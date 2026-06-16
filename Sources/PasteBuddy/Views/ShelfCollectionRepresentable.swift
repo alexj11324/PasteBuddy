@@ -60,7 +60,6 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = true
         collectionView.backgroundColors = [.clear]
-        collectionView.enclosingScrollView?.drawsBackground = false
         collectionView.register(
             ShelfCollectionViewItem<Item, Content>.self,
             forItemWithIdentifier: ShelfCollectionViewItem<Item, Content>.reuseIdentifier
@@ -86,6 +85,9 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
         scrollView.postsBoundsChangedNotifications = true
+        scrollView.horizontalScrollElasticity = .automatic
+        scrollView.verticalScrollElasticity = .none
+        scrollView.usesPredominantAxisScrolling = false
 
         context.coordinator.collectionView = collectionView
         context.coordinator.parent = self
@@ -97,14 +99,21 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         context.coordinator.parent = self
 
         if let layout = context.coordinator.collectionView?.collectionViewLayout as? NSCollectionViewFlowLayout {
+            var shouldInvalidateLayout = false
             if layout.itemSize != itemSize {
                 layout.itemSize = itemSize
+                shouldInvalidateLayout = true
             }
             if layout.minimumInteritemSpacing != interitemSpacing {
                 layout.minimumInteritemSpacing = interitemSpacing
+                shouldInvalidateLayout = true
             }
             if layout.minimumLineSpacing != interitemSpacing {
                 layout.minimumLineSpacing = interitemSpacing
+                shouldInvalidateLayout = true
+            }
+            if shouldInvalidateLayout {
+                layout.invalidateLayout()
             }
         }
 
@@ -120,6 +129,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         private var previousItemIDs: [UUID] = []
         private var previousSelectedIDs: Set<UUID> = []
         private var previousContentRevision: Int?
+        private var indexByID: [UUID: Int] = [:]
 
         init(_ parent: ShelfCollectionRepresentable) {
             self.parent = parent
@@ -127,17 +137,29 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
         func syncData() {
             guard let collectionView else { return }
+
             let itemIDs = parent.items.map(\.id)
-            let selectedIDs = parent.selectedIDs.union(parent.primarySelectedID.map { Set([$0]) } ?? [])
-            if itemIDs != previousItemIDs || parent.contentRevision != previousContentRevision {
+            let selectedIDs = effectiveSelectedIDs
+            rebuildIndexIfNeeded(itemIDs: itemIDs)
+
+            if itemIDs != previousItemIDs {
                 collectionView.reloadData()
                 previousItemIDs = itemIDs
                 previousContentRevision = parent.contentRevision
-            } else if selectedIDs != previousSelectedIDs {
-                reconfigureVisibleItems(in: collectionView)
+                applySelection(to: collectionView, selectedIDs: selectedIDs)
+                previousSelectedIDs = selectedIDs
+                return
             }
-            applySelection(to: collectionView)
-            collectionView.collectionViewLayout?.invalidateLayout()
+
+            if parent.contentRevision != previousContentRevision {
+                reconfigureVisibleItems(in: collectionView)
+                previousContentRevision = parent.contentRevision
+            } else if selectedIDs != previousSelectedIDs {
+                let changedIDs = selectedIDs.symmetricDifference(previousSelectedIDs)
+                reconfigureVisibleItems(in: collectionView, limitedTo: changedIDs)
+            }
+
+            applySelection(to: collectionView, selectedIDs: selectedIDs)
             previousSelectedIDs = selectedIDs
         }
 
@@ -159,13 +181,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                 return collectionItem
             }
 
-            let isSelected = parent.selectedIDs.contains(representedItem.id) || parent.primarySelectedID == representedItem.id
-            shelfItem.configure(
-                item: representedItem,
-                isSelected: isSelected,
-                isSelectable: parent.isSelectable(representedItem),
-                content: parent.content
-            )
+            configure(shelfItem, with: representedItem)
             return shelfItem
         }
 
@@ -215,13 +231,14 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
         func handleMouseDownSelection(in collectionView: NSCollectionView, indexPath: IndexPath, event: NSEvent) {
             guard event.type == .leftMouseDown,
-                  !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.control),
+                  !normalizedModifierFlags(from: event).contains(.control),
                   let item = item(at: indexPath) else {
                 return
             }
 
             lastMouseDownSelectionID = item.id
-            collectionView.selectionIndexPaths = selectionIndexPaths(afterSelecting: indexPath, event: event)
+            let nextSelection = selectionIndexPaths(afterSelecting: indexPath, event: event)
+            setCollectionSelection(nextSelection, in: collectionView)
             parent.onSelect(item.id, normalizedModifierFlags(from: event))
         }
 
@@ -235,27 +252,50 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             return parent.isSelectable(item)
         }
 
-        private func applySelection(to collectionView: NSCollectionView) {
+        private var effectiveSelectedIDs: Set<UUID> {
             var selectedIDs = parent.selectedIDs
             if let primarySelectedID = parent.primarySelectedID {
                 selectedIDs.insert(primarySelectedID)
             }
+            return selectedIDs
+        }
+
+        private func rebuildIndexIfNeeded(itemIDs: [UUID]) {
+            guard itemIDs != previousItemIDs else { return }
+            indexByID = Dictionary(uniqueKeysWithValues: itemIDs.enumerated().map { ($0.element, $0.offset) })
+        }
+
+        private func configure(_ shelfItem: ShelfCollectionViewItem<Item, Content>, with representedItem: Item) {
+            let isSelected = parent.selectedIDs.contains(representedItem.id) || parent.primarySelectedID == representedItem.id
+            shelfItem.configure(
+                item: representedItem,
+                isSelected: isSelected,
+                isSelectable: parent.isSelectable(representedItem),
+                content: parent.content
+            )
+        }
+
+        private func applySelection(to collectionView: NSCollectionView, selectedIDs: Set<UUID>) {
             let selectedIndexPaths = indexPaths(for: selectedIDs)
             guard collectionView.selectionIndexPaths != selectedIndexPaths else { return }
-            collectionView.selectionIndexPaths = selectedIndexPaths
+            setCollectionSelection(selectedIndexPaths, in: collectionView)
+        }
+
+        private func setCollectionSelection(_ selection: Set<IndexPath>, in collectionView: NSCollectionView) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                context.allowsImplicitAnimation = false
+                collectionView.selectionIndexPaths = selection
+            }
         }
 
         private func selectionIndexPaths(afterSelecting indexPath: IndexPath, event: NSEvent) -> Set<IndexPath> {
             let flags = normalizedModifierFlags(from: event)
-            var selectedIDs = parent.selectedIDs
-            if let primarySelectedID = parent.primarySelectedID {
-                selectedIDs.insert(primarySelectedID)
-            }
-            let currentSelection = indexPaths(for: selectedIDs)
+            let currentSelection = indexPaths(for: effectiveSelectedIDs)
 
             if flags.contains(.shift),
                let primarySelectedID = parent.primarySelectedID,
-               let anchorIndex = parent.items.firstIndex(where: { $0.id == primarySelectedID }) {
+               let anchorIndex = indexByID[primarySelectedID] {
                 let bounds = min(anchorIndex, indexPath.item)...max(anchorIndex, indexPath.item)
                 return Set(bounds.map { IndexPath(item: $0, section: 0) })
             }
@@ -277,25 +317,21 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         }
 
         private func indexPaths(for ids: Set<UUID>) -> Set<IndexPath> {
-            Set(parent.items.enumerated().compactMap { index, item in
-                ids.contains(item.id) ? IndexPath(item: index, section: 0) : nil
+            Set(ids.compactMap { id in
+                guard let index = indexByID[id] else { return nil }
+                return IndexPath(item: index, section: 0)
             })
         }
 
-        private func reconfigureVisibleItems(in collectionView: NSCollectionView) {
+        private func reconfigureVisibleItems(in collectionView: NSCollectionView, limitedTo changedIDs: Set<UUID>? = nil) {
             for collectionItem in collectionView.visibleItems() {
                 guard let shelfItem = collectionItem as? ShelfCollectionViewItem<Item, Content>,
                       let id = collectionItem.representedObject as? UUID,
-                      let representedItem = parent.items.first(where: { $0.id == id }) else {
+                      changedIDs?.contains(id) ?? true,
+                      let representedItem = item(withID: id) else {
                     continue
                 }
-                let isSelected = parent.selectedIDs.contains(id) || parent.primarySelectedID == id
-                shelfItem.configure(
-                    item: representedItem,
-                    isSelected: isSelected,
-                    isSelectable: parent.isSelectable(representedItem),
-                    content: parent.content
-                )
+                configure(shelfItem, with: representedItem)
             }
         }
 
@@ -306,6 +342,13 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                 return nil
             }
             return parent.items[indexPath.item]
+        }
+
+        private func item(withID id: UUID) -> Item? {
+            guard let index = indexByID[id], index >= parent.items.startIndex, index < parent.items.endIndex else {
+                return nil
+            }
+            return parent.items[index]
         }
 
         private func firstDisplayOrderedID(in indexPaths: Set<IndexPath>) -> UUID? {
@@ -361,10 +404,6 @@ private final class ShelfCollectionView: NSCollectionView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -453,7 +492,7 @@ private final class ShelfCollectionViewItem<Item: Identifiable, Content: View>: 
         NSUserInterfaceItemIdentifier("ShelfCollectionViewItem-\(String(describing: Item.self))-\(String(describing: Content.self))")
     }
 
-    private var hostingView: ShelfCollectionHostingView?
+    private var hostingView: ShelfCollectionHostingView<Content>?
 
     override func loadView() {
         view = ShelfCollectionItemContainerView()
@@ -470,7 +509,7 @@ private final class ShelfCollectionViewItem<Item: Identifiable, Content: View>: 
             containerView.routesShelfMouseEvents = isSelectable
         }
 
-        let rootView = AnyView(content(item, isSelected))
+        let rootView = content(item, isSelected)
         if let hostingView {
             hostingView.rootView = rootView
             hostingView.routesShelfMouseEvents = isSelectable
@@ -516,7 +555,7 @@ private final class ShelfCollectionItemContainerView: NSView {
     }
 }
 
-private final class ShelfCollectionHostingView: NSHostingView<AnyView> {
+private final class ShelfCollectionHostingView<Content: View>: NSHostingView<Content> {
     var routesShelfMouseEvents = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
