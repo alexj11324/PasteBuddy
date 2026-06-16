@@ -1,5 +1,6 @@
 import AppKit
 import PasteBuddyCore
+import QuartzCore
 import SwiftUI
 
 private enum ClipboardShelfMetrics {
@@ -11,7 +12,7 @@ private enum ClipboardShelfMetrics {
     static let searchIdleWidth: CGFloat = 208
     static let searchFocusedWidth: CGFloat = 272
     static let searchFilteredWidth: CGFloat = 310
-    static let sourceAppSuggestionWidth: CGFloat = 304
+    static let sourceAppSuggestionWidth: CGFloat = 168
     static let shelfVerticalPadding: CGFloat = 6
     static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
     static let renderLimit = 200
@@ -50,7 +51,7 @@ private enum ClipboardShelfDisplayItem: Identifiable {
 }
 
 struct ClipboardShelfPanelView: View {
-    private static let basePasteSearchAnimation = Animation.smooth(duration: 0.36, extraBounce: 0.09)
+    private static let basePasteSearchAnimation = Animation.smooth(duration: 0.24, extraBounce: 0)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var store: PasteBuddyStore
@@ -60,8 +61,8 @@ struct ClipboardShelfPanelView: View {
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
-    @FocusState private var isSearchFocused: Bool
     @FocusState private var isShelfKeyboardFocused: Bool
+    @FocusState private var isSearchFocused: Bool
     @State private var isShowingNewTextItem = false
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
@@ -99,7 +100,7 @@ struct ClipboardShelfPanelView: View {
             Task { @MainActor in
                 await Task.yield()
                 await Task.yield()
-                isSearchFocused = true
+                setSearchFocused(true)
             }
         }
         .onDisappear {
@@ -163,14 +164,10 @@ struct ClipboardShelfPanelView: View {
                     }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 } label: {
-                    Image(systemName: "plus")
+                    ShelfToolbarCircleIcon(systemName: "plus")
                 }
                 .buttonStyle(.plain)
                 .labelStyle(.iconOnly)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.primary)
-                .frame(width: 34, height: 38)
-                .contentShape(Rectangle())
                 .help(localized("Add item or pinboard"))
 
                 Menu {
@@ -199,20 +196,15 @@ struct ClipboardShelfPanelView: View {
                     }
                     .disabled(!store.canUndoDelete)
                 } label: {
-                    Image(systemName: "ellipsis")
+                    ShelfToolbarCircleIcon(systemName: "ellipsis")
                 }
                 .buttonStyle(.plain)
                 .labelStyle(.iconOnly)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.primary)
-                .frame(width: 34, height: 38)
-                .contentShape(Rectangle())
                 .help(localized("More actions"))
             }
             .controlSize(.large)
             .animation(pasteSearchAnimation, value: isSearchRailPresented)
             .animation(pasteSearchAnimation, value: isSearchFocused)
-            .animation(pasteSearchAnimation, value: shouldShowSourceAppSuggestions)
             .animation(pasteSearchAnimation, value: store.sourceAppFilter)
             .animation(pasteSearchAnimation, value: selectedCount)
 
@@ -226,10 +218,6 @@ struct ClipboardShelfPanelView: View {
 
     private var searchControl: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .scaleEffect(isSearchFocused ? 1.04 : 1.0)
-
             if let sourceAppFilter = store.sourceAppFilter {
                 ShelfSourceAppToken(appName: sourceAppFilter) {
                     store.sourceAppFilter = nil
@@ -242,31 +230,61 @@ struct ClipboardShelfPanelView: View {
                 ))
             }
 
-            TextField("Search or @App", text: $store.searchQuery)
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isSearchFocused ? .primary : .secondary)
+                .accessibilityHidden(true)
+
+            TextField("", text: $store.searchQuery, prompt: Text(localized("Search or @App")))
                 .textFieldStyle(.plain)
+                .font(.system(size: 16))
                 .focused($isSearchFocused)
                 .frame(minWidth: 48)
                 .accessibilityIdentifier("clipboard-shelf-search-field")
+                .accessibilityLabel(localized("Search or @App"))
                 .onKeyPress(phases: .down) { keyPress in
                     handleShelfKeyPress(keyPress, allowsPreview: false)
                 }
                 .onSubmit {
                     pasteSelected(format: store.defaultPasteFormat)
                 }
+
+            if hasSearchText {
+                Button {
+                    store.searchQuery = ""
+                    refreshShelfItems()
+                    setSearchFocused(true)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .help(localized("Clear search"))
+                .accessibilityLabel(localized("Clear search"))
+                .transition(.scale(scale: 0.86).combined(with: .opacity))
+            }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, hasSearchText ? 8 : 12)
         .padding(.vertical, 8)
         .frame(width: searchControlWidth, height: 38)
+        .contentShape(Capsule())
+        .onTapGesture {
+            setSearchFocused(true)
+        }
         .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
+        .clipShape(Capsule())
         .overlay {
             Capsule()
                 .strokeBorder(
-                    isSearchFocused ? Color.accentColor.opacity(0.78) : .primary.opacity(0.08),
-                    lineWidth: isSearchFocused ? 2 : 1
+                    isSearchFocused ? Color.accentColor.opacity(0.70) : .primary.opacity(0.08),
+                    lineWidth: isSearchFocused ? 1.5 : 1
                 )
-                .opacity(isSearchRailPresented ? 1 : 0)
+                .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(isSearchFocused ? 0.12 : 0.06), radius: isSearchFocused ? 12 : 7, y: isSearchFocused ? 3 : 2)
+        .shadow(color: .black.opacity(isSearchFocused ? 0.11 : 0.06), radius: isSearchFocused ? 10 : 6, y: isSearchFocused ? 3 : 2)
         .background {
             SourceAppSuggestionPanelPresenter(
                 isPresented: shouldShowSourceAppSuggestions,
@@ -304,7 +322,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var sourceAppSuggestions: [String] {
-        store.sourceAppSuggestions(matching: store.searchQuery, limit: 5)
+        store.sourceAppSuggestions(matching: store.searchQuery, limit: 3)
     }
 
     private var shouldShowSourceAppSuggestions: Bool {
@@ -754,6 +772,18 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
+        if isFocused, self.isSearchFocused {
+            self.isSearchFocused = false
+            isShelfKeyboardFocused = true
+            Task { @MainActor in
+                await Task.yield()
+                withAnimation(pasteSearchAnimation) {
+                    self.isSearchFocused = true
+                    isShelfKeyboardFocused = false
+                }
+            }
+            return
+        }
         guard isSearchFocused != isFocused else { return }
         withAnimation(pasteSearchAnimation) {
             isSearchFocused = isFocused
@@ -827,6 +857,14 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func handleExitCommand() {
+        if isSearchFocused {
+            if !store.searchQuery.isEmpty {
+                store.searchQuery = ""
+                refreshShelfItems()
+            }
+            setSearchFocused(false)
+            return
+        }
         if shelfInteraction.previewedID != nil {
             shelfInteraction.previewedID = nil
             return
@@ -1684,6 +1722,31 @@ private struct ShelfSourceAppToken: View {
     }
 }
 
+private struct ShelfToolbarCircleIcon: View {
+    let systemName: String
+    @State private var isHovered = false
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(.primary)
+            .frame(width: 42, height: 38)
+            .background {
+                Circle()
+                    .fill(.quaternary.opacity(isHovered ? 0.95 : 0))
+                    .frame(width: 34, height: 34)
+            }
+            .overlay {
+                Circle()
+                    .strokeBorder(.primary.opacity(isHovered ? 0.08 : 0), lineWidth: 1)
+                    .frame(width: 34, height: 34)
+            }
+            .contentShape(Circle())
+            .onHover { isHovered = $0 }
+            .accessibilityHidden(true)
+    }
+}
+
 private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
     let isPresented: Bool
     let appNames: [String]
@@ -1715,22 +1778,18 @@ private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
         }
     }
 
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.closeImmediately()
+    }
+
     @MainActor
     final class Coordinator {
         private var panel: SourceAppSuggestionPanel?
-        private var hostingView: SourceAppSuggestionHostingView<AnyView>?
+        private var contentView: NativeSourceAppSuggestionView?
         private weak var parentWindow: NSWindow?
-
-        deinit {
-            let panel = panel
-            let parentWindow = parentWindow
-            Task { @MainActor in
-                if let panel {
-                    parentWindow?.removeChildWindow(panel)
-                    panel.orderOut(nil)
-                }
-            }
-        }
+        private var parentWindowObservers: [NSObjectProtocol] = []
+        private var isClosingPanel = false
+        private var panelAnimationGeneration = 0
 
         func update(
             anchorView: NSView,
@@ -1740,34 +1799,33 @@ private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
             width: CGFloat,
             onSelect: @escaping (String) -> Void
         ) {
-            guard isPresented, !appNames.isEmpty, let window = anchorView.window else {
-                close()
+            guard isPresented, !appNames.isEmpty, let window = anchorView.window, window.isVisible else {
+                close(animated: true)
                 return
             }
 
+            let contentSize = NSSize(width: width, height: SourceAppSuggestionMetrics.panelHeight(for: appNames.count))
             let panel = suggestionPanel(parentWindow: window)
-            let rootView = AnyView(
-                ShelfSourceAppSuggestionStrip(appNames: appNames, query: query, onSelect: onSelect)
-                    .frame(width: width, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            )
-
-            if let hostingView {
-                hostingView.rootView = rootView
+            let wasVisible = panel.isVisible
+            isClosingPanel = false
+            panelAnimationGeneration += 1
+            if let contentView {
+                contentView.configure(appNames: appNames, query: query, onSelect: onSelect)
             } else {
-                let hostingView = SourceAppSuggestionHostingView(rootView: rootView)
-                hostingView.configureForTransparentPanel()
-                self.hostingView = hostingView
-                panel.contentView = hostingView
+                let contentView = NativeSourceAppSuggestionView(frame: NSRect(origin: .zero, size: contentSize))
+                contentView.configure(appNames: appNames, query: query, onSelect: onSelect)
+                self.contentView = contentView
+                panel.contentView = contentView
             }
 
-            hostingView?.layoutSubtreeIfNeeded()
-            let height = max(1, hostingView?.fittingSize.height ?? 1)
+            contentView?.frame = NSRect(origin: .zero, size: contentSize)
+            panel.setContentSize(contentSize)
+            let height = contentSize.height
             let anchorFrame = window.convertToScreen(anchorView.convert(anchorView.bounds, to: nil))
             let targetFrame = NSRect(
                 x: anchorFrame.minX,
-                y: anchorFrame.minY - height - 5,
-                width: width,
+                y: anchorFrame.minY - height - SourceAppSuggestionMetrics.searchGap,
+                width: contentSize.width,
                 height: height
             )
 
@@ -1775,13 +1833,14 @@ private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
                 panel.alphaValue = 1
                 panel.setFrame(targetFrame, display: true)
             } else {
-                panel.alphaValue = 0
+                panel.alphaValue = 1
                 panel.setFrame(targetFrame, display: false)
+                contentView?.prepareForPresentation(reduceMotion: shouldReduceMotion)
                 panel.orderFrontRegardless()
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.10
-                    panel.animator().alphaValue = 1
-                }
+                contentView?.animateIn(reduceMotion: shouldReduceMotion)
+            }
+            if wasVisible {
+                contentView?.resetPresentation()
             }
         }
 
@@ -1798,13 +1857,13 @@ private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
                 defer: false
             )
             panel.identifier = NSUserInterfaceItemIdentifier(ClipboardShelfWindowIdentifiers.sourceAppSuggestionPanel)
-            panel.isFloatingPanel = true
-            panel.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            panel.level = window.level
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.backgroundColor = .clear
             panel.isOpaque = false
             panel.hasShadow = true
             panel.hidesOnDeactivate = false
+            panel.isExcludedFromWindowsMenu = true
             panel.isMovable = false
             panel.ignoresMouseEvents = false
             panel.animationBehavior = .none
@@ -1815,138 +1874,367 @@ private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
 
         private func attach(_ panel: NSWindow, to window: NSWindow) {
             if parentWindow === window {
-                panel.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+                panel.level = window.level
                 return
             }
-            parentWindow?.removeChildWindow(panel)
-            window.addChildWindow(panel, ordered: .above)
+            if let parentWindow {
+                parentWindow.removeChildWindow(panel)
+            }
+            stopParentWindowMonitoring()
             parentWindow = window
-            panel.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+            window.addChildWindow(panel, ordered: .above)
+            panel.level = window.level
+            startParentWindowMonitoring(for: window)
         }
 
-        private func close() {
+        private func close(animated: Bool) {
             guard let panel, panel.isVisible else { return }
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.08
-                panel.animator().alphaValue = 0
-            } completionHandler: { [weak panel] in
-                Task { @MainActor in
-                    panel?.orderOut(nil)
+            guard animated, !shouldReduceMotion, !isClosingPanel, let contentView else {
+                isClosingPanel = false
+                contentView?.resetPresentation()
+                panel.orderOut(nil)
+                return
+            }
+            isClosingPanel = true
+            panelAnimationGeneration += 1
+            let animationGeneration = panelAnimationGeneration
+            contentView.animateOut(reduceMotion: shouldReduceMotion) { [weak self, weak panel] in
+                Task { @MainActor [weak self, weak panel] in
+                    guard let self, let panel, self.panel === panel, self.panelAnimationGeneration == animationGeneration else { return }
+                    self.isClosingPanel = false
+                    self.contentView?.resetPresentation()
+                    panel.orderOut(nil)
                 }
             }
         }
 
-        private func closeImmediately() {
+        func closeImmediately() {
+            stopParentWindowMonitoring()
+            isClosingPanel = false
+            panelAnimationGeneration += 1
             if let panel {
                 parentWindow?.removeChildWindow(panel)
+                contentView?.resetPresentation()
                 panel.orderOut(nil)
             }
             panel = nil
-            hostingView = nil
+            contentView = nil
+            parentWindow = nil
+        }
+
+        private func startParentWindowMonitoring(for window: NSWindow) {
+            parentWindowObservers = [
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.didResignKeyNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.close(animated: false)
+                    }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.willCloseNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.closeImmediately()
+                    }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.didChangeOcclusionStateNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self, weak window] _ in
+                    Task { @MainActor [weak self, weak window] in
+                        guard window?.isVisible != true else { return }
+                        self?.close(animated: false)
+                    }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: NSApplication.didResignActiveNotification,
+                    object: NSApp,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.close(animated: false)
+                    }
+                }
+            ]
+        }
+
+        private var shouldReduceMotion: Bool {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
+
+        private func stopParentWindowMonitoring() {
+            parentWindowObservers.forEach(NotificationCenter.default.removeObserver)
+            parentWindowObservers = []
         }
     }
 }
 
 private final class SourceAppSuggestionPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 
-private final class SourceAppSuggestionHostingView<Content: View>: NSHostingView<Content> {
-    func configureForTransparentPanel() {
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
+private enum SourceAppSuggestionMetrics {
+    static let rowHeight: CGFloat = 32
+    static let iconSize: CGFloat = 18
+    static let titleFontSize: CGFloat = 14
+    static let horizontalPadding: CGFloat = 10
+    static let titleSpacing: CGFloat = 8
+    static let verticalPadding: CGFloat = 5
+    static let searchGap: CGFloat = 2
+    static let entranceDuration: CFTimeInterval = 0.12
+    static let exitDuration: CFTimeInterval = 0.08
+
+    static func panelHeight(for rowCount: Int) -> CGFloat {
+        CGFloat(max(rowCount, 0)) * rowHeight + verticalPadding * 2
+    }
+}
+
+private final class NativeSourceAppSuggestionView: NSVisualEffectView {
+    private let stackView = NSStackView()
+    private var onSelect: ((String) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureView()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureView()
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
-}
 
-private struct ShelfSourceAppSuggestionStrip: View {
-    let appNames: [String]
-    let query: String
-    let onSelect: (String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(appNames.enumerated()), id: \.element) { index, appName in
-                Button {
-                    onSelect(appName)
-                } label: {
-                    HStack(spacing: 12) {
-                        SourceApplicationIconImage(appName: appName, size: 28)
-                        ShelfSourceAppSuggestionTitle(appName: appName, query: query)
-                            .font(.title3)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if index < appNames.count - 1 {
-                    Divider()
-                        .padding(.leading, 54)
-                        .opacity(0.34)
-                }
-            }
+    func prepareForPresentation(reduceMotion: Bool) {
+        guard !reduceMotion, let layer else {
+            resetPresentation()
+            return
         }
-        .padding(.vertical, 7)
-        .background {
-            suggestionShape
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.76))
-        }
-        .background(.regularMaterial, in: suggestionShape)
-        .overlay {
-            suggestionShape
-                .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
-        }
-        .compositingGroup()
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(NSLocalizedString("App suggestions", comment: ""))
+        layer.removeAllAnimations()
+        layer.opacity = 0
+        layer.transform = CATransform3DMakeTranslation(0, 5, 0)
     }
 
-    private var suggestionShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
+    func animateIn(reduceMotion: Bool) {
+        guard !reduceMotion, let layer else {
+            resetPresentation()
+            return
+        }
+        layer.removeAllAnimations()
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(SourceAppSuggestionMetrics.entranceDuration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.18, 0.86, 0.24, 1))
+        layer.opacity = 1
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    func animateOut(reduceMotion: Bool, completion: @escaping () -> Void) {
+        guard !reduceMotion, let layer else {
+            completion()
+            return
+        }
+        layer.removeAllAnimations()
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(SourceAppSuggestionMetrics.exitDuration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.32, 0, 0.67, 0))
+        CATransaction.setCompletionBlock(completion)
+        layer.opacity = 0
+        layer.transform = CATransform3DMakeTranslation(0, 3, 0)
+        CATransaction.commit()
+    }
+
+    func resetPresentation() {
+        guard let layer else { return }
+        layer.removeAllAnimations()
+        layer.opacity = 1
+        layer.transform = CATransform3DIdentity
+    }
+
+    func configure(appNames: [String], query: String, onSelect: @escaping (String) -> Void) {
+        self.onSelect = onSelect
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for appName in appNames {
+            let row = NativeSourceAppSuggestionRow(appName: appName, query: query)
+            row.target = self
+            row.action = #selector(selectSuggestion(_:))
+            row.heightAnchor.constraint(equalToConstant: SourceAppSuggestionMetrics.rowHeight).isActive = true
+            stackView.addArrangedSubview(row)
+        }
+    }
+
+    private func configureView() {
+        material = .popover
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+        layer?.borderWidth = 1
+
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.distribution = .fill
+        stackView.spacing = 0
+        stackView.edgeInsets = NSEdgeInsets(
+            top: SourceAppSuggestionMetrics.verticalPadding,
+            left: 0,
+            bottom: SourceAppSuggestionMetrics.verticalPadding,
+            right: 0
+        )
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        setAccessibilityLabel(NSLocalizedString("App suggestions", comment: ""))
+    }
+
+    @objc private func selectSuggestion(_ sender: NativeSourceAppSuggestionRow) {
+        onSelect?(sender.appName)
     }
 }
 
-private struct ShelfSourceAppSuggestionTitle: View {
+private final class NativeSourceAppSuggestionRow: NSControl {
     let appName: String
-    let query: String
-
-    var body: some View {
-        if let match = prefixMatch {
-            HStack(spacing: 0) {
-                Text(match.prefix)
-                    .foregroundStyle(.primary)
-                Text(match.suffix)
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            Text(appName)
-                .foregroundStyle(.primary)
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var isHoverHighlighted = false {
+        didSet {
+            needsDisplay = true
         }
     }
 
-    private var prefixMatch: (prefix: String, suffix: String)? {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedQuery = trimmedQuery.hasPrefix("@") ? String(trimmedQuery.dropFirst()) : trimmedQuery
+    init(appName: String, query: String) {
+        self.appName = appName
+        super.init(frame: .zero)
+        configureView(query: query)
+    }
 
+    required init?(coder: NSCoder) {
+        self.appName = ""
+        super.init(coder: coder)
+        configureView(query: "")
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        trackingArea = area
+        addTrackingArea(area)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHoverHighlighted = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHoverHighlighted = false
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        sendAction(action, to: target)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard isHoverHighlighted else { return }
+        NSColor.selectedContentBackgroundColor.withAlphaComponent(0.14).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 7, dy: 3), xRadius: 8, yRadius: 8).fill()
+    }
+
+    private func configureView(query: String) {
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        iconView.image = SourceApplicationIconResolver.icon(forApplicationName: appName)
+            ?? SourceApplicationIconResolver.genericApplicationIcon()
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.attributedStringValue = title(for: appName, query: query)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SourceAppSuggestionMetrics.horizontalPadding),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: SourceAppSuggestionMetrics.iconSize),
+            iconView.heightAnchor.constraint(equalToConstant: SourceAppSuggestionMetrics.iconSize),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: SourceAppSuggestionMetrics.titleSpacing),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -SourceAppSuggestionMetrics.horizontalPadding),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+
+        setAccessibilityLabel(appName)
+    }
+
+    private func title(for appName: String, query: String) -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: SourceAppSuggestionMetrics.titleFontSize)
+        let result = NSMutableAttributedString(
+            string: appName,
+            attributes: [
+                .font: font,
+                .foregroundColor: NSColor.labelColor
+            ]
+        )
+        let normalizedQuery = normalizedSuggestionQuery(query)
         guard !normalizedQuery.isEmpty,
               let range = appName.range(
                 of: normalizedQuery,
                 options: [.caseInsensitive, .diacriticInsensitive, .anchored]
               ) else {
-            return nil
+            return result
         }
+        let suffixRange = NSRange(range.upperBound..., in: appName)
+        result.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: suffixRange)
+        return result
+    }
 
-        return (
-            String(appName[range]),
-            String(appName[range.upperBound...])
-        )
+    private func normalizedSuggestionQuery(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
     }
 }
 
@@ -2241,6 +2529,7 @@ private extension View {
                 .overlay {
                     if showsStroke {
                         shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
+                            .allowsHitTesting(false)
                     }
                 }
         } else {
@@ -2252,6 +2541,7 @@ private extension View {
                 .overlay {
                     if showsStroke {
                         shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
+                            .allowsHitTesting(false)
                     }
                 }
         }
@@ -2264,6 +2554,7 @@ private extension View {
             .overlay {
                 if showsStroke {
                     shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
+                        .allowsHitTesting(false)
                 }
             }
         #endif
