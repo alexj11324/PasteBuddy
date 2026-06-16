@@ -10,6 +10,10 @@ struct SettingsView: View {
     @State private var newCaptureRuleContentType: ClipboardContentType?
     @State private var destructiveConfirmation: SettingsDestructiveAction?
 
+    private var runtimeIdentity: PasteBuddyRuntimeIdentity {
+        PasteBuddyRuntimeIdentityService.current
+    }
+
     var body: some View {
         TabView {
             Form {
@@ -812,6 +816,35 @@ struct SettingsView: View {
                     AccessibilityPermissionService.requestTrustPrompt()
                 }
 
+                LabeledContent("Stable Launch Path") {
+                    Text(runtimeIdentity.isRunningFromStablePath ? "Matched" : "Not matched")
+                        .foregroundStyle(runtimeIdentity.isRunningFromStablePath ? .green : .orange)
+                }
+
+                LabeledContent("Bundle Identifier") {
+                    diagnosticText(runtimeIdentity.bundleIdentifier)
+                }
+
+                LabeledContent("Bundle Path") {
+                    diagnosticText(runtimeIdentity.bundlePath)
+                }
+
+                LabeledContent("Executable Path") {
+                    diagnosticText(runtimeIdentity.executablePath)
+                }
+
+                LabeledContent("Expected App Path") {
+                    diagnosticText(runtimeIdentity.stableAppPath)
+                }
+
+                LabeledContent("Signing Channel") {
+                    diagnosticText(runtimeIdentity.signingChannel)
+                }
+
+                LabeledContent("Signing Identity") {
+                    diagnosticText(runtimeIdentity.codeSigningIdentity)
+                }
+
                 if let result = store.lastDirectPasteResult {
                     LabeledContent("Last Direct Paste") {
                         VStack(alignment: .trailing, spacing: 4) {
@@ -908,6 +941,12 @@ struct SettingsView: View {
                 }
             }
         )
+    }
+
+    private func diagnosticText(_ value: String) -> some View {
+        Text(value)
+            .font(.caption.monospaced())
+            .textSelection(.enabled)
     }
 
     private func performDestructiveAction(_ action: SettingsDestructiveAction) {

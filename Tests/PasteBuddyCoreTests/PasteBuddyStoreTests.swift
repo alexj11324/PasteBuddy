@@ -3732,6 +3732,14 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
         XCTAssertEqual(store.mainListItemsSnapshot.count, 125)
         XCTAssertEqual(store.filteredItems.count, 100)
+
+        let beyondRepositoryPageItem = items[124]
+        XCTAssertFalse(store.filteredItems.contains(where: { $0.id == beyondRepositoryPageItem.id }))
+
+        store.setSelectedItemIDs([beyondRepositoryPageItem.id])
+
+        XCTAssertEqual(store.selectedItemID, beyondRepositoryPageItem.id)
+        XCTAssertEqual(store.selectedItemsInDisplayOrder.map(\.id), [beyondRepositoryPageItem.id])
     }
 
     func testQuickPasteKeepsOneThroughNineLimitWithRepositoryBackedHistory() throws {

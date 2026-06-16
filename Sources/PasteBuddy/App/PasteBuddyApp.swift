@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import PasteBuddyCore
 import SwiftUI
 
@@ -33,6 +34,7 @@ struct PasteBuddyApp: App {
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
 
     init() {
+        Self.printRuntimeDiagnosticsIfNeeded()
         #if canImport(AppIntents)
         PasteBuddyAppShortcuts.updateAppShortcutParameters()
         #endif
@@ -526,8 +528,7 @@ struct PasteBuddyApp: App {
             detail: "trusted=\(isAccessibilityTrusted)"
         )
         guard isAccessibilityTrusted else {
-            PasteBuddyDiagnostics.record(.directPaste, "accessibilityPromptRequested")
-            _ = AccessibilityPermissionService.requestTrustPrompt()
+            PasteBuddyDiagnostics.record(.directPaste, "accessibilityMissing")
             let result = await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
             PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
             return result
@@ -581,8 +582,7 @@ struct PasteBuddyApp: App {
             detail: "trusted=\(isAccessibilityTrusted)"
         )
         guard isAccessibilityTrusted else {
-            PasteBuddyDiagnostics.record(.directPaste, "accessibilityPromptRequested")
-            _ = AccessibilityPermissionService.requestTrustPrompt()
+            PasteBuddyDiagnostics.record(.directPaste, "accessibilityMissing")
             let result = await PasteboardWriter.pasteToFrontmostAppAsync(items, format: format)
             PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
             return result
@@ -617,6 +617,23 @@ struct PasteBuddyApp: App {
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
         return result
+    }
+
+    private static func printRuntimeDiagnosticsIfNeeded() {
+        guard CommandLine.arguments.contains("--print-runtime-diagnostics") else {
+            return
+        }
+
+        let identity = PasteBuddyRuntimeIdentityService.current
+        print("accessibilityTrusted=\(AccessibilityPermissionService.isTrusted)")
+        print("stableLaunchPathMatched=\(identity.isRunningFromStablePath)")
+        print("bundleIdentifier=\(identity.bundleIdentifier)")
+        print("bundlePath=\(identity.bundlePath)")
+        print("executablePath=\(identity.executablePath)")
+        print("expectedAppPath=\(identity.stableAppPath)")
+        print("signingChannel=\(identity.signingChannel)")
+        print("signingIdentity=\(identity.codeSigningIdentity)")
+        Darwin.exit(EXIT_SUCCESS)
     }
 }
 

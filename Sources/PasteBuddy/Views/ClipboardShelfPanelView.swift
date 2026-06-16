@@ -9,12 +9,18 @@ private enum ClipboardShelfMetrics {
     static let cardHeaderHeight: CGFloat = 58
     static let cardPreviewHeight: CGFloat = 126
     static let cardCornerRadius: CGFloat = 17
+    static let searchIdleWidth: CGFloat = 208
+    static let searchFocusedWidth: CGFloat = 272
+    static let searchFilteredWidth: CGFloat = 310
+    static let sourceAppSuggestionWidth: CGFloat = 360
     static let shelfVerticalPadding: CGFloat = 6
     static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
     static let renderLimit = 200
 }
 
 struct ClipboardShelfPanelView: View {
+    private static let pasteSearchAnimation = Animation.smooth(duration: 0.36, extraBounce: 0.09)
+
     @Bindable var store: PasteBuddyStore
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
@@ -30,7 +36,9 @@ struct ClipboardShelfPanelView: View {
     @State private var selectedItemID: UUID?
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectionSyncTask: Task<Void, Never>?
+    @State private var isShelfSelectionUserOwned = false
     @State private var previewedItemID: UUID?
+    @State private var isSearchRailPresented = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -45,11 +53,19 @@ struct ClipboardShelfPanelView: View {
         .background(Color.clear)
         .onAppear {
             refreshShelfItems()
-            isSearchFocused = true
+            isSearchRailPresented = false
+            Task { @MainActor in
+                await Task.yield()
+                withAnimation(Self.pasteSearchAnimation) {
+                    isSearchRailPresented = true
+                    isSearchFocused = true
+                }
+            }
         }
         .onDisappear {
             selectionSyncTask?.cancel()
             selectionSyncTask = nil
+            isSearchRailPresented = false
         }
         .onChange(of: store.presentationRevision) {
             refreshShelfItems()
@@ -83,9 +99,15 @@ struct ClipboardShelfPanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 searchControl
+                    .layoutPriority(3)
+                    .zIndex(20)
+
+                sourceAppSuggestionRail
+                    .layoutPriority(2)
                     .zIndex(20)
 
                 collectionStrip
+                    .layoutPriority(1)
 
                 if selectedCount > 1 {
                     ShelfSelectedCountChip(count: selectedCount)
@@ -154,68 +176,109 @@ struct ClipboardShelfPanelView: View {
                 .help(localized("More actions"))
             }
             .controlSize(.large)
+            .animation(Self.pasteSearchAnimation, value: isSearchRailPresented)
+            .animation(Self.pasteSearchAnimation, value: isSearchFocused)
+            .animation(Self.pasteSearchAnimation, value: shouldShowSourceAppSuggestions)
+            .animation(Self.pasteSearchAnimation, value: store.sourceAppFilter)
+            .animation(Self.pasteSearchAnimation, value: selectedCount)
 
             if !visibleActiveFilterSummaries.isEmpty {
                 activeFilterStrip
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .animation(Self.pasteSearchAnimation, value: visibleActiveFilterSummaries.count)
     }
 
     private var searchControl: some View {
-        ZStack(alignment: .topLeading) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .scaleEffect(isSearchFocused ? 1.04 : 1.0)
 
-                if let sourceAppFilter = store.sourceAppFilter {
-                    ShelfSourceAppToken(appName: sourceAppFilter) {
-                        store.sourceAppFilter = nil
-                        refreshShelfItems()
-                        isSearchFocused = true
-                    }
-                }
-
-                TextField("Search or @App", text: $store.searchQuery)
-                    .textFieldStyle(.plain)
-                    .focused($isSearchFocused)
-                    .frame(minWidth: 48)
-                    .onSubmit {
-                        pasteSelected(format: store.defaultPasteFormat)
-                    }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(width: searchControlWidth, height: 38)
-            .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
-
-            if shouldShowSourceAppSuggestions {
-                ShelfSourceAppSuggestionPopover(appNames: sourceAppSuggestions) { appName in
-                    store.applySourceAppSuggestion(appName)
+            if let sourceAppFilter = store.sourceAppFilter {
+                ShelfSourceAppToken(appName: sourceAppFilter) {
+                    store.sourceAppFilter = nil
                     refreshShelfItems()
-                    isSearchFocused = true
+                    setSearchFocused(true)
                 }
-                .frame(width: max(searchControlWidth, 250))
-                .offset(y: 44)
-                .zIndex(50)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.86, anchor: .leading).combined(with: .opacity),
+                    removal: .scale(scale: 0.92, anchor: .leading).combined(with: .opacity)
+                ))
             }
+
+            TextField("Search or @App", text: $store.searchQuery)
+                .textFieldStyle(.plain)
+                .focused($isSearchFocused)
+                .frame(minWidth: 48)
+                .onSubmit {
+                    pasteSelected(format: store.defaultPasteFormat)
+                }
         }
-        .frame(width: searchControlWidth, height: searchControlHeight, alignment: .topLeading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(width: searchControlWidth, height: 38)
+        .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
+        .overlay {
+            Capsule()
+                .strokeBorder(.primary.opacity(isSearchFocused ? 0.18 : 0.08), lineWidth: 1)
+                .opacity(isSearchRailPresented ? 1 : 0)
+        }
+        .shadow(color: .black.opacity(isSearchFocused ? 0.12 : 0.06), radius: isSearchFocused ? 12 : 7, y: isSearchFocused ? 3 : 2)
+        .scaleEffect(isSearchRailPresented ? 1 : 0.93, anchor: .leading)
+        .offset(x: isSearchRailPresented ? 0 : -14, y: isSearchRailPresented ? 0 : 4)
+        .opacity(isSearchRailPresented ? 1 : 0)
+        .animation(Self.pasteSearchAnimation, value: searchControlWidth)
+        .animation(Self.pasteSearchAnimation, value: isSearchRailPresented)
+        .animation(Self.pasteSearchAnimation, value: isSearchFocused)
+        .animation(Self.pasteSearchAnimation, value: store.sourceAppFilter)
     }
 
     private var searchControlWidth: CGFloat {
-        if store.sourceAppFilter != nil {
-            return 300
+        guard isSearchRailPresented else {
+            return ClipboardShelfMetrics.searchIdleWidth
         }
-        return isSearchFocused || !store.searchQuery.isEmpty ? 240 : 210
+        if store.sourceAppFilter != nil {
+            return ClipboardShelfMetrics.searchFilteredWidth
+        }
+        if isSearchFocused || hasSearchText {
+            return ClipboardShelfMetrics.searchFocusedWidth
+        }
+        return ClipboardShelfMetrics.searchIdleWidth
     }
 
-    private var searchControlHeight: CGFloat {
-        guard shouldShowSourceAppSuggestions else { return 38 }
-        return 50 + CGFloat(sourceAppSuggestions.count) * 38
+    private var hasSearchText: Bool {
+        !store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var sourceAppSuggestions: [String] {
         store.sourceAppSuggestions(matching: store.searchQuery, limit: 5)
+    }
+
+    private var sourceAppSuggestionStrip: some View {
+        ShelfSourceAppSuggestionStrip(appNames: sourceAppSuggestions) { appName in
+            store.applySourceAppSuggestion(appName)
+            refreshShelfItems()
+            setSearchFocused(true)
+        }
+        .frame(maxWidth: 360)
+    }
+
+    private var sourceAppSuggestionRail: some View {
+        sourceAppSuggestionStrip
+            .frame(width: sourceAppSuggestionRailWidth, height: 38, alignment: .leading)
+            .opacity(shouldShowSourceAppSuggestions ? 1 : 0)
+            .scaleEffect(shouldShowSourceAppSuggestions ? 1 : 0.96, anchor: .leading)
+            .clipped()
+            .allowsHitTesting(shouldShowSourceAppSuggestions)
+            .accessibilityHidden(!shouldShowSourceAppSuggestions)
+            .animation(Self.pasteSearchAnimation, value: sourceAppSuggestionRailWidth)
+            .animation(Self.pasteSearchAnimation, value: shouldShowSourceAppSuggestions)
+    }
+
+    private var sourceAppSuggestionRailWidth: CGFloat {
+        shouldShowSourceAppSuggestions ? ClipboardShelfMetrics.sourceAppSuggestionWidth : 0
     }
 
     private var shouldShowSourceAppSuggestions: Bool {
@@ -354,7 +417,7 @@ struct ClipboardShelfPanelView: View {
         let pinboards = store.snapshot.pinboards
         let defaultPasteFormat = store.defaultPasteFormat
 
-        return HiddenScrollerHorizontalScrollView {
+        return ScrollView(.horizontal) {
             LazyHStack(alignment: .bottom, spacing: 20) {
                 if isShowingLaunchAtLoginPrompt {
                     LaunchAtLoginShelfCard(store: store) {
@@ -377,8 +440,8 @@ struct ClipboardShelfPanelView: View {
                             isSelected: currentSelectedItemIDs.contains(item.id) || currentSelectedItemID == item.id,
                             defaultPasteFormat: defaultPasteFormat,
                             pinboards: pinboards,
-                            onSelect: {
-                                selectItem(item)
+                            onSelect: { event in
+                                selectItem(item, event: event)
                             },
                             onPaste: { format in
                                 pasteItem(item, format: format)
@@ -421,6 +484,10 @@ struct ClipboardShelfPanelView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
         }
+        .scrollIndicators(.hidden)
+        .overlay {
+            ShelfHorizontalWheelRedirector()
+        }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
     }
 
@@ -445,7 +512,7 @@ struct ClipboardShelfPanelView: View {
             }
 
             Button("Focus Search") {
-                isSearchFocused = true
+                setSearchFocused(true)
             }
             .keyboardShortcut("f", modifiers: [.command])
         }
@@ -472,10 +539,10 @@ struct ClipboardShelfPanelView: View {
     private func moveSelection(_ direction: MoveCommandDirection) {
         switch direction {
         case .left, .up:
-            isSearchFocused = false
+            setSearchFocused(false)
             selectOffset(-1)
         case .right, .down:
-            isSearchFocused = false
+            setSearchFocused(false)
             selectOffset(1)
         @unknown default:
             break
@@ -512,10 +579,12 @@ struct ClipboardShelfPanelView: View {
         refreshShelfItems()
     }
 
-    private func selectItem(_ item: ClipboardItem) {
-        isSearchFocused = false
+    private func selectItem(_ item: ClipboardItem, event: NSEvent) {
+        isShelfSelectionUserOwned = true
+        deferSearchFocusClearingAfterSelection()
+
         let items = renderedShelfItems
-        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if flags.contains(.shift),
            let anchorID = selectionAnchorID ?? selectedItemID,
@@ -536,6 +605,11 @@ struct ClipboardShelfPanelView: View {
                 ids.insert(item.id)
             }
             setSelectedItemIDs(ids)
+            selectionAnchorID = item.id
+            return
+        }
+
+        if selectedItemIDs.count > 1, selectedItemIDs.contains(item.id) {
             selectionAnchorID = item.id
             return
         }
@@ -601,6 +675,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func selectSingleItem(_ id: UUID?) {
+        isShelfSelectionUserOwned = true
         let ids = id.map { Set([$0]) } ?? []
         guard selectedItemID != id || selectedItemIDs != ids else { return }
         if previewedItemID != id {
@@ -613,11 +688,27 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func setSelectedItemIDs(_ ids: Set<UUID>) {
+        isShelfSelectionUserOwned = true
         guard selectedItemIDs != ids else { return }
         previewedItemID = nil
         selectedItemIDs = ids
         selectedItemID = shelfItems.first(where: { ids.contains($0.id) })?.id
         scheduleStoreSelectionSync(primaryID: selectedItemID, ids: ids)
+    }
+
+    private func deferSearchFocusClearingAfterSelection() {
+        guard isSearchFocused else { return }
+        Task { @MainActor in
+            await Task.yield()
+            setSearchFocused(false)
+        }
+    }
+
+    private func setSearchFocused(_ isFocused: Bool) {
+        guard isSearchFocused != isFocused else { return }
+        withAnimation(Self.pasteSearchAnimation) {
+            isSearchFocused = isFocused
+        }
     }
 
     private func scheduleStoreSelectionSync(primaryID: UUID?, ids: Set<UUID>) {
@@ -645,7 +736,7 @@ struct ClipboardShelfPanelView: View {
 
     private func previewItem(_ item: ClipboardItem) {
         guard renderedShelfItems.contains(where: { $0.id == item.id }) else { return }
-        isSearchFocused = false
+        setSearchFocused(false)
         previewedItemID = item.id
         selectSingleItem(item.id)
     }
@@ -671,8 +762,6 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func refreshShelfItems() {
-        selectionSyncTask?.cancel()
-        selectionSyncTask = nil
         let items = store.filteredItems
         shelfItems = items
 
@@ -681,26 +770,56 @@ struct ClipboardShelfPanelView: View {
         if let previewedItemID, !itemIDs.contains(previewedItemID) {
             self.previewedItemID = nil
         }
-        let validSelectedIDs = store.selectedItemIDs.intersection(itemIDs)
-        if !validSelectedIDs.isEmpty {
-            selectedItemIDs = validSelectedIDs
-            selectedItemID = renderedItems.first(where: { validSelectedIDs.contains($0.id) })?.id
-            store.setSelectedItemIDs(validSelectedIDs)
+
+        let localSelectedIDs = selectedItemIDs.intersection(itemIDs)
+        let localPrimaryID = selectedItemID.flatMap { itemIDs.contains($0) ? $0 : nil }
+        if isShelfSelectionUserOwned, (!localSelectedIDs.isEmpty || localPrimaryID != nil) {
+            let ids = localSelectedIDs.isEmpty ? localPrimaryID.map { Set([$0]) } ?? [] : localSelectedIDs
+            let primaryID = localPrimaryID.flatMap { ids.contains($0) ? $0 : nil }
+                ?? renderedItems.first(where: { ids.contains($0.id) })?.id
+            let didNormalizeSelection = selectedItemIDs != ids || selectedItemID != primaryID
+            selectedItemIDs = ids
+            selectedItemID = primaryID
             if selectionAnchorID.map({ !itemIDs.contains($0) }) == true {
-                selectionAnchorID = validSelectedIDs.first
+                selectionAnchorID = selectedItemID
+            }
+            if didNormalizeSelection || selectionSyncTask != nil || !storeSelectionMatches(primaryID: primaryID, ids: ids) {
+                scheduleStoreSelectionSync(primaryID: primaryID, ids: ids)
+            }
+            return
+        }
+
+        selectionSyncTask?.cancel()
+        selectionSyncTask = nil
+
+        let validStoreSelectedIDs = store.selectedItemIDs.intersection(itemIDs)
+        if !validStoreSelectedIDs.isEmpty {
+            selectedItemIDs = validStoreSelectedIDs
+            selectedItemID = renderedItems.first(where: { validStoreSelectedIDs.contains($0.id) })?.id
+            isShelfSelectionUserOwned = false
+            if selectionAnchorID.map({ !itemIDs.contains($0) }) == true {
+                selectionAnchorID = selectedItemID
             }
         } else if let selectedID = store.selectedItemID, itemIDs.contains(selectedID) {
             selectedItemID = selectedID
             selectedItemIDs = [selectedID]
-            store.selectSingleItem(selectedID)
             selectionAnchorID = selectedID
+            isShelfSelectionUserOwned = false
         } else {
             let firstID = renderedItems.first?.id
             selectedItemID = firstID
             selectedItemIDs = firstID.map { [$0] } ?? []
-            store.selectSingleItem(firstID)
             selectionAnchorID = firstID
+            isShelfSelectionUserOwned = false
+            scheduleStoreSelectionSync(primaryID: firstID, ids: selectedItemIDs)
         }
+    }
+
+    private func storeSelectionMatches(primaryID: UUID?, ids: Set<UUID>) -> Bool {
+        if ids.count == 1 {
+            return store.selectedItemIDs == ids && store.selectedItemID == primaryID
+        }
+        return store.selectedItemIDs == ids
     }
 }
 
@@ -800,12 +919,15 @@ private struct ShelfOverflowStatusCard: View {
 }
 
 private struct ShelfCollectionChip: View {
+    private static let hoverAnimation = Animation.smooth(duration: 0.18, extraBounce: 0.04)
+
     let title: String
     let count: Int?
     let systemImageName: String
     let color: Color
     let isSelected: Bool
     let action: () -> Void
+    @State private var isHovered = false
 
     init(
         title: String,
@@ -828,21 +950,22 @@ private struct ShelfCollectionChip: View {
             HStack(spacing: 7) {
                 Image(systemName: systemImageName)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isSelected ? color : .secondary)
+                    .foregroundStyle(iconForegroundStyle)
 
                 Text(title)
                     .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
 
                 if let count, count > 0 {
                     Text("\(count)")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(isSelected ? color : .secondary)
+                        .foregroundStyle(.secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background {
-                            if isSelected {
-                                Capsule().fill(color.opacity(0.18))
+                            if isSelected || isHovered {
+                                Capsule().fill(.primary.opacity(0.08))
                             }
                         }
                 }
@@ -851,22 +974,45 @@ private struct ShelfCollectionChip: View {
             .padding(.vertical, 8)
             .frame(height: 38)
             .background {
-                if isSelected {
-                    Capsule().fill(.regularMaterial)
+                if isSelected || isHovered {
+                    Capsule()
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected ? 0.86 : 0.64))
+                        .background(.regularMaterial, in: Capsule())
                 }
             }
-            .overlay {
-                if isSelected {
-                    Capsule().strokeBorder(color.opacity(0.95), lineWidth: 2)
-                }
-            }
-            .shadow(color: .black.opacity(isSelected ? 0.12 : 0), radius: isSelected ? 8 : 0, y: 2)
+            .shadow(
+                color: .black.opacity(isSelected ? 0.07 : (isHovered ? 0.04 : 0)),
+                radius: isSelected || isHovered ? 6 : 0,
+                y: isSelected || isHovered ? 1 : 0
+            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .onHover { isHovered in
+            withAnimation(Self.hoverAnimation) {
+                self.isHovered = isHovered
+            }
+        }
+        .help(helpText)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityValue(isSelected ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: ""))
+    }
+
+    private var iconForegroundStyle: Color {
+        if isSelected {
+            return .primary
+        }
+        return color
+    }
+
+    private var helpText: String {
+        guard let count else { return title }
+        return String(
+            format: NSLocalizedString("%d items", comment: ""),
+            locale: Locale.current,
+            arguments: [count]
+        )
     }
 }
 
@@ -880,9 +1026,10 @@ private struct ShelfSelectedCountChip: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .frame(height: 38)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule().strokeBorder(Color.accentColor.opacity(0.72), lineWidth: 1)
+            .background {
+                Capsule()
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
+                    .background(.regularMaterial, in: Capsule())
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(String(format: NSLocalizedString("%d selected", comment: ""), count))
@@ -896,7 +1043,7 @@ private struct ClipboardShelfCard: View {
     let isSelected: Bool
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
-    let onSelect: () -> Void
+    let onSelect: (NSEvent) -> Void
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
@@ -905,16 +1052,21 @@ private struct ClipboardShelfCard: View {
     let onDismissPreview: () -> Void
 
     var body: some View {
-        ClipboardShelfCardVisual(item: item, imageDataProvider: imageDataProvider, isSelected: isSelected)
-            .gesture(
-                TapGesture(count: 2)
-                    .onEnded {
+        ClipboardShelfCardVisual(item: item, imageDataProvider: imageDataProvider)
+            .equatable()
+            .overlay {
+                ClipboardShelfCardSelectionRing(item: item, isSelected: isSelected)
+            }
+            .overlay {
+                ShelfClickSurface { event in
+                    onSelect(event)
+                } onMouseUp: { event in
+                    if event.clickCount >= 2 {
                         onPaste(defaultPasteFormat)
                     }
-                    .exclusively(before: TapGesture().onEnded {
-                        onSelect()
-                    })
-            )
+                }
+                .accessibilityHidden(true)
+            }
         .contextMenu {
             contextMenuContent
         }
@@ -1222,38 +1374,37 @@ private final class ShelfSpaceKeyMonitorView: NSView {
     }
 }
 
-private struct HiddenScrollerHorizontalScrollView<Content: View>: NSViewRepresentable {
-    private let content: Content
+private struct ShelfClickSurface: NSViewRepresentable {
+    let onMouseDown: (NSEvent) -> Void
+    let onMouseUp: (NSEvent) -> Void
 
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
+    func makeNSView(context: Context) -> ShelfClickNSView {
+        ShelfClickNSView(onMouseDown: onMouseDown, onMouseUp: onMouseUp)
     }
 
-    func makeNSView(context: Context) -> HiddenScrollerHorizontalScrollContainer<Content> {
-        HiddenScrollerHorizontalScrollContainer(rootView: content)
-    }
-
-    func updateNSView(_ nsView: HiddenScrollerHorizontalScrollContainer<Content>, context: Context) {
-        nsView.rootView = content
+    func updateNSView(_ nsView: ShelfClickNSView, context: Context) {
+        nsView.onMouseDown = onMouseDown
+        nsView.onMouseUp = onMouseUp
     }
 }
 
-private final class HiddenScrollerHorizontalScrollContainer<Content: View>: NSView {
-    private let scrollView = HiddenScrollerNSScrollView()
-    private let hostingView: NSHostingView<Content>
-
-    var rootView: Content {
-        didSet {
-            hostingView.rootView = rootView
-            needsLayout = true
-        }
+private struct ShelfHorizontalWheelRedirector: NSViewRepresentable {
+    func makeNSView(context: Context) -> ShelfHorizontalWheelRedirectorView {
+        ShelfHorizontalWheelRedirectorView()
     }
 
-    init(rootView: Content) {
-        self.rootView = rootView
-        self.hostingView = NSHostingView(rootView: rootView)
-        super.init(frame: .zero)
-        configureScrollView()
+    func updateNSView(_ nsView: ShelfHorizontalWheelRedirectorView, context: Context) {}
+}
+
+private final class ShelfHorizontalWheelRedirectorView: NSView {
+    private static let preciseScrollMultiplier: CGFloat = 1.25
+    private static let wheelLineMultiplier: CGFloat = 64
+
+    private var localScrollMonitor: Any?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installMonitor()
     }
 
     @available(*, unavailable)
@@ -1261,91 +1412,199 @@ private final class HiddenScrollerHorizontalScrollContainer<Content: View>: NSVi
         nil
     }
 
-    override var isFlipped: Bool {
-        true
-    }
-
-    override func layout() {
-        super.layout()
-        scrollView.frame = bounds
-        hostingView.layoutSubtreeIfNeeded()
-
-        let fittingSize = hostingView.fittingSize
-        let documentSize = NSSize(
-            width: max(bounds.width, fittingSize.width),
-            height: max(bounds.height, fittingSize.height)
-        )
-        if hostingView.frame.size != documentSize {
-            hostingView.frame = NSRect(origin: .zero, size: documentSize)
+    deinit {
+        if let localScrollMonitor {
+            NSEvent.removeMonitor(localScrollMonitor)
         }
-        scrollView.clampHorizontalOffset()
     }
 
-    private func configureScrollView() {
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.hasHorizontalScroller = false
-        scrollView.hasVerticalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
-        scrollView.horizontalScrollElasticity = .automatic
-        scrollView.verticalScrollElasticity = .none
-        scrollView.usesPredominantAxisScrolling = false
-        scrollView.documentView = hostingView
-        addSubview(scrollView)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitor()
     }
-}
 
-private final class HiddenScrollerNSScrollView: NSScrollView {
-    private static let preciseScrollMultiplier: CGFloat = 1.25
-    private static let wheelLineMultiplier: CGFloat = 64
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
 
-    override func scrollWheel(with event: NSEvent) {
-        let horizontalDelta = normalizedScrollDelta(event.scrollingDeltaX, for: event)
-        let verticalDelta = normalizedScrollDelta(event.scrollingDeltaY, for: event)
-        guard abs(verticalDelta) > abs(horizontalDelta), verticalDelta != 0 else {
-            super.scrollWheel(with: event)
-            return
+    private func installMonitor() {
+        guard localScrollMonitor == nil else { return }
+        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self,
+                  NSApp.isActive,
+                  event.window === self.window,
+                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
+                return event
+            }
+
+            let horizontalDelta = self.normalizedScrollDelta(event.scrollingDeltaX, for: event)
+            let verticalDelta = self.normalizedScrollDelta(event.scrollingDeltaY, for: event)
+            guard abs(verticalDelta) > abs(horizontalDelta), verticalDelta != 0,
+                  let scrollView = self.horizontalScrollView(containing: event.locationInWindow) else {
+                return event
+            }
+
+            self.scroll(scrollView, horizontallyBy: -verticalDelta)
+            return nil
         }
-
-        scrollHorizontally(by: -verticalDelta)
     }
 
     private func normalizedScrollDelta(_ delta: CGFloat, for event: NSEvent) -> CGFloat {
         delta * (event.hasPreciseScrollingDeltas ? Self.preciseScrollMultiplier : Self.wheelLineMultiplier)
     }
 
-    func clampHorizontalOffset() {
-        guard let documentView else { return }
-
-        let clipView = contentView
-        let maxX = max(0, documentView.frame.width - clipView.bounds.width)
-        let currentX = clipView.bounds.origin.x
-        let nextX = min(max(currentX, 0), maxX)
-        guard nextX != currentX else { return }
-
-        clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
-        reflectScrolledClipView(clipView)
+    private func horizontalScrollView(containing windowPoint: NSPoint) -> NSScrollView? {
+        guard let contentView = window?.contentView else { return nil }
+        return firstHorizontalScrollView(containing: windowPoint, in: contentView)
     }
 
-    private func scrollHorizontally(by delta: CGFloat) {
-        guard let documentView else { return }
+    private func firstHorizontalScrollView(containing windowPoint: NSPoint, in view: NSView) -> NSScrollView? {
+        let point = view.convert(windowPoint, from: nil)
+        guard view.bounds.contains(point) else { return nil }
 
-        let clipView = contentView
+        for subview in view.subviews.reversed() {
+            if let scrollView = firstHorizontalScrollView(containing: windowPoint, in: subview) {
+                return scrollView
+            }
+        }
+
+        guard let scrollView = view as? NSScrollView,
+              let documentView = scrollView.documentView,
+              documentView.frame.width > scrollView.contentView.bounds.width else {
+            return nil
+        }
+        return scrollView
+    }
+
+    private func scroll(_ scrollView: NSScrollView, horizontallyBy delta: CGFloat) {
+        guard let documentView = scrollView.documentView else { return }
+
+        let clipView = scrollView.contentView
         let maxX = max(0, documentView.frame.width - clipView.bounds.width)
         let currentX = clipView.bounds.origin.x
         let nextX = min(max(currentX + delta, 0), maxX)
         guard nextX != currentX else { return }
 
         clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
-        reflectScrolledClipView(clipView)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+}
+
+private final class ShelfClickNSView: NSView {
+    var onMouseDown: (NSEvent) -> Void
+    var onMouseUp: (NSEvent) -> Void
+    private var localMouseMonitor: Any?
+    private var isTrackingMouseDown = false
+
+    init(onMouseDown: @escaping (NSEvent) -> Void, onMouseUp: @escaping (NSEvent) -> Void) {
+        self.onMouseDown = onMouseDown
+        self.onMouseUp = onMouseUp
+        super.init(frame: .zero)
+        installMonitor()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    deinit {
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitor()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !NSApp.isActive,
+              let event = window?.currentEvent,
+              shouldHandleMouseDown(event) else {
+            return nil
+        }
+
+        return bounds.contains(point) ? super.hitTest(point) : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard shouldHandleMouseDown(event) else { return }
+        isTrackingMouseDown = true
+        onMouseDown(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let shouldEmitMouseUp = isTrackingMouseDown && shouldHandleMouseUp(event)
+        isTrackingMouseDown = false
+        guard shouldEmitMouseUp else { return }
+        onMouseUp(event)
+    }
+
+    private func installMonitor() {
+        guard localMouseMonitor == nil else { return }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+            guard let self, NSApp.isActive else {
+                return event
+            }
+
+            if event.type == .leftMouseDown, self.shouldHandleMouseDown(event) {
+                self.isTrackingMouseDown = true
+                self.onMouseDown(event)
+            } else if event.type == .leftMouseUp {
+                let shouldEmitMouseUp = self.isTrackingMouseDown && self.shouldHandleMouseUp(event)
+                self.isTrackingMouseDown = false
+                guard shouldEmitMouseUp else {
+                    return event
+                }
+                self.onMouseUp(event)
+            }
+            return event
+        }
+    }
+
+    private func shouldHandleMouseDown(_ event: NSEvent) -> Bool {
+        shouldHandleMouseEvent(event, expectedType: .leftMouseDown)
+    }
+
+    private func shouldHandleMouseUp(_ event: NSEvent) -> Bool {
+        shouldHandleMouseEvent(event, expectedType: .leftMouseUp)
+    }
+
+    private func shouldHandleMouseEvent(_ event: NSEvent, expectedType: NSEvent.EventType) -> Bool {
+        guard event.type == expectedType,
+              event.window === window else {
+            return false
+        }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.control) else {
+            return false
+        }
+
+        let point = convert(event.locationInWindow, from: nil)
+        return bounds.contains(point)
     }
 }
 
 private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
-    let isSelected: Bool
+    private let renderSignature: ClipboardShelfCardRenderSignature
+
+    init(
+        item: ClipboardItem,
+        imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?
+    ) {
+        self.item = item
+        self.imageDataProvider = imageDataProvider
+        self.renderSignature = ClipboardShelfCardRenderSignature(item: item)
+    }
 
     private var cardTint: Color {
         SourceApplicationIconResolver.themeColor(for: item, fallback: item.contentType.shelfTint)
@@ -1357,9 +1616,11 @@ private struct ClipboardShelfCardVisual: View {
                 Text(localized(item.contentType.displayName))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
-                Text(relativeDate)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.82))
+                TimelineView(.periodic(from: Date(), by: 60)) { timeline in
+                    Text(relativeDate(relativeTo: timeline.date))
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.82))
+                }
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
@@ -1380,10 +1641,6 @@ private struct ClipboardShelfCardVisual: View {
         .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.cardHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous)
-                .strokeBorder(isSelected ? cardTint : Color.white.opacity(0.24), lineWidth: isSelected ? 3 : 1)
-        }
         .shadow(color: .black.opacity(0.10), radius: 8, y: 4)
         .contentShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
     }
@@ -1409,6 +1666,11 @@ private struct ClipboardShelfCardVisual: View {
             }
             .padding(14)
             .frame(height: ClipboardShelfMetrics.cardPreviewHeight, alignment: .topLeading)
+            .background {
+                Rectangle()
+                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.22))
+            }
+            .background(.regularMaterial)
         }
     }
 
@@ -1431,10 +1693,15 @@ private struct ClipboardShelfCardVisual: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .background {
+            Rectangle()
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.18))
+        }
+        .background(.regularMaterial)
     }
 
-    private var relativeDate: String {
-        Self.relativeFormatter.localizedString(for: item.createdAt, relativeTo: Date())
+    private func relativeDate(relativeTo date: Date) -> String {
+        Self.relativeFormatter.localizedString(for: item.createdAt, relativeTo: date)
     }
 
     private var footerTitle: String? {
@@ -1484,6 +1751,26 @@ private struct ClipboardShelfCardVisual: View {
     }()
 }
 
+extension ClipboardShelfCardVisual: Equatable {
+    static func == (lhs: ClipboardShelfCardVisual, rhs: ClipboardShelfCardVisual) -> Bool {
+        lhs.renderSignature == rhs.renderSignature
+    }
+}
+
+private struct ClipboardShelfCardSelectionRing: View {
+    let item: ClipboardItem
+    let isSelected: Bool
+
+    private var cardTint: Color {
+        SourceApplicationIconResolver.themeColor(for: item, fallback: item.contentType.shelfTint)
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous)
+            .strokeBorder(isSelected ? cardTint : Color.white.opacity(0.24), lineWidth: isSelected ? 3 : 1)
+    }
+}
+
 private struct ClipboardShelfCardRenderSignature: Equatable {
     let id: UUID
     let createdAt: Date
@@ -1493,12 +1780,17 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let contentType: ClipboardContentType
     let title: String
     let ocrState: OCRState
+    let previewHeadline: String
+    let previewBody: String
+    let previewSearchHash: String
     let textCount: Int?
     let htmlCount: Int?
+    let rtfAssetID: String?
     let rtfByteCount: Int?
     let urlString: String?
     let fileURLString: String?
     let fileURLStrings: [String]
+    let imageAssetID: String?
     let imageByteCount: Int?
     let ocrTextCount: Int?
 
@@ -1511,13 +1803,18 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         contentType = item.contentType
         title = item.title
         ocrState = item.ocrState
+        previewHeadline = item.searchDocument.previewHeadline
+        previewBody = item.searchDocument.previewBody
+        previewSearchHash = item.searchDocument.searchHash
         textCount = item.payload.text?.count
         htmlCount = item.payload.htmlString?.count
-        rtfByteCount = item.payload.rtfData?.count
+        rtfAssetID = item.payload.rtfAssetID
+        rtfByteCount = item.payload.rtfData?.count ?? item.payload.rtfByteCount
         urlString = item.payload.urlString
         fileURLString = item.payload.fileURLString
         fileURLStrings = item.payload.fileURLStrings
-        imageByteCount = item.payload.imageData?.count
+        imageAssetID = item.payload.imageAssetID
+        imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
         ocrTextCount = item.payload.ocrText?.count
     }
 }
@@ -1591,38 +1888,40 @@ private struct ShelfSourceAppToken: View {
     }
 }
 
-private struct ShelfSourceAppSuggestionPopover: View {
+private struct ShelfSourceAppSuggestionStrip: View {
     let appNames: [String]
     let onSelect: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(appNames, id: \.self) { appName in
-                Button {
-                    onSelect(appName)
-                } label: {
-                    HStack(spacing: 10) {
-                        SourceApplicationIconImage(appName: appName, size: 22)
-                        Text(appName)
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(appNames, id: \.self) { appName in
+                    Button {
+                        onSelect(appName)
+                    } label: {
+                        HStack(spacing: 6) {
+                            SourceApplicationIconImage(appName: appName, size: 18)
+                            Text(appName)
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .contentShape(Capsule())
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
+                    }
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.vertical, 1)
         }
-        .padding(6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(.primary.opacity(0.14), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.22), radius: 14, x: 0, y: 8)
+        .scrollIndicators(.hidden)
+        .frame(height: 38)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NSLocalizedString("App suggestions", comment: ""))
     }
@@ -1863,34 +2162,43 @@ private extension View {
         if #available(macOS 26.0, *) {
             self
                 .glassEffect(.regular, in: shape)
+                .background {
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.28))
+                }
                 .clipShape(shape)
                 .overlay(alignment: .top) {
                     if showsStroke {
                         Rectangle()
-                            .fill(.white.opacity(0.30))
+                            .fill(.white.opacity(0.42))
                             .frame(height: 1)
                     }
                 }
         } else {
             self
-                .background(.ultraThinMaterial, in: shape)
+                .background(.thinMaterial, in: shape)
+                .background {
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.16))
+                }
                 .clipShape(shape)
                 .overlay(alignment: .top) {
                     if showsStroke {
                         Rectangle()
-                            .fill(.white.opacity(0.30))
+                            .fill(.white.opacity(0.42))
                             .frame(height: 1)
                     }
                 }
         }
         #else
         self
-            .background(.ultraThinMaterial, in: shape)
+            .background(.thinMaterial, in: shape)
+            .background {
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.16))
+            }
             .clipShape(shape)
             .overlay(alignment: .top) {
                 if showsStroke {
                     Rectangle()
-                        .fill(.white.opacity(0.30))
+                        .fill(.white.opacity(0.42))
                         .frame(height: 1)
                 }
             }
@@ -1904,26 +2212,35 @@ private extension View {
         if #available(macOS 26.0, *) {
             self
                 .glassEffect((interactive ? Glass.regular.interactive() : .regular), in: shape)
+                .background {
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.22))
+                }
                 .overlay {
                     if showsStroke {
-                        shape.strokeBorder(.white.opacity(0.30), lineWidth: 1)
+                        shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
                     }
                 }
         } else {
             self
-                .background(.ultraThinMaterial, in: shape)
+                .background(.thinMaterial, in: shape)
+                .background {
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.12))
+                }
                 .overlay {
                     if showsStroke {
-                        shape.strokeBorder(.white.opacity(0.30), lineWidth: 1)
+                        shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
                     }
                 }
         }
         #else
         self
-            .background(.ultraThinMaterial, in: shape)
+            .background(.thinMaterial, in: shape)
+            .background {
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.12))
+            }
             .overlay {
                 if showsStroke {
-                    shape.strokeBorder(.white.opacity(0.30), lineWidth: 1)
+                    shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
                 }
             }
         #endif

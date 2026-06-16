@@ -321,6 +321,7 @@
 "Selected" = "Selected";
 "Not selected" = "Not selected";
 "%d selected" = "%d selected";
+"%d items" = "%d items";
 "No external app is available to exclude." = "No external app is available to exclude.";
 "Excluded %@." = "Excluded %@.";
 "PasteBuddy could not create this item." = "PasteBuddy could not create this item.";

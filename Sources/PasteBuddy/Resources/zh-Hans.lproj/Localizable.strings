@@ -321,6 +321,7 @@
 "Selected" = "已选择";
 "Not selected" = "未选择";
 "%d selected" = "已选择 %d 项";
+"%d items" = "%d 项";
 "No external app is available to exclude." = "没有可排除的外部应用。";
 "Excluded %@." = "已排除 %@。";
 "PasteBuddy could not create this item." = "PasteBuddy 无法创建此项目。";

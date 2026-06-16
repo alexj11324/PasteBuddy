@@ -465,7 +465,7 @@ public final class PasteBuddyStore {
     public func setSelectedItemIDs(_ ids: Set<UUID>) {
         guard selectedItemIDs != ids else { return }
         selectedItemIDs = ids
-        selectedItemID = filteredItems.first(where: { ids.contains($0.id) })?.id
+        selectedItemID = mainListItemsSnapshot.first(where: { ids.contains($0.id) })?.id
     }
 
     public func selectSingleItem(_ id: UUID?) {
