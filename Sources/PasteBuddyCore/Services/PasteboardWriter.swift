@@ -4,6 +4,11 @@ import Foundation
 
 @MainActor
 public enum PasteboardWriter {
+    public enum DirectPasteFallbackBehavior: Equatable, Sendable {
+        case copyOnly
+        case failWithoutCopying
+    }
+
     public struct DirectPasteOptions: Equatable, Sendable {
         public static let activationWaitTimeoutDefault: TimeInterval = 0.45
         public static let pasteDispatchDelayDefault: TimeInterval = 0.06
@@ -11,16 +16,27 @@ public enum PasteboardWriter {
 
         public var activationWaitTimeout: TimeInterval
         public var pasteDispatchDelay: TimeInterval
+        public var fallbackBehavior: DirectPasteFallbackBehavior
 
         public init(
             activationWaitTimeout: TimeInterval = Self.activationWaitTimeoutDefault,
-            pasteDispatchDelay: TimeInterval = Self.pasteDispatchDelayDefault
+            pasteDispatchDelay: TimeInterval = Self.pasteDispatchDelayDefault,
+            fallbackBehavior: DirectPasteFallbackBehavior = .copyOnly
         ) {
             self.activationWaitTimeout = max(0, min(activationWaitTimeout, 1))
             self.pasteDispatchDelay = max(0, min(pasteDispatchDelay, 2))
+            self.fallbackBehavior = fallbackBehavior
         }
 
         public static let `default` = DirectPasteOptions()
+
+        public var pasteOnly: DirectPasteOptions {
+            DirectPasteOptions(
+                activationWaitTimeout: activationWaitTimeout,
+                pasteDispatchDelay: pasteDispatchDelay,
+                fallbackBehavior: .failWithoutCopying
+            )
+        }
     }
 
     public static var userConfiguredDirectPasteOptions: DirectPasteOptions {
@@ -28,6 +44,10 @@ public enum PasteboardWriter {
             forKey: DirectPasteOptions.pasteDispatchDelayUserDefaultsKey
         ) as? TimeInterval
         return DirectPasteOptions(pasteDispatchDelay: configuredDelay ?? DirectPasteOptions.pasteDispatchDelayDefault)
+    }
+
+    public static var userConfiguredPasteOnlyDirectPasteOptions: DirectPasteOptions {
+        userConfiguredDirectPasteOptions.pasteOnly
     }
 
     public static func copy(_ item: ClipboardItem, format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
@@ -106,12 +126,13 @@ public enum PasteboardWriter {
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) -> DirectPasteResult {
-        copy(item, format: format, to: pasteboard)
         guard isAccessibilityTrusted else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                item,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyAccessibilityRequired,
-                itemCount: 1,
-                format: format
+                options: options
             )
         }
         prepareForPaste?()
@@ -120,12 +141,15 @@ public enum PasteboardWriter {
             activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
             timeout: options.activationWaitTimeout
         ) else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                item,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyNoTargetApplication,
-                itemCount: 1,
-                format: format
+                options: options
             )
         }
+        copy(item, format: format, to: pasteboard)
         waitBeforePasteEvent(options.pasteDispatchDelay)
         if let sendPasteEvent {
             sendPasteEvent()
@@ -147,12 +171,13 @@ public enum PasteboardWriter {
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) async -> DirectPasteResult {
-        copy(item, format: format, to: pasteboard)
         guard isAccessibilityTrusted else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                item,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyAccessibilityRequired,
-                itemCount: 1,
-                format: format
+                options: options
             )
         }
         prepareForPaste?()
@@ -161,12 +186,15 @@ public enum PasteboardWriter {
             activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
             timeout: options.activationWaitTimeout
         ) else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                item,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyNoTargetApplication,
-                itemCount: 1,
-                format: format
+                options: options
             )
         }
+        copy(item, format: format, to: pasteboard)
         await waitBeforePasteEventAsync(options.pasteDispatchDelay)
         if let sendPasteEvent {
             sendPasteEvent()
@@ -204,12 +232,13 @@ public enum PasteboardWriter {
                 sendPasteEvent: sendPasteEvent
             )
         }
-        copy(items, format: format, to: pasteboard)
         guard isAccessibilityTrusted else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                items,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyAccessibilityRequired,
-                itemCount: items.count,
-                format: format
+                options: options
             )
         }
         prepareForPaste?()
@@ -218,12 +247,15 @@ public enum PasteboardWriter {
             activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
             timeout: options.activationWaitTimeout
         ) else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                items,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyNoTargetApplication,
-                itemCount: items.count,
-                format: format
+                options: options
             )
         }
+        copy(items, format: format, to: pasteboard)
         waitBeforePasteEvent(options.pasteDispatchDelay)
         if let sendPasteEvent {
             sendPasteEvent()
@@ -261,12 +293,13 @@ public enum PasteboardWriter {
                 sendPasteEvent: sendPasteEvent
             )
         }
-        copy(items, format: format, to: pasteboard)
         guard isAccessibilityTrusted else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                items,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyAccessibilityRequired,
-                itemCount: items.count,
-                format: format
+                options: options
             )
         }
         prepareForPaste?()
@@ -275,12 +308,15 @@ public enum PasteboardWriter {
             activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
             timeout: options.activationWaitTimeout
         ) else {
-            return DirectPasteResult(
+            return copyFallbackResult(
+                items,
+                format: format,
+                to: pasteboard,
                 outcome: .copiedOnlyNoTargetApplication,
-                itemCount: items.count,
-                format: format
+                options: options
             )
         }
+        copy(items, format: format, to: pasteboard)
         await waitBeforePasteEventAsync(options.pasteDispatchDelay)
         if let sendPasteEvent {
             sendPasteEvent()
@@ -296,6 +332,32 @@ public enum PasteboardWriter {
 
     public static func plainText(for items: [ClipboardItem]) -> String {
         ClipboardPlainTextRenderer.plainText(for: items)
+    }
+
+    private static func copyFallbackResult(
+        _ item: ClipboardItem,
+        format: PasteFormat,
+        to pasteboard: NSPasteboard,
+        outcome: DirectPasteOutcome,
+        options: DirectPasteOptions
+    ) -> DirectPasteResult {
+        if options.fallbackBehavior == .copyOnly {
+            copy(item, format: format, to: pasteboard)
+        }
+        return DirectPasteResult(outcome: outcome, itemCount: 1, format: format)
+    }
+
+    private static func copyFallbackResult(
+        _ items: [ClipboardItem],
+        format: PasteFormat,
+        to pasteboard: NSPasteboard,
+        outcome: DirectPasteOutcome,
+        options: DirectPasteOptions
+    ) -> DirectPasteResult {
+        if options.fallbackBehavior == .copyOnly {
+            copy(items, format: format, to: pasteboard)
+        }
+        return DirectPasteResult(outcome: outcome, itemCount: items.count, format: format)
     }
 
     private static func waitForTargetApplicationIfNeeded(
