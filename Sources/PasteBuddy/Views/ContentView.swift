@@ -201,6 +201,10 @@ private struct DirectPasteStatusBar: View {
         switch result.outcome {
         case .pastedToFrontmostApp:
             "checkmark.circle.fill"
+        case .failedAccessibilityPermissionRequired:
+            "exclamationmark.triangle.fill"
+        case .failedNoTargetApplication:
+            "arrowshape.turn.up.left.circle.fill"
         case .copiedOnlyAccessibilityRequired:
             "exclamationmark.triangle.fill"
         case .copiedOnlyNoTargetApplication:

@@ -530,7 +530,7 @@ struct PasteBuddyApp: App {
         guard isAccessibilityTrusted else {
             PasteBuddyDiagnostics.record(.directPaste, "accessibilityMissing")
             return DirectPasteResult(
-                outcome: .copiedOnlyAccessibilityRequired,
+                outcome: .failedAccessibilityPermissionRequired,
                 itemCount: 1,
                 format: format
             )
@@ -539,7 +539,7 @@ struct PasteBuddyApp: App {
               let targetBundleIdentifier = target.bundleIdentifier else {
             PasteBuddyDiagnostics.record(.directPaste, "targetMissing")
             return DirectPasteResult(
-                outcome: .copiedOnlyNoTargetApplication,
+                outcome: .failedNoTargetApplication,
                 itemCount: 1,
                 format: format
             )
@@ -585,7 +585,7 @@ struct PasteBuddyApp: App {
         guard isAccessibilityTrusted else {
             PasteBuddyDiagnostics.record(.directPaste, "accessibilityMissing")
             return DirectPasteResult(
-                outcome: .copiedOnlyAccessibilityRequired,
+                outcome: .failedAccessibilityPermissionRequired,
                 itemCount: items.count,
                 format: format
             )
@@ -594,7 +594,7 @@ struct PasteBuddyApp: App {
               let targetBundleIdentifier = target.bundleIdentifier else {
             PasteBuddyDiagnostics.record(.directPaste, "targetMissing")
             return DirectPasteResult(
-                outcome: .copiedOnlyNoTargetApplication,
+                outcome: .failedNoTargetApplication,
                 itemCount: items.count,
                 format: format
             )
@@ -693,6 +693,23 @@ private extension View {
             keyboardShortcut(keyEquivalent, modifiers: binding.modifiers.eventModifiers)
         } else {
             self
+        }
+    }
+}
+
+private extension Array where Element == ShortcutModifier {
+    var eventModifiers: EventModifiers {
+        reduce(into: EventModifiers()) { result, modifier in
+            switch modifier {
+            case .command:
+                result.insert(.command)
+            case .option:
+                result.insert(.option)
+            case .shift:
+                result.insert(.shift)
+            case .control:
+                result.insert(.control)
+            }
         }
     }
 }

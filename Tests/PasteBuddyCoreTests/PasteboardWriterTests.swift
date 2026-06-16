@@ -375,6 +375,34 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "copy first")
     }
 
+    func testPasteOnlyDirectPasteFailsWithoutCopyingWhenAccessibilityIsMissing() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyPasteOnlyAccessibility-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("existing clipboard", forType: .string)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Paste Only",
+            payload: ClipboardPayload(text: "must not copy")
+        )
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: false,
+            options: PasteboardWriter.DirectPasteOptions().pasteOnly,
+            sendPasteEvent: { XCTFail("Command-V should not be sent without Accessibility trust.") }
+        )
+
+        XCTAssertEqual(result.outcome, .failedAccessibilityPermissionRequired)
+        XCTAssertTrue(result.needsAccessibilityPermission)
+        XCTAssertTrue(result.statusMessage.contains("Paste was not sent"))
+        XCTAssertFalse(result.statusMessage.localizedCaseInsensitiveContains("copied"))
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing clipboard")
+    }
+
     func testDirectPasteWithAccessibilitySendsPasteEventAndReportsSuccess() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectSuccess-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }
@@ -612,6 +640,44 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(result.outcome, .copiedOnlyNoTargetApplication)
         XCTAssertEqual(result.itemCount, 1)
         XCTAssertEqual(pasteboard.string(forType: .string), "copy without wrong paste")
+    }
+
+    func testPasteOnlyDirectPasteFailsWithoutCopyingWhenTargetDoesNotBecomeActive() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyPasteOnlyNoTarget-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("existing clipboard", forType: .string)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Paste Only No Target",
+            payload: ClipboardPayload(text: "must not copy")
+        )
+        var preparedTarget = false
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            targetBundleIdentifier: "com.example.Target",
+            activeApplicationBundleIdentifier: {
+                "com.example.Other"
+            },
+            options: PasteboardWriter.DirectPasteOptions(activationWaitTimeout: 0.01).pasteOnly,
+            prepareForPaste: {
+                preparedTarget = true
+            },
+            sendPasteEvent: {
+                XCTFail("Command-V should not be sent when the target app is not active.")
+            }
+        )
+
+        XCTAssertTrue(preparedTarget)
+        XCTAssertEqual(result.outcome, .failedNoTargetApplication)
+        XCTAssertTrue(result.statusMessage.contains("Paste was not sent"))
+        XCTAssertFalse(result.statusMessage.localizedCaseInsensitiveContains("copied"))
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing clipboard")
     }
 
     func testAsyncDirectPasteCopiesOnlyWhenTargetDoesNotBecomeActive() async throws {

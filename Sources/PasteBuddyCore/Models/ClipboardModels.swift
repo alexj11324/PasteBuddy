@@ -2458,6 +2458,8 @@ public enum PasteFormat: String, Codable, Equatable, Sendable {
 
 public enum DirectPasteOutcome: String, Codable, Sendable {
     case pastedToFrontmostApp
+    case failedAccessibilityPermissionRequired
+    case failedNoTargetApplication
     case copiedOnlyAccessibilityRequired
     case copiedOnlyNoTargetApplication
     case emptySelection
@@ -2465,6 +2467,8 @@ public enum DirectPasteOutcome: String, Codable, Sendable {
     public var displayName: String {
         switch self {
         case .pastedToFrontmostApp: "Paste sent to active app"
+        case .failedAccessibilityPermissionRequired: "Paste failed - Accessibility access required"
+        case .failedNoTargetApplication: "Paste failed - no target app available"
         case .copiedOnlyAccessibilityRequired: "Copied only - Accessibility access required"
         case .copiedOnlyNoTargetApplication: "Copied only - no target app available"
         case .emptySelection: "No PasteBuddy items selected"
@@ -2507,17 +2511,36 @@ public struct DirectPasteResult: Codable, Equatable, Sendable {
     }
 
     public var needsAccessibilityPermission: Bool {
-        outcome == .copiedOnlyAccessibilityRequired
+        outcome == .copiedOnlyAccessibilityRequired || outcome == .failedAccessibilityPermissionRequired
     }
 
     public var permissionGuidance: DirectPastePermissionGuidance? {
-        needsAccessibilityPermission ? DirectPastePermissionGuidance() : nil
+        switch outcome {
+        case .copiedOnlyAccessibilityRequired:
+            DirectPastePermissionGuidance()
+        case .failedAccessibilityPermissionRequired:
+            DirectPastePermissionGuidance(
+                title: "Accessibility access required for direct paste",
+                detail: "macOS requires Accessibility access before PasteBuddy can send Command-V into the active app. PasteBuddy did not modify the clipboard.",
+                actionTitle: "Request Accessibility Access"
+            )
+        case .pastedToFrontmostApp, .failedNoTargetApplication, .copiedOnlyNoTargetApplication, .emptySelection:
+            nil
+        }
     }
 
     public var statusMessage: String {
         switch outcome {
         case .pastedToFrontmostApp:
             itemCount == 1 ? "Pasted 1 item to the active app." : "Pasted \(itemCount) items to the active app."
+        case .failedAccessibilityPermissionRequired:
+            itemCount == 1
+                ? "Paste was not sent. Grant Accessibility access to paste automatically."
+                : "Paste was not sent for \(itemCount) items. Grant Accessibility access to paste automatically."
+        case .failedNoTargetApplication:
+            itemCount == 1
+                ? "Paste was not sent. Focus a target app before using direct paste."
+                : "Paste was not sent for \(itemCount) items. Focus a target app before using direct paste."
         case .copiedOnlyAccessibilityRequired:
             itemCount == 1
                 ? "Copied 1 item. Grant Accessibility access to paste automatically."

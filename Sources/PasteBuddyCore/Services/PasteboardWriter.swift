@@ -344,7 +344,11 @@ public enum PasteboardWriter {
         if options.fallbackBehavior == .copyOnly {
             copy(item, format: format, to: pasteboard)
         }
-        return DirectPasteResult(outcome: outcome, itemCount: 1, format: format)
+        return DirectPasteResult(
+            outcome: fallbackOutcome(for: outcome, options: options),
+            itemCount: 1,
+            format: format
+        )
     }
 
     private static func copyFallbackResult(
@@ -357,7 +361,28 @@ public enum PasteboardWriter {
         if options.fallbackBehavior == .copyOnly {
             copy(items, format: format, to: pasteboard)
         }
-        return DirectPasteResult(outcome: outcome, itemCount: items.count, format: format)
+        return DirectPasteResult(
+            outcome: fallbackOutcome(for: outcome, options: options),
+            itemCount: items.count,
+            format: format
+        )
+    }
+
+    private static func fallbackOutcome(
+        for copyOutcome: DirectPasteOutcome,
+        options: DirectPasteOptions
+    ) -> DirectPasteOutcome {
+        guard options.fallbackBehavior == .failWithoutCopying else {
+            return copyOutcome
+        }
+        switch copyOutcome {
+        case .copiedOnlyAccessibilityRequired:
+            return .failedAccessibilityPermissionRequired
+        case .copiedOnlyNoTargetApplication:
+            return .failedNoTargetApplication
+        case .pastedToFrontmostApp, .failedAccessibilityPermissionRequired, .failedNoTargetApplication, .emptySelection:
+            return copyOutcome
+        }
     }
 
     private static func waitForTargetApplicationIfNeeded(
