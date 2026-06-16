@@ -529,13 +529,14 @@ struct PasteBuddyApp: App {
         )
         guard isAccessibilityTrusted else {
             PasteBuddyDiagnostics.record(.directPaste, "accessibilityMissing")
-            let result = await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
-            PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
-            return result
+            return DirectPasteResult(
+                outcome: .copiedOnlyAccessibilityRequired,
+                itemCount: 1,
+                format: format
+            )
         }
         guard let target = tracker.currentExternalApplication(),
               let targetBundleIdentifier = target.bundleIdentifier else {
-            PasteboardWriter.copy(item, format: format)
             PasteBuddyDiagnostics.record(.directPaste, "targetMissing")
             return DirectPasteResult(
                 outcome: .copiedOnlyNoTargetApplication,
@@ -555,7 +556,7 @@ struct PasteBuddyApp: App {
             activeApplicationBundleIdentifier: {
                 tracker.frontmostApplicationBundleIdentifier()
             },
-            options: PasteboardWriter.userConfiguredDirectPasteOptions,
+            options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions,
             prepareForPaste: {
                 PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
                 tracker.activateLastExternalApplication()
@@ -583,13 +584,14 @@ struct PasteBuddyApp: App {
         )
         guard isAccessibilityTrusted else {
             PasteBuddyDiagnostics.record(.directPaste, "accessibilityMissing")
-            let result = await PasteboardWriter.pasteToFrontmostAppAsync(items, format: format)
-            PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
-            return result
+            return DirectPasteResult(
+                outcome: .copiedOnlyAccessibilityRequired,
+                itemCount: items.count,
+                format: format
+            )
         }
         guard let target = tracker.currentExternalApplication(),
               let targetBundleIdentifier = target.bundleIdentifier else {
-            PasteboardWriter.copy(items, format: format)
             PasteBuddyDiagnostics.record(.directPaste, "targetMissing")
             return DirectPasteResult(
                 outcome: .copiedOnlyNoTargetApplication,
@@ -609,7 +611,7 @@ struct PasteBuddyApp: App {
             activeApplicationBundleIdentifier: {
                 tracker.frontmostApplicationBundleIdentifier()
             },
-            options: PasteboardWriter.userConfiguredDirectPasteOptions,
+            options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions,
             prepareForPaste: {
                 PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
                 tracker.activateLastExternalApplication()
@@ -699,16 +701,5 @@ private extension ShortcutBinding {
     var keyEquivalent: KeyEquivalent? {
         guard let key, let character = key.first else { return nil }
         return KeyEquivalent(character)
-    }
-}
-
-private extension [ShortcutModifier] {
-    var eventModifiers: EventModifiers {
-        var result: EventModifiers = []
-        if contains(.command) { result.insert(.command) }
-        if contains(.option) { result.insert(.option) }
-        if contains(.control) { result.insert(.control) }
-        if contains(.shift) { result.insert(.shift) }
-        return result
     }
 }
