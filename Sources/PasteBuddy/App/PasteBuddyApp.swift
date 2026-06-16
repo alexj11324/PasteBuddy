@@ -38,6 +38,7 @@ struct PasteBuddyApp: App {
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
     @State private var isShowingNewTextItem = false
+    @State private var mainWindowLaunchCoordinator = MainWindowLaunchCoordinator()
 
     init() {
         Self.printRuntimeDiagnosticsIfNeeded()
@@ -78,6 +79,10 @@ struct PasteBuddyApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     flushPendingSaveIfNeeded(for: phase)
+                }
+                .background {
+                    MainWindowLaunchGuard(coordinator: mainWindowLaunchCoordinator)
+                        .frame(width: 0, height: 0)
                 }
         }
         .commands {
@@ -337,6 +342,9 @@ struct PasteBuddyApp: App {
             }
         } label: {
             Label(localized(store.macMenuBarStatus.title), systemImage: store.macMenuBarStatus.systemImageName)
+                .task {
+                    await startRuntimeIfNeeded()
+                }
         }
     }
 
@@ -358,6 +366,7 @@ struct PasteBuddyApp: App {
 
     private func openMainWindow() async {
         await startRuntimeIfNeeded()
+        mainWindowLaunchCoordinator.allowNextMainWindowPresentation()
         openWindow(id: "main")
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -642,6 +651,56 @@ struct PasteBuddyApp: App {
         print("sentryConfigured=\(sentryConfiguration != nil)")
         print("sentryEnvironment=\(sentryConfiguration?.environment ?? "not-configured")")
         Darwin.exit(EXIT_SUCCESS)
+    }
+}
+
+@MainActor
+private final class MainWindowLaunchCoordinator {
+    private var shouldAllowNextMainWindowPresentation = false
+    private var didSuppressAutomaticLaunchWindow = false
+
+    func allowNextMainWindowPresentation() {
+        shouldAllowNextMainWindowPresentation = true
+    }
+
+    func shouldSuppressMainWindow(_ window: NSWindow) -> Bool {
+        if shouldAllowNextMainWindowPresentation {
+            shouldAllowNextMainWindowPresentation = false
+            return false
+        }
+        guard !didSuppressAutomaticLaunchWindow else {
+            return false
+        }
+        didSuppressAutomaticLaunchWindow = true
+        PasteBuddyDiagnostics.record(.directPaste, "suppressedAutomaticMainWindow", detail: window.title)
+        return true
+    }
+}
+
+private struct MainWindowLaunchGuard: NSViewRepresentable {
+    let coordinator: MainWindowLaunchCoordinator
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        scheduleSuppressionCheck(for: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        scheduleSuppressionCheck(for: nsView)
+    }
+
+    private func scheduleSuppressionCheck(for view: NSView) {
+        Task { @MainActor [weak view] in
+            await Task.yield()
+            guard let window = view?.window,
+                  coordinator.shouldSuppressMainWindow(window)
+            else {
+                return
+            }
+            window.orderOut(nil)
+            window.close()
+        }
     }
 }
 

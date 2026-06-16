@@ -60,7 +60,6 @@ final class ClipboardShelfPanelController {
         preparePanelContentForPresentation(panel)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
         panel.makeKey()
         animatePanelContentIn(panel)
         PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
@@ -117,7 +116,7 @@ final class ClipboardShelfPanelController {
     private func makePanel() -> ClipboardShelfPanel {
         let panel = ClipboardShelfPanel(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 292),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
