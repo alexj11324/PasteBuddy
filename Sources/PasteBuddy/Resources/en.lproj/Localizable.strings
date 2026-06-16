@@ -327,6 +327,7 @@
 "Resumes at %@." = "Resumes at %@.";
 "PasteBuddy clipboard shelf" = "PasteBuddy clipboard shelf";
 "Search Clipboard" = "Search Clipboard";
+"Search or @App" = "Search or @App";
 "Clipboard collections" = "Clipboard collections";
 "Remove clipboard filter" = "Remove clipboard filter";
 "Reload clipboard history" = "Reload clipboard history";
@@ -354,6 +355,8 @@
 "Pause Capture" = "Pause Capture";
 "Link" = "Link";
 "Double-click or press Return to paste." = "Double-click or press Return to paste.";
+"Press Space to preview. Press Return to paste." = "Press Space to preview. Press Return to paste.";
+"Close preview" = "Close preview";
 "%d file" = "%d file";
 "%d files" = "%d files";
 "%d chars" = "%d chars";
@@ -364,6 +367,8 @@
 "Capture active" = "Capture active";
 "Capture paused" = "Capture paused";
 "Capture paused temporarily" = "Capture paused temporarily";
+"Clear app filter" = "Clear app filter";
+"App suggestions" = "App suggestions";
 "New clipboard content is evaluated by local privacy rules before it enters encrypted history." = "New clipboard content is evaluated by local privacy rules before it enters encrypted history.";
 "Automatic clipboard capture is stopped until you resume it." = "Automatic clipboard capture is stopped until you resume it.";
 "Automatic clipboard capture is stopped until the selected resume time." = "Automatic clipboard capture is stopped until the selected resume time.";

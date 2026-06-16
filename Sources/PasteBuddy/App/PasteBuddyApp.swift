@@ -8,6 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        PasteBuddyDiagnostics.recordAccessibilityTrust(
+            .directPaste,
+            "accessibilityTrustCheckedAtLaunch"
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -437,7 +441,20 @@ struct PasteBuddyApp: App {
 
     private func toggleClipboardShelf() async {
         await startRuntimeIfNeeded()
+        PasteBuddyDiagnostics.recordAccessibilityTrust(
+            .shelf,
+            "accessibilityTrustCheckedBeforeShelfToggle"
+        )
         frontmostApplicationTracker.recordCurrentFrontmostApplication()
+        if let target = frontmostApplicationTracker.currentExternalApplication() {
+            PasteBuddyDiagnostics.record(
+                .hotKey,
+                "targetRecordedBeforeShelfToggle",
+                detail: "bundle=\(target.bundleIdentifier ?? "nil") name=\(target.localizedName)"
+            )
+        } else {
+            PasteBuddyDiagnostics.record(.hotKey, "targetMissingBeforeShelfToggle")
+        }
         shelfPanelController?.toggle()
     }
 
@@ -471,9 +488,11 @@ struct PasteBuddyApp: App {
             )
         }
 
-        if panelHotKeyController == nil, let shelfPanelController {
+        if panelHotKeyController == nil, shelfPanelController != nil {
             panelHotKeyController = PasteBuddyPanelHotKeyController {
-                shelfPanelController.toggle()
+                Task { @MainActor in
+                    await toggleClipboardShelf()
+                }
             }
         }
     }
@@ -499,19 +518,36 @@ struct PasteBuddyApp: App {
         format: PasteFormat,
         tracker: FrontmostApplicationTracker
     ) async -> DirectPasteResult {
-        guard AccessibilityPermissionService.isTrusted else {
-            return await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
+        PasteBuddyDiagnostics.record(.directPaste, "singleItemRequested", detail: "format=\(format.rawValue)")
+        let isAccessibilityTrusted = AccessibilityPermissionService.isTrusted
+        PasteBuddyDiagnostics.record(
+            .directPaste,
+            "accessibilityTrustChecked",
+            detail: "trusted=\(isAccessibilityTrusted)"
+        )
+        guard isAccessibilityTrusted else {
+            PasteBuddyDiagnostics.record(.directPaste, "accessibilityPromptRequested")
+            _ = AccessibilityPermissionService.requestTrustPrompt()
+            let result = await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
+            PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
+            return result
         }
         guard let target = tracker.currentExternalApplication(),
               let targetBundleIdentifier = target.bundleIdentifier else {
             PasteboardWriter.copy(item, format: format)
+            PasteBuddyDiagnostics.record(.directPaste, "targetMissing")
             return DirectPasteResult(
                 outcome: .copiedOnlyNoTargetApplication,
                 itemCount: 1,
                 format: format
             )
         }
-        return await PasteboardWriter.pasteToFrontmostAppAsync(
+        PasteBuddyDiagnostics.record(
+            .directPaste,
+            "targetSelected",
+            detail: "bundle=\(targetBundleIdentifier) name=\(target.localizedName)"
+        )
+        let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             item,
             format: format,
             targetBundleIdentifier: targetBundleIdentifier,
@@ -520,9 +556,12 @@ struct PasteBuddyApp: App {
             },
             options: PasteboardWriter.userConfiguredDirectPasteOptions,
             prepareForPaste: {
+                PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
                 tracker.activateLastExternalApplication()
             }
         )
+        PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
+        return result
     }
 
     private static func pasteItemsToTarget(
@@ -530,22 +569,40 @@ struct PasteBuddyApp: App {
         format: PasteFormat,
         tracker: FrontmostApplicationTracker
     ) async -> DirectPasteResult {
+        PasteBuddyDiagnostics.record(.directPaste, "multiItemRequested", detail: "count=\(items.count) format=\(format.rawValue)")
         guard !items.isEmpty else {
+            PasteBuddyDiagnostics.record(.directPaste, "emptySelection")
             return DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
         }
-        guard AccessibilityPermissionService.isTrusted else {
-            return await PasteboardWriter.pasteToFrontmostAppAsync(items, format: format)
+        let isAccessibilityTrusted = AccessibilityPermissionService.isTrusted
+        PasteBuddyDiagnostics.record(
+            .directPaste,
+            "accessibilityTrustChecked",
+            detail: "trusted=\(isAccessibilityTrusted)"
+        )
+        guard isAccessibilityTrusted else {
+            PasteBuddyDiagnostics.record(.directPaste, "accessibilityPromptRequested")
+            _ = AccessibilityPermissionService.requestTrustPrompt()
+            let result = await PasteboardWriter.pasteToFrontmostAppAsync(items, format: format)
+            PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
+            return result
         }
         guard let target = tracker.currentExternalApplication(),
               let targetBundleIdentifier = target.bundleIdentifier else {
             PasteboardWriter.copy(items, format: format)
+            PasteBuddyDiagnostics.record(.directPaste, "targetMissing")
             return DirectPasteResult(
                 outcome: .copiedOnlyNoTargetApplication,
                 itemCount: items.count,
                 format: format
             )
         }
-        return await PasteboardWriter.pasteToFrontmostAppAsync(
+        PasteBuddyDiagnostics.record(
+            .directPaste,
+            "targetSelected",
+            detail: "bundle=\(targetBundleIdentifier) name=\(target.localizedName)"
+        )
+        let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             items,
             format: format,
             targetBundleIdentifier: targetBundleIdentifier,
@@ -554,9 +611,12 @@ struct PasteBuddyApp: App {
             },
             options: PasteboardWriter.userConfiguredDirectPasteOptions,
             prepareForPaste: {
+                PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
                 tracker.activateLastExternalApplication()
             }
         )
+        PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
+        return result
     }
 }
 

@@ -719,7 +719,7 @@ public final class PasteBuddyStore {
     }
 
     public func filterSuggestions(matching query: String, limit: Int = 8) -> [ClipboardFilterDescriptor] {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedQuery = Self.normalizedSuggestionQuery(query)
         let allSuggestions = availableFilterSuggestions()
         let filteredSuggestions: [ClipboardFilterDescriptor]
         if normalizedQuery.isEmpty {
@@ -732,6 +732,42 @@ public final class PasteBuddyStore {
             }
         }
         return Array(filteredSuggestions.prefix(max(limit, 0)))
+    }
+
+    public func sourceAppSuggestions(matching query: String, limit: Int = 6) -> [String] {
+        let normalizedQuery = Self.normalizedAppSuggestionQuery(query)
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        let matches = availableSourceApps.compactMap { appName -> (name: String, rank: Int)? in
+            let normalizedName = Self.normalizedAppMention(appName)
+            guard !normalizedName.isEmpty else { return nil }
+            if normalizedName == normalizedQuery {
+                return (appName, 0)
+            }
+            if normalizedName.hasPrefix(normalizedQuery) {
+                return (appName, 1)
+            }
+            if normalizedName.contains(normalizedQuery) {
+                return (appName, 2)
+            }
+            return nil
+        }
+
+        return Array(matches
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank {
+                    return lhs.rank < rhs.rank
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            .map(\.name)
+            .prefix(max(limit, 0)))
+    }
+
+    public func applySourceAppSuggestion(_ appName: String) {
+        sourceAppFilter = appName
+        searchQuery = ""
+        selectSingleItem(filteredItems.first?.id)
     }
 
     @discardableResult
@@ -2342,11 +2378,13 @@ public final class PasteBuddyStore {
               repositorySyncedDataRevision == dataRevision else {
             return nil
         }
+        let filters = resolvedSearchFilters()
+        guard !filters.isImpossible else { return [] }
         do {
             return try clipboardRepository.fetchPage(ClipboardItemPageRequest(
-                searchQuery: searchQuery,
+                searchQuery: filters.textQuery,
                 contentType: contentTypeFilter,
-                sourceAppName: sourceAppFilter,
+                sourceAppName: filters.sourceAppName,
                 deviceName: deviceFilter,
                 dateFilter: dateFilter,
                 pinboardID: pinboardID,
@@ -2461,16 +2499,18 @@ public final class PasteBuddyStore {
     }
 
     private func filtered(_ items: [ClipboardItem]) -> [ClipboardItem] {
-        items.filter { item in
-            item.matches(searchQuery) && matchesStructuredFilters(item)
+        let filters = resolvedSearchFilters()
+        guard !filters.isImpossible else { return [] }
+        return items.filter { item in
+            item.matches(filters.textQuery) && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
         }
     }
 
-    private func matchesStructuredFilters(_ item: ClipboardItem) -> Bool {
+    private func matchesStructuredFilters(_ item: ClipboardItem, sourceAppName: String? = nil) -> Bool {
         if let contentTypeFilter, item.contentType != contentTypeFilter {
             return false
         }
-        if let sourceAppFilter, item.sourceAppName != sourceAppFilter {
+        if let sourceAppName = sourceAppName ?? sourceAppFilter, item.sourceAppName != sourceAppName {
             return false
         }
         if let deviceFilter, item.deviceName != deviceFilter {
@@ -2480,6 +2520,35 @@ public final class PasteBuddyStore {
             return false
         }
         return true
+    }
+
+    private func resolvedSearchFilters() -> PasteBuddyResolvedSearchFilters {
+        let parts = PasteBuddySearchQueryParts.parse(searchQuery)
+        let mentionedSourceApp = parts.sourceAppMention.flatMap(resolveSourceAppName)
+        let mentionHasNoMatch = parts.sourceAppMention != nil && mentionedSourceApp == nil
+        if mentionHasNoMatch {
+            return PasteBuddyResolvedSearchFilters(textQuery: parts.textQuery, sourceAppName: nil, isImpossible: true)
+        }
+
+        if let sourceAppFilter, let mentionedSourceApp, sourceAppFilter != mentionedSourceApp {
+            return PasteBuddyResolvedSearchFilters(textQuery: parts.textQuery, sourceAppName: nil, isImpossible: true)
+        }
+
+        return PasteBuddyResolvedSearchFilters(
+            textQuery: parts.textQuery,
+            sourceAppName: sourceAppFilter ?? mentionedSourceApp,
+            isImpossible: false
+        )
+    }
+
+    private func resolveSourceAppName(_ mention: String) -> String? {
+        let normalizedMention = Self.normalizedAppMention(mention)
+        guard !normalizedMention.isEmpty else { return nil }
+
+        let sourceApps = availableSourceApps
+        return sourceApps.first { Self.normalizedAppMention($0) == normalizedMention }
+            ?? sourceApps.first { Self.normalizedAppMention($0).hasPrefix(normalizedMention) }
+            ?? sourceApps.first { Self.normalizedAppMention($0).contains(normalizedMention) }
     }
 
     private func availableFilterSuggestions() -> [ClipboardFilterDescriptor] {
@@ -2563,6 +2632,68 @@ public final class PasteBuddyStore {
         }
         return "#\(raw)"
     }
+
+    private static func normalizedSuggestionQuery(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("@") else {
+            return trimmed.lowercased()
+        }
+        return String(trimmed.dropFirst()).lowercased()
+    }
+
+    private static func normalizedAppSuggestionQuery(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("@") else {
+            return normalizedAppMention(trimmed)
+        }
+        return normalizedAppMention(String(trimmed.dropFirst()))
+    }
+
+    private static func normalizedAppMention(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
+            .lowercased()
+    }
+}
+
+private struct PasteBuddySearchQueryParts: Equatable {
+    var textQuery: String
+    var sourceAppMention: String?
+
+    static func parse(_ query: String) -> PasteBuddySearchQueryParts {
+        let tokens = query.split(whereSeparator: { $0.isWhitespace })
+        var textTokens: [String] = []
+        var sourceAppMention: String?
+
+        for token in tokens {
+            let value = String(token)
+            guard sourceAppMention == nil, value.hasPrefix("@") else {
+                textTokens.append(value)
+                continue
+            }
+
+            let mention = String(value.dropFirst())
+                .trimmingCharacters(in: .punctuationCharacters)
+            if !mention.isEmpty {
+                sourceAppMention = mention
+            }
+        }
+
+        return PasteBuddySearchQueryParts(
+            textQuery: textTokens.joined(separator: " "),
+            sourceAppMention: sourceAppMention
+        )
+    }
+}
+
+private struct PasteBuddyResolvedSearchFilters {
+    var textQuery: String
+    var sourceAppName: String?
+    var isImpossible: Bool
 }
 
 private struct PasteBuddyPresentationCache {

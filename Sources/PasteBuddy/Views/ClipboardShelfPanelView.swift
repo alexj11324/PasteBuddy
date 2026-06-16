@@ -20,6 +20,7 @@ struct ClipboardShelfPanelView: View {
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let reloadClipboardHistory: @MainActor () async -> Void
     let onDismiss: () -> Void
+    let onDismissImmediately: () -> Void
 
     @FocusState private var isSearchFocused: Bool
     @State private var isShowingNewTextItem = false
@@ -29,6 +30,7 @@ struct ClipboardShelfPanelView: View {
     @State private var selectedItemID: UUID?
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectionSyncTask: Task<Void, Never>?
+    @State private var previewedItemID: UUID?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -53,9 +55,14 @@ struct ClipboardShelfPanelView: View {
             refreshShelfItems()
         }
         .onMoveCommand(perform: moveSelection)
-        .onExitCommand(perform: onDismiss)
+        .onExitCommand(perform: handleExitCommand)
         .background {
-            keyboardShortcuts
+            ZStack {
+                keyboardShortcuts
+                ShelfSpaceKeyMonitor(isEnabled: !isSearchFocused) {
+                    previewSelectedItem()
+                }
+            }
         }
         .sheet(isPresented: $isShowingNewTextItem) {
             NewTextItemSheet { title, text in
@@ -74,22 +81,9 @@ struct ClipboardShelfPanelView: View {
 
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search Clipboard", text: $store.searchQuery)
-                        .textFieldStyle(.plain)
-                        .focused($isSearchFocused)
-                        .frame(width: isSearchFocused || !store.searchQuery.isEmpty ? 190 : 128)
-                        .onSubmit {
-                            pasteSelected(format: store.defaultPasteFormat)
-                        }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(height: 38)
-                .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
+            HStack(alignment: .top, spacing: 10) {
+                searchControl
+                    .zIndex(20)
 
                 collectionStrip
 
@@ -161,9 +155,79 @@ struct ClipboardShelfPanelView: View {
             }
             .controlSize(.large)
 
-            if store.hasActiveFilters {
+            if !visibleActiveFilterSummaries.isEmpty {
                 activeFilterStrip
             }
+        }
+    }
+
+    private var searchControl: some View {
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+
+                if let sourceAppFilter = store.sourceAppFilter {
+                    ShelfSourceAppToken(appName: sourceAppFilter) {
+                        store.sourceAppFilter = nil
+                        refreshShelfItems()
+                        isSearchFocused = true
+                    }
+                }
+
+                TextField("Search or @App", text: $store.searchQuery)
+                    .textFieldStyle(.plain)
+                    .focused($isSearchFocused)
+                    .frame(minWidth: 48)
+                    .onSubmit {
+                        pasteSelected(format: store.defaultPasteFormat)
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(width: searchControlWidth, height: 38)
+            .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
+
+            if shouldShowSourceAppSuggestions {
+                ShelfSourceAppSuggestionPopover(appNames: sourceAppSuggestions) { appName in
+                    store.applySourceAppSuggestion(appName)
+                    refreshShelfItems()
+                    isSearchFocused = true
+                }
+                .frame(width: max(searchControlWidth, 250))
+                .offset(y: 44)
+                .zIndex(50)
+            }
+        }
+        .frame(width: searchControlWidth, height: searchControlHeight, alignment: .topLeading)
+    }
+
+    private var searchControlWidth: CGFloat {
+        if store.sourceAppFilter != nil {
+            return 300
+        }
+        return isSearchFocused || !store.searchQuery.isEmpty ? 240 : 210
+    }
+
+    private var searchControlHeight: CGFloat {
+        guard shouldShowSourceAppSuggestions else { return 38 }
+        return 50 + CGFloat(sourceAppSuggestions.count) * 38
+    }
+
+    private var sourceAppSuggestions: [String] {
+        store.sourceAppSuggestions(matching: store.searchQuery, limit: 5)
+    }
+
+    private var shouldShowSourceAppSuggestions: Bool {
+        isSearchFocused
+            && store.sourceAppFilter == nil
+            && !store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !sourceAppSuggestions.isEmpty
+    }
+
+    private var visibleActiveFilterSummaries: [ClipboardFilterDescriptor] {
+        store.activeFilterSummaries.filter { descriptor in
+            !(descriptor.kind == .sourceApp && store.sourceAppFilter != nil)
         }
     }
 
@@ -172,7 +236,6 @@ struct ClipboardShelfPanelView: View {
             HStack(spacing: 8) {
                 ShelfCollectionChip(
                     title: localized("Clipboard"),
-                    count: store.snapshot.items.count,
                     systemImageName: "clock.arrow.circlepath",
                     color: store.isCapturePaused ? .orange : .blue,
                     isSelected: store.selectedScope == .history
@@ -225,7 +288,7 @@ struct ClipboardShelfPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                ForEach(store.activeFilterSummaries) { descriptor in
+                ForEach(visibleActiveFilterSummaries) { descriptor in
                     Button {
                         clearFilter(descriptor)
                     } label: {
@@ -328,6 +391,21 @@ struct ClipboardShelfPanelView: View {
                             },
                             onDelete: {
                                 store.removeItem(item.id)
+                            },
+                            isPreviewPresented: Binding(
+                                get: { previewedItemID == item.id },
+                                set: { isPresented in
+                                    if isPresented {
+                                        previewItem(item)
+                                    } else if previewedItemID == item.id {
+                                        previewedItemID = nil
+                                    }
+                                }
+                            ),
+                            onDismissPreview: {
+                                if previewedItemID == item.id {
+                                    previewedItemID = nil
+                                }
                             }
                         )
                     }
@@ -394,8 +472,10 @@ struct ClipboardShelfPanelView: View {
     private func moveSelection(_ direction: MoveCommandDirection) {
         switch direction {
         case .left, .up:
+            isSearchFocused = false
             selectOffset(-1)
         case .right, .down:
+            isSearchFocused = false
             selectOffset(1)
         @unknown default:
             break
@@ -412,11 +492,13 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func setScope(_ scope: PasteScope) {
+        previewedItemID = nil
         store.selectedScope = scope
         refreshShelfItems()
     }
 
     private func clearFilter(_ descriptor: ClipboardFilterDescriptor) {
+        previewedItemID = nil
         switch descriptor.kind {
         case .contentType:
             store.contentTypeFilter = nil
@@ -431,6 +513,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func selectItem(_ item: ClipboardItem) {
+        isSearchFocused = false
         let items = renderedShelfItems
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
@@ -472,20 +555,26 @@ struct ClipboardShelfPanelView: View {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
         Task { @MainActor in
-            let hydratedItems = await store.hydratedItems(for: items)
-            let result = await directPasteItems(hydratedItems, format)
+            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismiss: onDismissImmediately
+            ) {
+                let hydratedItems = await store.hydratedItems(for: items)
+                return await directPasteItems(hydratedItems, format)
+            }
             store.recordDirectPasteResult(result)
-            onDismiss()
         }
     }
 
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
         Task { @MainActor in
-            let hydratedItem = await store.hydratedItem(for: item)
-            let result = await directPasteItem(hydratedItem, format)
+            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismiss: onDismissImmediately
+            ) {
+                let hydratedItem = await store.hydratedItem(for: item)
+                return await directPasteItem(hydratedItem, format)
+            }
             store.recordDirectPasteResult(result)
-            onDismiss()
         }
     }
 
@@ -514,6 +603,9 @@ struct ClipboardShelfPanelView: View {
     private func selectSingleItem(_ id: UUID?) {
         let ids = id.map { Set([$0]) } ?? []
         guard selectedItemID != id || selectedItemIDs != ids else { return }
+        if previewedItemID != id {
+            previewedItemID = nil
+        }
         selectedItemID = id
         selectedItemIDs = ids
         selectionAnchorID = id
@@ -522,6 +614,7 @@ struct ClipboardShelfPanelView: View {
 
     private func setSelectedItemIDs(_ ids: Set<UUID>) {
         guard selectedItemIDs != ids else { return }
+        previewedItemID = nil
         selectedItemIDs = ids
         selectedItemID = shelfItems.first(where: { ids.contains($0.id) })?.id
         scheduleStoreSelectionSync(primaryID: selectedItemID, ids: ids)
@@ -545,6 +638,26 @@ struct ClipboardShelfPanelView: View {
         }
     }
 
+    private func previewSelectedItem() {
+        guard let item = selectedItemsInDisplayOrder.first else { return }
+        previewItem(item)
+    }
+
+    private func previewItem(_ item: ClipboardItem) {
+        guard renderedShelfItems.contains(where: { $0.id == item.id }) else { return }
+        isSearchFocused = false
+        previewedItemID = item.id
+        selectSingleItem(item.id)
+    }
+
+    private func handleExitCommand() {
+        if previewedItemID != nil {
+            previewedItemID = nil
+            return
+        }
+        onDismiss()
+    }
+
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
@@ -565,6 +678,9 @@ struct ClipboardShelfPanelView: View {
 
         let renderedItems = Array(items.prefix(ClipboardShelfMetrics.renderLimit))
         let itemIDs = Set(renderedItems.map(\.id))
+        if let previewedItemID, !itemIDs.contains(previewedItemID) {
+            self.previewedItemID = nil
+        }
         let validSelectedIDs = store.selectedItemIDs.intersection(itemIDs)
         if !validSelectedIDs.isEmpty {
             selectedItemIDs = validSelectedIDs
@@ -685,11 +801,27 @@ private struct ShelfOverflowStatusCard: View {
 
 private struct ShelfCollectionChip: View {
     let title: String
-    let count: Int
+    let count: Int?
     let systemImageName: String
     let color: Color
     let isSelected: Bool
     let action: () -> Void
+
+    init(
+        title: String,
+        count: Int? = nil,
+        systemImageName: String,
+        color: Color,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.count = count
+        self.systemImageName = systemImageName
+        self.color = color
+        self.isSelected = isSelected
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -702,7 +834,7 @@ private struct ShelfCollectionChip: View {
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
 
-                if count > 0 {
+                if let count, count > 0 {
                     Text("\(count)")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(isSelected ? color : .secondary)
@@ -729,6 +861,7 @@ private struct ShelfCollectionChip: View {
                 }
             }
             .shadow(color: .black.opacity(isSelected ? 0.12 : 0), radius: isSelected ? 8 : 0, y: 2)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -768,26 +901,39 @@ private struct ClipboardShelfCard: View {
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
     let onDelete: () -> Void
+    @Binding var isPreviewPresented: Bool
+    let onDismissPreview: () -> Void
 
     var body: some View {
         ClipboardShelfCardVisual(item: item, imageDataProvider: imageDataProvider, isSelected: isSelected)
-            .onTapGesture {
-                onSelect()
-            }
-            .onTapGesture(count: 2) {
-                onPaste(defaultPasteFormat)
-            }
+            .gesture(
+                TapGesture(count: 2)
+                    .onEnded {
+                        onPaste(defaultPasteFormat)
+                    }
+                    .exclusively(before: TapGesture().onEnded {
+                        onSelect()
+                    })
+            )
         .contextMenu {
             contextMenuContent
         }
         .onDrag {
             ClipboardItemDragProvider.provider(for: draggedItems)
         }
+        .popover(isPresented: $isPreviewPresented, arrowEdge: .bottom) {
+            ShelfExpandedPreview(
+                item: item,
+                imageDataProvider: imageDataProvider,
+                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.contentType.shelfTint),
+                onDismiss: onDismissPreview
+            )
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
         .accessibilityLabel("\(item.title), \(localized(item.contentType.displayName))")
         .accessibilityValue(localized(isSelected ? "Selected" : "Not selected"))
-        .accessibilityHint(localized("Press Return to paste."))
+        .accessibilityHint(localized("Press Space to preview. Press Return to paste."))
     }
 
     @ViewBuilder
@@ -826,6 +972,253 @@ private struct ClipboardShelfCard: View {
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+}
+
+private struct ShelfExpandedPreview: View {
+    let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let tint: Color
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(localized("Close preview"))
+
+                Label(localized(item.contentType.displayName), systemImage: item.contentType.systemImageName)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Spacer(minLength: 12)
+
+                SourceApplicationIconBadge(item: item, size: 24)
+            }
+
+            previewContent
+
+            HStack(spacing: 10) {
+                Text(footnote)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let url = item.openableURL {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("Open", systemImage: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 560, alignment: .leading)
+        .background(.regularMaterial)
+        .onExitCommand(perform: onDismiss)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(localized("Preview"))
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
+        switch item.contentType {
+        case .image:
+            VStack(alignment: .leading, spacing: 10) {
+                if item.payload.hasImageAsset {
+                    ShelfExpandedImagePreview(item: item, imageDataProvider: imageDataProvider, tint: tint)
+                }
+                if let text = item.payload.ocrText, !text.isEmpty {
+                    previewText(text)
+                        .frame(maxHeight: 110)
+                }
+            }
+        case .text, .url, .file, .mixed:
+            previewText(ClipboardPlainTextRenderer.plainText(for: item))
+                .frame(height: 300)
+        }
+    }
+
+    private func previewText(_ text: String) -> some View {
+        ScrollView {
+            Text(text.isEmpty ? item.visualPreview.body : text)
+                .font(.system(size: 16, design: .monospaced))
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(12)
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(tint.opacity(0.28), lineWidth: 1)
+        }
+    }
+
+    private var footnote: String {
+        switch item.contentType {
+        case .image:
+            if let imageSize = ClipboardImageCache.imageSize(for: item) {
+                return "\(Int(imageSize.width)) x \(Int(imageSize.height))"
+            }
+            return localized(item.ocrState.displayName)
+        case .file:
+            let count = item.payload.allFileURLStrings.count
+            return localized(count == 1 ? "%d file" : "%d files", count)
+        default:
+            return localized("%d chars", ClipboardPlainTextRenderer.plainText(for: item).count)
+        }
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
+    }
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        String(
+            format: NSLocalizedString(key, comment: ""),
+            locale: Locale.current,
+            arguments: arguments
+        )
+    }
+}
+
+private struct ShelfExpandedImagePreview: View {
+    let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let tint: Color
+    @State private var image: NSImage?
+    @State private var loadedImageData: Data?
+
+    var body: some View {
+        ZStack {
+            if let image = image ?? ClipboardImageCache.cachedThumbnail(
+                for: item,
+                imageData: loadedImageData,
+                maxPixelSize: maxPixelSize
+            ) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 340)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(tint.opacity(0.10))
+                Image(systemName: "photo")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 340)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(tint.opacity(0.25), lineWidth: 1)
+        }
+        .accessibilityLabel(localized("Captured image preview"))
+        .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
+            image = ClipboardImageCache.cachedThumbnail(
+                for: item,
+                imageData: loadedImageData,
+                maxPixelSize: maxPixelSize
+            )
+            guard image == nil else { return }
+
+            let imageData: Data?
+            if let loadedImageData {
+                imageData = loadedImageData
+            } else {
+                imageData = await imageDataProvider(item)
+            }
+            loadedImageData = imageData
+            let loadedImage = await ClipboardImageCache.thumbnail(
+                for: item,
+                imageData: imageData,
+                maxPixelSize: maxPixelSize
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
+        }
+    }
+
+    private var maxPixelSize: Int {
+        1_600
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
+    }
+}
+
+private struct ShelfSpaceKeyMonitor: NSViewRepresentable {
+    let isEnabled: Bool
+    let onSpace: () -> Void
+
+    func makeNSView(context: Context) -> ShelfSpaceKeyMonitorView {
+        ShelfSpaceKeyMonitorView(isEnabled: isEnabled, onSpace: onSpace)
+    }
+
+    func updateNSView(_ nsView: ShelfSpaceKeyMonitorView, context: Context) {
+        nsView.isEnabled = isEnabled
+        nsView.onSpace = onSpace
+    }
+}
+
+private final class ShelfSpaceKeyMonitorView: NSView {
+    var isEnabled: Bool
+    var onSpace: () -> Void
+    private var localKeyDownMonitor: Any?
+
+    init(isEnabled: Bool, onSpace: @escaping () -> Void) {
+        self.isEnabled = isEnabled
+        self.onSpace = onSpace
+        super.init(frame: .zero)
+        installMonitor()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    deinit {
+        if let localKeyDownMonitor {
+            NSEvent.removeMonitor(localKeyDownMonitor)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitor()
+    }
+
+    private func installMonitor() {
+        guard localKeyDownMonitor == nil else { return }
+        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  self.isEnabled,
+                  event.window === self.window,
+                  Self.isPlainSpace(event) else {
+                return event
+            }
+
+            self.onSpace()
+            return nil
+        }
+    }
+
+    private static func isPlainSpace(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isEmpty else { return false }
+        return event.keyCode == 49 || event.charactersIgnoringModifiers == " "
     }
 }
 
@@ -954,6 +1347,10 @@ private struct ClipboardShelfCardVisual: View {
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let isSelected: Bool
 
+    private var cardTint: Color {
+        SourceApplicationIconResolver.themeColor(for: item, fallback: item.contentType.shelfTint)
+    }
+
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
@@ -971,7 +1368,7 @@ private struct ClipboardShelfCardVisual: View {
         .padding(.trailing, 12)
         .padding(.vertical, 8)
         .frame(height: ClipboardShelfMetrics.cardHeaderHeight)
-        .background(item.contentType.shelfTint)
+        .background(cardTint)
     }
 
     var body: some View {
@@ -985,7 +1382,7 @@ private struct ClipboardShelfCardVisual: View {
         .clipShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous)
-                .strokeBorder(isSelected ? item.contentType.shelfTint : Color.white.opacity(0.24), lineWidth: isSelected ? 3 : 1)
+                .strokeBorder(isSelected ? cardTint : Color.white.opacity(0.24), lineWidth: isSelected ? 3 : 1)
         }
         .shadow(color: .black.opacity(0.10), radius: 8, y: 4)
         .contentShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
@@ -996,13 +1393,13 @@ private struct ClipboardShelfCardVisual: View {
         let preview = item.visualPreview
 
         if preview.prefersImageThumbnail {
-            ShelfThumbnailView(item: item, imageDataProvider: imageDataProvider)
+            ShelfThumbnailView(item: item, imageDataProvider: imageDataProvider, tint: cardTint)
         } else {
             VStack(alignment: .leading, spacing: 9) {
                 if item.contentType == .url {
                     Image(systemName: "link.circle.fill")
                         .font(.system(size: 30))
-                        .foregroundStyle(item.contentType.shelfTint)
+                        .foregroundStyle(cardTint)
                 }
                 Text(preview.body)
                     .font(item.contentType == .text ? .callout.monospaced() : .callout)
@@ -1128,6 +1525,7 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
 private struct ShelfThumbnailView: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let tint: Color
     @State private var thumbnail: NSImage?
     @State private var loadedImageData: Data?
 
@@ -1139,10 +1537,10 @@ private struct ShelfThumbnailView: View {
                     .scaledToFill()
             } else {
                 Rectangle()
-                    .fill(item.contentType.shelfTint.opacity(0.10))
+                    .fill(tint.opacity(0.10))
                 Image(systemName: item.contentType.systemImageName)
                     .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(item.contentType.shelfTint)
+                    .foregroundStyle(tint)
             }
         }
         .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
@@ -1166,8 +1564,93 @@ private struct ShelfThumbnailView: View {
     }
 }
 
+private struct ShelfSourceAppToken: View {
+    let appName: String
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            SourceApplicationIconImage(appName: appName, size: 18)
+            Text(appName)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+            Button(action: onClear) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(NSLocalizedString("Clear app filter", comment: ""))
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 6)
+        .padding(.vertical, 3)
+        .background(.quaternary, in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(appName)
+    }
+}
+
+private struct ShelfSourceAppSuggestionPopover: View {
+    let appNames: [String]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(appNames, id: \.self) { appName in
+                Button {
+                    onSelect(appName)
+                } label: {
+                    HStack(spacing: 10) {
+                        SourceApplicationIconImage(appName: appName, size: 22)
+                        Text(appName)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.22), radius: 14, x: 0, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(NSLocalizedString("App suggestions", comment: ""))
+    }
+}
+
+private struct SourceApplicationIconImage: View {
+    let appName: String
+    let size: CGFloat
+
+    var body: some View {
+        let image = SourceApplicationIconResolver.icon(forApplicationName: appName)
+            ?? SourceApplicationIconResolver.genericApplicationIcon()
+        Image(nsImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
 private struct SourceApplicationIconBadge: View {
     let item: ClipboardItem
+    let size: CGFloat
+
+    init(item: ClipboardItem, size: CGFloat = 36) {
+        self.item = item
+        self.size = size
+    }
 
     var body: some View {
         ZStack {
@@ -1185,7 +1668,7 @@ private struct SourceApplicationIconBadge: View {
                     .foregroundStyle(item.contentType.shelfTint)
             }
         }
-        .frame(width: 36, height: 36)
+        .frame(width: size, height: size)
         .help(item.sourceAppName)
         .accessibilityLabel(item.sourceAppName)
     }
@@ -1225,6 +1708,13 @@ private enum SourceApplicationIconResolver {
         ClipboardImageCache.genericAppIcon()
     }
 
+    static func themeColor(for item: ClipboardItem, fallback: Color) -> Color {
+        let key = colorCacheKey(for: item)
+        let sourceIcon = icon(for: item)
+            ?? (hasKnownSource(for: item) ? genericApplicationIcon() : nil)
+        return AppIconThemeColorResolver.themeColor(for: sourceIcon, cacheKey: key, fallback: fallback)
+    }
+
     private static func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
         if let image = runningApplicationIcon(bundleIdentifier: bundleIdentifier) {
             return image
@@ -1236,7 +1726,7 @@ private enum SourceApplicationIconResolver {
         return icon(forApplicationURL: applicationURL)
     }
 
-    private static func icon(forApplicationName appName: String) -> NSImage? {
+    static func icon(forApplicationName appName: String) -> NSImage? {
         if let image = runningApplicationIcon(appName: appName) {
             return image
         }
@@ -1272,6 +1762,16 @@ private enum SourceApplicationIconResolver {
 
     private static func icon(forApplicationURL url: URL) -> NSImage {
         icon(from: NSWorkspace.shared.icon(forFile: url.path))
+    }
+
+    private static func colorCacheKey(for item: ClipboardItem) -> String {
+        if let bundleIdentifier = normalized(item.sourceBundleIdentifier) {
+            return "bundle:\(bundleIdentifier)"
+        }
+        if let appName = normalized(item.sourceAppName) {
+            return "name:\(appName.lowercased())"
+        }
+        return "contentType:\(item.contentType.rawValue)"
     }
 
     private static func runningApplicationIcon(bundleIdentifier: String? = nil, appName: String? = nil) -> NSImage? {

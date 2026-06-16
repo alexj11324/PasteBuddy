@@ -5,8 +5,8 @@ import Foundation
 @MainActor
 public enum PasteboardWriter {
     public struct DirectPasteOptions: Equatable, Sendable {
-        public static let activationWaitTimeoutDefault: TimeInterval = 0.12
-        public static let pasteDispatchDelayDefault: TimeInterval = 0
+        public static let activationWaitTimeoutDefault: TimeInterval = 0.45
+        public static let pasteDispatchDelayDefault: TimeInterval = 0.06
         public static let pasteDispatchDelayUserDefaultsKey = "PasteBuddyDirectPasteDelaySeconds"
 
         public var activationWaitTimeout: TimeInterval

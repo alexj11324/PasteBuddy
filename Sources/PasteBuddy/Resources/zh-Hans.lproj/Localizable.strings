@@ -327,6 +327,7 @@
 "Resumes at %@." = "将在 %@ 恢复。";
 "PasteBuddy clipboard shelf" = "PasteBuddy 剪贴板架";
 "Search Clipboard" = "搜索剪贴板";
+"Search or @App" = "搜索或 @App";
 "Clipboard collections" = "剪贴板集合";
 "Remove clipboard filter" = "移除剪贴板过滤器";
 "Reload clipboard history" = "重新加载剪贴板历史";
@@ -354,6 +355,8 @@
 "Pause Capture" = "暂停捕获";
 "Link" = "链接";
 "Double-click or press Return to paste." = "双击或按 Return 即可粘贴。";
+"Press Space to preview. Press Return to paste." = "按空格键预览，按 Return 粘贴。";
+"Close preview" = "关闭预览";
 "%d file" = "%d 个文件";
 "%d files" = "%d 个文件";
 "%d chars" = "%d 个字符";
@@ -364,6 +367,8 @@
 "Capture active" = "捕获已开启";
 "Capture paused" = "捕获已暂停";
 "Capture paused temporarily" = "捕获暂时暂停";
+"Clear app filter" = "清除应用过滤器";
+"App suggestions" = "应用建议";
 "New clipboard content is evaluated by local privacy rules before it enters encrypted history." = "新的剪贴板内容会先经过本地隐私规则检查，然后才进入加密历史。";
 "Automatic clipboard capture is stopped until you resume it." = "自动剪贴板捕获已停止，直到你恢复。";
 "Automatic clipboard capture is stopped until the selected resume time." = "自动剪贴板捕获已停止，直到选定的恢复时间。";

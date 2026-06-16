@@ -34,6 +34,7 @@ final class ClipboardShelfPanelController {
     }
 
     func toggle() {
+        PasteBuddyDiagnostics.record(.shelf, "toggleRequested", detail: "visible=\(isVisible)")
         if isVisible {
             hide()
         } else {
@@ -42,10 +43,12 @@ final class ClipboardShelfPanelController {
     }
 
     func show() {
+        PasteBuddyDiagnostics.record(.shelf, "showRequested")
         let panel = panel ?? makePanel()
         self.panel = panel
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = bottomAttachedFrame(for: panel)
+        PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
         if shouldReduceShelfMotion {
             panel.setFrame(finalFrame, display: false)
         } else {
@@ -53,20 +56,33 @@ final class ClipboardShelfPanelController {
         }
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
+        PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
         if shouldReduceShelfMotion {
             panel.setFrame(finalFrame, display: true)
             postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
         } else {
+            let finalFrameDetail = NSStringFromRect(finalFrame)
             animate(panel, to: finalFrame) { [weak self] in
+                PasteBuddyDiagnostics.record(.shelf, "animationFinished", detail: finalFrameDetail)
                 self?.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
             }
         }
         installDismissalMonitoringAfterPresentation(for: panel)
     }
 
+    func hideImmediately() {
+        guard let panel, panel.isVisible else { return }
+        PasteBuddyDiagnostics.record(.shelf, "hideImmediate")
+        stopOutsideClickMonitoring()
+        stopFocusMonitoring()
+        stopScreenParameterMonitoring()
+        panel.orderOut(nil)
+        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+    }
+
     func hide() {
         guard let panel, panel.isVisible else { return }
+        PasteBuddyDiagnostics.record(.shelf, "hideRequested")
         stopOutsideClickMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
@@ -128,6 +144,8 @@ final class ClipboardShelfPanelController {
                 }
             ) { [weak self] in
                 self?.hide()
+            } onDismissImmediately: { [weak self] in
+                self?.hideImmediately()
             }
         )
         hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
@@ -404,10 +422,43 @@ private extension NSRect {
 
 @MainActor
 final class PasteBuddyPanelHotKeyController {
+    private let onToggle: @MainActor () -> Void
     private var registration: PasteBuddyCarbonHotKeyRegistration?
+    private var eventTap: PasteBuddyPanelHotKeyEventTap?
+    private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
 
     init(onToggle: @escaping @MainActor () -> Void) {
-        registration = PasteBuddyCarbonHotKeyRegistration(onToggle: onToggle)
+        self.onToggle = onToggle
+        let handler: @MainActor (PasteBuddyPanelHotKeySource) -> Void = { [weak self] source in
+            self?.triggerToggle(source: source)
+        }
+        eventTap = PasteBuddyPanelHotKeyEventTap(onToggle: { handler(.eventTap) })
+        registration = PasteBuddyCarbonHotKeyRegistration(onToggle: { handler(.carbon) })
+    }
+
+    private func triggerToggle(source: PasteBuddyPanelHotKeySource) {
+        guard triggerGate.shouldTrigger(source: source) else { return }
+        onToggle()
+    }
+}
+
+enum PasteBuddyPanelHotKeySource: String, Sendable {
+    case carbon
+    case eventTap
+}
+
+struct PasteBuddyPanelHotKeyTriggerGate {
+    private var lastTriggerDate: Date?
+    var duplicateInterval: TimeInterval = 0.25
+
+    mutating func shouldTrigger(source: PasteBuddyPanelHotKeySource, now: Date = Date()) -> Bool {
+        if let lastTriggerDate, now.timeIntervalSince(lastTriggerDate) < duplicateInterval {
+            PasteBuddyDiagnostics.record(.hotKey, "ignoredDuplicate", detail: "source=\(source.rawValue)")
+            return false
+        }
+        lastTriggerDate = now
+        PasteBuddyDiagnostics.record(.hotKey, "pressed", detail: "source=\(source.rawValue)")
+        return true
     }
 }
 
@@ -437,7 +488,7 @@ private final class PasteBuddyCarbonHotKeyRegistration {
             eventKind: UInt32(kEventHotKeyPressed)
         )
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(
+        let status = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, eventRef, userData in
                 guard let eventRef, let userData else { return noErr }
@@ -468,6 +519,11 @@ private final class PasteBuddyCarbonHotKeyRegistration {
             selfPointer,
             &eventHandler
         )
+        PasteBuddyDiagnostics.record(.hotKey, "carbonHandlerInstalled", detail: "status=\(status)")
+        guard status == noErr else {
+            eventHandler = nil
+            return
+        }
     }
 
     private func registerShowHideHotKey() {
@@ -476,7 +532,7 @@ private final class PasteBuddyCarbonHotKeyRegistration {
             self.hotKeyRef = nil
         }
         let hotKeyID = EventHotKeyID(signature: pasteBuddyHotKeySignature, id: pasteBuddyShowHideHotKeyID)
-        RegisterEventHotKey(
+        let status = RegisterEventHotKey(
             UInt32(kVK_ANSI_V),
             UInt32(cmdKey | shiftKey),
             hotKeyID,
@@ -484,12 +540,107 @@ private final class PasteBuddyCarbonHotKeyRegistration {
             0,
             &hotKeyRef
         )
+        PasteBuddyDiagnostics.record(.hotKey, "carbonRegistered", detail: "status=\(status)")
+        guard status == noErr else {
+            hotKeyRef = nil
+            return
+        }
     }
 
     private func handlePressedHotKey() {
         Task { @MainActor [onToggle] in
             onToggle()
         }
+    }
+}
+
+final class PasteBuddyPanelHotKeyEventTap {
+    private let onToggle: @MainActor () -> Void
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+
+    init(onToggle: @escaping @MainActor () -> Void) {
+        self.onToggle = onToggle
+        installEventTap()
+    }
+
+    deinit {
+        if let eventTap {
+            CFMachPortInvalidate(eventTap)
+        }
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+    }
+
+    private func installEventTap() {
+        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: { _, type, event, userData in
+                guard let userData else {
+                    return Unmanaged.passUnretained(event)
+                }
+                let eventTap = Unmanaged<PasteBuddyPanelHotKeyEventTap>
+                    .fromOpaque(userData)
+                    .takeUnretainedValue()
+                return eventTap.handle(type: type, event: event)
+            },
+            userInfo: selfPointer
+        ) else {
+            PasteBuddyDiagnostics.record(.hotKey, "eventTapInstallFailed")
+            return
+        }
+
+        eventTap = tap
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        PasteBuddyDiagnostics.record(.hotKey, "eventTapInstalled")
+    }
+
+    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            PasteBuddyDiagnostics.record(.hotKey, "eventTapReenabled", detail: "type=\(type.rawValue)")
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard type == .keyDown else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        guard PasteBuddyPanelHotKeyMatcher.matches(keyCode: keyCode, flags: event.flags) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        PasteBuddyDiagnostics.record(.hotKey, "eventTapMatched", detail: "keyCode=\(keyCode)")
+        Task { @MainActor [onToggle] in
+            onToggle()
+        }
+        return nil
+    }
+}
+
+enum PasteBuddyPanelHotKeyMatcher {
+    static func matches(keyCode: Int64, flags: CGEventFlags) -> Bool {
+        guard keyCode == Int64(kVK_ANSI_V),
+              flags.contains(.maskCommand),
+              flags.contains(.maskShift),
+              !flags.contains(.maskAlternate),
+              !flags.contains(.maskControl)
+        else {
+            return false
+        }
+        return true
     }
 }
 

@@ -27,6 +27,121 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.filteredItems.map(\.id), [imageItem.id])
     }
 
+    func testSearchAtAppMentionFiltersSourceApplications() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let codex = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Codex",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Codex Review",
+            payload: ClipboardPayload(text: "repository review notes")
+        ))
+        let braveLaunch = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Brave Launch",
+            payload: ClipboardPayload(text: "launch checklist")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Brave Sunset",
+            payload: ClipboardPayload(text: "sunset notes")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Notes Launch",
+            payload: ClipboardPayload(text: "launch checklist")
+        ))
+
+        store.searchQuery = "@Codex"
+        XCTAssertEqual(store.filteredItems.map(\.id), [codex.id])
+
+        store.searchQuery = "@Brave launch"
+        XCTAssertEqual(store.filteredItems.map(\.id), [braveLaunch.id])
+
+        store.searchQuery = "@Missing"
+        XCTAssertTrue(store.filteredItems.isEmpty)
+    }
+
+    func testSourceAppSuggestionsMatchPartialInputAndApplyAsFilter() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Paste",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Paste Item",
+            payload: ClipboardPayload(text: "paste text")
+        ))
+        let pasteBuddy = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "PasteBuddy",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "PasteBuddy Item",
+            payload: ClipboardPayload(text: "pastebuddy text")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Brave Item",
+            payload: ClipboardPayload(text: "brave text")
+        ))
+
+        XCTAssertEqual(store.sourceAppSuggestions(matching: "pa"), ["Paste", "PasteBuddy"])
+        XCTAssertEqual(store.sourceAppSuggestions(matching: "@pasteb"), ["PasteBuddy"])
+        XCTAssertEqual(store.sourceAppSuggestions(matching: "browser"), ["Brave Browser"])
+
+        store.searchQuery = "pa"
+        store.applySourceAppSuggestion("PasteBuddy")
+
+        XCTAssertEqual(store.sourceAppFilter, "PasteBuddy")
+        XCTAssertEqual(store.searchQuery, "")
+        XCTAssertEqual(store.filteredItems.map(\.id), [pasteBuddy.id])
+    }
+
+    func testRepositoryBackedSearchAtAppMentionUsesResolvedSourceApp() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let brave = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Brave Launch",
+            payload: ClipboardPayload(text: "launch checklist")
+        )
+        let notes = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Notes Launch",
+            payload: ClipboardPayload(text: "launch checklist")
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: [brave, notes]))
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        store.searchQuery = "@Brave launch"
+
+        XCTAssertEqual(store.filteredItems.map(\.id), [brave.id])
+    }
+
     func testMarkOCRPendingClearsCompletedStateForRerun() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

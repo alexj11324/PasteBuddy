@@ -9,7 +9,7 @@ struct ExternalApplicationIdentity {
 @MainActor
 final class FrontmostApplicationTracker {
     private var activationObserver: NSObjectProtocol?
-    private weak var lastExternalApplication: NSRunningApplication?
+    private var lastExternalApplication: NSRunningApplication?
     private let selfBundleIdentifiers = Set(
         [Bundle.main.bundleIdentifier, "com.pastebuddy.app"].compactMap(\.self)
     )
