@@ -1,18 +1,22 @@
 # Clipboard Shelf Search Handoff
 
-Status: blocked for follow-up debugging.
+Status: fixed in the current working tree.
 
-Current branch state contains a partial rewrite of the Clipboard Shelf search
-control:
+Summary:
 
-- Removed the custom `NSSearchField` bridge from `ClipboardShelfPanelView`.
-- Rebuilt the shelf search control as a SwiftUI `TextField` inside the existing
-  Liquid Glass surface helper.
-- Changed the shelf panel from `.nonactivatingPanel` to `.borderless` and call
-  `NSApp.activate(ignoringOtherApps: true)` before `panel.makeKey()`.
-- Added a focus retry path that toggles the SwiftUI `@FocusState` false/true
-  when search focus is requested while SwiftUI already thinks it is focused.
-- Added localized "Clear search" strings.
+- The bottom Clipboard Shelf search field is a SwiftUI `TextField` inside the
+  existing Liquid Glass surface helper. It is not the main window toolbar
+  `.searchable` field.
+- The root cause was the Shelf root view also being a SwiftUI focus owner:
+  `.focusable().focused($isShelfKeyboardFocused)` competed with the search
+  field's own `@FocusState`, so SwiftUI could believe the search field was
+  focused while AppKit's real first responder was not the text field.
+- The fix removes the root focus owner, removes the false/true focus retry, and
+  keeps only the search field's focus state.
+- Shelf card selection is now local to `ShelfInteractionModel`; it no longer
+  schedules delayed writes back to `store.selectedItemID` on each click. This
+  prevents card browsing in the Shelf from forcing the main window list/detail
+  views to refresh.
 
 Verified:
 
@@ -24,27 +28,17 @@ Verified:
   `accessibilityTrusted=true`,
   `stableLaunchPathMatched=true`,
   `bundleIdentifier=com.alexjiang.PasteBuddy.dev`.
+- Accessibility verification on `/Applications/PasteBuddy Dev.app` showed
+  `clipboard-shelf-search-field` with `focused=true`.
+- Typing `brave` into the open Shelf changed the Shelf field AX value to
+  `brave`.
+- Computer Use can observe the Shelf panel and card accessibility state, but its
+  click action currently reports "Computer Use is not active" for this panel; do
+  not treat that tool click failure as app behavior.
 
-Known remaining problem:
+Regression notes:
 
-- The Clipboard Shelf search field is still not focusable by real click.
-- AX sees the shelf field:
-  `AXTextField`, identifier `clipboard-shelf-search-field`,
-  frame approximately `x=16 y=664 w=272 h=38`.
-- System Events / HID probes clicking the AX-derived center and typing did not
-  change the field value; AX continued to report `focused=false`.
-- The main window toolbar search still appears separately as the system
-  `.searchable` search field (`AXSearchField`). The broken field is the custom
-  bottom Shelf field only.
-
-Likely next areas to inspect:
-
-- SwiftUI `TextField` focus inside `NSHostingView` hosted by a borderless
-  `NSPanel`.
-- Whether the root `.focusable().focused($isShelfKeyboardFocused)` steals focus
-  back from the search field.
-- Hit testing around the glass/stroke layers and the `SourceAppSuggestionPanel`
-  background presenter.
-- Whether the shelf needs a small AppKit focus shim while keeping the visible
-  search UI in SwiftUI, or whether the shelf panel must become a standard
-  toolbar-backed window to use Apple's true `.searchable` Liquid Glass search.
+- Do not reintroduce a root SwiftUI focus target just to catch keyboard events;
+  it can steal AppKit first responder from the text field.
+- Do not make Shelf card browsing update the global main-window selection on
+  every click. Copy, paste, preview, and drag should use Shelf-local selection.

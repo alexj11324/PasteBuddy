@@ -61,14 +61,12 @@ struct ClipboardShelfPanelView: View {
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
-    @FocusState private var isShelfKeyboardFocused: Bool
     @FocusState private var isSearchFocused: Bool
     @State private var isShowingNewTextItem = false
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
     @State private var shelfOverflowCount = 0
     @State private var shelfInteraction = ShelfInteractionModel()
-    @State private var selectionSyncTask: Task<Void, Never>?
     @State private var isSearchRailPresented = false
     @State private var relativeDateReference = Date()
     @State private var shelfScope: PasteScope = .history
@@ -86,17 +84,10 @@ struct ClipboardShelfPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($isShelfKeyboardFocused)
-        .onKeyPress(phases: .down) { keyPress in
-            handleShelfKeyPress(keyPress, allowsPreview: true)
-        }
         .onAppear {
             shelfScope = store.selectedScope
             refreshShelfItems()
             isSearchRailPresented = true
-            isShelfKeyboardFocused = false
             Task { @MainActor in
                 await Task.yield()
                 await Task.yield()
@@ -104,15 +95,10 @@ struct ClipboardShelfPanelView: View {
             }
         }
         .onDisappear {
-            selectionSyncTask?.cancel()
-            selectionSyncTask = nil
             isSearchRailPresented = false
         }
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
-        }
-        .onChange(of: isSearchFocused) { _, isFocused in
-            isShelfKeyboardFocused = !isFocused
         }
         .onMoveCommand(perform: moveSelection)
         .onExitCommand(perform: handleExitCommand)
@@ -702,10 +688,6 @@ struct ClipboardShelfPanelView: View {
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.select(item.id, modifiers: modifiers)
         }
-        scheduleStoreSelectionSync(
-            primaryID: shelfInteraction.primarySelectedID,
-            ids: shelfInteraction.selectedIDs
-        )
     }
 
     private func pasteSelected(format: PasteFormat) {
@@ -761,33 +743,16 @@ struct ClipboardShelfPanelView: View {
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.selectSingle(id)
         }
-        scheduleStoreSelectionSync(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs)
-    }
-
-    private func setSelectedItemIDs(_ ids: Set<UUID>) {
-        PasteBuddyMotion.performInstantSelection {
-            shelfInteraction.setSelectedIDs(ids)
-        }
-        scheduleStoreSelectionSync(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs)
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
-        if isFocused, self.isSearchFocused {
+        guard self.isSearchFocused != isFocused else { return }
+        guard isFocused else {
             self.isSearchFocused = false
-            isShelfKeyboardFocused = true
-            Task { @MainActor in
-                await Task.yield()
-                withAnimation(pasteSearchAnimation) {
-                    self.isSearchFocused = true
-                    isShelfKeyboardFocused = false
-                }
-            }
             return
         }
-        guard isSearchFocused != isFocused else { return }
         withAnimation(pasteSearchAnimation) {
-            isSearchFocused = isFocused
-            isShelfKeyboardFocused = !isFocused
+            self.isSearchFocused = isFocused
         }
     }
 
@@ -824,24 +789,6 @@ struct ClipboardShelfPanelView: View {
         }
 
         return .ignored
-    }
-
-    private func scheduleStoreSelectionSync(primaryID: UUID?, ids: Set<UUID>) {
-        selectionSyncTask?.cancel()
-        let store = store
-        selectionSyncTask = Task { @MainActor in
-            do {
-                try await Task.sleep(nanoseconds: 45_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            if ids.count == 1 {
-                store.selectSingleItem(primaryID)
-            } else {
-                store.setSelectedItemIDs(ids)
-            }
-        }
     }
 
     private func previewSelectedItem() {
@@ -895,20 +842,6 @@ struct ClipboardShelfPanelView: View {
             storeSelectedIDs: store.selectedItemIDs,
             storePrimarySelectedID: store.selectedItemID
         )
-
-        if !storeSelectionMatches(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs) {
-            scheduleStoreSelectionSync(
-                primaryID: shelfInteraction.primarySelectedID,
-                ids: shelfInteraction.selectedIDs
-            )
-        }
-    }
-
-    private func storeSelectionMatches(primaryID: UUID?, ids: Set<UUID>) -> Bool {
-        if ids.count == 1 {
-            return store.selectedItemIDs == ids && store.selectedItemID == primaryID
-        }
-        return store.selectedItemIDs == ids
     }
 
     private func dragProvider(for item: ClipboardItem) -> NSItemProvider {
