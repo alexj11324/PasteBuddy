@@ -16,6 +16,12 @@
 - IMPORTANT: 如果无法拿到目标窗口或 view 的真实 frame，不允许继续用猜测坐标做结论；必须先补充可观测性、日志、Accessibility 标识、测试 hook 或 AppKit 调试入口。
 - IMPORTANT: 对 Paste/PasteBuddy 底部 shelf 这类贴屏底部交互，必须验证它贴的是目标 screen 的完整 `frame` 底边，而不是 `visibleFrame`；不得因为 Dock 或多屏布局而绕开底部，也不得用固定主屏坐标假设 shelf 位置。
 
+## macOS 视觉边界与背景裁剪（IMPORTANT）
+- IMPORTANT: 胶囊、圆角按钮、圆角 segmented/tab item、toolbar pill 等控件外面不允许露出矩形灰色背景或方形容器底色。
+- IMPORTANT: 这类问题不要称为“遮罩”并继续叠层修补；工程上按 `background bleed`（背景溢出/漏出）、`unclipped background`（背景未裁剪）、`cell background` 或 `selection highlight background` 排查。
+- IMPORTANT: 修复时优先消除或透明化外层 cell/container background，并确保背景、选中高亮和 hover/focus 状态被同一个圆角边界裁剪；禁止新增一个矩形灰底作为胶囊外框。
+- IMPORTANT: 对 NSCollectionView/NSTableView/SwiftUI-NSHostingView 混合控件，必须检查 item/cell/backgroundView/selection layer/hosting view 的背景色和 clipping，不允许让 AppKit 默认矩形背景从 SwiftUI 圆角控件外漏出。
+
 ## macOS 签名与权限验证（IMPORTANT）
 - IMPORTANT: PasteBuddy 日常开发必须使用稳定的 `Apple Development` 签名身份；禁止使用 ad-hoc、`-`、`Sign to Run Locally`。
 - IMPORTANT: 发布、安装包、真实用户路径或需要验证 Accessibility/TCC 权限持久性的测试，必须使用 `Developer ID Application` 签名，并安装到 `/Applications/PasteBuddy.app` 后验证。

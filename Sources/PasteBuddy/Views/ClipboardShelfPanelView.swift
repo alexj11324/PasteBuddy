@@ -18,6 +18,38 @@ private enum ClipboardShelfMetrics {
     static let renderLimit = 200
 }
 
+private struct ClipboardShelfQueryState: Equatable {
+    let dataRevision: Int
+    let queryRevision: Int
+    let selectedScope: PasteScope
+    let searchQuery: String
+    let contentTypeFilter: ClipboardContentType?
+    let sourceAppFilter: String?
+    let deviceFilter: String?
+    let dateFilter: ClipboardDateFilter
+    let pasteStackRevision: Int
+}
+
+private enum ClipboardShelfDisplayItem: Identifiable {
+    case launchAtLoginPrompt
+    case empty(title: String, detail: String, systemImageName: String)
+    case clipboard(ClipboardItem)
+    case overflow(shownCount: Int, remainingCount: Int)
+
+    var id: UUID {
+        switch self {
+        case .launchAtLoginPrompt:
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        case .empty:
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        case .clipboard(let item):
+            item.id
+        case .overflow:
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        }
+    }
+}
+
 struct ClipboardShelfPanelView: View {
     private static let pasteSearchAnimation = Animation.smooth(duration: 0.36, extraBounce: 0.09)
 
@@ -32,13 +64,11 @@ struct ClipboardShelfPanelView: View {
     @State private var isShowingNewTextItem = false
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
-    @State private var selectionAnchorID: UUID?
-    @State private var selectedItemID: UUID?
-    @State private var selectedItemIDs: Set<UUID> = []
+    @State private var shelfOverflowCount = 0
+    @State private var shelfInteraction = ShelfInteractionModel()
     @State private var selectionSyncTask: Task<Void, Never>?
-    @State private var isShelfSelectionUserOwned = false
-    @State private var previewedItemID: UUID?
     @State private var isSearchRailPresented = false
+    @State private var relativeDateReference = Date()
 
     var body: some View {
         VStack(spacing: 12) {
@@ -67,11 +97,14 @@ struct ClipboardShelfPanelView: View {
             selectionSyncTask = nil
             isSearchRailPresented = false
         }
-        .onChange(of: store.presentationRevision) {
+        .onChange(of: shelfQueryState) {
             refreshShelfItems()
         }
         .onMoveCommand(perform: moveSelection)
         .onExitCommand(perform: handleExitCommand)
+        .task {
+            await runShelfMinuteTicker()
+        }
         .background {
             ZStack {
                 keyboardShortcuts
@@ -100,10 +133,6 @@ struct ClipboardShelfPanelView: View {
             HStack(alignment: .top, spacing: 10) {
                 searchControl
                     .layoutPriority(3)
-                    .zIndex(20)
-
-                sourceAppSuggestionRail
-                    .layoutPriority(2)
                     .zIndex(20)
 
                 collectionStrip
@@ -229,6 +258,14 @@ struct ClipboardShelfPanelView: View {
         .scaleEffect(isSearchRailPresented ? 1 : 0.93, anchor: .leading)
         .offset(x: isSearchRailPresented ? 0 : -14, y: isSearchRailPresented ? 0 : 4)
         .opacity(isSearchRailPresented ? 1 : 0)
+        .overlay(alignment: .topLeading) {
+            if shouldShowSourceAppSuggestions {
+                sourceAppSuggestionStrip
+                    .offset(y: 44)
+                    .zIndex(100)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
         .animation(Self.pasteSearchAnimation, value: searchControlWidth)
         .animation(Self.pasteSearchAnimation, value: isSearchRailPresented)
         .animation(Self.pasteSearchAnimation, value: isSearchFocused)
@@ -245,7 +282,7 @@ struct ClipboardShelfPanelView: View {
         if isSearchFocused || hasSearchText {
             return ClipboardShelfMetrics.searchFocusedWidth
         }
-        return ClipboardShelfMetrics.searchIdleWidth
+        return ClipboardShelfMetrics.searchFocusedWidth
     }
 
     private var hasSearchText: Bool {
@@ -263,22 +300,6 @@ struct ClipboardShelfPanelView: View {
             setSearchFocused(true)
         }
         .frame(maxWidth: 360)
-    }
-
-    private var sourceAppSuggestionRail: some View {
-        sourceAppSuggestionStrip
-            .frame(width: sourceAppSuggestionRailWidth, height: 38, alignment: .leading)
-            .opacity(shouldShowSourceAppSuggestions ? 1 : 0)
-            .scaleEffect(shouldShowSourceAppSuggestions ? 1 : 0.96, anchor: .leading)
-            .clipped()
-            .allowsHitTesting(shouldShowSourceAppSuggestions)
-            .accessibilityHidden(!shouldShowSourceAppSuggestions)
-            .animation(Self.pasteSearchAnimation, value: sourceAppSuggestionRailWidth)
-            .animation(Self.pasteSearchAnimation, value: shouldShowSourceAppSuggestions)
-    }
-
-    private var sourceAppSuggestionRailWidth: CGFloat {
-        shouldShowSourceAppSuggestions ? ClipboardShelfMetrics.sourceAppSuggestionWidth : 0
     }
 
     private var shouldShowSourceAppSuggestions: Bool {
@@ -342,6 +363,45 @@ struct ClipboardShelfPanelView: View {
 
     private var renderedShelfItems: [ClipboardItem] {
         Array(shelfItems.prefix(ClipboardShelfMetrics.renderLimit))
+    }
+
+    private var shelfDisplayItems: [ClipboardShelfDisplayItem] {
+        if isShowingLaunchAtLoginPrompt {
+            return [.launchAtLoginPrompt]
+        }
+        if shelfItems.isEmpty {
+            return [
+                .empty(
+                    title: emptyTitle,
+                    detail: emptyDescription,
+                    systemImageName: emptySystemImage
+                )
+            ]
+        }
+
+        var items = renderedShelfItems.map(ClipboardShelfDisplayItem.clipboard)
+        if shelfOverflowCount > 0 {
+            items.append(.overflow(shownCount: renderedShelfItems.count, remainingCount: shelfOverflowCount))
+        }
+        return items
+    }
+
+    private var shelfQueryState: ClipboardShelfQueryState {
+        ClipboardShelfQueryState(
+            dataRevision: store.dataRevision,
+            queryRevision: store.queryRevision,
+            selectedScope: store.selectedScope,
+            searchQuery: store.searchQuery,
+            contentTypeFilter: store.contentTypeFilter,
+            sourceAppFilter: store.sourceAppFilter,
+            deviceFilter: store.deviceFilter,
+            dateFilter: store.dateFilter,
+            pasteStackRevision: store.pasteStackItems.count
+        )
+    }
+
+    private var relativeDateMinuteBucket: Int {
+        Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
     }
 
     private var activeFilterStrip: some View {
@@ -409,84 +469,100 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var shelf: some View {
-        let items = shelfItems
-        let renderedItems = renderedShelfItems
-        let overflowCount = max(0, items.count - renderedItems.count)
-        let currentSelectedItemID = selectedItemID
-        let currentSelectedItemIDs = selectedItemIDs
         let pinboards = store.snapshot.pinboards
         let defaultPasteFormat = store.defaultPasteFormat
 
-        return ScrollView(.horizontal) {
-            LazyHStack(alignment: .bottom, spacing: 20) {
-                if isShowingLaunchAtLoginPrompt {
+        return ShelfCollectionRepresentable(
+            items: shelfDisplayItems,
+            selectedIDs: shelfInteraction.selectedIDs,
+            primarySelectedID: shelfInteraction.primarySelectedID,
+            itemSize: CGSize(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight),
+            interitemSpacing: 20,
+            contentRevision: store.dataRevision &+ store.queryRevision &+ shelfOverflowCount &+ relativeDateMinuteBucket,
+            isSelectable: { displayItem in
+                if case .clipboard = displayItem {
+                    return true
+                }
+                return false
+            }
+        ) { displayItem, isSelected in
+            switch displayItem {
+            case .launchAtLoginPrompt:
+                VStack {
+                    Spacer(minLength: 0)
                     LaunchAtLoginShelfCard(store: store) {
                         isShowingLaunchAtLoginPrompt = false
                     }
                 }
-
-                if items.isEmpty {
+                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+            case .empty(let title, let detail, let systemImageName):
+                VStack {
+                    Spacer(minLength: 0)
                     EmptyShelfCard(
-                        title: emptyTitle,
-                        detail: emptyDescription,
-                        systemImageName: emptySystemImage
+                        title: title,
+                        detail: detail,
+                        systemImageName: systemImageName
                     )
-                } else {
-                    ForEach(renderedItems) { item in
-                        ClipboardShelfCard(
-                            item: item,
-                            imageDataProvider: store.imageData,
-                            draggedItems: draggableItems(for: item),
-                            isSelected: currentSelectedItemIDs.contains(item.id) || currentSelectedItemID == item.id,
-                            defaultPasteFormat: defaultPasteFormat,
-                            pinboards: pinboards,
-                            onSelect: { event in
-                                selectItem(item, event: event)
-                            },
-                            onPaste: { format in
-                                pasteItem(item, format: format)
-                            },
-                            onCopy: { format in
-                                copyItem(item, format: format)
-                            },
-                            onPin: { pinboardID in
-                                store.pinItem(item.id, to: pinboardID)
-                            },
-                            onDelete: {
-                                store.removeItem(item.id)
-                            },
-                            isPreviewPresented: Binding(
-                                get: { previewedItemID == item.id },
-                                set: { isPresented in
-                                    if isPresented {
-                                        previewItem(item)
-                                    } else if previewedItemID == item.id {
-                                        previewedItemID = nil
-                                    }
-                                }
-                            ),
-                            onDismissPreview: {
-                                if previewedItemID == item.id {
-                                    previewedItemID = nil
-                                }
-                            }
-                        )
-                    }
-
-                    if overflowCount > 0 {
-                        ShelfOverflowStatusCard(
-                            shownCount: renderedItems.count,
-                            remainingCount: overflowCount
-                        )
-                    }
                 }
+                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+            case .clipboard(let item):
+                ClipboardShelfCard(
+                    item: item,
+                    imageDataProvider: store.imageData,
+                    isSelected: isSelected,
+                    relativeDateReference: relativeDateReference,
+                    defaultPasteFormat: defaultPasteFormat,
+                    pinboards: pinboards,
+                    onPaste: { format in
+                        pasteItem(item, format: format)
+                    },
+                    onCopy: { format in
+                        copyItem(item, format: format)
+                    },
+                    onPin: { pinboardID in
+                        store.pinItem(item.id, to: pinboardID)
+                    },
+                    onDelete: {
+                        store.removeItem(item.id)
+                    },
+                    isPreviewPresented: Binding(
+                        get: { shelfInteraction.previewedID == item.id },
+                        set: { isPresented in
+                            if isPresented {
+                                previewItem(item)
+                            } else if shelfInteraction.previewedID == item.id {
+                                shelfInteraction.previewedID = nil
+                            }
+                        }
+                    ),
+                    onDismissPreview: {
+                        if shelfInteraction.previewedID == item.id {
+                            shelfInteraction.previewedID = nil
+                        }
+                    }
+                )
+                .transaction { transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
+            case .overflow(let shownCount, let remainingCount):
+                VStack {
+                    Spacer(minLength: 0)
+                    ShelfOverflowStatusCard(
+                        shownCount: shownCount,
+                        remainingCount: remainingCount
+                    )
+                }
+                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 6)
-        }
-        .scrollIndicators(.hidden)
-        .overlay {
-            ShelfHorizontalWheelRedirector()
+        } onSelect: { id, modifiers in
+            guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
+            selectItem(item, modifiers: modifiers)
+        } onDoubleClick: { id in
+            guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
+            pasteItem(item, format: defaultPasteFormat)
+        } pasteboardWriter: { displayItem in
+            pasteboardWriter(for: displayItem)
         }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
     }
@@ -552,20 +628,20 @@ struct ClipboardShelfPanelView: View {
     private func selectOffset(_ offset: Int) {
         let items = renderedShelfItems
         guard !items.isEmpty else { return }
-        let currentID = selectedItemID ?? selectedItemIDs.first
+        let currentID = shelfInteraction.primarySelectedID ?? shelfInteraction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
         selectSingleItem(items[nextIndex].id)
     }
 
     private func setScope(_ scope: PasteScope) {
-        previewedItemID = nil
+        shelfInteraction.previewedID = nil
         store.selectedScope = scope
         refreshShelfItems()
     }
 
     private func clearFilter(_ descriptor: ClipboardFilterDescriptor) {
-        previewedItemID = nil
+        shelfInteraction.previewedID = nil
         switch descriptor.kind {
         case .contentType:
             store.contentTypeFilter = nil
@@ -579,50 +655,14 @@ struct ClipboardShelfPanelView: View {
         refreshShelfItems()
     }
 
-    private func selectItem(_ item: ClipboardItem, event: NSEvent) {
-        isShelfSelectionUserOwned = true
-        deferSearchFocusClearingAfterSelection()
-
-        let items = renderedShelfItems
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-
-        if flags.contains(.shift),
-           let anchorID = selectionAnchorID ?? selectedItemID,
-           let anchorIndex = items.firstIndex(where: { $0.id == anchorID }),
-           let itemIndex = items.firstIndex(where: { $0.id == item.id }) {
-            let lowerBound = min(anchorIndex, itemIndex)
-            let upperBound = max(anchorIndex, itemIndex)
-            let ids = Set(items[lowerBound...upperBound].map(\.id))
-            setSelectedItemIDs(ids)
-            return
+    private func selectItem(_ item: ClipboardItem, modifiers: NSEvent.ModifierFlags) {
+        PasteBuddyMotion.performInstantSelection {
+            shelfInteraction.select(item.id, modifiers: modifiers)
         }
-
-        if flags.contains(.command) {
-            var ids = selectedItemIDs
-            if ids.contains(item.id) {
-                ids.remove(item.id)
-            } else {
-                ids.insert(item.id)
-            }
-            setSelectedItemIDs(ids)
-            selectionAnchorID = item.id
-            return
-        }
-
-        if selectedItemIDs.count > 1, selectedItemIDs.contains(item.id) {
-            selectionAnchorID = item.id
-            return
-        }
-
-        selectSingleItem(item.id)
-    }
-
-    private func draggableItems(for item: ClipboardItem) -> [ClipboardItem] {
-        let selectedItems = selectedItemsInDisplayOrder
-        if selectedItems.contains(where: { $0.id == item.id }) {
-            return selectedItems
-        }
-        return [item]
+        scheduleStoreSelectionSync(
+            primaryID: shelfInteraction.primarySelectedID,
+            ids: shelfInteraction.selectedIDs
+        )
     }
 
     private func pasteSelected(format: PasteFormat) {
@@ -667,41 +707,25 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
-        let ids = selectedItemIDs
+        let ids = shelfInteraction.selectedIDs
         guard !ids.isEmpty else {
-            return selectedItemID.flatMap { id in renderedShelfItems.first { $0.id == id } }.map { [$0] } ?? []
+            return shelfInteraction.primarySelectedID.flatMap { id in renderedShelfItems.first { $0.id == id } }.map { [$0] } ?? []
         }
         return renderedShelfItems.filter { ids.contains($0.id) }
     }
 
     private func selectSingleItem(_ id: UUID?) {
-        isShelfSelectionUserOwned = true
-        let ids = id.map { Set([$0]) } ?? []
-        guard selectedItemID != id || selectedItemIDs != ids else { return }
-        if previewedItemID != id {
-            previewedItemID = nil
+        PasteBuddyMotion.performInstantSelection {
+            shelfInteraction.selectSingle(id)
         }
-        selectedItemID = id
-        selectedItemIDs = ids
-        selectionAnchorID = id
-        scheduleStoreSelectionSync(primaryID: id, ids: ids)
+        scheduleStoreSelectionSync(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs)
     }
 
     private func setSelectedItemIDs(_ ids: Set<UUID>) {
-        isShelfSelectionUserOwned = true
-        guard selectedItemIDs != ids else { return }
-        previewedItemID = nil
-        selectedItemIDs = ids
-        selectedItemID = shelfItems.first(where: { ids.contains($0.id) })?.id
-        scheduleStoreSelectionSync(primaryID: selectedItemID, ids: ids)
-    }
-
-    private func deferSearchFocusClearingAfterSelection() {
-        guard isSearchFocused else { return }
-        Task { @MainActor in
-            await Task.yield()
-            setSearchFocused(false)
+        PasteBuddyMotion.performInstantSelection {
+            shelfInteraction.setSelectedIDs(ids)
         }
+        scheduleStoreSelectionSync(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs)
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
@@ -737,13 +761,13 @@ struct ClipboardShelfPanelView: View {
     private func previewItem(_ item: ClipboardItem) {
         guard renderedShelfItems.contains(where: { $0.id == item.id }) else { return }
         setSearchFocused(false)
-        previewedItemID = item.id
+        shelfInteraction.previewedID = item.id
         selectSingleItem(item.id)
     }
 
     private func handleExitCommand() {
-        if previewedItemID != nil {
-            previewedItemID = nil
+        if shelfInteraction.previewedID != nil {
+            shelfInteraction.previewedID = nil
             return
         }
         onDismiss()
@@ -764,54 +788,20 @@ struct ClipboardShelfPanelView: View {
     private func refreshShelfItems() {
         let items = store.filteredItems
         shelfItems = items
+        shelfOverflowCount = max(0, items.count - ClipboardShelfMetrics.renderLimit)
 
         let renderedItems = Array(items.prefix(ClipboardShelfMetrics.renderLimit))
-        let itemIDs = Set(renderedItems.map(\.id))
-        if let previewedItemID, !itemIDs.contains(previewedItemID) {
-            self.previewedItemID = nil
-        }
+        shelfInteraction.replaceItems(
+            renderedItems,
+            storeSelectedIDs: store.selectedItemIDs,
+            storePrimarySelectedID: store.selectedItemID
+        )
 
-        let localSelectedIDs = selectedItemIDs.intersection(itemIDs)
-        let localPrimaryID = selectedItemID.flatMap { itemIDs.contains($0) ? $0 : nil }
-        if isShelfSelectionUserOwned, (!localSelectedIDs.isEmpty || localPrimaryID != nil) {
-            let ids = localSelectedIDs.isEmpty ? localPrimaryID.map { Set([$0]) } ?? [] : localSelectedIDs
-            let primaryID = localPrimaryID.flatMap { ids.contains($0) ? $0 : nil }
-                ?? renderedItems.first(where: { ids.contains($0.id) })?.id
-            let didNormalizeSelection = selectedItemIDs != ids || selectedItemID != primaryID
-            selectedItemIDs = ids
-            selectedItemID = primaryID
-            if selectionAnchorID.map({ !itemIDs.contains($0) }) == true {
-                selectionAnchorID = selectedItemID
-            }
-            if didNormalizeSelection || selectionSyncTask != nil || !storeSelectionMatches(primaryID: primaryID, ids: ids) {
-                scheduleStoreSelectionSync(primaryID: primaryID, ids: ids)
-            }
-            return
-        }
-
-        selectionSyncTask?.cancel()
-        selectionSyncTask = nil
-
-        let validStoreSelectedIDs = store.selectedItemIDs.intersection(itemIDs)
-        if !validStoreSelectedIDs.isEmpty {
-            selectedItemIDs = validStoreSelectedIDs
-            selectedItemID = renderedItems.first(where: { validStoreSelectedIDs.contains($0.id) })?.id
-            isShelfSelectionUserOwned = false
-            if selectionAnchorID.map({ !itemIDs.contains($0) }) == true {
-                selectionAnchorID = selectedItemID
-            }
-        } else if let selectedID = store.selectedItemID, itemIDs.contains(selectedID) {
-            selectedItemID = selectedID
-            selectedItemIDs = [selectedID]
-            selectionAnchorID = selectedID
-            isShelfSelectionUserOwned = false
-        } else {
-            let firstID = renderedItems.first?.id
-            selectedItemID = firstID
-            selectedItemIDs = firstID.map { [$0] } ?? []
-            selectionAnchorID = firstID
-            isShelfSelectionUserOwned = false
-            scheduleStoreSelectionSync(primaryID: firstID, ids: selectedItemIDs)
+        if !storeSelectionMatches(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs) {
+            scheduleStoreSelectionSync(
+                primaryID: shelfInteraction.primarySelectedID,
+                ids: shelfInteraction.selectedIDs
+            )
         }
     }
 
@@ -820,6 +810,40 @@ struct ClipboardShelfPanelView: View {
             return store.selectedItemIDs == ids && store.selectedItemID == primaryID
         }
         return store.selectedItemIDs == ids
+    }
+
+    private func pasteboardWriter(for displayItem: ClipboardShelfDisplayItem) -> NSPasteboardWriting? {
+        guard case .clipboard(let item) = displayItem else { return nil }
+        let pasteboardItem = NSPasteboardItem()
+        if let payloadData = try? JSONEncoder().encode(PinboardItemDragPayload(ids: [item.id])) {
+            pasteboardItem.setData(
+                payloadData,
+                forType: NSPasteboard.PasteboardType(UTType.pasteBuddyPinboardItemIDs.identifier)
+            )
+        }
+        pasteboardItem.setString(PasteboardWriter.plainText(for: item), forType: .string)
+        if let value = item.payload.urlString {
+            pasteboardItem.setString(value, forType: .URL)
+        }
+        if let value = item.payload.allFileURLStrings.first {
+            pasteboardItem.setString(value, forType: .fileURL)
+        }
+        if let data = item.payload.imageData {
+            pasteboardItem.setData(data, forType: .png)
+        }
+        return pasteboardItem
+    }
+
+    private func runShelfMinuteTicker() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            relativeDateReference = Date()
+        }
     }
 }
 
@@ -1039,11 +1063,10 @@ private struct ShelfSelectedCountChip: View {
 private struct ClipboardShelfCard: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
-    let draggedItems: [ClipboardItem]
     let isSelected: Bool
+    let relativeDateReference: Date
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
-    let onSelect: (NSEvent) -> Void
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
@@ -1052,26 +1075,17 @@ private struct ClipboardShelfCard: View {
     let onDismissPreview: () -> Void
 
     var body: some View {
-        ClipboardShelfCardVisual(item: item, imageDataProvider: imageDataProvider)
+        ClipboardShelfCardVisual(
+            item: item,
+            imageDataProvider: imageDataProvider,
+            relativeDateReference: relativeDateReference
+        )
             .equatable()
             .overlay {
                 ClipboardShelfCardSelectionRing(item: item, isSelected: isSelected)
             }
-            .overlay {
-                ShelfClickSurface { event in
-                    onSelect(event)
-                } onMouseUp: { event in
-                    if event.clickCount >= 2 {
-                        onPaste(defaultPasteFormat)
-                    }
-                }
-                .accessibilityHidden(true)
-            }
         .contextMenu {
             contextMenuContent
-        }
-        .onDrag {
-            ClipboardItemDragProvider.provider(for: draggedItems)
         }
         .popover(isPresented: $isPreviewPresented, arrowEdge: .bottom) {
             ShelfExpandedPreview(
@@ -1225,8 +1239,15 @@ private struct ShelfExpandedPreview: View {
             let count = item.payload.allFileURLStrings.count
             return localized(count == 1 ? "%d file" : "%d files", count)
         default:
-            return localized("%d chars", ClipboardPlainTextRenderer.plainText(for: item).count)
+            return localized("%d chars", presentationCharacterCount)
         }
+    }
+
+    private var presentationCharacterCount: Int {
+        item.payload.text?.count
+            ?? item.payload.urlString?.count
+            ?? item.payload.ocrText?.count
+            ?? item.searchDocument.normalizedText.count
     }
 
     private func localized(_ key: String) -> String {
@@ -1327,7 +1348,7 @@ private struct ShelfSpaceKeyMonitor: NSViewRepresentable {
 private final class ShelfSpaceKeyMonitorView: NSView {
     var isEnabled: Bool
     var onSpace: () -> Void
-    private var localKeyDownMonitor: Any?
+    nonisolated(unsafe) private var localKeyDownMonitor: Any?
 
     init(isEnabled: Bool, onSpace: @escaping () -> Void) {
         self.isEnabled = isEnabled
@@ -1374,236 +1395,24 @@ private final class ShelfSpaceKeyMonitorView: NSView {
     }
 }
 
-private struct ShelfClickSurface: NSViewRepresentable {
-    let onMouseDown: (NSEvent) -> Void
-    let onMouseUp: (NSEvent) -> Void
-
-    func makeNSView(context: Context) -> ShelfClickNSView {
-        ShelfClickNSView(onMouseDown: onMouseDown, onMouseUp: onMouseUp)
-    }
-
-    func updateNSView(_ nsView: ShelfClickNSView, context: Context) {
-        nsView.onMouseDown = onMouseDown
-        nsView.onMouseUp = onMouseUp
-    }
-}
-
-private struct ShelfHorizontalWheelRedirector: NSViewRepresentable {
-    func makeNSView(context: Context) -> ShelfHorizontalWheelRedirectorView {
-        ShelfHorizontalWheelRedirectorView()
-    }
-
-    func updateNSView(_ nsView: ShelfHorizontalWheelRedirectorView, context: Context) {}
-}
-
-private final class ShelfHorizontalWheelRedirectorView: NSView {
-    private static let preciseScrollMultiplier: CGFloat = 1.25
-    private static let wheelLineMultiplier: CGFloat = 64
-
-    private var localScrollMonitor: Any?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        installMonitor()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    deinit {
-        if let localScrollMonitor {
-            NSEvent.removeMonitor(localScrollMonitor)
-        }
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        installMonitor()
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    private func installMonitor() {
-        guard localScrollMonitor == nil else { return }
-        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self,
-                  NSApp.isActive,
-                  event.window === self.window,
-                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
-                return event
-            }
-
-            let horizontalDelta = self.normalizedScrollDelta(event.scrollingDeltaX, for: event)
-            let verticalDelta = self.normalizedScrollDelta(event.scrollingDeltaY, for: event)
-            guard abs(verticalDelta) > abs(horizontalDelta), verticalDelta != 0,
-                  let scrollView = self.horizontalScrollView(containing: event.locationInWindow) else {
-                return event
-            }
-
-            self.scroll(scrollView, horizontallyBy: -verticalDelta)
-            return nil
-        }
-    }
-
-    private func normalizedScrollDelta(_ delta: CGFloat, for event: NSEvent) -> CGFloat {
-        delta * (event.hasPreciseScrollingDeltas ? Self.preciseScrollMultiplier : Self.wheelLineMultiplier)
-    }
-
-    private func horizontalScrollView(containing windowPoint: NSPoint) -> NSScrollView? {
-        guard let contentView = window?.contentView else { return nil }
-        return firstHorizontalScrollView(containing: windowPoint, in: contentView)
-    }
-
-    private func firstHorizontalScrollView(containing windowPoint: NSPoint, in view: NSView) -> NSScrollView? {
-        let point = view.convert(windowPoint, from: nil)
-        guard view.bounds.contains(point) else { return nil }
-
-        for subview in view.subviews.reversed() {
-            if let scrollView = firstHorizontalScrollView(containing: windowPoint, in: subview) {
-                return scrollView
-            }
-        }
-
-        guard let scrollView = view as? NSScrollView,
-              let documentView = scrollView.documentView,
-              documentView.frame.width > scrollView.contentView.bounds.width else {
-            return nil
-        }
-        return scrollView
-    }
-
-    private func scroll(_ scrollView: NSScrollView, horizontallyBy delta: CGFloat) {
-        guard let documentView = scrollView.documentView else { return }
-
-        let clipView = scrollView.contentView
-        let maxX = max(0, documentView.frame.width - clipView.bounds.width)
-        let currentX = clipView.bounds.origin.x
-        let nextX = min(max(currentX + delta, 0), maxX)
-        guard nextX != currentX else { return }
-
-        clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
-        scrollView.reflectScrolledClipView(clipView)
-    }
-}
-
-private final class ShelfClickNSView: NSView {
-    var onMouseDown: (NSEvent) -> Void
-    var onMouseUp: (NSEvent) -> Void
-    private var localMouseMonitor: Any?
-    private var isTrackingMouseDown = false
-
-    init(onMouseDown: @escaping (NSEvent) -> Void, onMouseUp: @escaping (NSEvent) -> Void) {
-        self.onMouseDown = onMouseDown
-        self.onMouseUp = onMouseUp
-        super.init(frame: .zero)
-        installMonitor()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    deinit {
-        if let localMouseMonitor {
-            NSEvent.removeMonitor(localMouseMonitor)
-        }
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        installMonitor()
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard !NSApp.isActive,
-              let event = window?.currentEvent,
-              shouldHandleMouseDown(event) else {
-            return nil
-        }
-
-        return bounds.contains(point) ? super.hitTest(point) : nil
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard shouldHandleMouseDown(event) else { return }
-        isTrackingMouseDown = true
-        onMouseDown(event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        let shouldEmitMouseUp = isTrackingMouseDown && shouldHandleMouseUp(event)
-        isTrackingMouseDown = false
-        guard shouldEmitMouseUp else { return }
-        onMouseUp(event)
-    }
-
-    private func installMonitor() {
-        guard localMouseMonitor == nil else { return }
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
-            guard let self, NSApp.isActive else {
-                return event
-            }
-
-            if event.type == .leftMouseDown, self.shouldHandleMouseDown(event) {
-                self.isTrackingMouseDown = true
-                self.onMouseDown(event)
-            } else if event.type == .leftMouseUp {
-                let shouldEmitMouseUp = self.isTrackingMouseDown && self.shouldHandleMouseUp(event)
-                self.isTrackingMouseDown = false
-                guard shouldEmitMouseUp else {
-                    return event
-                }
-                self.onMouseUp(event)
-            }
-            return event
-        }
-    }
-
-    private func shouldHandleMouseDown(_ event: NSEvent) -> Bool {
-        shouldHandleMouseEvent(event, expectedType: .leftMouseDown)
-    }
-
-    private func shouldHandleMouseUp(_ event: NSEvent) -> Bool {
-        shouldHandleMouseEvent(event, expectedType: .leftMouseUp)
-    }
-
-    private func shouldHandleMouseEvent(_ event: NSEvent, expectedType: NSEvent.EventType) -> Bool {
-        guard event.type == expectedType,
-              event.window === window else {
-            return false
-        }
-
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard !flags.contains(.control) else {
-            return false
-        }
-
-        let point = convert(event.locationInWindow, from: nil)
-        return bounds.contains(point)
-    }
-}
-
 private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let relativeDateReference: Date
     private let renderSignature: ClipboardShelfCardRenderSignature
 
     init(
         item: ClipboardItem,
-        imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?
+        imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?,
+        relativeDateReference: Date
     ) {
         self.item = item
         self.imageDataProvider = imageDataProvider
-        self.renderSignature = ClipboardShelfCardRenderSignature(item: item)
+        self.relativeDateReference = relativeDateReference
+        self.renderSignature = ClipboardShelfCardRenderSignature(
+            item: item,
+            relativeDateReference: relativeDateReference
+        )
     }
 
     private var cardTint: Color {
@@ -1616,11 +1425,9 @@ private struct ClipboardShelfCardVisual: View {
                 Text(localized(item.contentType.displayName))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
-                TimelineView(.periodic(from: Date(), by: 60)) { timeline in
-                    Text(relativeDate(relativeTo: timeline.date))
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.82))
-                }
+                Text(relativeDate(relativeTo: relativeDateReference))
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.82))
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
@@ -1727,9 +1534,15 @@ private struct ClipboardShelfCardVisual: View {
             let count = item.payload.allFileURLStrings.count
             return localized(count == 1 ? "%d file" : "%d files", count)
         default:
-            let count = ClipboardPlainTextRenderer.plainText(for: item).count
-            return localized("%d chars", count)
+            return localized("%d chars", presentationCharacterCount)
         }
+    }
+
+    private var presentationCharacterCount: Int {
+        item.payload.text?.count
+            ?? item.payload.urlString?.count
+            ?? item.payload.ocrText?.count
+            ?? item.searchDocument.normalizedText.count
     }
 
     private func localized(_ key: String) -> String {
@@ -1752,7 +1565,7 @@ private struct ClipboardShelfCardVisual: View {
 }
 
 extension ClipboardShelfCardVisual: Equatable {
-    static func == (lhs: ClipboardShelfCardVisual, rhs: ClipboardShelfCardVisual) -> Bool {
+    nonisolated static func == (lhs: ClipboardShelfCardVisual, rhs: ClipboardShelfCardVisual) -> Bool {
         lhs.renderSignature == rhs.renderSignature
     }
 }
@@ -1793,8 +1606,9 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let imageAssetID: String?
     let imageByteCount: Int?
     let ocrTextCount: Int?
+    let relativeDateMinuteBucket: Int
 
-    init(item: ClipboardItem) {
+    init(item: ClipboardItem, relativeDateReference: Date) {
         id = item.id
         createdAt = item.createdAt
         updatedAt = item.updatedAt
@@ -1816,6 +1630,7 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         imageAssetID = item.payload.imageAssetID
         imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
         ocrTextCount = item.payload.ocrText?.count
+        relativeDateMinuteBucket = Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
     }
 }
 

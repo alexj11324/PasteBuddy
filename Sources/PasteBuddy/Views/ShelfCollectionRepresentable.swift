@@ -1,0 +1,575 @@
+import AppKit
+import SwiftUI
+
+@MainActor
+struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRepresentable where Item.ID == UUID {
+    var items: [Item]
+    var selectedIDs: Set<UUID>
+    var primarySelectedID: UUID?
+    var itemSize: CGSize
+    var interitemSpacing: CGFloat
+    var contentRevision: Int
+    var isSelectable: (Item) -> Bool
+    var content: (Item, Bool) -> Content
+    var onSelect: (UUID, NSEvent.ModifierFlags) -> Void
+    var onDoubleClick: (UUID) -> Void
+    var pasteboardWriter: ((Item) -> NSPasteboardWriting?)?
+
+    init(
+        items: [Item],
+        selectedIDs: Set<UUID>,
+        primarySelectedID: UUID?,
+        itemSize: CGSize,
+        interitemSpacing: CGFloat,
+        contentRevision: Int = 0,
+        isSelectable: @escaping (Item) -> Bool = { _ in true },
+        @ViewBuilder content: @escaping (Item, Bool) -> Content,
+        onSelect: @escaping (UUID, NSEvent.ModifierFlags) -> Void,
+        onDoubleClick: @escaping (UUID) -> Void,
+        pasteboardWriter: ((Item) -> NSPasteboardWriting?)? = nil
+    ) {
+        self.items = items
+        self.selectedIDs = selectedIDs
+        self.primarySelectedID = primarySelectedID
+        self.itemSize = itemSize
+        self.interitemSpacing = interitemSpacing
+        self.contentRevision = contentRevision
+        self.isSelectable = isSelectable
+        self.content = content
+        self.onSelect = onSelect
+        self.onDoubleClick = onDoubleClick
+        self.pasteboardWriter = pasteboardWriter
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let layout = NSCollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.minimumInteritemSpacing = interitemSpacing
+        layout.minimumLineSpacing = interitemSpacing
+        layout.itemSize = itemSize
+        layout.sectionInset = NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
+
+        let collectionView = ShelfCollectionView()
+        collectionView.collectionViewLayout = layout
+        collectionView.dataSource = context.coordinator
+        collectionView.delegate = context.coordinator
+        collectionView.isSelectable = true
+        collectionView.allowsMultipleSelection = true
+        collectionView.backgroundColors = [.clear]
+        collectionView.enclosingScrollView?.drawsBackground = false
+        collectionView.register(
+            ShelfCollectionViewItem<Item, Content>.self,
+            forItemWithIdentifier: ShelfCollectionViewItem<Item, Content>.reuseIdentifier
+        )
+        collectionView.mouseDownSelectionHandler = { [weak coordinator = context.coordinator] collectionView, indexPath, event in
+            coordinator?.handleMouseDownSelection(in: collectionView, indexPath: indexPath, event: event)
+        }
+        collectionView.doubleClickHandler = { [weak coordinator = context.coordinator] collectionView, indexPath in
+            coordinator?.handleDoubleClick(in: collectionView, indexPath: indexPath)
+        }
+        collectionView.isSelectableIndexPath = { [weak coordinator = context.coordinator] indexPath in
+            coordinator?.isSelectableItem(at: indexPath) ?? false
+        }
+        collectionView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collectionView.setDraggingSourceOperationMask(.copy, forLocal: true)
+
+        let scrollView = ShelfCollectionScrollView()
+        scrollView.documentView = collectionView
+        scrollView.drawsBackground = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.borderType = .noBorder
+        scrollView.postsBoundsChangedNotifications = true
+
+        context.coordinator.collectionView = collectionView
+        context.coordinator.parent = self
+        context.coordinator.syncData()
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+
+        if let layout = context.coordinator.collectionView?.collectionViewLayout as? NSCollectionViewFlowLayout {
+            if layout.itemSize != itemSize {
+                layout.itemSize = itemSize
+            }
+            if layout.minimumInteritemSpacing != interitemSpacing {
+                layout.minimumInteritemSpacing = interitemSpacing
+            }
+            if layout.minimumLineSpacing != interitemSpacing {
+                layout.minimumLineSpacing = interitemSpacing
+            }
+        }
+
+        context.coordinator.syncData()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
+        var parent: ShelfCollectionRepresentable
+        weak var collectionView: NSCollectionView?
+
+        private var lastMouseDownSelectionID: UUID?
+        private var previousItemIDs: [UUID] = []
+        private var previousSelectedIDs: Set<UUID> = []
+        private var previousContentRevision: Int?
+
+        init(_ parent: ShelfCollectionRepresentable) {
+            self.parent = parent
+        }
+
+        func syncData() {
+            guard let collectionView else { return }
+            let itemIDs = parent.items.map(\.id)
+            let selectedIDs = parent.selectedIDs.union(parent.primarySelectedID.map { Set([$0]) } ?? [])
+            if itemIDs != previousItemIDs || parent.contentRevision != previousContentRevision {
+                collectionView.reloadData()
+                previousItemIDs = itemIDs
+                previousContentRevision = parent.contentRevision
+            } else if selectedIDs != previousSelectedIDs {
+                reconfigureVisibleItems(in: collectionView)
+            }
+            applySelection(to: collectionView)
+            collectionView.collectionViewLayout?.invalidateLayout()
+            previousSelectedIDs = selectedIDs
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+            parent.items.count
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            itemForRepresentedObjectAt indexPath: IndexPath
+        ) -> NSCollectionViewItem {
+            let collectionItem = collectionView.makeItem(
+                withIdentifier: ShelfCollectionViewItem<Item, Content>.reuseIdentifier,
+                for: indexPath
+            )
+
+            guard let shelfItem = collectionItem as? ShelfCollectionViewItem<Item, Content>,
+                  let representedItem = item(at: indexPath) else {
+                return collectionItem
+            }
+
+            let isSelected = parent.selectedIDs.contains(representedItem.id) || parent.primarySelectedID == representedItem.id
+            shelfItem.configure(
+                item: representedItem,
+                isSelected: isSelected,
+                isSelectable: parent.isSelectable(representedItem),
+                content: parent.content
+            )
+            return shelfItem
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            layout collectionViewLayout: NSCollectionViewLayout,
+            sizeForItemAt indexPath: IndexPath
+        ) -> NSSize {
+            parent.itemSize
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+            guard let id = firstDisplayOrderedID(in: indexPaths),
+                  id != lastMouseDownSelectionID else {
+                lastMouseDownSelectionID = nil
+                return
+            }
+
+            parent.onSelect(id, currentEventModifierFlags())
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, shouldSelectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> {
+            []
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+            guard collectionView.selectionIndexPaths.isEmpty,
+                  let id = firstDisplayOrderedID(in: indexPaths),
+                  id != lastMouseDownSelectionID else {
+                return
+            }
+
+            parent.onSelect(id, currentEventModifierFlags())
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, shouldDeselectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> {
+            []
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            pasteboardWriterForItemAt indexPath: IndexPath
+        ) -> NSPasteboardWriting? {
+            guard let representedItem = item(at: indexPath) else { return nil }
+            return parent.pasteboardWriter?(representedItem)
+        }
+
+        func handleMouseDownSelection(in collectionView: NSCollectionView, indexPath: IndexPath, event: NSEvent) {
+            guard event.type == .leftMouseDown,
+                  !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.control),
+                  let item = item(at: indexPath) else {
+                return
+            }
+
+            lastMouseDownSelectionID = item.id
+            collectionView.selectionIndexPaths = selectionIndexPaths(afterSelecting: indexPath, event: event)
+            parent.onSelect(item.id, normalizedModifierFlags(from: event))
+        }
+
+        func handleDoubleClick(in collectionView: NSCollectionView, indexPath: IndexPath) {
+            guard let item = item(at: indexPath) else { return }
+            parent.onDoubleClick(item.id)
+        }
+
+        func isSelectableItem(at indexPath: IndexPath) -> Bool {
+            guard let item = item(at: indexPath) else { return false }
+            return parent.isSelectable(item)
+        }
+
+        private func applySelection(to collectionView: NSCollectionView) {
+            var selectedIDs = parent.selectedIDs
+            if let primarySelectedID = parent.primarySelectedID {
+                selectedIDs.insert(primarySelectedID)
+            }
+            let selectedIndexPaths = indexPaths(for: selectedIDs)
+            guard collectionView.selectionIndexPaths != selectedIndexPaths else { return }
+            collectionView.selectionIndexPaths = selectedIndexPaths
+        }
+
+        private func selectionIndexPaths(afterSelecting indexPath: IndexPath, event: NSEvent) -> Set<IndexPath> {
+            let flags = normalizedModifierFlags(from: event)
+            var selectedIDs = parent.selectedIDs
+            if let primarySelectedID = parent.primarySelectedID {
+                selectedIDs.insert(primarySelectedID)
+            }
+            let currentSelection = indexPaths(for: selectedIDs)
+
+            if flags.contains(.shift),
+               let primarySelectedID = parent.primarySelectedID,
+               let anchorIndex = parent.items.firstIndex(where: { $0.id == primarySelectedID }) {
+                let bounds = min(anchorIndex, indexPath.item)...max(anchorIndex, indexPath.item)
+                return Set(bounds.map { IndexPath(item: $0, section: 0) })
+            }
+
+            if flags.contains(.command) {
+                var nextSelection = currentSelection
+                if nextSelection.contains(indexPath) {
+                    nextSelection.remove(indexPath)
+                } else {
+                    nextSelection.insert(indexPath)
+                }
+                return nextSelection
+            }
+
+            if currentSelection.count > 1, currentSelection.contains(indexPath) {
+                return currentSelection
+            }
+            return [indexPath]
+        }
+
+        private func indexPaths(for ids: Set<UUID>) -> Set<IndexPath> {
+            Set(parent.items.enumerated().compactMap { index, item in
+                ids.contains(item.id) ? IndexPath(item: index, section: 0) : nil
+            })
+        }
+
+        private func reconfigureVisibleItems(in collectionView: NSCollectionView) {
+            for collectionItem in collectionView.visibleItems() {
+                guard let shelfItem = collectionItem as? ShelfCollectionViewItem<Item, Content>,
+                      let id = collectionItem.representedObject as? UUID,
+                      let representedItem = parent.items.first(where: { $0.id == id }) else {
+                    continue
+                }
+                let isSelected = parent.selectedIDs.contains(id) || parent.primarySelectedID == id
+                shelfItem.configure(
+                    item: representedItem,
+                    isSelected: isSelected,
+                    isSelectable: parent.isSelectable(representedItem),
+                    content: parent.content
+                )
+            }
+        }
+
+        private func item(at indexPath: IndexPath) -> Item? {
+            guard indexPath.section == 0,
+                  indexPath.item >= parent.items.startIndex,
+                  indexPath.item < parent.items.endIndex else {
+                return nil
+            }
+            return parent.items[indexPath.item]
+        }
+
+        private func firstDisplayOrderedID(in indexPaths: Set<IndexPath>) -> UUID? {
+            indexPaths
+                .sorted { $0.item < $1.item }
+                .compactMap { item(at: $0)?.id }
+                .first
+        }
+
+        private func currentEventModifierFlags() -> NSEvent.ModifierFlags {
+            guard let event = NSApp.currentEvent else { return [] }
+            return normalizedModifierFlags(from: event)
+        }
+
+        private func normalizedModifierFlags(from event: NSEvent) -> NSEvent.ModifierFlags {
+            event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        }
+    }
+}
+
+private final class ShelfCollectionScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        guard event.scrollingDeltaX == 0, event.scrollingDeltaY != 0 else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        scrollHorizontally(by: -normalizedScrollDelta(event.scrollingDeltaY, for: event))
+    }
+
+    private func normalizedScrollDelta(_ delta: CGFloat, for event: NSEvent) -> CGFloat {
+        delta * (event.hasPreciseScrollingDeltas ? 1.25 : 64)
+    }
+
+    private func scrollHorizontally(by delta: CGFloat) {
+        guard let documentView else { return }
+
+        let clipView = contentView
+        let maxX = max(0, documentView.frame.width - clipView.bounds.width)
+        let currentX = clipView.bounds.origin.x
+        let nextX = min(max(currentX + delta, 0), maxX)
+        guard nextX != currentX else { return }
+
+        clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
+        reflectScrolledClipView(clipView)
+    }
+}
+
+private final class ShelfCollectionView: NSCollectionView {
+    var mouseDownSelectionHandler: ((NSCollectionView, IndexPath, NSEvent) -> Void)?
+    var doubleClickHandler: ((NSCollectionView, IndexPath) -> Void)?
+    var isSelectableIndexPath: ((IndexPath) -> Bool)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        super.hitTest(point)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        routeMouseDownSelection(with: event)
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        routeDoubleClick(with: event)
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    @discardableResult
+    func handleMouseDownFromDescendant(_ event: NSEvent) -> Bool {
+        guard routeMouseDownSelection(with: event) else { return false }
+        super.mouseDown(with: event)
+        return true
+    }
+
+    @discardableResult
+    func handleMouseUpFromDescendant(_ event: NSEvent) -> Bool {
+        guard shouldRouteShelfMouseEvent(event) else { return false }
+        super.mouseUp(with: event)
+        routeDoubleClick(with: event)
+        return true
+    }
+
+    @discardableResult
+    private func routeMouseDownSelection(with event: NSEvent) -> Bool {
+        guard shouldRouteShelfMouseEvent(event),
+              let indexPath = indexPathForShelfItem(at: convert(event.locationInWindow, from: nil)) else {
+            return false
+        }
+        mouseDownSelectionHandler?(self, indexPath, event)
+        return true
+    }
+
+    @discardableResult
+    private func routeDoubleClick(with event: NSEvent) -> Bool {
+        guard event.clickCount >= 2,
+              shouldRouteShelfMouseEvent(event),
+              let indexPath = indexPathForShelfItem(at: convert(event.locationInWindow, from: nil)) else {
+            return false
+        }
+        doubleClickHandler?(self, indexPath)
+        return true
+    }
+
+    private func indexPathForShelfItem(at point: NSPoint) -> IndexPath? {
+        guard bounds.contains(point) else { return nil }
+        let visibleRect = self.visibleRect
+        return collectionViewLayout?
+            .layoutAttributesForElements(in: visibleRect)
+            .filter { $0.representedElementCategory == .item }
+            .compactMap { attributes -> (attributes: NSCollectionViewLayoutAttributes, indexPath: IndexPath)? in
+                guard let indexPath = attributes.indexPath else { return nil }
+                return (attributes, indexPath)
+            }
+            .sorted { $0.indexPath.item < $1.indexPath.item }
+            .first { attributes, indexPath in
+                attributes.frame.contains(point)
+                    && (isSelectableIndexPath?(indexPath) ?? true)
+            }?
+            .indexPath
+    }
+
+    private func shouldRouteShelfMouseEvent(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged:
+            break
+        default:
+            return false
+        }
+        guard event.window == nil || event.window === window else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return !flags.contains(.control)
+    }
+}
+
+private final class ShelfCollectionViewItem<Item: Identifiable, Content: View>: NSCollectionViewItem where Item.ID == UUID {
+    static var reuseIdentifier: NSUserInterfaceItemIdentifier {
+        NSUserInterfaceItemIdentifier("ShelfCollectionViewItem-\(String(describing: Item.self))-\(String(describing: Content.self))")
+    }
+
+    private var hostingView: ShelfCollectionHostingView?
+
+    override func loadView() {
+        view = ShelfCollectionItemContainerView()
+    }
+
+    func configure(
+        item: Item,
+        isSelected: Bool,
+        isSelectable: Bool,
+        content: (Item, Bool) -> Content
+    ) {
+        representedObject = item.id
+        if let containerView = view as? ShelfCollectionItemContainerView {
+            containerView.routesShelfMouseEvents = isSelectable
+        }
+
+        let rootView = AnyView(content(item, isSelected))
+        if let hostingView {
+            hostingView.rootView = rootView
+            hostingView.routesShelfMouseEvents = isSelectable
+        } else {
+            let hostingView = ShelfCollectionHostingView(rootView: rootView)
+            hostingView.routesShelfMouseEvents = isSelectable
+            hostingView.translatesAutoresizingMaskIntoConstraints = false
+            hostingView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            hostingView.setContentHuggingPriority(.defaultLow, for: .vertical)
+            view.addSubview(hostingView)
+            NSLayoutConstraint.activate([
+                hostingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                hostingView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                hostingView.topAnchor.constraint(equalTo: view.topAnchor),
+                hostingView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+            self.hostingView = hostingView
+        }
+    }
+}
+
+private final class ShelfCollectionItemContainerView: NSView {
+    var routesShelfMouseEvents = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard routesShelfMouseEvents,
+              enclosingShelfCollectionView?.handleMouseDownFromDescendant(event) == true else {
+            super.mouseDown(with: event)
+            return
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard routesShelfMouseEvents,
+              enclosingShelfCollectionView?.handleMouseUpFromDescendant(event) == true else {
+            super.mouseUp(with: event)
+            return
+        }
+    }
+}
+
+private final class ShelfCollectionHostingView: NSHostingView<AnyView> {
+    var routesShelfMouseEvents = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard routesShelfMouseEvents,
+              bounds.contains(point),
+              let event = window?.currentEvent ?? NSApp.currentEvent,
+              shouldHandleShelfSelectionEvent(event) else {
+            return super.hitTest(point)
+        }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard routesShelfMouseEvents,
+              enclosingShelfCollectionView?.handleMouseDownFromDescendant(event) == true else {
+            super.mouseDown(with: event)
+            return
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard routesShelfMouseEvents,
+              enclosingShelfCollectionView?.handleMouseUpFromDescendant(event) == true else {
+            super.mouseUp(with: event)
+            return
+        }
+    }
+}
+
+private extension NSView {
+    var enclosingShelfCollectionView: ShelfCollectionView? {
+        var view = superview
+        while let currentView = view {
+            if let collectionView = currentView as? ShelfCollectionView {
+                return collectionView
+            }
+            view = currentView.superview
+        }
+        return nil
+    }
+
+    func shouldHandleShelfSelectionEvent(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged:
+            break
+        default:
+            return false
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return !flags.contains(.control)
+    }
+}
