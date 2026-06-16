@@ -72,6 +72,40 @@ final class FrontmostApplicationTracker {
         return application.activate(options: [])
     }
 
+    func waitForActivation(of bundleIdentifier: String, timeout: TimeInterval) async -> Bool {
+        let normalizedTarget = Self.normalizedBundleIdentifier(bundleIdentifier)
+        guard let normalizedTarget else { return false }
+        if Self.normalizedBundleIdentifier(frontmostApplicationBundleIdentifier()) == normalizedTarget {
+            return true
+        }
+
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        return await withCheckedContinuation { continuation in
+            let waiter = FrontmostApplicationActivationWaiter(continuation: continuation)
+            waiter.observer = notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [waiter] notification in
+                guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      Self.normalizedBundleIdentifier(application.bundleIdentifier) == normalizedTarget else {
+                    return
+                }
+                Task { @MainActor [waiter] in
+                    waiter.resume(true)
+                }
+            }
+
+            Task { @MainActor [waiter] in
+                let nanoseconds = UInt64(max(0, timeout) * 1_000_000_000)
+                if nanoseconds > 0 {
+                    try? await Task.sleep(nanoseconds: nanoseconds)
+                }
+                waiter.resume(false)
+            }
+        }
+    }
+
     private func recordIfExternal(_ application: NSRunningApplication?) {
         guard let application, isExternal(application) else { return }
         lastExternalApplication = application
@@ -86,5 +120,32 @@ final class FrontmostApplicationTracker {
             return false
         }
         return true
+    }
+
+    nonisolated private static func normalizedBundleIdentifier(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed.lowercased()
+    }
+}
+
+@MainActor
+private final class FrontmostApplicationActivationWaiter {
+    var observer: NSObjectProtocol?
+    private var didResume = false
+    private let continuation: CheckedContinuation<Bool, Never>
+
+    init(continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ result: Bool) {
+        guard !didResume else { return }
+        didResume = true
+        if let observer {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            self.observer = nil
+        }
+        continuation.resume(returning: result)
     }
 }

@@ -6,17 +6,19 @@ struct ContentView: View {
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let currentExternalApplication: () -> ExternalApplicationIdentity?
-    @State private var isShowingNewTextItem = false
+    @Binding var isShowingNewTextItem: Bool
 
     init(
         store: PasteBuddyStore,
         directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
         directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
+        isShowingNewTextItem: Binding<Bool> = .constant(false),
         currentExternalApplication: @escaping () -> ExternalApplicationIdentity? = { nil }
     ) {
         self.store = store
         self.directPasteItem = directPasteItem
         self.directPasteItems = directPasteItems
+        self._isShowingNewTextItem = isShowingNewTextItem
         self.currentExternalApplication = currentExternalApplication
     }
 

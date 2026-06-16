@@ -560,11 +560,12 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "wait for active target")
     }
 
-    func testDirectPasteDefaultsAllowBrowserFocusRecovery() {
+    func testDirectPasteDefaultsWaitForActivationWithoutPasteDelay() {
         let options = PasteboardWriter.DirectPasteOptions.default
 
         XCTAssertGreaterThanOrEqual(options.activationWaitTimeout, 0.35)
-        XCTAssertGreaterThanOrEqual(options.pasteDispatchDelay, 0.05)
+        XCTAssertEqual(options.pasteDispatchDelay, 0)
+        XCTAssertEqual(PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0.05).pasteDispatchDelay, 0.05)
     }
 
     func testAsyncDirectPasteWaitsForTargetActivationWithoutBlockingMainActor() async throws {

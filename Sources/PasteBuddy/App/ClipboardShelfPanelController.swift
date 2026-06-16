@@ -52,9 +52,10 @@ final class ClipboardShelfPanelController {
         panel.setFrame(finalFrame, display: false)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
+        panel.makeKey()
         PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
         postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
-        installDismissalMonitoringAfterPresentation(for: panel)
+        startDismissalMonitoring(for: panel)
     }
 
     func hideImmediately() {
@@ -158,15 +159,9 @@ final class ClipboardShelfPanelController {
         panel.setFrame(finalFrame, display: panel.isVisible)
     }
 
-    private func installDismissalMonitoringAfterPresentation(for panel: NSPanel) {
-        Task { @MainActor [weak self, weak panel] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard let self, let panel, self.panel === panel, panel.isVisible else {
-                return
-            }
-            self.startOutsideClickMonitoring(for: panel)
-            self.startFocusMonitoring(for: panel)
-        }
+    private func startDismissalMonitoring(for panel: NSPanel) {
+        startOutsideClickMonitoring(for: panel)
+        startFocusMonitoring(for: panel)
     }
 
     private func startOutsideClickMonitoring(for panel: NSPanel) {
@@ -176,7 +171,7 @@ final class ClipboardShelfPanelController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] event in
             guard let self, let panel, panel.isVisible else { return event }
-            if Self.isMenuWindow(event.window) {
+            if Self.isShelfAuxiliaryWindow(event.window) {
                 return event
             }
             self.hideIfOutsideClick(at: self.screenLocation(for: event))
@@ -261,7 +256,7 @@ final class ClipboardShelfPanelController {
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
         let keyWindow = NSApp.keyWindow
-        if keyWindow === panel || Self.isMenuWindow(keyWindow) {
+        if keyWindow === panel || Self.isShelfAuxiliaryWindow(keyWindow) {
             return
         }
         hide()
@@ -285,8 +280,11 @@ final class ClipboardShelfPanelController {
         return window.convertPoint(toScreen: event.locationInWindow)
     }
 
-    private static func isMenuWindow(_ window: NSWindow?) -> Bool {
+    private static func isShelfAuxiliaryWindow(_ window: NSWindow?) -> Bool {
         guard let window else { return false }
+        if window.identifier?.rawValue == ClipboardShelfWindowIdentifiers.sourceAppSuggestionPanel {
+            return true
+        }
         return String(describing: type(of: window)).contains("Menu")
     }
 

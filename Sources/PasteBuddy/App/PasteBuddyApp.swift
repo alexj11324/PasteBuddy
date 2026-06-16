@@ -15,8 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        PasteBuddyLifecycleFlush.flushForTermination(flushPendingSave)
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        PasteBuddyTerminationCoordinator.flushBeforeTerminating(
+            flushPendingSave,
+            reply: { shouldTerminate in
+                sender.reply(toApplicationShouldTerminate: shouldTerminate)
+            }
+        )
     }
 }
 
@@ -32,6 +37,7 @@ struct PasteBuddyApp: App {
     @State private var shelfPanelController: ClipboardShelfPanelController?
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
+    @State private var isShowingNewTextItem = false
 
     init() {
         Self.printRuntimeDiagnosticsIfNeeded()
@@ -61,6 +67,7 @@ struct PasteBuddyApp: App {
                         tracker: frontmostApplicationTracker
                     )
                 },
+                isShowingNewTextItem: $isShowingNewTextItem,
                 currentExternalApplication: {
                     frontmostApplicationTracker.currentExternalApplication()
                 }
@@ -77,7 +84,7 @@ struct PasteBuddyApp: App {
             CommandMenu("Clipboard") {
                 Button("New Text Item") {
                     Task { @MainActor in
-                        await presentNewTextItemPanel()
+                        await presentNewTextItemSheet()
                     }
                 }
 
@@ -380,43 +387,9 @@ struct PasteBuddyApp: App {
         }
     }
 
-    private func presentNewTextItemPanel() async {
+    private func presentNewTextItemSheet() async {
         await openMainWindow()
-
-        let titleField = NSTextField(string: "")
-        titleField.placeholderString = localized("Title")
-        titleField.frame = NSRect(x: 0, y: 0, width: 460, height: 24)
-
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 180))
-        textView.isRichText = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 460, height: 180))
-        scrollView.borderType = .bezelBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.documentView = textView
-
-        let stack = NSStackView(views: [titleField, scrollView])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 460, height: 220)
-        titleField.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        scrollView.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        scrollView.heightAnchor.constraint(equalToConstant: 180).isActive = true
-
-        let alert = NSAlert()
-        alert.messageText = localized("New Text Item")
-        alert.informativeText = localized("Create a local encrypted PasteBuddy text item.")
-        alert.accessoryView = stack
-        alert.addButton(withTitle: localized("Create"))
-        alert.addButton(withTitle: localized("Cancel"))
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard store.createTextItem(text: textView.string, title: titleField.stringValue) != nil else {
-            NSSound.beep()
-            return
-        }
+        isShowingNewTextItem = true
     }
 
     private func createNewPinboard() async {
@@ -550,18 +523,28 @@ struct PasteBuddyApp: App {
             "targetSelected",
             detail: "bundle=\(targetBundleIdentifier) name=\(target.localizedName)"
         )
+        let options = notificationDrivenDirectPasteOptions()
+        let requestedActivation = tracker.activateLastExternalApplication()
+        PasteBuddyDiagnostics.record(
+            .directPaste,
+            "activateTargetRequested",
+            detail: "bundle=\(targetBundleIdentifier) requested=\(requestedActivation)"
+        )
+        guard await tracker.waitForActivation(
+            of: targetBundleIdentifier,
+            timeout: options.activationWaitTimeout
+        ) else {
+            PasteBuddyDiagnostics.record(.directPaste, "targetActivationTimedOut", detail: "bundle=\(targetBundleIdentifier)")
+            return DirectPasteResult(
+                outcome: .failedNoTargetApplication,
+                itemCount: 1,
+                format: format
+            )
+        }
         let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             item,
             format: format,
-            targetBundleIdentifier: targetBundleIdentifier,
-            activeApplicationBundleIdentifier: {
-                tracker.frontmostApplicationBundleIdentifier()
-            },
-            options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions,
-            prepareForPaste: {
-                PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
-                tracker.activateLastExternalApplication()
-            }
+            options: options
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
         return result
@@ -605,21 +588,40 @@ struct PasteBuddyApp: App {
             "targetSelected",
             detail: "bundle=\(targetBundleIdentifier) name=\(target.localizedName)"
         )
+        let options = notificationDrivenDirectPasteOptions()
+        let requestedActivation = tracker.activateLastExternalApplication()
+        PasteBuddyDiagnostics.record(
+            .directPaste,
+            "activateTargetRequested",
+            detail: "bundle=\(targetBundleIdentifier) requested=\(requestedActivation)"
+        )
+        guard await tracker.waitForActivation(
+            of: targetBundleIdentifier,
+            timeout: options.activationWaitTimeout
+        ) else {
+            PasteBuddyDiagnostics.record(.directPaste, "targetActivationTimedOut", detail: "bundle=\(targetBundleIdentifier)")
+            return DirectPasteResult(
+                outcome: .failedNoTargetApplication,
+                itemCount: items.count,
+                format: format
+            )
+        }
         let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             items,
             format: format,
-            targetBundleIdentifier: targetBundleIdentifier,
-            activeApplicationBundleIdentifier: {
-                tracker.frontmostApplicationBundleIdentifier()
-            },
-            options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions,
-            prepareForPaste: {
-                PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
-                tracker.activateLastExternalApplication()
-            }
+            options: options
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
         return result
+    }
+
+    private static func notificationDrivenDirectPasteOptions() -> PasteboardWriter.DirectPasteOptions {
+        let configured = PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions
+        return PasteboardWriter.DirectPasteOptions(
+            activationWaitTimeout: configured.activationWaitTimeout,
+            pasteDispatchDelay: 0,
+            fallbackBehavior: .failWithoutCopying
+        )
     }
 
     private static func printRuntimeDiagnosticsIfNeeded() {
@@ -655,28 +657,18 @@ final class PasteBuddyRuntimeLoadGate {
 }
 
 @MainActor
-enum PasteBuddyLifecycleFlush {
-    static let terminationTimeout: TimeInterval = 0.25
-
-    static func flushForTermination(
+enum PasteBuddyTerminationCoordinator {
+    static func flushBeforeTerminating(
         _ flushPendingSave: (() async -> Void)?,
-        timeout: TimeInterval = 0.25
-    ) {
-        guard let flushPendingSave else { return }
+        reply: @escaping (Bool) -> Void
+    ) -> NSApplication.TerminateReply {
+        guard let flushPendingSave else { return .terminateNow }
 
-        var didFinish = false
         Task { @MainActor in
             await flushPendingSave()
-            didFinish = true
+            reply(true)
         }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        while !didFinish && Date() < deadline {
-            RunLoop.current.run(
-                mode: .default,
-                before: min(deadline, Date().addingTimeInterval(0.01))
-            )
-        }
+        return .terminateLater
     }
 }
 

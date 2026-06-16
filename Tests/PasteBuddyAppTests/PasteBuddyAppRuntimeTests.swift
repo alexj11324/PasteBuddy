@@ -19,13 +19,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(loadAsyncCallCount, 1)
     }
 
-    func testLifecycleFlushForTerminationTriggersPendingSaveFlush() {
+    func testTerminationCoordinatorDefersUntilPendingSaveFlush() async {
         var didFlush = false
 
-        PasteBuddyLifecycleFlush.flushForTermination({
-            didFlush = true
-        }, timeout: 0.05)
+        let didReply = await withCheckedContinuation { continuation in
+            let reply = PasteBuddyTerminationCoordinator.flushBeforeTerminating({
+                didFlush = true
+            }, reply: { shouldTerminate in
+                continuation.resume(returning: shouldTerminate)
+            })
 
+            XCTAssertEqual(reply, .terminateLater)
+        }
+
+        XCTAssertTrue(didReply)
         XCTAssertTrue(didFlush)
     }
 

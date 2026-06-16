@@ -1,7 +1,6 @@
 import AppKit
 import PasteBuddyCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
@@ -51,8 +50,9 @@ private enum ClipboardShelfDisplayItem: Identifiable {
 }
 
 struct ClipboardShelfPanelView: View {
-    private static let pasteSearchAnimation = Animation.smooth(duration: 0.36, extraBounce: 0.09)
+    private static let basePasteSearchAnimation = Animation.smooth(duration: 0.36, extraBounce: 0.09)
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var store: PasteBuddyStore
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
@@ -61,6 +61,7 @@ struct ClipboardShelfPanelView: View {
     let onDismissImmediately: () -> Void
 
     @FocusState private var isSearchFocused: Bool
+    @FocusState private var isShelfKeyboardFocused: Bool
     @State private var isShowingNewTextItem = false
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
@@ -84,16 +85,21 @@ struct ClipboardShelfPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isShelfKeyboardFocused)
+        .onKeyPress(phases: .down) { keyPress in
+            handleShelfKeyPress(keyPress, allowsPreview: true)
+        }
         .onAppear {
             shelfScope = store.selectedScope
             refreshShelfItems()
-            isSearchRailPresented = false
+            isSearchRailPresented = true
+            isShelfKeyboardFocused = false
             Task { @MainActor in
                 await Task.yield()
-                withAnimation(Self.pasteSearchAnimation) {
-                    isSearchRailPresented = true
-                    isSearchFocused = true
-                }
+                await Task.yield()
+                isSearchFocused = true
             }
         }
         .onDisappear {
@@ -104,18 +110,13 @@ struct ClipboardShelfPanelView: View {
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
         }
+        .onChange(of: isSearchFocused) { _, isFocused in
+            isShelfKeyboardFocused = !isFocused
+        }
         .onMoveCommand(perform: moveSelection)
         .onExitCommand(perform: handleExitCommand)
         .task {
             await runShelfMinuteTicker()
-        }
-        .background {
-            ZStack {
-                keyboardShortcuts
-                ShelfSpaceKeyMonitor(isEnabled: !isSearchFocused) {
-                    previewSelectedItem()
-                }
-            }
         }
         .sheet(isPresented: $isShowingNewTextItem) {
             NewTextItemSheet { title, text in
@@ -209,18 +210,18 @@ struct ClipboardShelfPanelView: View {
                 .help(localized("More actions"))
             }
             .controlSize(.large)
-            .animation(Self.pasteSearchAnimation, value: isSearchRailPresented)
-            .animation(Self.pasteSearchAnimation, value: isSearchFocused)
-            .animation(Self.pasteSearchAnimation, value: shouldShowSourceAppSuggestions)
-            .animation(Self.pasteSearchAnimation, value: store.sourceAppFilter)
-            .animation(Self.pasteSearchAnimation, value: selectedCount)
+            .animation(pasteSearchAnimation, value: isSearchRailPresented)
+            .animation(pasteSearchAnimation, value: isSearchFocused)
+            .animation(pasteSearchAnimation, value: shouldShowSourceAppSuggestions)
+            .animation(pasteSearchAnimation, value: store.sourceAppFilter)
+            .animation(pasteSearchAnimation, value: selectedCount)
 
             if !visibleActiveFilterSummaries.isEmpty {
                 activeFilterStrip
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(Self.pasteSearchAnimation, value: visibleActiveFilterSummaries.count)
+        .animation(pasteSearchAnimation, value: visibleActiveFilterSummaries.count)
     }
 
     private var searchControl: some View {
@@ -245,6 +246,10 @@ struct ClipboardShelfPanelView: View {
                 .textFieldStyle(.plain)
                 .focused($isSearchFocused)
                 .frame(minWidth: 48)
+                .accessibilityIdentifier("clipboard-shelf-search-field")
+                .onKeyPress(phases: .down) { keyPress in
+                    handleShelfKeyPress(keyPress, allowsPreview: false)
+                }
                 .onSubmit {
                     pasteSelected(format: store.defaultPasteFormat)
                 }
@@ -255,25 +260,30 @@ struct ClipboardShelfPanelView: View {
         .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
         .overlay {
             Capsule()
-                .strokeBorder(.primary.opacity(isSearchFocused ? 0.18 : 0.08), lineWidth: 1)
+                .strokeBorder(
+                    isSearchFocused ? Color.accentColor.opacity(0.78) : .primary.opacity(0.08),
+                    lineWidth: isSearchFocused ? 2 : 1
+                )
                 .opacity(isSearchRailPresented ? 1 : 0)
         }
         .shadow(color: .black.opacity(isSearchFocused ? 0.12 : 0.06), radius: isSearchFocused ? 12 : 7, y: isSearchFocused ? 3 : 2)
-        .scaleEffect(isSearchRailPresented ? 1 : 0.93, anchor: .leading)
-        .offset(x: isSearchRailPresented ? 0 : -14, y: isSearchRailPresented ? 0 : 4)
-        .opacity(isSearchRailPresented ? 1 : 0)
-        .overlay(alignment: .topLeading) {
-            if shouldShowSourceAppSuggestions {
-                sourceAppSuggestionStrip
-                    .offset(y: 42)
-                    .zIndex(100)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+        .background {
+            SourceAppSuggestionPanelPresenter(
+                isPresented: shouldShowSourceAppSuggestions,
+                appNames: sourceAppSuggestions,
+                query: store.searchQuery,
+                width: ClipboardShelfMetrics.sourceAppSuggestionWidth,
+                onSelect: { appName in
+                    store.applySourceAppSuggestion(appName)
+                    refreshShelfItems()
+                    setSearchFocused(true)
+                }
+            )
         }
-        .animation(Self.pasteSearchAnimation, value: searchControlWidth)
-        .animation(Self.pasteSearchAnimation, value: isSearchRailPresented)
-        .animation(Self.pasteSearchAnimation, value: isSearchFocused)
-        .animation(Self.pasteSearchAnimation, value: store.sourceAppFilter)
+        .animation(pasteSearchAnimation, value: searchControlWidth)
+        .animation(pasteSearchAnimation, value: isSearchRailPresented)
+        .animation(pasteSearchAnimation, value: isSearchFocused)
+        .animation(pasteSearchAnimation, value: store.sourceAppFilter)
     }
 
     private var searchControlWidth: CGFloat {
@@ -297,20 +307,15 @@ struct ClipboardShelfPanelView: View {
         store.sourceAppSuggestions(matching: store.searchQuery, limit: 5)
     }
 
-    private var sourceAppSuggestionStrip: some View {
-        ShelfSourceAppSuggestionStrip(appNames: sourceAppSuggestions, query: store.searchQuery) { appName in
-            store.applySourceAppSuggestion(appName)
-            refreshShelfItems()
-            setSearchFocused(true)
-        }
-        .frame(width: ClipboardShelfMetrics.sourceAppSuggestionWidth, alignment: .leading)
-    }
-
     private var shouldShowSourceAppSuggestions: Bool {
         isSearchFocused
             && store.sourceAppFilter == nil
             && !store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !sourceAppSuggestions.isEmpty
+    }
+
+    private var pasteSearchAnimation: Animation? {
+        reduceMotion ? nil : Self.basePasteSearchAnimation
     }
 
     private var visibleActiveFilterSummaries: [ClipboardFilterDescriptor] {
@@ -476,20 +481,45 @@ struct ClipboardShelfPanelView: View {
         let pinboards = store.snapshot.pinboards
         let defaultPasteFormat = store.defaultPasteFormat
 
-        return ShelfCollectionRepresentable(
-            items: shelfDisplayItems,
-            selectedIDs: shelfInteraction.selectedIDs,
-            primarySelectedID: shelfInteraction.primarySelectedID,
-            itemSize: CGSize(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight),
-            interitemSpacing: 20,
-            contentRevision: store.dataRevision &+ store.queryRevision &+ shelfOverflowCount &+ relativeDateMinuteBucket,
-            isSelectable: { displayItem in
-                if case .clipboard = displayItem {
-                    return true
+        return ScrollView(.horizontal) {
+            LazyHStack(alignment: .bottom, spacing: 20) {
+                ForEach(shelfDisplayItems) { displayItem in
+                    shelfDragEnabled(
+                        shelfDisplayItem(
+                            displayItem,
+                            isSelected: isSelected(displayItem),
+                            defaultPasteFormat: defaultPasteFormat,
+                            pinboards: pinboards
+                        )
+                        .frame(
+                            width: ClipboardShelfMetrics.cardWidth,
+                            height: ClipboardShelfMetrics.shelfHeight,
+                            alignment: .bottom
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectDisplayItem(displayItem)
+                        }
+                        .onTapGesture(count: 2) {
+                            pasteDisplayItem(displayItem, format: defaultPasteFormat)
+                        },
+                        for: displayItem
+                    )
                 }
-                return false
             }
-        ) { displayItem, isSelected in
+            .padding(.horizontal, 4)
+        }
+        .scrollIndicators(.hidden)
+        .frame(height: ClipboardShelfMetrics.shelfHeight)
+    }
+
+    @ViewBuilder
+    private func shelfDisplayItem(
+        _ displayItem: ClipboardShelfDisplayItem,
+        isSelected: Bool,
+        defaultPasteFormat: PasteFormat,
+        pinboards: [Pinboard]
+    ) -> some View {
             switch displayItem {
             case .launchAtLoginPrompt:
                 VStack {
@@ -559,46 +589,36 @@ struct ClipboardShelfPanelView: View {
                 }
                 .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
             }
-        } onSelect: { id, modifiers in
-            guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
-            selectItem(item, modifiers: modifiers)
-        } onDoubleClick: { id in
-            guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
-            pasteItem(item, format: defaultPasteFormat)
-        } pasteboardWriter: { displayItem in
-            pasteboardWriter(for: displayItem)
         }
-        .frame(height: ClipboardShelfMetrics.shelfHeight)
+
+    @ViewBuilder
+    private func shelfDragEnabled<Content: View>(_ content: Content, for displayItem: ClipboardShelfDisplayItem) -> some View {
+        if case .clipboard(let item) = displayItem {
+            content.onDrag {
+                dragProvider(for: item)
+            }
+        } else {
+            content
+        }
     }
 
-    private var keyboardShortcuts: some View {
-        HStack {
-            Button("Paste Selected") {
-                pasteSelected(format: store.defaultPasteFormat)
-            }
-            .keyboardShortcut(.return, modifiers: [])
+    private func isSelected(_ displayItem: ClipboardShelfDisplayItem) -> Bool {
+        guard case .clipboard(let item) = displayItem else { return false }
+        return shelfInteraction.selectedIDs.contains(item.id) || shelfInteraction.primarySelectedID == item.id
+    }
 
-            Button("Paste Selected as Plain Text") {
-                pasteSelected(format: .plainText)
-            }
-            .keyboardShortcut(.return, modifiers: [.shift])
+    private func selectDisplayItem(_ displayItem: ClipboardShelfDisplayItem) {
+        guard case .clipboard(let item) = displayItem else { return }
+        selectItem(item, modifiers: currentShelfModifierFlags())
+    }
 
-            ForEach(1...9, id: \.self) { index in
-                Button("Quick Paste \(index)") {
-                    guard let item = store.quickPasteItem(atOneBasedIndex: index, in: shelfScope) else { return }
-                    pasteItem(item, format: store.defaultPasteFormat)
-                }
-                .keyboardShortcut(KeyEquivalent(Character(String(index))), modifiers: [.command])
-            }
+    private func pasteDisplayItem(_ displayItem: ClipboardShelfDisplayItem, format: PasteFormat) {
+        guard case .clipboard(let item) = displayItem else { return }
+        pasteItem(item, format: format)
+    }
 
-            Button("Focus Search") {
-                setSearchFocused(true)
-            }
-            .keyboardShortcut("f", modifiers: [.command])
-        }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
+    private func currentShelfModifierFlags() -> NSEvent.ModifierFlags {
+        NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
     }
 
     private var emptyTitle: String {
@@ -660,6 +680,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func selectItem(_ item: ClipboardItem, modifiers: NSEvent.ModifierFlags) {
+        setSearchFocused(false)
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.select(item.id, modifiers: modifiers)
         }
@@ -734,9 +755,45 @@ struct ClipboardShelfPanelView: View {
 
     private func setSearchFocused(_ isFocused: Bool) {
         guard isSearchFocused != isFocused else { return }
-        withAnimation(Self.pasteSearchAnimation) {
+        withAnimation(pasteSearchAnimation) {
             isSearchFocused = isFocused
+            isShelfKeyboardFocused = !isFocused
         }
+    }
+
+    private func handleShelfKeyPress(_ keyPress: KeyPress, allowsPreview: Bool) -> KeyPress.Result {
+        let modifiers = keyPress.modifiers
+
+        if keyPress.key == .space, modifiers.isEmpty, allowsPreview, !isSearchFocused {
+            previewSelectedItem()
+            return .handled
+        }
+
+        if keyPress.key == .return {
+            if modifiers.isEmpty {
+                pasteSelected(format: store.defaultPasteFormat)
+                return .handled
+            }
+            if modifiers == .shift {
+                pasteSelected(format: .plainText)
+                return .handled
+            }
+        }
+
+        if modifiers == .command {
+            let characters = keyPress.characters.lowercased()
+            if characters == "f" {
+                setSearchFocused(true)
+                return .handled
+            }
+            if let index = Int(characters), (1...9).contains(index),
+               let item = store.quickPasteItem(atOneBasedIndex: index, in: shelfScope) {
+                pasteItem(item, format: store.defaultPasteFormat)
+                return .handled
+            }
+        }
+
+        return .ignored
     }
 
     private func scheduleStoreSelectionSync(primaryID: UUID?, ids: Set<UUID>) {
@@ -816,26 +873,9 @@ struct ClipboardShelfPanelView: View {
         return store.selectedItemIDs == ids
     }
 
-    private func pasteboardWriter(for displayItem: ClipboardShelfDisplayItem) -> NSPasteboardWriting? {
-        guard case .clipboard(let item) = displayItem else { return nil }
-        let pasteboardItem = NSPasteboardItem()
-        if let payloadData = try? JSONEncoder().encode(PinboardItemDragPayload(ids: [item.id])) {
-            pasteboardItem.setData(
-                payloadData,
-                forType: NSPasteboard.PasteboardType(UTType.pasteBuddyPinboardItemIDs.identifier)
-            )
-        }
-        pasteboardItem.setString(PasteboardWriter.plainText(for: item), forType: .string)
-        if let value = item.payload.urlString {
-            pasteboardItem.setString(value, forType: .URL)
-        }
-        if let value = item.payload.allFileURLStrings.first {
-            pasteboardItem.setString(value, forType: .fileURL)
-        }
-        if let data = item.payload.imageData {
-            pasteboardItem.setData(data, forType: .png)
-        }
-        return pasteboardItem
+    private func dragProvider(for item: ClipboardItem) -> NSItemProvider {
+        let items = shelfInteraction.selectedIDs.contains(item.id) ? selectedItemsInDisplayOrder : [item]
+        return ClipboardItemDragProvider.provider(for: items.isEmpty ? [item] : items)
     }
 
     private func runShelfMinuteTicker() async {
@@ -949,6 +989,7 @@ private struct ShelfOverflowStatusCard: View {
 private struct ShelfCollectionChip: View {
     private static let hoverAnimation = Animation.smooth(duration: 0.18, extraBounce: 0.04)
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let count: Int?
     let systemImageName: String
@@ -1017,7 +1058,7 @@ private struct ShelfCollectionChip: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered in
-            withAnimation(Self.hoverAnimation) {
+            withAnimation(reduceMotion ? nil : Self.hoverAnimation) {
                 self.isHovered = isHovered
             }
         }
@@ -1335,70 +1376,6 @@ private struct ShelfExpandedImagePreview: View {
     }
 }
 
-private struct ShelfSpaceKeyMonitor: NSViewRepresentable {
-    let isEnabled: Bool
-    let onSpace: () -> Void
-
-    func makeNSView(context: Context) -> ShelfSpaceKeyMonitorView {
-        ShelfSpaceKeyMonitorView(isEnabled: isEnabled, onSpace: onSpace)
-    }
-
-    func updateNSView(_ nsView: ShelfSpaceKeyMonitorView, context: Context) {
-        nsView.isEnabled = isEnabled
-        nsView.onSpace = onSpace
-    }
-}
-
-private final class ShelfSpaceKeyMonitorView: NSView {
-    var isEnabled: Bool
-    var onSpace: () -> Void
-    nonisolated(unsafe) private var localKeyDownMonitor: Any?
-
-    init(isEnabled: Bool, onSpace: @escaping () -> Void) {
-        self.isEnabled = isEnabled
-        self.onSpace = onSpace
-        super.init(frame: .zero)
-        installMonitor()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    deinit {
-        if let localKeyDownMonitor {
-            NSEvent.removeMonitor(localKeyDownMonitor)
-        }
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        installMonitor()
-    }
-
-    private func installMonitor() {
-        guard localKeyDownMonitor == nil else { return }
-        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self,
-                  self.isEnabled,
-                  event.window === self.window,
-                  Self.isPlainSpace(event) else {
-                return event
-            }
-
-            self.onSpace()
-            return nil
-        }
-    }
-
-    private static func isPlainSpace(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.isEmpty else { return false }
-        return event.keyCode == 49 || event.charactersIgnoringModifiers == " "
-    }
-}
-
 private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
@@ -1707,6 +1684,185 @@ private struct ShelfSourceAppToken: View {
     }
 }
 
+private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
+    let isPresented: Bool
+    let appNames: [String]
+    let query: String
+    let width: CGFloat
+    let onSelect: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            context.coordinator.update(
+                anchorView: nsView,
+                isPresented: isPresented,
+                appNames: appNames,
+                query: query,
+                width: width,
+                onSelect: onSelect
+            )
+        }
+    }
+
+    @MainActor
+    final class Coordinator {
+        private var panel: SourceAppSuggestionPanel?
+        private var hostingView: SourceAppSuggestionHostingView<AnyView>?
+        private weak var parentWindow: NSWindow?
+
+        deinit {
+            let panel = panel
+            let parentWindow = parentWindow
+            Task { @MainActor in
+                if let panel {
+                    parentWindow?.removeChildWindow(panel)
+                    panel.orderOut(nil)
+                }
+            }
+        }
+
+        func update(
+            anchorView: NSView,
+            isPresented: Bool,
+            appNames: [String],
+            query: String,
+            width: CGFloat,
+            onSelect: @escaping (String) -> Void
+        ) {
+            guard isPresented, !appNames.isEmpty, let window = anchorView.window else {
+                close()
+                return
+            }
+
+            let panel = suggestionPanel(parentWindow: window)
+            let rootView = AnyView(
+                ShelfSourceAppSuggestionStrip(appNames: appNames, query: query, onSelect: onSelect)
+                    .frame(width: width, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            )
+
+            if let hostingView {
+                hostingView.rootView = rootView
+            } else {
+                let hostingView = SourceAppSuggestionHostingView(rootView: rootView)
+                hostingView.configureForTransparentPanel()
+                self.hostingView = hostingView
+                panel.contentView = hostingView
+            }
+
+            hostingView?.layoutSubtreeIfNeeded()
+            let height = max(1, hostingView?.fittingSize.height ?? 1)
+            let anchorFrame = window.convertToScreen(anchorView.convert(anchorView.bounds, to: nil))
+            let targetFrame = NSRect(
+                x: anchorFrame.minX,
+                y: anchorFrame.minY - height - 5,
+                width: width,
+                height: height
+            )
+
+            if panel.isVisible {
+                panel.alphaValue = 1
+                panel.setFrame(targetFrame, display: true)
+            } else {
+                panel.alphaValue = 0
+                panel.setFrame(targetFrame, display: false)
+                panel.orderFrontRegardless()
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.10
+                    panel.animator().alphaValue = 1
+                }
+            }
+        }
+
+        private func suggestionPanel(parentWindow window: NSWindow) -> SourceAppSuggestionPanel {
+            if let panel {
+                attach(panel, to: window)
+                return panel
+            }
+
+            let panel = SourceAppSuggestionPanel(
+                contentRect: .zero,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.identifier = NSUserInterfaceItemIdentifier(ClipboardShelfWindowIdentifiers.sourceAppSuggestionPanel)
+            panel.isFloatingPanel = true
+            panel.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = true
+            panel.hidesOnDeactivate = false
+            panel.isMovable = false
+            panel.ignoresMouseEvents = false
+            panel.animationBehavior = .none
+            self.panel = panel
+            attach(panel, to: window)
+            return panel
+        }
+
+        private func attach(_ panel: NSWindow, to window: NSWindow) {
+            if parentWindow === window {
+                panel.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+                return
+            }
+            parentWindow?.removeChildWindow(panel)
+            window.addChildWindow(panel, ordered: .above)
+            parentWindow = window
+            panel.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+        }
+
+        private func close() {
+            guard let panel, panel.isVisible else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.08
+                panel.animator().alphaValue = 0
+            } completionHandler: { [weak panel] in
+                Task { @MainActor in
+                    panel?.orderOut(nil)
+                }
+            }
+        }
+
+        private func closeImmediately() {
+            if let panel {
+                parentWindow?.removeChildWindow(panel)
+                panel.orderOut(nil)
+            }
+            panel = nil
+            hostingView = nil
+        }
+    }
+}
+
+private final class SourceAppSuggestionPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+private final class SourceAppSuggestionHostingView<Content: View>: NSHostingView<Content> {
+    func configureForTransparentPanel() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+}
+
 private struct ShelfSourceAppSuggestionStrip: View {
     let appNames: [String]
     let query: String
@@ -1747,7 +1903,6 @@ private struct ShelfSourceAppSuggestionStrip: View {
             suggestionShape
                 .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.18), radius: 14, y: 7)
         .compositingGroup()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NSLocalizedString("App suggestions", comment: ""))
