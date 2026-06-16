@@ -3,7 +3,7 @@
 import PackageDescription
 
 let pasteBuddySwiftSettings: [SwiftSetting] = [
-    .swiftLanguageMode(.v5)
+    .swiftLanguageMode(.v6)
 ]
 
 let package = Package(
