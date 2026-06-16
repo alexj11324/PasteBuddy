@@ -311,7 +311,7 @@ public final class PasteBuddyStore {
             return presentationCache.filteredItems
         }
 
-        let items = makeFilteredItems(isHistoryAccessLocked: cacheKey.isHistoryAccessLocked)
+        let items = makeFilteredItems(scope: selectedScope, isHistoryAccessLocked: cacheKey.isHistoryAccessLocked)
         presentationCache.filteredItemsKey = cacheKey
         presentationCache.filteredItems = items
         return items
@@ -319,6 +319,13 @@ public final class PasteBuddyStore {
 
     public var filteredItemsSnapshot: [ClipboardItem] {
         filteredItems
+    }
+
+    public func filteredItems(for scope: PasteScope) -> [ClipboardItem] {
+        if scope == selectedScope {
+            return filteredItems
+        }
+        return makeFilteredItems(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
 
     public var mainListItemsSnapshot: [ClipboardItem] {
@@ -333,10 +340,10 @@ public final class PasteBuddyStore {
         return items
     }
 
-    private func makeFilteredItems(isHistoryAccessLocked: Bool) -> [ClipboardItem] {
+    private func makeFilteredItems(scope: PasteScope, isHistoryAccessLocked: Bool) -> [ClipboardItem] {
         guard !isHistoryAccessLocked else { return [] }
         let scopedItems: [ClipboardItem]
-        switch selectedScope {
+        switch scope {
         case .history:
             if let databaseItems = databaseFilteredItems(pinboardID: nil) {
                 return databaseItems
@@ -639,9 +646,9 @@ public final class PasteBuddyStore {
         historyUnlockedAt = date
     }
 
-    public func quickPasteItem(atOneBasedIndex index: Int) -> ClipboardItem? {
+    public func quickPasteItem(atOneBasedIndex index: Int, in scope: PasteScope? = nil) -> ClipboardItem? {
         guard (1...9).contains(index) else { return nil }
-        let items = filteredItems
+        let items = scope.map { filteredItems(for: $0) } ?? filteredItems
         let zeroBasedIndex = index - 1
         guard items.indices.contains(zeroBasedIndex) else { return nil }
         return items[zeroBasedIndex]

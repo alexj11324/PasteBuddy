@@ -12,7 +12,7 @@ private enum ClipboardShelfMetrics {
     static let searchIdleWidth: CGFloat = 208
     static let searchFocusedWidth: CGFloat = 272
     static let searchFilteredWidth: CGFloat = 310
-    static let sourceAppSuggestionWidth: CGFloat = 360
+    static let sourceAppSuggestionWidth: CGFloat = 304
     static let shelfVerticalPadding: CGFloat = 6
     static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
     static let renderLimit = 200
@@ -21,7 +21,7 @@ private enum ClipboardShelfMetrics {
 private struct ClipboardShelfQueryState: Equatable {
     let dataRevision: Int
     let queryRevision: Int
-    let selectedScope: PasteScope
+    let shelfScope: PasteScope
     let searchQuery: String
     let contentTypeFilter: ClipboardContentType?
     let sourceAppFilter: String?
@@ -69,11 +69,14 @@ struct ClipboardShelfPanelView: View {
     @State private var selectionSyncTask: Task<Void, Never>?
     @State private var isSearchRailPresented = false
     @State private var relativeDateReference = Date()
+    @State private var shelfScope: PasteScope = .history
 
     var body: some View {
         VStack(spacing: 12) {
             toolbar
+                .zIndex(1)
             shelf
+                .zIndex(0)
         }
         .padding(.top, 12)
         .padding(.horizontal, 16)
@@ -82,6 +85,7 @@ struct ClipboardShelfPanelView: View {
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
         .onAppear {
+            shelfScope = store.selectedScope
             refreshShelfItems()
             isSearchRailPresented = false
             Task { @MainActor in
@@ -261,7 +265,7 @@ struct ClipboardShelfPanelView: View {
         .overlay(alignment: .topLeading) {
             if shouldShowSourceAppSuggestions {
                 sourceAppSuggestionStrip
-                    .offset(y: 44)
+                    .offset(y: 42)
                     .zIndex(100)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -294,12 +298,12 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var sourceAppSuggestionStrip: some View {
-        ShelfSourceAppSuggestionStrip(appNames: sourceAppSuggestions) { appName in
+        ShelfSourceAppSuggestionStrip(appNames: sourceAppSuggestions, query: store.searchQuery) { appName in
             store.applySourceAppSuggestion(appName)
             refreshShelfItems()
             setSearchFocused(true)
         }
-        .frame(maxWidth: 360)
+        .frame(width: ClipboardShelfMetrics.sourceAppSuggestionWidth, alignment: .leading)
     }
 
     private var shouldShowSourceAppSuggestions: Bool {
@@ -322,7 +326,7 @@ struct ClipboardShelfPanelView: View {
                     title: localized("Clipboard"),
                     systemImageName: "clock.arrow.circlepath",
                     color: store.isCapturePaused ? .orange : .blue,
-                    isSelected: store.selectedScope == .history
+                    isSelected: shelfScope == .history
                 ) {
                     setScope(.history)
                 }
@@ -332,7 +336,7 @@ struct ClipboardShelfPanelView: View {
                     count: store.pasteStackItems.count,
                     systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
                     color: store.isPasteStackActive ? .green : .secondary,
-                    isSelected: store.selectedScope == .pasteStack
+                    isSelected: shelfScope == .pasteStack
                 ) {
                     setScope(.pasteStack)
                 }
@@ -343,7 +347,7 @@ struct ClipboardShelfPanelView: View {
                         count: pinboard.itemIDs.count,
                         systemImageName: "pin.fill",
                         color: Color(hex: pinboard.colorHex) ?? .blue,
-                        isSelected: store.selectedScope == .pinboard(pinboard.id)
+                        isSelected: shelfScope == .pinboard(pinboard.id)
                     ) {
                         setScope(.pinboard(pinboard.id))
                     }
@@ -390,7 +394,7 @@ struct ClipboardShelfPanelView: View {
         ClipboardShelfQueryState(
             dataRevision: store.dataRevision,
             queryRevision: store.queryRevision,
-            selectedScope: store.selectedScope,
+            shelfScope: shelfScope,
             searchQuery: store.searchQuery,
             contentTypeFilter: store.contentTypeFilter,
             sourceAppFilter: store.sourceAppFilter,
@@ -581,7 +585,7 @@ struct ClipboardShelfPanelView: View {
 
             ForEach(1...9, id: \.self) { index in
                 Button("Quick Paste \(index)") {
-                    guard let item = store.quickPasteItem(atOneBasedIndex: index) else { return }
+                    guard let item = store.quickPasteItem(atOneBasedIndex: index, in: shelfScope) else { return }
                     pasteItem(item, format: store.defaultPasteFormat)
                 }
                 .keyboardShortcut(KeyEquivalent(Character(String(index))), modifiers: [.command])
@@ -598,15 +602,15 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var emptyTitle: String {
-        store.selectedScope == .pasteStack ? localized("Paste Stack is Empty") : localized("No Clipboard Items")
+        shelfScope == .pasteStack ? localized("Paste Stack is Empty") : localized("No Clipboard Items")
     }
 
     private var emptySystemImage: String {
-        store.selectedScope == .pasteStack ? "tray" : "doc.on.clipboard"
+        shelfScope == .pasteStack ? "tray" : "doc.on.clipboard"
     }
 
     private var emptyDescription: String {
-        if store.selectedScope == .pasteStack {
+        if shelfScope == .pasteStack {
             return store.isPasteStackActive ? localized("New copies will appear here.") : localized("Start collecting copied items.")
         }
         return localized("Copy text, links, screenshots, or files to fill the shelf.")
@@ -635,9 +639,9 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func setScope(_ scope: PasteScope) {
+        guard shelfScope != scope else { return }
         shelfInteraction.previewedID = nil
-        store.selectedScope = scope
-        refreshShelfItems()
+        shelfScope = scope
     }
 
     private func clearFilter(_ descriptor: ClipboardFilterDescriptor) {
@@ -786,7 +790,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func refreshShelfItems() {
-        let items = store.filteredItems
+        let items = store.filteredItems(for: shelfScope)
         shelfItems = items
         shelfOverflowCount = max(0, items.count - ClipboardShelfMetrics.renderLimit)
 
@@ -1705,40 +1709,89 @@ private struct ShelfSourceAppToken: View {
 
 private struct ShelfSourceAppSuggestionStrip: View {
     let appNames: [String]
+    let query: String
     let onSelect: (String) -> Void
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(appNames, id: \.self) { appName in
-                    Button {
-                        onSelect(appName)
-                    } label: {
-                        HStack(spacing: 6) {
-                            SourceApplicationIconImage(appName: appName, size: 18)
-                            Text(appName)
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .contentShape(Capsule())
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(appNames.enumerated()), id: \.element) { index, appName in
+                Button {
+                    onSelect(appName)
+                } label: {
+                    HStack(spacing: 12) {
+                        SourceApplicationIconImage(appName: appName, size: 28)
+                        ShelfSourceAppSuggestionTitle(appName: appName, query: query)
+                            .font(.title3)
+                            .lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
-                    }
+                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if index < appNames.count - 1 {
+                    Divider()
+                        .padding(.leading, 54)
+                        .opacity(0.34)
                 }
             }
-            .padding(.vertical, 1)
         }
-        .scrollIndicators(.hidden)
-        .frame(height: 38)
+        .padding(.vertical, 7)
+        .background {
+            suggestionShape
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.76))
+        }
+        .background(.regularMaterial, in: suggestionShape)
+        .overlay {
+            suggestionShape
+                .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 7)
+        .compositingGroup()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NSLocalizedString("App suggestions", comment: ""))
+    }
+
+    private var suggestionShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+    }
+}
+
+private struct ShelfSourceAppSuggestionTitle: View {
+    let appName: String
+    let query: String
+
+    var body: some View {
+        if let match = prefixMatch {
+            HStack(spacing: 0) {
+                Text(match.prefix)
+                    .foregroundStyle(.primary)
+                Text(match.suffix)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text(appName)
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private var prefixMatch: (prefix: String, suffix: String)? {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedQuery = trimmedQuery.hasPrefix("@") ? String(trimmedQuery.dropFirst()) : trimmedQuery
+
+        guard !normalizedQuery.isEmpty,
+              let range = appName.range(
+                of: normalizedQuery,
+                options: [.caseInsensitive, .diacriticInsensitive, .anchored]
+              ) else {
+            return nil
+        }
+
+        return (
+            String(appName[range]),
+            String(appName[range.upperBound...])
+        )
     }
 }
 

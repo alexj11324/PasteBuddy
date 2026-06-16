@@ -150,10 +150,12 @@ PasteBuddy treats clipboard history as high-sensitivity local user data.
   scoped to their public identity and permission level. Removing a participant
   revokes future local access metadata; full cryptographic rekey of already
   delivered board content remains a signed-app sharing recovery task.
-- Debug, logs, analytics, and crashes: no telemetry or crash-reporting
-  integration is present. Future telemetry must pass a plaintext-leak review
-  and may only record aggregate metadata that excludes clipboard payloads,
-  OCR text, URLs, file contents, image bytes, search query text, and keys.
+- Debug, logs, analytics, and crashes: Sentry crash reporting is integrated but
+  disabled unless a deployment injects a Sentry DSN into the app bundle or
+  runtime environment. It must run with default PII disabled and must not record
+  clipboard payloads, OCR text, URLs, file contents, image bytes, search query
+  text, or keys. Session replay, profiling, and analytics-style telemetry are
+  not enabled by the app integration.
 - Temporary files: test/probe artifacts stay under `tmp`; production import,
   extension, sync, and sharing flows must use encrypted envelopes rather than
   plaintext handoff files.
@@ -171,5 +173,5 @@ PasteBuddy treats clipboard history as high-sensitivity local user data.
   public-key directory deployment, and push/background registration.
 - User-facing CloudKit account, corruption, logout, restore, participant
   removal rekey, and lost-key recovery UX beyond the local diagnostics above.
-- App Store privacy review for any future telemetry, crash reporting, or
-  analytics integration.
+- App Store privacy review for Sentry crash reporting and any future telemetry
+  or analytics integration.

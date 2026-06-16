@@ -35,6 +35,7 @@ struct PasteBuddyApp: App {
 
     init() {
         Self.printRuntimeDiagnosticsIfNeeded()
+        _ = PasteBuddySentryBootstrap.startIfConfigured()
         #if canImport(AppIntents)
         PasteBuddyAppShortcuts.updateAppShortcutParameters()
         #endif
@@ -635,6 +636,9 @@ struct PasteBuddyApp: App {
         print("expectedAppPath=\(identity.stableAppPath)")
         print("signingChannel=\(identity.signingChannel)")
         print("signingIdentity=\(identity.codeSigningIdentity)")
+        let sentryConfiguration = PasteBuddySentryConfiguration.make()
+        print("sentryConfigured=\(sentryConfiguration != nil)")
+        print("sentryEnvironment=\(sentryConfiguration?.environment ?? "not-configured")")
         Darwin.exit(EXIT_SUCCESS)
     }
 }

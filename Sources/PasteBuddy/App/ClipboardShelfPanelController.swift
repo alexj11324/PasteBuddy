@@ -1,7 +1,6 @@
 import AppKit
 import Carbon
 import PasteBuddyCore
-import QuartzCore
 import SwiftUI
 
 @MainActor
@@ -49,24 +48,12 @@ final class ClipboardShelfPanelController {
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = bottomAttachedFrame(for: panel)
         PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
-        if shouldReduceShelfMotion {
-            panel.setFrame(finalFrame, display: false)
-        } else {
-            panel.setFrame(hiddenFrame(for: finalFrame), display: false)
-        }
+        panel.animationBehavior = nativeWindowAnimationBehavior
+        panel.setFrame(finalFrame, display: false)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
         PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
-        if shouldReduceShelfMotion {
-            panel.setFrame(finalFrame, display: true)
-            postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
-        } else {
-            let finalFrameDetail = NSStringFromRect(finalFrame)
-            animate(panel, to: finalFrame) { [weak self] in
-                PasteBuddyDiagnostics.record(.shelf, "animationFinished", detail: finalFrameDetail)
-                self?.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
-            }
-        }
+        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
         installDismissalMonitoringAfterPresentation(for: panel)
     }
 
@@ -76,6 +63,7 @@ final class ClipboardShelfPanelController {
         stopOutsideClickMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
+        panel.animationBehavior = .none
         panel.orderOut(nil)
         postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
     }
@@ -86,20 +74,9 @@ final class ClipboardShelfPanelController {
         stopOutsideClickMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
-        let completion: @MainActor @Sendable () -> Void = { [weak self, weak panel] in
-            panel?.orderOut(nil)
-            self?.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
-        }
-
-        guard !shouldReduceShelfMotion else {
-            completion()
-            return
-        }
-
-        let hiddenFrame = hiddenFrame(for: panel.frame)
-        animate(panel, to: hiddenFrame, duration: 0.16) {
-            completion()
-        }
+        panel.animationBehavior = nativeWindowAnimationBehavior
+        panel.orderOut(nil)
+        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
     }
 
     private func makePanel() -> ClipboardShelfPanel {
@@ -116,7 +93,7 @@ final class ClipboardShelfPanelController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
-        panel.animationBehavior = .none
+        panel.animationBehavior = nativeWindowAnimationBehavior
         panel.isExcludedFromWindowsMenu = true
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -165,16 +142,6 @@ final class ClipboardShelfPanelController {
         )
     }
 
-    private func hiddenFrame(for frame: NSRect) -> NSRect {
-        let screen = screen(containing: frame) ?? activeScreen()
-        return NSRect(
-            x: frame.minX,
-            y: screen.frame.minY - frame.height,
-            width: frame.width,
-            height: frame.height
-        )
-    }
-
     private func panelHeight(for panel: NSPanel, in screenFrame: NSRect) -> CGFloat {
         let minimumHeight = min(236, screenFrame.height)
         let maximumHeight = max(minimumHeight, min(screenFrame.height * 0.36, 360))
@@ -186,34 +153,9 @@ final class ClipboardShelfPanelController {
         return min(max(preferredHeight, minimumHeight), maximumHeight)
     }
 
-    private func animate(
-        _ panel: NSPanel,
-        to frame: NSRect,
-        duration: TimeInterval = 0.18,
-        completion: (@MainActor @Sendable () -> Void)? = nil
-    ) {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = duration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(frame, display: true)
-        } completionHandler: {
-            Task { @MainActor in
-                completion?()
-            }
-        }
-    }
-
     private func positionVisiblePanel(_ panel: NSPanel) {
         let finalFrame = bottomAttachedFrame(for: panel)
-        if panel.isVisible {
-            if shouldReduceShelfMotion {
-                panel.setFrame(finalFrame, display: true)
-            } else {
-                animate(panel, to: finalFrame)
-            }
-        } else {
-            panel.setFrame(finalFrame, display: false)
-        }
+        panel.setFrame(finalFrame, display: panel.isVisible)
     }
 
     private func installDismissalMonitoringAfterPresentation(for panel: NSPanel) {
@@ -350,6 +292,10 @@ final class ClipboardShelfPanelController {
 
     private var shouldReduceShelfMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private var nativeWindowAnimationBehavior: NSWindow.AnimationBehavior {
+        shouldReduceShelfMotion ? .none : .utilityWindow
     }
 
     private func postVoiceOverAnnouncement(_ message: String) {

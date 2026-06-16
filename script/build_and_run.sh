@@ -35,6 +35,9 @@ APP_ICON_SOURCE="$ROOT_DIR/Support/AppIcon.icns"
 APP_ICON_NAME="AppIcon.icns"
 INSTALL_BUNDLE="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
 PACKAGE_ZIP="$DIST_DIR/$APP_NAME-installable.zip"
+SENTRY_KEYCHAIN_SERVICE="${PASTEBUDDY_SENTRY_KEYCHAIN_SERVICE:-PasteBuddy Sentry DSN}"
+SENTRY_KEYCHAIN_ACCOUNT="${PASTEBUDDY_SENTRY_KEYCHAIN_ACCOUNT:-$BUNDLE_ID}"
+SENTRY_KEYCHAIN_FALLBACK_ACCOUNT="${PASTEBUDDY_SENTRY_KEYCHAIN_FALLBACK_ACCOUNT:-pastebuddy}"
 
 die() {
   echo "$*" >&2
@@ -159,6 +162,24 @@ resolve_code_sign_identity() {
   printf '%s\n' "$identity"
 }
 
+resolve_sentry_dsn() {
+  local configured account dsn
+  configured="${PASTEBUDDY_SENTRY_DSN:-${SENTRY_DSN:-}}"
+  if [[ -n "$configured" ]]; then
+    printf '%s\n' "$configured"
+    return
+  fi
+
+  for account in "$SENTRY_KEYCHAIN_ACCOUNT" "$SENTRY_KEYCHAIN_FALLBACK_ACCOUNT"; do
+    [[ -n "$account" ]] || continue
+    dsn="$(/usr/bin/security find-generic-password -w -s "$SENTRY_KEYCHAIN_SERVICE" -a "$account" 2>/dev/null || true)"
+    if [[ -n "$dsn" ]]; then
+      printf '%s\n' "$dsn"
+      return
+    fi
+  done
+}
+
 CODESIGN_IDENTITY="$(resolve_code_sign_identity)"
 
 kill_binary() {
@@ -246,6 +267,15 @@ cat >"$INFO_PLIST" <<PLIST
 </dict>
 </plist>
 PLIST
+
+CONFIGURED_SENTRY_DSN="$(resolve_sentry_dsn)"
+CONFIGURED_SENTRY_ENVIRONMENT="${PASTEBUDDY_SENTRY_ENVIRONMENT:-}"
+if [[ -n "$CONFIGURED_SENTRY_DSN" ]]; then
+  /usr/bin/plutil -insert PasteBuddySentryDSN -string "$CONFIGURED_SENTRY_DSN" "$INFO_PLIST"
+fi
+if [[ -n "$CONFIGURED_SENTRY_ENVIRONMENT" ]]; then
+  /usr/bin/plutil -insert PasteBuddySentryEnvironment -string "$CONFIGURED_SENTRY_ENVIRONMENT" "$INFO_PLIST"
+fi
 
 assert_safe_bundle_path() {
   local bundle="$1"

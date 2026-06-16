@@ -20,7 +20,8 @@ let package = Package(
         .library(name: "PasteBuddyMobile", targets: ["PasteBuddyMobile"])
     ],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.5.0")
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.5.0"),
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "8.0.0")
     ],
     targets: [
         .target(
@@ -32,7 +33,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "PasteBuddy",
-            dependencies: ["PasteBuddyCore"],
+            dependencies: [
+                "PasteBuddyCore",
+                .product(name: "Sentry", package: "sentry-cocoa")
+            ],
             resources: [
                 .process("Resources")
             ],
