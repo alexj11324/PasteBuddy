@@ -23,6 +23,11 @@
 - IMPORTANT: 修复 Shelf 卡顿时必须优先排查全局状态副作用、`queryRevision` bump、`selectedItemsInDisplayOrder`、`mainListItemsSnapshot` 和命令菜单 disabled 计算，不要只盯着 Shelf card 动画或 collection reload。
 - IMPORTANT: 为这类修复添加正式回归测试，验证 scoped 查询/快捷键不会 mutate `selectedScope` 或 bump 不必要的 `queryRevision`；不要只靠手动点击感觉判断。
 
+## PasteBuddy Shelf Liquid Glass 背景（IMPORTANT）
+- IMPORTANT: Shelf 底板、搜索框、空态/提示卡片等 custom glass surface 必须共享同一个 `ClipboardShelfGlass.defaultTintOpacity` 默认逻辑；禁止给搜索框或局部背景保留单独的 opacity state、slider 或调试控件。
+- IMPORTANT: 不要把截图里的百分比或临时调试滑杆显示值当作设计经验值；需要改 Shelf 毛玻璃不透明度时，只调整共享的 `ClipboardShelfGlass.defaultTintOpacity`，并让搜索框和整体背景同源生效。
+- IMPORTANT: Shelf 毛玻璃当前经验是用原生 `glassEffect` 配合 `.thickMaterial` 预模糊和 `ClipboardShelfGlass.detailSuppressionOpacity` 压掉背后高频文字细节；不要为“更像 glass”移除这层细节抑制。
+
 ## macOS 视觉边界与背景裁剪（IMPORTANT）
 - IMPORTANT: 胶囊、圆角按钮、圆角 segmented/tab item、toolbar pill 等控件外面不允许露出矩形灰色背景或方形容器底色。
 - IMPORTANT: 这类问题不要称为“遮罩”并继续叠层修补；工程上按 `background bleed`（背景溢出/漏出）、`unclipped background`（背景未裁剪）、`cell background` 或 `selection highlight background` 排查。

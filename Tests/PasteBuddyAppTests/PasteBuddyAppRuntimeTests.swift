@@ -145,6 +145,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testShelfGlassSurfacesUseNativeTintWithoutStackedBase() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let bottomSheetStart = try XCTUnwrap(source.range(of: "func pasteBuddyBottomSheetSurface"))
+        let glassSurfaceStart = try XCTUnwrap(source.range(of: "func pasteBuddyGlassSurface"))
+        let bottomSheetSurface = String(source[bottomSheetStart.lowerBound..<glassSurfaceStart.lowerBound])
+        let nativeGlassStart = try XCTUnwrap(bottomSheetSurface.range(of: "if #available(macOS 26.0, *)"))
+        let fallbackStart = try XCTUnwrap(bottomSheetSurface.range(of: "} else {"))
+        let nativeGlassBranch = String(bottomSheetSurface[nativeGlassStart.lowerBound..<fallbackStart.lowerBound])
+        let glassSurface = String(source[glassSurfaceStart.lowerBound...])
+        let smallNativeStart = try XCTUnwrap(glassSurface.range(of: "if #available(macOS 26.0, *)"))
+        let smallFallbackStart = try XCTUnwrap(glassSurface.range(of: "} else {"))
+        let smallNativeGlassBranch = String(glassSurface[smallNativeStart.lowerBound..<smallFallbackStart.lowerBound])
+
+        XCTAssertFalse(source.contains("PasteBuddyGlassContainer"))
+        XCTAssertFalse(source.contains("@State private var glassTintOpacity"))
+        XCTAssertFalse(source.contains("ShelfGlassOpacityControl"))
+        XCTAssertFalse(source.contains("Slider(value: $opacity"))
+        XCTAssertFalse(source.contains("glassTintOpacity: glassTintOpacity"))
+        XCTAssertTrue(source.contains("static let defaultTintOpacity = 0.30"))
+        XCTAssertTrue(source.contains("static let detailSuppressionOpacity = 0.28"))
+        XCTAssertTrue(source.contains("glassTintOpacity: Double = ClipboardShelfGlass.defaultTintOpacity"))
+        XCTAssertTrue(source.contains("let tintOpacity = min(max(glassTintOpacity, 0), 1)"))
+        XCTAssertTrue(nativeGlassBranch.contains(".fill(.thickMaterial)"))
+        XCTAssertTrue(nativeGlassBranch.contains("ClipboardShelfGlass.detailSuppressionOpacity"))
+        XCTAssertTrue(nativeGlassBranch.contains(".glassEffect(.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)), in: shape)"))
+        XCTAssertFalse(nativeGlassBranch.contains(".background"))
+        XCTAssertFalse(bottomSheetSurface.contains("opacity(0.82)"))
+        XCTAssertTrue(smallNativeGlassBranch.contains("Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)).interactive()"))
+        XCTAssertFalse(smallNativeGlassBranch.contains(".background"))
+    }
+
     func testPanelHotKeyTriggerGateRecordsSourceAndDeduplicates() {
         var events: [PasteBuddyDiagnosticEvent] = []
         PasteBuddyDiagnostics.installTestSink { event in
@@ -261,5 +292,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             intent: .defaultIntent
         )!
         return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    private func sourceFileContents(_ relativePath: String) throws -> String {
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<8 {
+            let candidate = directory.appendingPathComponent(relativePath)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return String(decoding: try Data(contentsOf: candidate), as: UTF8.self)
+            }
+            directory.deleteLastPathComponent()
+        }
+        throw XCTSkip("Could not locate \(relativePath) from \(FileManager.default.currentDirectoryPath)")
     }
 }

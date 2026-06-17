@@ -19,6 +19,11 @@ private enum ClipboardShelfMetrics {
     static let renderLimit = 200
 }
 
+private enum ClipboardShelfGlass {
+    static let defaultTintOpacity = 0.30
+    static let detailSuppressionOpacity = 0.28
+}
+
 private struct ClipboardShelfQueryState: Equatable {
     let dataRevision: Int
     let queryRevision: Int
@@ -2410,46 +2415,41 @@ private struct EmptyShelfCard: View {
     }
 }
 
-private struct PasteBuddyGlassContainer<Content: View>: View {
-    private let spacing: CGFloat?
-    private let content: Content
-
-    init(spacing: CGFloat? = nil, @ViewBuilder content: () -> Content) {
-        self.spacing = spacing
-        self.content = content()
-    }
-
-    var body: some View {
-        #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: spacing) {
-                content
-            }
-        } else {
-            content
-        }
-        #else
-        content
-        #endif
-    }
-}
-
 private extension View {
     @ViewBuilder
-    func pasteBuddyBottomSheetSurface(cornerRadius: CGFloat, showsStroke: Bool = true) -> some View {
+    func pasteBuddyBottomSheetSurface(
+        cornerRadius: CGFloat,
+        glassTintOpacity: Double = ClipboardShelfGlass.defaultTintOpacity,
+        showsStroke: Bool = true
+    ) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let tintOpacity = min(max(glassTintOpacity, 0), 1)
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
-            self
-                .glassEffect(.regular, in: shape)
-                .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.82))
-                }
+            ZStack {
+                // Add a stronger system blur before glass sampling so background text collapses into color.
+                shape
+                    .fill(.thickMaterial)
+                    .allowsHitTesting(false)
+                shape
+                    .fill(Color(nsColor: .windowBackgroundColor).opacity(ClipboardShelfGlass.detailSuppressionOpacity))
+                    .allowsHitTesting(false)
+                self
+            }
+                .glassEffect(.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)), in: shape)
                 .clipShape(shape)
+                .overlay {
+                    shape.strokeBorder(.white.opacity(showsStroke ? 0.20 : 0.14), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
                 .overlay(alignment: .top) {
                     if showsStroke {
                         Rectangle()
                             .fill(.white.opacity(0.42))
+                            .frame(height: 1)
+                    } else {
+                        Rectangle()
+                            .fill(.white.opacity(0.10))
                             .frame(height: 1)
                     }
                 }
@@ -2486,15 +2486,25 @@ private extension View {
     }
 
     @ViewBuilder
-    func pasteBuddyGlassSurface(cornerRadius: CGFloat, interactive: Bool = false, showsStroke: Bool = true) -> some View {
+    func pasteBuddyGlassSurface(
+        cornerRadius: CGFloat,
+        glassTintOpacity: Double = ClipboardShelfGlass.defaultTintOpacity,
+        interactive: Bool = false,
+        showsStroke: Bool = true
+    ) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let tintOpacity = min(max(glassTintOpacity, 0), 1)
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             self
-                .glassEffect((interactive ? Glass.regular.interactive() : .regular), in: shape)
-                .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(interactive ? 0.72 : 0.64))
-                }
+                .glassEffect(
+                    (
+                        interactive
+                        ? Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)).interactive()
+                        : Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity))
+                    ),
+                    in: shape
+                )
                 .overlay {
                     if showsStroke {
                         shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
