@@ -1431,6 +1431,10 @@ private struct ClipboardShelfCardVisual: View {
             footer
         }
         .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.cardHeight)
+        .background {
+            RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.96))
+        }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: ClipboardShelfMetrics.cardCornerRadius, style: .continuous))
         .shadow(color: .black.opacity(0.10), radius: 8, y: 4)
@@ -1460,7 +1464,7 @@ private struct ClipboardShelfCardVisual: View {
             .frame(height: ClipboardShelfMetrics.cardPreviewHeight, alignment: .topLeading)
             .background {
                 Rectangle()
-                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.22))
+                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.94))
             }
             .background(.regularMaterial)
         }
@@ -1487,7 +1491,7 @@ private struct ClipboardShelfCardVisual: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .background {
             Rectangle()
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.18))
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
         }
         .background(.regularMaterial)
     }
@@ -2287,7 +2291,6 @@ private enum SourceApplicationIconResolver {
     static func themeColor(for item: ClipboardItem, fallback: Color) -> Color {
         let key = colorCacheKey(for: item)
         let sourceIcon = icon(for: item)
-            ?? (hasKnownSource(for: item) ? genericApplicationIcon() : nil)
         return AppIconThemeColorResolver.themeColor(for: sourceIcon, cacheKey: key, fallback: fallback)
     }
 
@@ -2440,7 +2443,7 @@ private extension View {
             self
                 .glassEffect(.regular, in: shape)
                 .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.28))
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.82))
                 }
                 .clipShape(shape)
                 .overlay(alignment: .top) {
@@ -2454,7 +2457,7 @@ private extension View {
             self
                 .background(.thinMaterial, in: shape)
                 .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.16))
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.86))
                 }
                 .clipShape(shape)
                 .overlay(alignment: .top) {
@@ -2469,7 +2472,7 @@ private extension View {
         self
             .background(.thinMaterial, in: shape)
             .background {
-                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.16))
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.86))
             }
             .clipShape(shape)
             .overlay(alignment: .top) {
@@ -2490,7 +2493,7 @@ private extension View {
             self
                 .glassEffect((interactive ? Glass.regular.interactive() : .regular), in: shape)
                 .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.22))
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(interactive ? 0.72 : 0.64))
                 }
                 .overlay {
                     if showsStroke {
@@ -2502,7 +2505,7 @@ private extension View {
             self
                 .background(.thinMaterial, in: shape)
                 .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.12))
+                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(interactive ? 0.66 : 0.58))
                 }
                 .overlay {
                     if showsStroke {
@@ -2515,7 +2518,7 @@ private extension View {
         self
             .background(.thinMaterial, in: shape)
             .background {
-                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.12))
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(interactive ? 0.66 : 0.58))
             }
             .overlay {
                 if showsStroke {

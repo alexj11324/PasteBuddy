@@ -5,6 +5,17 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
+    func testAppDelegateDoesNotReopenMainWindowWhenNoWindowsAreVisible() {
+        let delegate = AppDelegate()
+
+        XCTAssertFalse(
+            delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false)
+        )
+        XCTAssertTrue(
+            delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true)
+        )
+    }
+
     func testRuntimeLoadGateInvokesAsyncLoadOnlyOnce() async {
         let gate = PasteBuddyRuntimeLoadGate()
         var loadAsyncCallCount = 0
@@ -185,20 +196,52 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testAppIconThemeColorUsesLargestChromaticRegion() {
         let width = 40
         let height = 40
+        let image = makeTestImage(width: width, height: height) { x, _ in
+            x < 30
+                ? (red: 255, green: 59, blue: 48, alpha: 255)
+                : (red: 0, green: 122, blue: 255, alpha: 255)
+        }
+
+        let dominantColor = AppIconThemeColorResolver.dominantColor(in: image, sampleSize: 40)
+        let rgbColor = dominantColor?.usingColorSpace(.deviceRGB)
+
+        XCTAssertNotNil(rgbColor)
+        XCTAssertGreaterThan(rgbColor?.redComponent ?? 0, rgbColor?.blueComponent ?? 1)
+        XCTAssertGreaterThan(rgbColor?.redComponent ?? 0, rgbColor?.greenComponent ?? 1)
+    }
+
+    func testAppIconThemeColorPrefersSaturatedBrandMarkOverMutedBackground() {
+        let width = 40
+        let height = 40
+        let image = makeTestImage(width: width, height: height) { x, y in
+            let isBrandMark = (12..<28).contains(x) && (12..<28).contains(y)
+            return isBrandMark
+                ? (red: 0, green: 122, blue: 255, alpha: 255)
+                : (red: 130, green: 150, blue: 115, alpha: 255)
+        }
+
+        let dominantColor = AppIconThemeColorResolver.dominantColor(in: image, sampleSize: 40)
+        let rgbColor = dominantColor?.usingColorSpace(.deviceRGB)
+
+        XCTAssertNotNil(rgbColor)
+        XCTAssertGreaterThan(rgbColor?.blueComponent ?? 0, rgbColor?.redComponent ?? 1)
+        XCTAssertGreaterThan(rgbColor?.blueComponent ?? 0, rgbColor?.greenComponent ?? 1)
+    }
+
+    private func makeTestImage(
+        width: Int,
+        height: Int,
+        pixel: (_ x: Int, _ y: Int) -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)
+    ) -> NSImage {
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         for y in 0..<height {
             for x in 0..<width {
                 let offset = (y * width + x) * 4
-                if x < 30 {
-                    pixels[offset] = 255
-                    pixels[offset + 1] = 59
-                    pixels[offset + 2] = 48
-                } else {
-                    pixels[offset] = 0
-                    pixels[offset + 1] = 122
-                    pixels[offset + 2] = 255
-                }
-                pixels[offset + 3] = 255
+                let color = pixel(x, y)
+                pixels[offset] = color.red
+                pixels[offset + 1] = color.green
+                pixels[offset + 2] = color.blue
+                pixels[offset + 3] = color.alpha
             }
         }
         let data = Data(pixels)
@@ -217,13 +260,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             shouldInterpolate: false,
             intent: .defaultIntent
         )!
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
-
-        let dominantColor = AppIconThemeColorResolver.dominantColor(in: image, sampleSize: 40)
-        let rgbColor = dominantColor?.usingColorSpace(.deviceRGB)
-
-        XCTAssertNotNil(rgbColor)
-        XCTAssertGreaterThan(rgbColor?.redComponent ?? 0, rgbColor?.blueComponent ?? 1)
-        XCTAssertGreaterThan(rgbColor?.redComponent ?? 0, rgbColor?.greenComponent ?? 1)
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
     }
 }

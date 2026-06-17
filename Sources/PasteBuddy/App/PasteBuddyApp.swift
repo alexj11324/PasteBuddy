@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        flag
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         PasteBuddyTerminationCoordinator.flushBeforeTerminating(
             flushPendingSave,
@@ -23,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
     }
+}
+
+private enum MainWindowPresentation: String, Codable, Hashable {
+    case manual
 }
 
 @main
@@ -49,7 +57,96 @@ struct PasteBuddyApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("PasteBuddy", id: "main") {
+        mainWindowScene
+
+        Settings {
+            SettingsView(store: store)
+        }
+
+        MenuBarExtra {
+            Label(localized(store.macMenuBarStatus.captureStatusLine), systemImage: store.macMenuBarStatus.systemImageName)
+            Text(localized(store.macMenuBarStatus.captureDetail))
+            Text(localized(store.macMenuBarStatus.launchAtLoginStatusLine))
+
+            Divider()
+
+            Button("Show Clipboard Shelf") {
+                Task { @MainActor in
+                    await toggleClipboardShelf()
+                }
+            }
+            .keyboardShortcut("v", modifiers: [.command, .shift])
+
+            Button("Open PasteBuddy") {
+                Task { @MainActor in
+                    await openMainWindow()
+                }
+            }
+
+            Menu("Open Settings") {
+                ForEach(store.macMenuBarStatus.settingsDestinations) { destination in
+                    Button {
+                        store.requestSettingsDestination(destination)
+                        openSettings()
+                    } label: {
+                        Label(localizedSettingsTitle(destination), systemImage: destination.systemImageName)
+                    }
+                }
+            }
+
+            Button(localized(store.snapshot.general.launchAtLoginEnabled ? "Disable Launch at Login" : "Enable Launch at Login")) {
+                store.setLaunchAtLoginEnabled(
+                    !store.snapshot.general.launchAtLoginEnabled,
+                    applySystemRegistration: LaunchAtLoginService.isAvailable
+                )
+            }
+            .disabled(!LaunchAtLoginService.isAvailable)
+
+            Divider()
+
+            Button(localized(store.isPasteStackActive ? "Stop Paste Stack" : "Start Paste Stack")) {
+                store.togglePasteStack()
+            }
+            Button("Paste Next Stack Item") {
+                Task { @MainActor in
+                    if let item = store.pasteNextStackItem() {
+                        store.recordDirectPasteResult(
+                            await Self.pasteItemToTarget(
+                                item,
+                                format: store.defaultPasteFormat,
+                                tracker: frontmostApplicationTracker
+                            )
+                        )
+                    }
+                }
+            }
+            .disabled(store.pasteStackItems.isEmpty)
+            Divider()
+            Button(localized(store.macMenuBarStatus.captureActionTitle)) {
+                store.toggleCapturePaused()
+            }
+            Button("Pause Capture for 15 Minutes") {
+                store.pauseCapture(for: 15 * 60)
+            }
+            Button("Pause Capture for 1 Hour") {
+                store.pauseCapture(for: 60 * 60)
+            }
+            Divider()
+            ForEach(store.snapshot.items.prefix(6)) { item in
+                Button(item.title.menuBarTitle) {
+                    PasteboardWriter.copy(item)
+                }
+            }
+        } label: {
+            Label(localized(store.macMenuBarStatus.title), systemImage: store.macMenuBarStatus.systemImageName)
+                .task {
+                    await startRuntimeIfNeeded()
+                }
+        }
+    }
+
+    private var mainWindowScene: some Scene {
+        WindowGroup("PasteBuddy", id: "main", for: MainWindowPresentation.self) { _ in
             ContentView(
                 store: store,
                 directPasteItem: { item, format in
@@ -261,91 +358,6 @@ struct PasteBuddyApp: App {
                 .disabled(!canUnpinSelectionFromCurrentPinboard)
             }
         }
-
-        Settings {
-            SettingsView(store: store)
-        }
-
-        MenuBarExtra {
-            Label(localized(store.macMenuBarStatus.captureStatusLine), systemImage: store.macMenuBarStatus.systemImageName)
-            Text(localized(store.macMenuBarStatus.captureDetail))
-            Text(localized(store.macMenuBarStatus.launchAtLoginStatusLine))
-
-            Divider()
-
-            Button("Show Clipboard Shelf") {
-                Task { @MainActor in
-                    await toggleClipboardShelf()
-                }
-            }
-            .keyboardShortcut("v", modifiers: [.command, .shift])
-
-            Button("Open PasteBuddy") {
-                Task { @MainActor in
-                    await openMainWindow()
-                }
-            }
-
-            Menu("Open Settings") {
-                ForEach(store.macMenuBarStatus.settingsDestinations) { destination in
-                    Button {
-                        store.requestSettingsDestination(destination)
-                        openSettings()
-                    } label: {
-                        Label(localizedSettingsTitle(destination), systemImage: destination.systemImageName)
-                    }
-                }
-            }
-
-            Button(localized(store.snapshot.general.launchAtLoginEnabled ? "Disable Launch at Login" : "Enable Launch at Login")) {
-                store.setLaunchAtLoginEnabled(
-                    !store.snapshot.general.launchAtLoginEnabled,
-                    applySystemRegistration: LaunchAtLoginService.isAvailable
-                )
-            }
-            .disabled(!LaunchAtLoginService.isAvailable)
-
-            Divider()
-
-            Button(localized(store.isPasteStackActive ? "Stop Paste Stack" : "Start Paste Stack")) {
-                store.togglePasteStack()
-            }
-            Button("Paste Next Stack Item") {
-                Task { @MainActor in
-                    if let item = store.pasteNextStackItem() {
-                        store.recordDirectPasteResult(
-                            await Self.pasteItemToTarget(
-                                item,
-                                format: store.defaultPasteFormat,
-                                tracker: frontmostApplicationTracker
-                            )
-                        )
-                    }
-                }
-            }
-            .disabled(store.pasteStackItems.isEmpty)
-            Divider()
-            Button(localized(store.macMenuBarStatus.captureActionTitle)) {
-                store.toggleCapturePaused()
-            }
-            Button("Pause Capture for 15 Minutes") {
-                store.pauseCapture(for: 15 * 60)
-            }
-            Button("Pause Capture for 1 Hour") {
-                store.pauseCapture(for: 60 * 60)
-            }
-            Divider()
-            ForEach(store.snapshot.items.prefix(6)) { item in
-                Button(item.title.menuBarTitle) {
-                    PasteboardWriter.copy(item)
-                }
-            }
-        } label: {
-            Label(localized(store.macMenuBarStatus.title), systemImage: store.macMenuBarStatus.systemImageName)
-                .task {
-                    await startRuntimeIfNeeded()
-                }
-        }
     }
 
     private func localized(_ key: String) -> String {
@@ -367,7 +379,7 @@ struct PasteBuddyApp: App {
     private func openMainWindow() async {
         await startRuntimeIfNeeded()
         mainWindowLaunchCoordinator.allowNextMainWindowPresentation()
-        openWindow(id: "main")
+        openWindow(id: "main", value: MainWindowPresentation.manual)
         NSApp.activate(ignoringOtherApps: true)
     }
 

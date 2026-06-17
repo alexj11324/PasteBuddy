@@ -57,7 +57,8 @@ enum AppIconThemeColorResolver {
         var chromaticBuckets: [Int: ColorBucket] = [:]
         var allBuckets: [Int: ColorBucket] = [:]
 
-        for offset in stride(from: 0, to: pixels.count, by: bytesPerPixel) {
+        for pixelIndex in 0..<pixelCount {
+            let offset = pixelIndex * bytesPerPixel
             let alpha = CGFloat(pixels[offset + 3]) / 255
             guard alpha >= 0.35 else { continue }
 
@@ -68,11 +69,20 @@ enum AppIconThemeColorResolver {
             let minimum = min(red, green, blue)
             let saturation = brightness > 0 ? (brightness - minimum) / brightness : 0
             let weight = Double(alpha)
-            let key = quantizedKey(red: red, green: green, blue: blue)
 
-            allBuckets[key, default: ColorBucket()].add(red: red, green: green, blue: blue, weight: weight)
-            if saturation >= 0.18, brightness >= 0.18, brightness <= 0.96 {
-                chromaticBuckets[key, default: ColorBucket()].add(red: red, green: green, blue: blue, weight: weight)
+            allBuckets[quantizedKey(red: red, green: green, blue: blue), default: ColorBucket()]
+                .add(red: red, green: green, blue: blue, weight: weight)
+
+            if let score = chromaticScore(
+                alpha: alpha,
+                saturation: saturation,
+                brightness: brightness,
+                pixelIndex: pixelIndex,
+                sampleSize: sampleSize
+            ) {
+                let key = quantizedChromaticKey(red: red, green: green, blue: blue)
+                chromaticBuckets[key, default: ColorBucket()]
+                    .add(red: red, green: green, blue: blue, weight: score)
             }
         }
 
@@ -81,6 +91,43 @@ enum AppIconThemeColorResolver {
         }
 
         return displayColor(red: bucket.averageRed, green: bucket.averageGreen, blue: bucket.averageBlue)
+    }
+
+    private static func chromaticScore(
+        alpha: CGFloat,
+        saturation: CGFloat,
+        brightness: CGFloat,
+        pixelIndex: Int,
+        sampleSize: Int
+    ) -> Double? {
+        guard saturation >= 0.18,
+              brightness >= 0.16,
+              !(brightness >= 0.94 && saturation < 0.45) else {
+            return nil
+        }
+
+        let x = Double(pixelIndex % sampleSize) + 0.5
+        let y = Double(pixelIndex / sampleSize) + 0.5
+        let center = Double(sampleSize) / 2
+        let normalizedDistance = min(hypot(x - center, y - center) / (center * sqrt(2)), 1)
+        let centerWeight = 1.16 - normalizedDistance * 0.32
+        let saturationWeight = pow(Double(saturation), 1.8)
+        let brightnessWeight = 0.72 + min(Double(brightness), 0.95) * 0.28
+
+        return Double(alpha) * saturationWeight * brightnessWeight * centerWeight
+    }
+
+    private static func quantizedChromaticKey(red: CGFloat, green: CGFloat, blue: CGFloat) -> Int {
+        let color = NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+
+        let hueBucket = min(max(Int((hue * 24).rounded(.down)), 0), 23)
+        let saturationBucket = min(max(Int((saturation * 3).rounded(.down)), 0), 2)
+        return (hueBucket << 8) | saturationBucket
     }
 
     private static func quantizedKey(red: CGFloat, green: CGFloat, blue: CGFloat) -> Int {
