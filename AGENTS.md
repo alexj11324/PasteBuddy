@@ -40,6 +40,13 @@
 - IMPORTANT: 如果构建命令、脚本、环境变量或 Xcode 设置试图使用 ad-hoc 签名，必须立即拒绝并改为稳定签名身份，不要继续运行 UI/HID 权限验证。
 - IMPORTANT: `script/build_and_run.sh` 是本仓库标准构建入口；默认 `PASTEBUDDY_SIGNING_CHANNEL=development`，发布验证显式使用 `PASTEBUDDY_SIGNING_CHANNEL=release`。
 
+## iOS TestFlight 发布固定流程（IMPORTANT）
+- IMPORTANT: PasteBuddy iOS/TestFlight 发布必须使用 `script/push_testflight.sh`；不要只手动 `git push`，也不要绕过 CI 手动上传 App Store Connect。
+- IMPORTANT: 固定顺序是本地 `swift test` + iOS simulator compile 通过后，push 当前 `main` HEAD；`.github/workflows/testflight.yml` 随 push 接管 archive、签名、上传 App Store Connect/TestFlight，并写入 `ios-build-*` tag。
+- IMPORTANT: App Store Connect `.p8` 私钥只允许通过 Google Secret Manager `general-secrets-store` 里的 `asc-api-key-664UJQLMB2` 读取；禁止写入仓库、`.env`、临时脚本常量或长期本地文件。
+- IMPORTANT: 如果工作区有无关未提交改动，先确认要发布的 HEAD 已提交；只有在这些脏文件明确不属于本次发布时才可给脚本加 `--allow-dirty`。
+- IMPORTANT: 发布后必须等待 GitHub Actions 的 `Upload TestFlight` workflow 完成，并报告 ASC/TestFlight 上传是否成功；失败时先看 workflow 日志，不要重复推送造成重复 build。
+
 ## 遇到不认识的东西时
 1. 先想：我知道这是什么吗？
 2. 不知道 → Exa 搜 1 次了解它是什么。禁止用 find_helpful_skills 当搜索引擎。

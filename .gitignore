@@ -7,3 +7,4 @@ tmp/
 *.ipa
 *.xcarchive
 *.xcdistributionlogs/
+PasteBuddyiOS.xcodeproj/project.xcworkspace/
