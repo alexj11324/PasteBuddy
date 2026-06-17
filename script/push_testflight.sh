@@ -43,6 +43,7 @@ Environment overrides:
   PASTEBUDDY_TESTFLIGHT_WORKFLOW="$WORKFLOW"
   PASTEBUDDY_IOS_VERIFY_DESTINATION="$DESTINATION"
   PASTEBUDDY_SWIFT_MODULE_CACHE="$MODULE_CACHE_PATH"
+  PASTEBUDDY_TESTFLIGHT_VERIFY_ROOT=/tmp
   PASTEBUDDY_TESTFLIGHT_TIMEOUT_MINUTES=$TIMEOUT_MINUTES
 USAGE
 }
@@ -96,6 +97,8 @@ if [[ "$NO_WAIT" -eq 0 && "$SKIP_PUSH" -eq 0 ]]; then
   require_command gh
 fi
 
+head_sha="$(git rev-parse HEAD)"
+
 mkdir -p "$MODULE_CACHE_PATH"
 export CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_PATH"
 export SWIFT_MODULE_CACHE_PATH="$MODULE_CACHE_PATH"
@@ -104,6 +107,18 @@ current_branch="$(git branch --show-current)"
 [[ "$current_branch" == "$BRANCH" ]] || die "Run from '$BRANCH'; current branch is '$current_branch'."
 
 dirty_status="$(git status --porcelain)"
+VERIFY_DIR="$ROOT_DIR"
+VERIFY_PARENT=""
+REMOVE_VERIFY_WORKTREE=0
+
+cleanup() {
+  if [[ "$REMOVE_VERIFY_WORKTREE" -eq 1 ]]; then
+    git -C "$ROOT_DIR" worktree remove --force "$VERIFY_DIR" >/dev/null 2>&1 || true
+    [[ -z "$VERIFY_PARENT" ]] || rmdir "$VERIFY_PARENT" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 if [[ -n "$dirty_status" ]]; then
   if [[ "$ALLOW_DIRTY" -ne 1 ]]; then
     echo "$dirty_status" >&2
@@ -111,30 +126,33 @@ if [[ -n "$dirty_status" ]]; then
   fi
   echo "warning: continuing with uncommitted files that will not be pushed:" >&2
   echo "$dirty_status" >&2
+  VERIFY_PARENT="$(mktemp -d "${PASTEBUDDY_TESTFLIGHT_VERIFY_ROOT:-/tmp}/pastebuddy-testflight.XXXXXX")"
+  VERIFY_DIR="$VERIFY_PARENT/repo"
+  git worktree add --detach "$VERIFY_DIR" "$head_sha" >/dev/null
+  REMOVE_VERIFY_WORKTREE=1
+  echo "warning: local verification will run against committed HEAD in $VERIFY_DIR" >&2
 fi
 
 if [[ "$SKIP_SWIFT_TEST" -eq 0 ]]; then
   log "Running Swift tests"
-  swift test
+  (cd "$VERIFY_DIR" && swift test)
 else
   log "Skipping Swift tests"
 fi
 
 if [[ "$SKIP_IOS_BUILD" -eq 0 ]]; then
   log "Compiling iOS app locally"
-  xcodebuild \
+  (cd "$VERIFY_DIR" && xcodebuild \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -configuration "$CONFIGURATION" \
     -destination "$DESTINATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     CODE_SIGNING_ALLOWED=NO \
-    build
+    build)
 else
   log "Skipping iOS local compile"
 fi
-
-head_sha="$(git rev-parse HEAD)"
 
 if [[ "$SKIP_PUSH" -eq 1 ]]; then
   log "Skipping push for $head_sha"
@@ -142,7 +160,7 @@ if [[ "$SKIP_PUSH" -eq 1 ]]; then
 fi
 
 log "Checking remote state"
-git fetch "$REMOTE" "$BRANCH" --tags
+git fetch "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" --tags
 
 if git rev-parse --verify "$REMOTE/$BRANCH" >/dev/null 2>&1; then
   read -r behind ahead < <(git rev-list --left-right --count "$REMOTE/$BRANCH"...HEAD)

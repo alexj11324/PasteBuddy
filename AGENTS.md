@@ -44,7 +44,7 @@
 - IMPORTANT: PasteBuddy iOS/TestFlight 发布必须使用 `script/push_testflight.sh`；不要只手动 `git push`，也不要绕过 CI 手动上传 App Store Connect。
 - IMPORTANT: 固定顺序是本地 `swift test` + iOS simulator compile 通过后，push 当前 `main` HEAD；`.github/workflows/testflight.yml` 随 push 接管 archive、签名、上传 App Store Connect/TestFlight，并写入 `ios-build-*` tag。
 - IMPORTANT: App Store Connect `.p8` 私钥只允许通过 Google Secret Manager `general-secrets-store` 里的 `asc-api-key-664UJQLMB2` 读取；禁止写入仓库、`.env`、临时脚本常量或长期本地文件。
-- IMPORTANT: 如果工作区有无关未提交改动，先确认要发布的 HEAD 已提交；只有在这些脏文件明确不属于本次发布时才可给脚本加 `--allow-dirty`。
+- IMPORTANT: 如果工作区有无关未提交改动，先确认要发布的 HEAD 已提交；只有在这些脏文件明确不属于本次发布时才可给脚本加 `--allow-dirty`，脚本会用临时 git worktree 验证即将 push 的 HEAD，而不是验证脏工作区。
 - IMPORTANT: 发布后必须等待 GitHub Actions 的 `Upload TestFlight` workflow 完成，并报告 ASC/TestFlight 上传是否成功；失败时先看 workflow 日志，不要重复推送造成重复 build。
 
 ## 遇到不认识的东西时
