@@ -10,173 +10,306 @@ final class LocalizationResourceTests: XCTestCase {
         XCTAssertEqual(Set(english.keys), Set(simplifiedChinese.keys))
     }
 
+    func testStringCatalogMatchesLegacyResourcesAndContainsReviewedChinese() throws {
+        let english = try localizedStrings(locale: "en")
+        let simplifiedChinese = try localizedStrings(locale: "zh-Hans")
+        let catalog = try stringCatalog()
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any], "String catalog must contain a strings object")
+
+        XCTAssertEqual(catalog["sourceLanguage"] as? String, "en")
+        XCTAssertEqual(catalog["version"] as? String, "1.0")
+        XCTAssertEqual(Set(strings.keys), Set(english.keys))
+
+        let allowedIdentityValues: Set<String> = [
+            "Command",
+            "Control",
+            "HTML",
+            "MCP",
+            "Option",
+            "PasteBuddy",
+            "Shift",
+            "URL"
+        ]
+
+        for (key, englishValue) in english {
+            let catalogEntry = try XCTUnwrap(strings[key] as? [String: Any], "Missing catalog entry for \(key)")
+            let catalogEnglish = try catalogValue(catalogEntry, locale: "en", key: key)
+            let catalogChinese = try catalogValue(catalogEntry, locale: "zh-Hans", key: key)
+            let stringsChinese = try XCTUnwrap(simplifiedChinese[key], "Missing zh-Hans strings value for \(key)")
+
+            XCTAssertEqual(catalogEnglish, englishValue, "\(key) catalog English must match Localizable.strings")
+            XCTAssertEqual(catalogChinese, stringsChinese, "\(key) catalog zh-Hans must match Localizable.strings")
+            XCTAssertFalse(catalogChinese.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "\(key) has empty zh-Hans catalog value")
+            if catalogChinese == catalogEnglish {
+                XCTAssertTrue(
+                    allowedIdentityValues.contains(catalogEnglish),
+                    "\(key) zh-Hans value is still identical to English: \(catalogEnglish)"
+                )
+            }
+        }
+    }
+
     func testPriorityUserFacingStringsHaveSimplifiedChineseTranslations() throws {
         let simplifiedChinese = try localizedStrings(locale: "zh-Hans")
         let priorityKeys = [
-            "Search clipboard",
-            "New Text Item",
-            "Labels",
-            "Save Labels",
-            "Clipboard item labels",
-            "Reusable Type",
-            "Code",
-            "Color",
-            "Template",
-            "Asset",
-            "Custom Capture Rules",
-            "Add Rule",
-            "Rule Pattern",
-            "Contains Text",
-            "Source Bundle ID",
-            "Paste Stack",
-            "Delete Pinboard?",
-            "Items stay in clipboard history. Only this pinboard collection is removed.",
-            "Drop clipboard items here to pin them.",
-            "Share Pinboard",
-            "Share Settings",
-            "Access Mode",
-            "Default Permission",
-            "Invite Participant",
-            "Participants",
-            "Stop Sharing",
-            "Read Only",
-            "Can Edit",
-            "Invitation Only",
-            "Link Access",
-            "Collecting",
-            "Paused",
-            "Next",
-            "Top to Bottom",
-            "Bottom to Top",
-            "Copy as Plain Text",
-            "Paste to Active App",
-            "Paste Order",
-            "Multiple selected items paste as plain text in this visible order, keeping mixed content predictable.",
-            "Clear Filters",
-            "Active clipboard filters",
-            "Run local Apple OCR after image capture",
-            "Enable local MCP server access",
-            "Clear MCP Audit Log",
-            "Sync & Sharing",
-            "Request Accessibility Access",
-            "Last Direct Paste",
-            "Dismiss",
-            "Clear Shortcut",
-            "Key",
-            "Quick Paste Modifiers",
-            "Plain Text Quick Paste Modifiers",
-            "Save to PasteBuddy",
-            "Mobile Setup",
-            "Restore Purchases",
-            "Storage Security",
-            "Estimated History Size",
-            "Pinned History Size",
-            "Unpinned History Size",
-            "Storage Limit",
-            "Clear All History Including Pinned Items",
-            "Device Unlock",
-            "Trial",
-            "Quality Bar",
-            "Supported Locales",
-            "Manual Release Audit",
-            "VoiceOver",
-            "Larger Text",
-            "Appearance",
-            "Not Color Only",
-            "Localization",
-            "Implemented",
-            "Manual Audit Required",
-            "Encrypt clipboard history at rest",
-            "Require Touch ID to unlock history",
-            "Unlock History",
-            "Lock History",
-            "History Lock",
-            "Standard Local Storage",
-            "Encrypted Local Storage",
-            "Confirm Action",
-            "Clear Unpinned History?",
-            "Clear All History?",
-            "Revoke MCP Access?",
-            "Clear MCP Audit Log?",
-            "This removes all local clipboard history, including pinned item memberships. This action cannot be undone.",
-            "Storage",
-            "Plans",
-            "Integrations",
-            "More",
-            "Clipboard Shelf",
-            "Content type filter",
-            "Source app filter",
-            "Device filter",
-            "Copied date filter",
-            "Removes all active clipboard filters.",
-            "Move to %@",
-            "Pin to %@",
-            "Touch ID grace period: %d seconds",
-            "Keep up to %d items",
-            "Use up to %@",
-            "Keep history forever",
-            "Keep normal history for %d days",
-            "Clipboard details, OCR text, and pinning actions appear here.",
-            "Separate labels with commas.",
-            "Remove label %@",
-            "Saves edits back to clipboard history.",
-            "Start Collecting",
-            "Stop Collecting",
-            "Paste Stack (%d)",
-            "Pinboard %@",
-            "Color %@",
-            "Pinboard color %@",
-            "Selected",
-            "Not selected",
-            "No external app is available to exclude.",
-            "Excluded %@.",
-            "PasteBuddy could not create this item.",
-            "Resumes at %@.",
-            "PasteBuddy clipboard shelf",
-            "Reload clipboard history",
-            "Add item or pinboard",
-            "More actions",
-            "New copies will appear here.",
-            "Start collecting copied items.",
-            "Copy text, links, screenshots, or files to fill the shelf.",
-            "Stop Paste Stack",
-            "Start Paste Stack",
-            "Reverse Paste Stack",
-            "Show Clipboard Shelf",
-            "Show/Hide Clipboard Shelf",
-            "Open PasteBuddy",
-            "Open Settings",
-            "%@ Settings",
-            "Disable Launch at Login",
-            "Enable Launch at Login",
-            "Launch at Login: On",
-            "Launch at Login: Off",
-            "PasteBuddy Active",
-            "PasteBuddy Paused",
-            "Pause Capture for 15 Minutes",
-            "Pause Capture for 1 Hour",
-            "Pause Capture",
-            "Link",
-            "Double-click or press Return to paste.",
-            "%d file",
-            "%d files",
-            "%d chars",
-            "Not needed",
-            "OCR pending",
-            "OCR complete",
-            "OCR failed",
-            "Capture active",
-            "Capture paused",
-            "Capture paused temporarily",
-            "New clipboard content is evaluated by local privacy rules before it enters encrypted history.",
-            "Automatic clipboard capture is stopped until you resume it.",
-            "Automatic clipboard capture is stopped until the selected resume time."
+            "label.search_clipboard",
+            "label.new_text_item",
+            "label.labels",
+            "action.save_labels",
+            "label.clipboard_item_labels",
+            "label.reusable_type",
+            "label.code",
+            "label.color",
+            "label.template",
+            "label.asset",
+            "label.custom_capture_rules",
+            "action.add_rule",
+            "label.rule_pattern",
+            "label.contains_text",
+            "label.source_bundle_id",
+            "action.paste_stack",
+            "dialog.delete_pinboard",
+            "message.items_stay_in_clipboard_history_only_this",
+            "message.drop_clipboard_items_here_to_pin_them",
+            "action.share_pinboard",
+            "action.share_settings",
+            "label.access_mode",
+            "label.default_permission",
+            "action.invite_participant",
+            "label.participants",
+            "action.stop_sharing",
+            "label.read_only",
+            "label.can_edit",
+            "label.invitation_only",
+            "label.link_access",
+            "label.collecting",
+            "label.paused",
+            "label.next",
+            "label.top_to_bottom",
+            "label.bottom_to_top",
+            "action.copy_as_plain_text",
+            "action.paste_to_active_app",
+            "action.paste_order",
+            "message.multiple_selected_items_paste_as_plain_text",
+            "action.clear_filters",
+            "label.active_clipboard_filters",
+            "message.run_local_apple_ocr_after_image_capture",
+            "action.enable_local_mcp_server_access",
+            "label.mcp_access_status",
+            "label.mcp_is_currently_on",
+            "label.mcp_is_currently_off",
+            "message.tool_selections_are_saved_and_take_effect",
+            "action.clear_mcp_audit_log",
+            "action.sync_sharing",
+            "action.request_accessibility_access",
+            "label.last_direct_paste",
+            "action.dismiss",
+            "action.clear_shortcut",
+            "label.key",
+            "label.quick_paste_modifiers",
+            "label.plain_text_quick_paste_modifiers",
+            "action.save_to_pastebuddy",
+            "action.copy_to_pastebuddy",
+            "message.preparing_shared_content",
+            "action.retry",
+            "message.saving_shared_content_to_encrypted_history",
+            "label.mobile_setup",
+            "action.restore_purchases",
+            "label.storage_security",
+            "label.estimated_history_size",
+            "label.pinned_history_size",
+            "label.unpinned_history_size",
+            "label.storage_limit",
+            "action.clear_all_history_including_pinned",
+            "label.device_unlock",
+            "label.trial",
+            "label.quality_bar",
+            "label.supported_locales",
+            "label.manual_release_audit",
+            "label.voiceover",
+            "label.larger_text",
+            "label.appearance",
+            "label.not_color_only",
+            "label.localization",
+            "label.implemented",
+            "label.manual_audit_required",
+            "label.encrypt_clipboard_history_at_rest",
+            "label.require_touch_id_to_unlock",
+            "action.unlock_history",
+            "action.lock_history",
+            "label.history_lock",
+            "label.standard_local_storage",
+            "label.encrypted_local_storage",
+            "label.confirm_action",
+            "dialog.clear_unpinned_history",
+            "dialog.clear_all_history",
+            "dialog.revoke_mcp_access",
+            "dialog.clear_mcp_audit_log",
+            "message.this_removes_all_local_clipboard_history_including",
+            "label.storage",
+            "label.plans",
+            "label.integrations",
+            "label.more",
+            "label.clipboard_shelf",
+            "label.content_type_filter",
+            "label.source_app_filter",
+            "label.device_filter",
+            "label.copied_date_filter",
+            "message.removes_all_active_clipboard_filters",
+            "format.move_to",
+            "format.pin_to",
+            "format.touch_id_grace_period_seconds",
+            "format.keep_up_to_items",
+            "format.use_up_to",
+            "label.keep_history_forever",
+            "format.keep_normal_history_for_days",
+            "message.clipboard_details_ocr_text_and_pinning_actions",
+            "message.separate_labels_with_commas",
+            "format.remove_label",
+            "message.saves_edits_back_to_clipboard_history",
+            "action.start_collecting",
+            "action.stop_collecting",
+            "format.paste_stack",
+            "format.pinboard",
+            "format.color",
+            "format.pinboard_color",
+            "state.selected",
+            "label.not_selected",
+            "message.no_external_app_is_available_to_exclude",
+            "format.excluded",
+            "message.pastebuddy_could_not_create_this_item",
+            "format.resumes_at",
+            "label.pastebuddy_clipboard_shelf",
+            "action.reload_clipboard_history",
+            "action.add_item_or_pinboard",
+            "label.more_actions",
+            "message.new_copies_will_appear_here",
+            "message.start_collecting_copied_items",
+            "message.copy_text_links_screenshots_or_files_to",
+            "action.stop_paste_stack",
+            "action.start_paste_stack",
+            "action.reverse_paste_stack",
+            "action.show_clipboard_shelf",
+            "label.shelf_position",
+            "label.shelf_at_top",
+            "label.shelf_at_bottom",
+            "action.show_hide_clipboard_shelf",
+            "action.open_pastebuddy",
+            "action.open_settings",
+            "format.settings",
+            "action.disable_launch_at_login",
+            "action.enable_launch_at_login",
+            "label.launch_at_login_on",
+            "label.launch_at_login_off",
+            "label.pastebuddy_active",
+            "label.pastebuddy_paused",
+            "action.pause_capture_for_15_minutes",
+            "action.pause_capture_for_1_hour",
+            "action.pause_capture",
+            "label.link",
+            "label.clipboard_shelf_opened",
+            "label.clipboard_shelf_closed",
+            "action.open_clipboard_shelf",
+            "action.copy_pastebuddy_item",
+            "action.paste_pastebuddy_item",
+            "action.copy_pastebuddy_item_as_plain",
+            "action.paste_pastebuddy_item_as_plain",
+            "action.undo_delete_pastebuddy_item",
+            "action.pin_selected_to",
+            "label.no_pinboards_available",
+            "action.unpin_from_current_pinboard",
+            "message.click_for_pastebuddy_menu",
+            "label.pastebuddy_menu_bar_item",
+            "action.hide_this_prompt",
+            "action.open_at_login",
+            "message.automatically_start_pastebuddy_when_your_mac_restarts",
+            "message.launch_at_login_is_unavailable_in_this",
+            "action.toggle_launch_at_login",
+            "action.open_at_login.a7a8de0b",
+            "format.showing_first_items",
+            "format.refine_search_or_filters_to_see_more",
+            "format.showing_first_clipboard_items_refine_search_or",
+            "action.paste_next",
+            "action.paste_order_preview",
+            "label.settings_entry_point",
+            "message.opened_from_the_menu_bar_the_related",
+            "action.clear_settings_focus",
+            "action.pause_15m",
+            "action.pause_1h",
+            "label.privacy_scope",
+            "message.custom_rules_run_locally_before_capture_and",
+            "message.touch_id_protects_access_to_the_history",
+            "message.pinned_items_are_preserved_when_normal_history",
+            "message.per_item_copy_and_paste_menus_still",
+            "action.start_trial",
+            "message.storekit_2_purchase_and_restore_adapters_are",
+            "message.cleared_shortcuts_remain_available_from_menus_but",
+            "message.mcp_is_local_only_and_disabled_by",
+            "message.cloudkit_upload_code_must_be_wired_only",
+            "state.required",
+            "label.matched",
+            "label.not_matched",
+            "message.direct_paste_copies_the_selected_item_first",
+            "label.new_text",
+            "label.source_app",
+            "label.full_screen_preview",
+            "label.content",
+            "label.category",
+            "label.untitled",
+            "label.extension_setup",
+            "state.available",
+            "state.optional",
+            "action.paste_permission",
+            "label.full_access",
+            "label.limited",
+            "label.drag",
+            "action.insert",
+            "action.copy_plain_text",
+            "action.pin_to_pinboard",
+            "message.double_click_or_press_return_to_paste",
+            "format.file",
+            "format.files",
+            "format.chars",
+            "label.not_needed",
+            "label.ocr_pending",
+            "label.ocr_complete",
+            "label.ocr_failed",
+            "label.capture_active.d7a4a72f",
+            "label.capture_paused.04ddfd1a",
+            "label.capture_paused_temporarily",
+            "message.new_clipboard_content_is_evaluated_by_local",
+            "message.automatic_clipboard_capture_is_stopped_until_you",
+            "message.automatic_clipboard_capture_is_stopped_until_the"
         ]
 
         for key in priorityKeys {
             let translation = try XCTUnwrap(simplifiedChinese[key], "Missing translation for \(key)")
             XCTAssertFalse(translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             XCTAssertNotEqual(translation, key)
+        }
+    }
+
+    func testiOSInfoPlistResourcesHaveSimplifiedChineseTranslations() throws {
+        let targets = [
+            "PasteBuddyiOS",
+            "PasteBuddyKeyboard",
+            "PasteBuddyShare",
+            "PasteBuddyAction"
+        ]
+
+        for target in targets {
+            let english = try stringsDictionary(at: infoPlistStringsURL(target: target, locale: "en"))
+            let simplifiedChinese = try stringsDictionary(at: infoPlistStringsURL(target: target, locale: "zh-Hans"))
+
+            XCTAssertEqual(Set(english.keys), Set(simplifiedChinese.keys), "\(target) InfoPlist keys differ")
+
+            for (key, englishValue) in english {
+                let translation = try XCTUnwrap(simplifiedChinese[key], "Missing \(target) InfoPlist translation for \(key)")
+                XCTAssertFalse(translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if englishValue != "PasteBuddy" {
+                    XCTAssertNotEqual(translation, englishValue, "\(target) InfoPlist \(key) is still English")
+                }
+            }
         }
     }
 
@@ -206,6 +339,26 @@ final class LocalizationResourceTests: XCTestCase {
 
     private func localizedStrings(locale: String) throws -> [String: String] {
         let url = try resourceURL(locale: locale)
+        return try stringsDictionary(at: url)
+    }
+
+    private func stringCatalog() throws -> [String: Any] {
+        let url = try stringCatalogURL()
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any],
+            "Unable to parse \(url.path) as a string catalog"
+        )
+    }
+
+    private func catalogValue(_ entry: [String: Any], locale: String, key: String) throws -> String {
+        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any], "\(key) missing localizations")
+        let localePayload = try XCTUnwrap(localizations[locale] as? [String: Any], "\(key) missing \(locale)")
+        let stringUnit = try XCTUnwrap(localePayload["stringUnit"] as? [String: Any], "\(key) missing \(locale) stringUnit")
+        return try XCTUnwrap(stringUnit["value"] as? String, "\(key) missing \(locale) value")
+    }
+
+    private func stringsDictionary(at url: URL) throws -> [String: String] {
         let data = try Data(contentsOf: url)
         let object = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
         return try XCTUnwrap(object as? [String: String], "Unable to parse \(url.path) as a strings dictionary")
@@ -226,5 +379,38 @@ final class LocalizationResourceTests: XCTestCase {
             directory.deleteLastPathComponent()
         }
         throw XCTSkip("Could not locate PasteBuddy localization resources from \(FileManager.default.currentDirectoryPath)")
+    }
+
+    private func stringCatalogURL() throws -> URL {
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<8 {
+            let candidate = directory
+                .appendingPathComponent("Sources", isDirectory: true)
+                .appendingPathComponent("PasteBuddy", isDirectory: true)
+                .appendingPathComponent("Resources", isDirectory: true)
+                .appendingPathComponent("Localizable.xcstrings")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            directory.deleteLastPathComponent()
+        }
+        throw XCTSkip("Could not locate PasteBuddy string catalog from \(FileManager.default.currentDirectoryPath)")
+    }
+
+    private func infoPlistStringsURL(target: String, locale: String) throws -> URL {
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<8 {
+            let candidate = directory
+                .appendingPathComponent("Support", isDirectory: true)
+                .appendingPathComponent("InfoPlist", isDirectory: true)
+                .appendingPathComponent(target, isDirectory: true)
+                .appendingPathComponent("\(locale).lproj", isDirectory: true)
+                .appendingPathComponent("InfoPlist.strings")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            directory.deleteLastPathComponent()
+        }
+        throw XCTSkip("Could not locate \(target) InfoPlist localization resources from \(FileManager.default.currentDirectoryPath)")
     }
 }

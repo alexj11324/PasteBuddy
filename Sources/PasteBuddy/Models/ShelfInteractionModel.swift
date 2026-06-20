@@ -92,6 +92,31 @@ final class ShelfInteractionModel {
         clearPreviewUnlessSelected()
     }
 
+    @discardableResult
+    func presentPreview(for id: UUID) -> Bool {
+        guard itemIDs.contains(id) else { return false }
+        selectSingle(id)
+        previewedID = id
+        return true
+    }
+
+    @discardableResult
+    func togglePreview(for id: UUID) -> Bool {
+        guard itemIDs.contains(id) else { return false }
+        if previewedID == id {
+            previewedID = nil
+            return false
+        }
+        selectSingle(id)
+        previewedID = id
+        return true
+    }
+
+    func dismissPreview(for id: UUID? = nil) {
+        guard id == nil || previewedID == id else { return }
+        previewedID = nil
+    }
+
     func replaceItems(
         _ newItems: [ClipboardItem],
         storeSelectedIDs: Set<UUID> = [],

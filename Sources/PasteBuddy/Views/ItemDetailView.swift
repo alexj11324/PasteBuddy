@@ -34,9 +34,9 @@ struct ItemDetailView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    localized("Select an Item"),
+                    localized("label.select_an_item"),
                     systemImage: "sidebar.right",
-                    description: Text(localized("Clipboard details, OCR text, and pinning actions appear here."))
+                    description: Text(localized("message.clipboard_details_ocr_text_and_pinning_actions"))
                 )
             }
         }
@@ -45,34 +45,34 @@ struct ItemDetailView: View {
     private func header(for item: ClipboardItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                TextField("Title", text: $draftTitle)
+                TextField("label.title", text: $draftTitle)
                     .textFieldStyle(.roundedBorder)
                     .font(.title3)
-                    .accessibilityLabel(localized("Clipboard item title"))
+                    .accessibilityLabel(localized("label.clipboard_item_title"))
                     .onSubmit {
                         store.renameSelectedItem(to: draftTitle)
                     }
 
-                Button("Save") {
+                Button("action.save") {
                     store.renameSelectedItem(to: draftTitle)
                 }
-                .help(NSLocalizedString("Save Title", comment: ""))
+                .help(NSLocalizedString("action.save_title", comment: ""))
             }
 
             HStack(alignment: .firstTextBaseline) {
-                TextField("Labels", text: $draftLabels)
+                TextField("label.labels", text: $draftLabels)
                     .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel(localized("Clipboard item labels"))
-                    .accessibilityHint(localized("Separate labels with commas."))
+                    .accessibilityLabel(localized("label.clipboard_item_labels"))
+                    .accessibilityHint(localized("message.separate_labels_with_commas"))
                     .onSubmit {
                         store.setLabels(parsedLabels, for: item.id)
                     }
 
-                Button("Save") {
+                Button("action.save") {
                     store.setLabels(parsedLabels, for: item.id)
                     draftLabels = store.selectedItem?.labels.joined(separator: ", ") ?? ""
                 }
-                .help(NSLocalizedString("Save Labels", comment: ""))
+                .help(NSLocalizedString("action.save_labels", comment: ""))
             }
 
             if !item.labels.isEmpty {
@@ -85,11 +85,11 @@ struct ItemDetailView: View {
                             Label(label, systemImage: "xmark.circle.fill")
                         }
                         .buttonStyle(.borderless)
-                        .accessibilityLabel(String(format: localized("Remove label %@"), label))
+                        .accessibilityLabel(String(format: localized("format.remove_label"), label))
                     }
                 }
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel(localized("Clipboard item labels"))
+                .accessibilityLabel(localized("label.clipboard_item_labels"))
             }
 
             Picker(
@@ -105,19 +105,19 @@ struct ItemDetailView: View {
                 }
             }
             .pickerStyle(.menu)
-            .accessibilityLabel(localized("Reusable content type"))
+            .accessibilityLabel(localized("label.reusable_content_type"))
 
             HStack {
                 Button {
                     PasteboardWriter.copy(item)
                 } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+                    Label("action.copy", systemImage: "doc.on.doc")
                 }
 
                 Button {
                     pasteItem(item, format: store.defaultPasteFormat)
                 } label: {
-                    Label("Paste to Active App", systemImage: "arrow.down.doc")
+                    Label("action.paste_to_active_app", systemImage: "arrow.down.doc")
                 }
 
                 Menu {
@@ -125,18 +125,18 @@ struct ItemDetailView: View {
                         Button {
                             NSWorkspace.shared.open(url)
                         } label: {
-                            Label("Open", systemImage: "arrow.up.right.square")
+                            Label("action.open", systemImage: "arrow.up.right.square")
                         }
                     }
 
-                    Button("Copy as Plain Text") {
+                    Button("action.copy_as_plain_text") {
                         PasteboardWriter.copy(item, format: .plainText)
                     }
-                    Button("Paste as Plain Text") {
+                    Button("action.paste_as_plain_text") {
                         pasteItem(item, format: .plainText)
                     }
 
-                    Menu("Pin") {
+                    Menu("action.pin") {
                         ForEach(store.snapshot.pinboards) { pinboard in
                             Button(pinboard.name) {
                                 store.pinItem(item.id, to: pinboard.id)
@@ -145,24 +145,24 @@ struct ItemDetailView: View {
                     }
 
                     if case .pinboard(let pinboardID) = store.selectedScope {
-                        Button("Remove from Pinboard") {
+                        Button("action.remove_from_pinboard") {
                             store.removeItem(item.id, fromPinboard: pinboardID)
                         }
                     }
 
-                    Button("Undo Delete") {
+                    Button("action.undo_delete") {
                         store.undoLastDeletion()
                     }
                     .disabled(!store.canUndoDelete)
 
                     Divider()
 
-                    Button("Delete", role: .destructive) {
+                    Button("action.delete", role: .destructive) {
                         store.removeItem(item.id)
                     }
-                    .accessibilityHint(localized("Removes this clipboard item from history and pinboards. Use Undo Delete to restore it."))
+                    .accessibilityHint(localized("message.removes_this_clipboard_item_from_history_and"))
                 } label: {
-                    Label("More", systemImage: "ellipsis.circle")
+                    Label("label.more", systemImage: "ellipsis.circle")
                 }
             }
         }
@@ -183,13 +183,13 @@ struct ItemDetailView: View {
                     .font(.body.monospaced())
                     .frame(minHeight: 240)
                     .border(.quaternary)
-                    .accessibilityLabel(localized("Clipboard text body"))
-                    .accessibilityHint(localized("Edit the saved text, then choose Save Text."))
+                    .accessibilityLabel(localized("label.clipboard_text_body"))
+                    .accessibilityHint(localized("message.edit_the_saved_text_then_choose_save"))
 
-                Button("Save Text") {
+                Button("action.save_text") {
                     store.updateTextItem(item.id, to: draftText)
                 }
-                .accessibilityHint(localized("Saves edits back to clipboard history."))
+                .accessibilityHint(localized("message.saves_edits_back_to_clipboard_history"))
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -220,7 +220,7 @@ struct ItemDetailView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Local OCR")
+                        Text("label.local_ocr")
                             .font(.headline)
                         Spacer()
                         Button {
@@ -241,7 +241,7 @@ struct ItemDetailView: View {
                             .textSelection(.enabled)
                             .font(.body.monospaced())
                     } else {
-                        Text("Recognized screenshot text will appear here after Apple's local Vision OCR finishes.")
+                        Text("message.recognized_screenshot_text_will_appear_here_after")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -255,19 +255,19 @@ struct ItemDetailView: View {
                     .textSelection(.enabled)
                     .font(.body.monospaced())
                 if let html = item.payload.htmlString, !html.isEmpty {
-                    LabeledContent("HTML") {
+                    LabeledContent("label.html") {
                         Text(html.singleLinePreview)
                             .textSelection(.enabled)
                     }
                 }
                 if !item.payload.allFileURLStrings.isEmpty {
-                    LabeledContent("Files") {
+                    LabeledContent("label.files") {
                         Text(item.payload.allFileURLStrings.joined(separator: "\n"))
                             .textSelection(.enabled)
                     }
                 }
                 if item.payload.imageData != nil {
-                    Label("Includes image data", systemImage: "photo")
+                    Label("label.includes_image_data", systemImage: "photo")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -280,29 +280,29 @@ struct ItemDetailView: View {
     private func metadata(for item: ClipboardItem) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 8) {
             GridRow {
-                Text("Type").foregroundStyle(.secondary)
+                Text("label.type").foregroundStyle(.secondary)
                 Text(localized(item.contentType.displayName))
             }
             GridRow {
-                Text("Reusable Type").foregroundStyle(.secondary)
+                Text("label.reusable_type").foregroundStyle(.secondary)
                 Text(localized(item.reuseCategory.displayName))
             }
             GridRow {
-                Text("Source").foregroundStyle(.secondary)
+                Text("label.source").foregroundStyle(.secondary)
                 Text(item.sourceAppName)
             }
             GridRow {
-                Text("Device").foregroundStyle(.secondary)
+                Text("label.device").foregroundStyle(.secondary)
                 Text(item.deviceName)
             }
             GridRow {
-                Text("Created").foregroundStyle(.secondary)
+                Text("label.created").foregroundStyle(.secondary)
                 Text(item.createdAt.formatted(date: .abbreviated, time: .standard))
             }
         }
         .textSelection(.enabled)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(localized("Clipboard item metadata"))
+        .accessibilityLabel(localized("label.clipboard_item_metadata"))
     }
 
     private func localized(_ key: String) -> String {
@@ -326,7 +326,7 @@ struct ItemDetailView: View {
                 await MainActor.run {
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmed.isEmpty {
-                        store.markOCRFailed(String(localized: "No Chinese or English text was recognized."), for: item.id)
+                        store.markOCRFailed(String(localized: "message.no_chinese_or_english_text_was_recognized"), for: item.id)
                     } else {
                         store.updateOCRText(trimmed, for: item.id)
                     }
@@ -372,8 +372,8 @@ private struct CachedDetailImagePreview: View {
         }
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .accessibilityLabel(localized("Captured image preview"))
-        .accessibilityHint(localized("Recognized local OCR text appears below the image when available."))
+        .accessibilityLabel(localized("label.captured_image_preview"))
+        .accessibilityHint(localized("message.recognized_local_ocr_text_appears_below_the"))
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
             image = ClipboardImageCache.cachedThumbnail(
                 for: item,

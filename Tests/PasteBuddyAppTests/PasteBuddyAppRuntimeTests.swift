@@ -1,11 +1,12 @@
 import AppKit
 import Carbon
+import PasteBuddyCore
 import XCTest
 @testable import PasteBuddy
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
-    func testAppDelegateDoesNotReopenMainWindowWhenNoWindowsAreVisible() {
+    func testAppDelegateFallsBackToDefaultReopenWhenDockHandlerIsMissing() {
         let delegate = AppDelegate()
 
         XCTAssertFalse(
@@ -63,6 +64,271 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
 
         XCTAssertEqual(events, ["dismiss", "focus-restored", "paste"])
+    }
+
+    func testShelfPreviewToggleDismissesAlreadyPreviewedCard() {
+        let item = makeShelfItem(title: "Screenshot")
+        let interaction = ShelfInteractionModel(items: [item])
+
+        XCTAssertTrue(interaction.togglePreview(for: item.id))
+        XCTAssertEqual(interaction.previewedID, item.id)
+
+        XCTAssertFalse(interaction.togglePreview(for: item.id))
+        XCTAssertNil(interaction.previewedID)
+        XCTAssertEqual(interaction.primarySelectedID, item.id)
+        XCTAssertEqual(interaction.selectedIDs, [item.id])
+    }
+
+    func testShelfPreviewToggleSwitchesCardsAndIgnoresMissingItems() {
+        let first = makeShelfItem(title: "First")
+        let second = makeShelfItem(title: "Second")
+        let interaction = ShelfInteractionModel(items: [first, second])
+
+        XCTAssertTrue(interaction.togglePreview(for: first.id))
+        XCTAssertEqual(interaction.previewedID, first.id)
+        XCTAssertEqual(interaction.primarySelectedID, first.id)
+        XCTAssertEqual(interaction.selectedIDs, [first.id])
+
+        XCTAssertTrue(interaction.togglePreview(for: second.id))
+        XCTAssertEqual(interaction.previewedID, second.id)
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+        XCTAssertEqual(interaction.selectedIDs, [second.id])
+
+        XCTAssertFalse(interaction.togglePreview(for: UUID()))
+        XCTAssertEqual(interaction.previewedID, second.id)
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+        XCTAssertEqual(interaction.selectedIDs, [second.id])
+    }
+
+    func testShelfPreviewPresentationSelectsPreviewedCard() {
+        let first = makeShelfItem(title: "First")
+        let second = makeShelfItem(title: "Second")
+        let interaction = ShelfInteractionModel(items: [first, second])
+
+        XCTAssertTrue(interaction.presentPreview(for: second.id))
+        XCTAssertEqual(interaction.previewedID, second.id)
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+        XCTAssertEqual(interaction.selectedIDs, [second.id])
+
+        interaction.dismissPreview(for: first.id)
+        XCTAssertEqual(interaction.previewedID, second.id)
+
+        interaction.dismissPreview(for: second.id)
+        XCTAssertNil(interaction.previewedID)
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+        XCTAssertEqual(interaction.selectedIDs, [second.id])
+    }
+
+    func testShelfTreatsPopoverWindowsAsAuxiliaryPreviewWindows() {
+        XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("NSPopoverWindow"))
+        XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("_TtC7SwiftUI19PlatformPopoverHost"))
+        XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("NSMenuWindow"))
+        XCTAssertFalse(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("NSWindow"))
+    }
+
+    func testShelfOutsideClickPolicyIgnoresMenuBarStatusItemClick() {
+        let shelfFrame = CGRect(x: 0, y: 652, width: 1512, height: 330)
+        let menuBarStatusItemPoint = CGPoint(x: 1329, y: 16)
+        let ordinaryOutsidePoint = CGPoint(x: 800, y: 500)
+
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldDismissForOutsideClick(
+                at: menuBarStatusItemPoint,
+                panelFrame: shelfFrame,
+                isShelfAuxiliaryWindowHit: false,
+                isIgnoredDismissalTargetHit: true
+            )
+        )
+        XCTAssertTrue(
+            ClipboardShelfPanelController.shouldDismissForOutsideClick(
+                at: ordinaryOutsidePoint,
+                panelFrame: shelfFrame,
+                isShelfAuxiliaryWindowHit: false,
+                isIgnoredDismissalTargetHit: false
+            )
+        )
+    }
+
+    func testShelfPlacementFramesAttachToFullScreenTopOrBottomEdges() {
+        let screenFrame = CGRect(x: -100, y: 50, width: 1512, height: 982)
+        let visibleFrame = CGRect(x: -100, y: 111, width: 1512, height: 888)
+        let shelfHeight: CGFloat = 330
+
+        XCTAssertEqual(
+            ClipboardShelfPanelController.attachedFrame(
+                for: .top,
+                screenFrame: screenFrame,
+                visibleFrame: visibleFrame,
+                height: shelfHeight
+            ),
+            CGRect(x: -100, y: 669, width: 1512, height: 330)
+        )
+        XCTAssertEqual(
+            ClipboardShelfPanelController.attachedFrame(
+                for: .bottom,
+                screenFrame: screenFrame,
+                visibleFrame: visibleFrame,
+                height: shelfHeight
+            ),
+            CGRect(x: -100, y: 50, width: 1512, height: 330)
+        )
+    }
+
+    func testShelfExpandedTextPreviewIsEditableAndSaveable() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let previewStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedPreview"))
+        let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
+        let previewSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
+
+        XCTAssertTrue(previewSource.contains("TextEditor(text:"))
+        XCTAssertTrue(previewSource.contains("onSaveText(draftText)"))
+        XCTAssertTrue(previewSource.contains("Button(\"action.save_text\")"))
+    }
+
+    func testShelfExpandedImagePreviewUsesAppleLiveTextInsteadOfOCRTextBox() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let previewStart = try XCTUnwrap(source.range(of: "private var previewContent"))
+        let editableStart = try XCTUnwrap(source.range(of: "private struct ShelfEditableTextPreview"))
+        let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
+        let nextViewStart = try XCTUnwrap(source.range(of: "private struct ClipboardShelfCardVisual"))
+        let previewContentSource = String(source[previewStart.lowerBound..<editableStart.lowerBound])
+        let imagePreviewSource = String(source[imageStart.lowerBound..<nextViewStart.lowerBound])
+
+        XCTAssertTrue(source.contains("import VisionKit"))
+        XCTAssertTrue(imagePreviewSource.contains("ShelfLiveTextImagePreview("))
+        XCTAssertTrue(imagePreviewSource.contains("ImageAnalysisOverlayView"))
+        XCTAssertTrue(imagePreviewSource.contains("ImageAnalyzer().analyze"))
+        XCTAssertTrue(imagePreviewSource.contains("preferredInteractionTypes = .automaticTextOnly"))
+        XCTAssertTrue(imagePreviewSource.contains("trackingImageView = imageView"))
+        XCTAssertTrue(imagePreviewSource.contains("imageView.addSubview(overlayView)"))
+        XCTAssertTrue(imagePreviewSource.contains("NSImage(data: imageData)"))
+        XCTAssertFalse(source.contains("import QuickLookUI"))
+        XCTAssertFalse(imagePreviewSource.contains("QLPreviewView"))
+        XCTAssertFalse(imagePreviewSource.contains("ShelfQuickLookPreviewFileStore"))
+        XCTAssertFalse(imagePreviewSource.contains("ShelfQuickLookPreviews"))
+        XCTAssertFalse(imagePreviewSource.contains("data.write(to:"))
+        XCTAssertFalse(previewContentSource.contains("if let text = item.payload.ocrText"))
+        XCTAssertFalse(previewContentSource.contains("previewText(text)"))
+        XCTAssertFalse(imagePreviewSource.contains("TextEditor(text:"))
+        XCTAssertFalse(imagePreviewSource.contains("Button(\"action.save_text\")"))
+        XCTAssertFalse(imagePreviewSource.contains("ocrText"))
+    }
+
+    func testShelfLinkCardsDoNotFetchRemoteMetadataByDefault() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+
+        XCTAssertTrue(shelfSource.contains("ShelfLinkPreviewCardBody(preview: preview, tint: cardTint)"))
+        XCTAssertTrue(shelfSource.contains("Image(systemName: \"link.circle.fill\")"))
+        XCTAssertFalse(shelfSource.contains("LinkPreviewCache.preview(for:"))
+        XCTAssertFalse(shelfSource.contains("LinkPreviewCache.cachedPreview(for:"))
+        XCTAssertFalse(sourceFileExists("Sources/PasteBuddy/Models/LinkPreviewCache.swift"))
+        XCTAssertFalse(shelfSource.contains("LPMetadataProvider"))
+    }
+
+    func testMobileShareUntitledFallbackResolvesLocalizationBeforeText() throws {
+        let source = try sourceFileContents("Sources/PasteBuddyMobile/MobileExtensionViews.swift")
+
+        XCTAssertTrue(source.contains("Text(displayTitle)"))
+        XCTAssertTrue(source.contains("PasteBuddyLocalization.string(\"label.untitled\", defaultValue: \"Untitled\")"))
+        XCTAssertFalse(source.contains("Text(input.title?.isEmpty == false ? input.title! : \"label.untitled\")"))
+    }
+
+    func testShelfCollectionChipsDoNotRenderItemCounts() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
+        let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
+        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
+        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
+        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
+        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+
+        XCTAssertFalse(stripSource.contains("count:"))
+        XCTAssertFalse(chipSource.contains("let count"))
+        XCTAssertFalse(chipSource.contains("Text(\"\\(count)\")"))
+        XCTAssertTrue(chipSource.contains("private var helpText: String"))
+    }
+
+    func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
+        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
+        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+
+        XCTAssertTrue(chipSource.contains(".clipShape(Capsule())"))
+        XCTAssertFalse(chipSource.contains(".shadow("))
+    }
+
+    func testMenuBarStatusItemOwnsClickableMenuInsteadOfSwiftUIMenuBarExtra() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let statusItemSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyStatusItemController.swift")
+
+        XCTAssertFalse(appSource.contains("MenuBarExtra"))
+        XCTAssertFalse(appSource.contains("handleDockIconReopen"))
+        XCTAssertTrue(appSource.contains("statusItemController = PasteBuddyStatusItemController"))
+        XCTAssertTrue(statusItemSource.contains("statusItem.menu = statusMenu"))
+        XCTAssertTrue(statusItemSource.contains("func menuNeedsUpdate(_ menu: NSMenu)"))
+        XCTAssertTrue(statusItemSource.contains("menu.removeAllItems()"))
+        XCTAssertTrue(statusItemSource.contains("menu.addItem(item)"))
+        XCTAssertFalse(statusItemSource.contains("statusItem.popUpMenu(menu)"))
+        XCTAssertFalse(statusItemSource.contains("statusItem.button?.performClick(nil)"))
+    }
+
+    func testMenuBarStatusItemDoesNotExposeDirectMainWindowOpenAction() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
+        let menuEnd = try XCTUnwrap(appSource.range(of: "private func openMainWindow()"))
+        let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
+
+        XCTAssertFalse(menuSource.contains("Open PasteBuddy"))
+        XCTAssertFalse(menuSource.contains("openMainWindow()"))
+        XCTAssertFalse(menuSource.contains("openWindow(id: \"main\""))
+    }
+
+    func testStatusItemMenuExposesShelfPlacementModeChooser() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
+        let menuEnd = try XCTUnwrap(appSource.range(of: "private func openMainWindow()"))
+        let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
+
+        XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardShelfPlacement")"#))
+        XCTAssertTrue(appSource.contains("shelfPanelController?.placement = shelfPlacement"))
+        XCTAssertTrue(menuSource.contains("label.shelf_position"))
+        XCTAssertTrue(menuSource.contains("label.shelf_at_top"))
+        XCTAssertTrue(menuSource.contains("label.shelf_at_bottom"))
+        XCTAssertTrue(menuSource.contains("shelfPlacementMenu"))
+        XCTAssertTrue(menuSource.contains("shelfPlacement = .top"))
+        XCTAssertTrue(menuSource.contains("shelfPlacement = .bottom"))
+    }
+
+    func testStatusItemUsesNativeMenuInsteadOfCustomClickRouting() throws {
+        let statusItemSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyStatusItemController.swift")
+
+        XCTAssertTrue(statusItemSource.contains("statusItem.menu = statusMenu"))
+        XCTAssertFalse(statusItemSource.contains("button.target = self"))
+        XCTAssertFalse(statusItemSource.contains("handleStatusItemClick"))
+        XCTAssertFalse(statusItemSource.contains("shouldOpenMenu(for:"))
+    }
+
+    func testMCPToolTogglesRemainConfigurableWhenServerIsOff() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let mcpStart = try XCTUnwrap(source.range(of: "Section(\"label.mcp\")"))
+        let syncStart = try XCTUnwrap(source.range(of: "Section(\"action.sync_sharing\")"))
+        let mcpSource = String(source[mcpStart.lowerBound..<syncStart.lowerBound])
+
+        XCTAssertTrue(mcpSource.contains("label.mcp_access_status"))
+        XCTAssertTrue(mcpSource.contains("label.mcp_is_currently_on"))
+        XCTAssertTrue(mcpSource.contains("label.mcp_is_currently_off"))
+        XCTAssertTrue(mcpSource.contains("message.tool_selections_are_saved_and_take_effect"))
+        XCTAssertFalse(mcpSource.contains(".disabled(!store.snapshot.mcp.isServerEnabled)"))
+    }
+
+    func testPushTestFlightFetchRefreshesRemoteTrackingBranchBeforeAheadCheck() throws {
+        let source = try sourceFileContents("script/push_testflight.sh")
+
+        XCTAssertTrue(
+            source.contains(#"git fetch "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" --tags"#)
+        )
+        XCTAssertFalse(source.contains(#"git fetch "$REMOTE" "$BRANCH" --tags"#))
     }
 
     func testPanelHotKeyMatcherRequiresCommandShiftV() {
@@ -174,6 +440,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(bottomSheetSurface.contains("opacity(0.82)"))
         XCTAssertTrue(smallNativeGlassBranch.contains("Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)).interactive()"))
         XCTAssertFalse(smallNativeGlassBranch.contains(".background"))
+    }
+
+    func testShelfCollectionScrollViewSuppressesVisibleScrollers() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
+
+        XCTAssertTrue(source.contains("scrollView.hasHorizontalScroller = false"))
+        XCTAssertTrue(source.contains("scrollView.horizontalScroller = nil"))
+        XCTAssertTrue(source.contains("override var horizontalScroller: NSScroller?"))
+        XCTAssertTrue(source.contains("set { super.horizontalScroller = nil }"))
+        XCTAssertTrue(source.contains("override var hasHorizontalScroller: Bool"))
+        XCTAssertTrue(source.contains("get { false }"))
+        XCTAssertTrue(source.contains("override var autohidesScrollers: Bool"))
+        XCTAssertTrue(source.contains("hideScrollers()"))
+        XCTAssertTrue(source.contains("horizontalScroller?.isHidden = true"))
     }
 
     func testPanelHotKeyTriggerGateRecordsSourceAndDeduplicates() {
@@ -294,6 +574,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
     }
 
+    private func makeShelfItem(title: String) -> ClipboardItem {
+        ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: title,
+            payload: ClipboardPayload(text: title)
+        )
+    }
+
     private func sourceFileContents(_ relativePath: String) throws -> String {
         var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         for _ in 0..<8 {
@@ -304,5 +594,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             directory.deleteLastPathComponent()
         }
         throw XCTSkip("Could not locate \(relativePath) from \(FileManager.default.currentDirectoryPath)")
+    }
+
+    private func sourceFileExists(_ relativePath: String) -> Bool {
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<8 {
+            let candidate = directory.appendingPathComponent(relativePath)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return true
+            }
+            directory.deleteLastPathComponent()
+        }
+        return false
     }
 }

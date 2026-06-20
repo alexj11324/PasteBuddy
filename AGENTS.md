@@ -9,12 +9,24 @@
 - IMPORTANT: 所有 test 文件,除非是正式 pipeline 所需的,一律写入 tmp 文件夹,不可以持久化保存
 - IMPORTANT: 谨慎持久化 test 文件
 
+## PasteBuddy 国际化/本地化工作流（IMPORTANT）
+- IMPORTANT: PasteBuddy 新增用户可见文案必须使用语义 key（例如 `action.save_text`、`label.mobile_setup`、`format.items_count`），不要把完整英文句子直接写成 UI key。
+- IMPORTANT: `PasteBuddyCore` 或非 SwiftUI view 层生成的用户可见文案必须使用 `PasteBuddyLocalization.string/format`，并提供与英文 catalog 值一致的 `defaultValue`。
+- IMPORTANT: 翻译维护必须优先走 `script/localize_string_catalog_with_dify.py`；Dify 负责翻译/审稿，`script/localization_catalog_workflow.py` 负责同步 `Localizable.strings` 与 `Localizable.xcstrings`。
+- IMPORTANT: 只做本地同步时运行 `python3 script/localize_string_catalog_with_dify.py --skip-dify`；提交前至少运行 `python3 script/localization_catalog_workflow.py check` 和 `swift test --filter LocalizationResourceTests`。
+- IMPORTANT: iOS target 必须继续使用 `Sources/PasteBuddy/Resources/Localizable.xcstrings`；不要重新把 iOS 资源阶段切回 `Localizable.strings`。
+- IMPORTANT: Dify API key 只能从 `DIFY_WORKFLOW_API_KEY` 或 Google Secret Manager `general-secrets-store/dify-pastebuddy-localization-workflow-api-key` 读取，禁止写入仓库、`.env`、临时脚本常量或长期本地文件。
+
 ## macOS UI/HID 验证（IMPORTANT）
 - IMPORTANT: 验证 macOS 原生窗口、popover、panel、shelf、Dock 覆盖、点击关闭、拖拽、双击等交互时，禁止凭截图、经验值或硬编码坐标猜测点击位置。
 - IMPORTANT: 每次 UI/HID 验证前，必须先通过 Apple 推荐的系统接口读取真实运行时几何信息，例如 `NSScreen.screens`、`NSWindow/NSPanel.frame`、Accessibility frame、`CGWindowListCopyWindowInfo` 或目标 view/window 的实际 frame。
 - IMPORTANT: 点击点、拖拽起点/终点、外部点击区域、底部贴边位置必须由真实 frame 动态计算；涉及多屏、外接屏、Dock、菜单栏、Stage Manager、Spaces 或窗口跨屏时，必须先确认目标窗口所在 screen，再在该 screen 坐标系内计算。
 - IMPORTANT: 如果无法拿到目标窗口或 view 的真实 frame，不允许继续用猜测坐标做结论；必须先补充可观测性、日志、Accessibility 标识、测试 hook 或 AppKit 调试入口。
 - IMPORTANT: 对 Paste/PasteBuddy 底部 shelf 这类贴屏底部交互，必须验证它贴的是目标 screen 的完整 `frame` 底边，而不是 `visibleFrame`；不得因为 Dock 或多屏布局而绕开底部，也不得用固定主屏坐标假设 shelf 位置。
+- IMPORTANT: 每一次修复 macOS UI、视觉、HID、window/panel/shelf、滚动条、背景裁剪、hover/focus、hit testing 或布局问题后，不能只运行 `swift build` / `swift test` 就声称成功；必须重新编译并重新打开真实 app，再做运行时视觉验证。
+- IMPORTANT: PasteBuddy 视觉/UI 修复的完成门槛是：运行 `script/build_and_run.sh --verify` 安装并启动新编译的 `/Applications/PasteBuddy Dev.app`，确认输出包含 `accessibilityTrusted=true`、`stableLaunchPathMatched=true`、正确 `bundleIdentifier`、`bundlePath` 与 `signingChannel=development`，然后重新触发受影响的 UI（例如 Shelf/Panel/Popover），基于真实 window/view frame 截图或直接观察确认用户可见问题已经消失。
+- IMPORTANT: 如果没有重新打开新编译 app、没有触发受影响 UI、没有视觉验证原始症状已经消失，只能报告“代码已改但视觉结果未验证”，禁止说“已修复/完成/成功”。
+- IMPORTANT: PasteBuddy 主窗口/历史窗口只能由用户明确手动触发；验证 Shelf、菜单栏图标、popover、状态菜单或后台运行时，禁止为了方便主动打开主窗口，也禁止在菜单栏状态菜单里新增“Open PasteBuddy”这类直接打开主窗口入口。需要查看主窗口时必须先得到用户明确授权。
 
 ## PasteBuddy Shelf 状态隔离与性能（IMPORTANT）
 - IMPORTANT: Shelf 顶部 `Clipboard` / `Paste Stack` / Pinboard chip 只是 Shelf 内部浏览切页时，禁止直接写全局 `store.selectedScope`；必须使用 Shelf 本地状态（如 `shelfScope`）驱动 chip 高亮、空态、快捷键和 `store.filteredItems(for:)` 查询。

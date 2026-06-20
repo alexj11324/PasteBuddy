@@ -31,6 +31,71 @@ public enum ClipboardContentType: String, CaseIterable, Codable, Identifiable, S
     }
 }
 
+public enum SmartPinboardCategory: String, CaseIterable, Codable, Identifiable, Sendable {
+    case text
+    case links
+    case images
+    case files
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .text: "Text"
+        case .links: "Links"
+        case .images: "Images"
+        case .files: "Files"
+        }
+    }
+
+    public var pinboardName: String {
+        "Smart: \(displayName)"
+    }
+
+    public var systemImageName: String {
+        switch self {
+        case .text: "text.alignleft"
+        case .links: "link"
+        case .images: "photo"
+        case .files: "doc"
+        }
+    }
+
+    public var colorHex: String {
+        switch self {
+        case .text: "#4EA7FC"
+        case .links: "#70C1B3"
+        case .images: "#B388EB"
+        case .files: "#FF9F1C"
+        }
+    }
+
+    public var matchedContentType: ClipboardContentType {
+        switch self {
+        case .text: .text
+        case .links: .url
+        case .images: .image
+        case .files: .file
+        }
+    }
+
+    public func matches(_ item: ClipboardItem) -> Bool {
+        item.presentationContentType == matchedContentType
+    }
+
+    public static func category(forPinboardName name: String) -> SmartPinboardCategory? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return allCases.first { $0.pinboardName == trimmed }
+    }
+
+    public static func isSmartPinboardName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return category(forPinboardName: trimmed) != nil || obsoletePinboardNames.contains(trimmed)
+    }
+
+    public static let obsoletePinboardNames: Set<String> = ["Smart: Mixed"]
+}
+
 public enum ClipboardReuseCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     case general
     case snippet
@@ -372,7 +437,31 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
     }
 
     public var allURLStrings: [String] {
+        let explicitURLs = explicitURLStrings
+        if !explicitURLs.isEmpty {
+            return explicitURLs
+        }
+        return Self.detectedURLStrings(in: text ?? htmlString?.pasteBuddyPlainTextFromHTML ?? "")
+    }
+
+    public var explicitURLStrings: [String] {
         [urlString].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+    }
+
+    public var presentationURLString: String? {
+        explicitURLStrings.first ?? standaloneDetectedURLString
+    }
+
+    private var standaloneDetectedURLString: String? {
+        let candidateText = text ?? htmlString?.pasteBuddyPlainTextFromHTML
+        guard let trimmed = candidateText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              !trimmed.contains(where: \.isWhitespace),
+              let detected = Self.detectedURLStrings(in: trimmed).first,
+              Self.normalizedURLComparisonKey(detected) == Self.normalizedURLComparisonKey(trimmed) else {
+            return nil
+        }
+        return detected
     }
 
     public var primaryText: String {
@@ -411,6 +500,41 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
             result.append(trimmed)
         }
         return result
+    }
+
+    private static func detectedURLStrings(in value: String) -> [String] {
+        value
+            .split(whereSeparator: \.isWhitespace)
+            .compactMap { rawToken -> String? in
+                let token = rawToken.trimmingCharacters(in: CharacterSet(charactersIn: "<>()[]{}\"'"))
+                    .trimmingCharacters(in: .punctuationCharacters)
+                guard token.contains(".") else { return nil }
+                let candidate: String
+                if token.hasPrefix("http://") || token.hasPrefix("https://") {
+                    candidate = token
+                } else if token.hasPrefix("www.") {
+                    candidate = "https://\(token)"
+                } else {
+                    return nil
+                }
+                guard let url = URL(string: candidate),
+                      let host = url.host(percentEncoded: false),
+                      host.contains(".") else {
+                    return nil
+                }
+                return candidate
+            }
+    }
+
+    private static func normalizedURLComparisonKey(_ value: String) -> String {
+        let normalized = value
+            .trimmingCharacters(in: CharacterSet(charactersIn: "<>()[]{}\"'"))
+            .trimmingCharacters(in: .punctuationCharacters)
+            .lowercased()
+        if normalized.hasPrefix("www.") {
+            return "https://\(normalized)"
+        }
+        return normalized
     }
 }
 
@@ -736,7 +860,33 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
+    public var presentationContentType: ClipboardContentType {
+        if payload.presentationURLString != nil,
+           contentType == .url || contentType == .text {
+            return .url
+        }
+        guard contentType == .mixed else { return contentType }
+        if payload.hasImageAsset {
+            return .image
+        }
+        if !payload.allFileURLStrings.isEmpty {
+            return .file
+        }
+        if payload.presentationURLString != nil {
+            return .url
+        }
+        if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || payload.hasRTFAsset {
+            return .text
+        }
+        return .mixed
+    }
+
     public var visualPreview: ClipboardVisualPreview {
+        if presentationContentType == .url {
+            return linkVisualPreview
+        }
         switch contentType {
         case .text:
             let body = searchDocument.previewBody.nilIfEmpty ?? title
@@ -749,15 +899,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 systemImageName: "text.alignleft"
             )
         case .url:
-            let urlString = payload.urlString ?? title
-            let host = URL(string: urlString)?.host?.nilIfEmpty
-            return ClipboardVisualPreview(
-                headline: host ?? title,
-                body: urlString,
-                detail: host == nil ? nil : "Link",
-                badgeText: contentType.displayName,
-                systemImageName: "link"
-            )
+            return linkVisualPreview
         case .file:
             let fileNames = payload.allFileURLStrings.map { value in
                 URL(string: value)?.lastPathComponent.nilIfEmpty ?? value
@@ -784,6 +926,55 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 prefersImageThumbnail: payload.hasImageAsset
             )
         case .mixed:
+            switch presentationContentType {
+            case .text:
+                let body = searchDocument.previewBody.nilIfEmpty ?? title
+                let detail = payload.htmlString?.isEmpty == false || payload.hasRTFAsset ? "Rich text available" : nil
+                return ClipboardVisualPreview(
+                    headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
+                    body: body,
+                    detail: detail,
+                    badgeText: ClipboardContentType.text.displayName,
+                    systemImageName: "text.alignleft"
+                )
+            case .url:
+                let urlString = payload.urlString ?? title
+                let host = URL(string: urlString)?.host?.nilIfEmpty
+                return ClipboardVisualPreview(
+                    headline: host ?? title,
+                    body: urlString,
+                    detail: host == nil ? nil : "Link",
+                    badgeText: ClipboardContentType.url.displayName,
+                    systemImageName: "link"
+                )
+            case .file:
+                let fileNames = payload.allFileURLStrings.map { value in
+                    URL(string: value)?.lastPathComponent.nilIfEmpty ?? value
+                }
+                let body = fileNames.first ?? title
+                let remainingCount = max(fileNames.count - 1, 0)
+                let detail = remainingCount > 0 ? "\(remainingCount) more \(remainingCount == 1 ? "file" : "files")" : nil
+                return ClipboardVisualPreview(
+                    headline: body,
+                    body: payload.allFileURLStrings.first ?? body,
+                    detail: detail,
+                    badgeText: ClipboardContentType.file.displayName,
+                    systemImageName: "doc"
+                )
+            case .image:
+                let body = searchDocument.previewBody.nilIfEmpty
+                    ?? (ocrState.isPending ? "OCR pending" : "Image preview")
+                return ClipboardVisualPreview(
+                    headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
+                    body: body,
+                    detail: ocrState.displayName,
+                    badgeText: ClipboardContentType.image.displayName,
+                    systemImageName: "photo",
+                    prefersImageThumbnail: payload.hasImageAsset
+                )
+            case .mixed:
+                break
+            }
             let body = searchDocument.previewBody.nilIfEmpty ?? title
             var detailParts: [String] = []
             if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
@@ -810,7 +1001,10 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var openableURL: URL? {
-        switch contentType {
+        if let presentationURLString = payload.presentationURLString {
+            return URL(string: presentationURLString)
+        }
+        return switch contentType {
         case .url:
             payload.urlString.flatMap { URL(string: $0) }
         case .file:
@@ -835,14 +1029,13 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
-        guard contentType == .mixed else { return [contentType] }
-        var types: Set<ClipboardContentType> = [.mixed]
+        var types: Set<ClipboardContentType> = [contentType]
         if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.hasRTFAsset {
             types.insert(.text)
         }
-        if !payload.allURLStrings.isEmpty {
+        if payload.presentationURLString != nil {
             types.insert(.url)
         }
         if !payload.allFileURLStrings.isEmpty {
@@ -852,6 +1045,18 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             types.insert(.image)
         }
         return types
+    }
+
+    private var linkVisualPreview: ClipboardVisualPreview {
+        let urlString = payload.presentationURLString ?? payload.urlString ?? title
+        let host = URL(string: urlString)?.host?.nilIfEmpty
+        return ClipboardVisualPreview(
+            headline: host ?? title,
+            body: urlString,
+            detail: host == nil ? nil : "Link",
+            badgeText: ClipboardContentType.url.displayName,
+            systemImageName: "link"
+        )
     }
 
     public static func normalizedLabels(_ labels: [String]) -> [String] {

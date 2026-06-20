@@ -110,6 +110,41 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         )
     }
 
+    func testRepositorySynchronizesDistinctItemsWithSameDedupeHash() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 2_600_000)
+        let first = ClipboardItem(
+            createdAt: now,
+            updatedAt: now,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "same payload")
+        )
+        let second = ClipboardItem(
+            createdAt: now.addingTimeInterval(10),
+            updatedAt: now.addingTimeInterval(10),
+            sourceAppName: "TextEdit",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "same payload")
+        )
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertEqual(first.searchDocument.dedupeHash, second.searchDocument.dedupeHash)
+
+        try repository.synchronize(with: PasteBuddySnapshot(items: [first]))
+        try repository.synchronize(with: PasteBuddySnapshot(items: [second, first]))
+
+        XCTAssertEqual(try repository.itemCount(), 2)
+        XCTAssertEqual(try repository.exportSnapshot().items.map(\.id), [second.id, first.id])
+    }
+
     @MainActor
     func testStoreOrdinarySaveSynchronizesRepositoryIncrementallyWithoutReplaceAll() throws {
         let harness = try StoreHarness()

@@ -16,20 +16,20 @@ public struct MobileShareImportView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                Section("Shared Content") {
-                    LabeledContent("Source") {
+                Section("label.shared_content") {
+                    LabeledContent("label.source") {
                         Text(input.source.displayName)
                     }
-                    LabeledContent("Title") {
-                        Text(input.title?.isEmpty == false ? input.title! : "Untitled")
+                    LabeledContent("label.title") {
+                        Text(displayTitle)
                     }
                     Text(previewText)
                         .lineLimit(4)
                 }
 
-                Section("Destination") {
-                    Picker("Pinboard", selection: $selectedPinboardID) {
-                        Text("History Only").tag(nil as UUID?)
+                Section("label.destination") {
+                    Picker("label.pinboard", selection: $selectedPinboardID) {
+                        Text("label.history_only").tag(nil as UUID?)
                         ForEach(store.snapshot.pinboards) { pinboard in
                             Text(pinboard.name).tag(Optional(pinboard.id))
                         }
@@ -43,7 +43,7 @@ public struct MobileShareImportView: View {
                     }
                 }
 
-                Section("Extension Setup") {
+                Section("label.extension_setup") {
                     Text(store.mobileGuidanceReport.summary)
                         .foregroundStyle(store.mobileGuidanceReport.needsUserAction ? .orange : .secondary)
                     Text(store.mobileGuidanceReport.shareActionCapabilities.favoriteReorderGuidance)
@@ -54,9 +54,9 @@ public struct MobileShareImportView: View {
                     }
                 }
             }
-            .navigationTitle("Save to PasteBuddy")
+            .navigationTitle("action.save_to_pastebuddy")
             .toolbar {
-                Button("Save") {
+                Button("action.save") {
                     save()
                 }
             }
@@ -68,6 +68,14 @@ public struct MobileShareImportView: View {
             ?? input.urlString
             ?? input.fileURLString
             ?? (input.imageData?.isEmpty == false ? "Image data" : "No preview")
+    }
+
+    private var displayTitle: String {
+        guard let title = input.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return PasteBuddyLocalization.string("label.untitled", defaultValue: "Untitled")
+        }
+        return title
     }
 
     private func save() {
@@ -93,28 +101,28 @@ public struct MobileOnboardingGuidanceView: View {
 
     public var body: some View {
         List {
-            Section("Status") {
+            Section("label.status") {
                 Label(report.summary, systemImage: report.needsUserAction ? "exclamationmark.circle" : "checkmark.circle")
                     .foregroundStyle(report.needsUserAction ? .orange : .green)
 
-                LabeledContent("Automatic Capture") {
+                LabeledContent("label.automatic_capture") {
                     Text(report.pastePermissionGuidance.automaticCaptureStatus.displayName)
                         .foregroundStyle(report.canAttemptAutomaticPasteCapture ? .green : .orange)
                 }
 
-                LabeledContent("Manual Imports") {
-                    Text(report.canUseManualExtensionImports ? "Available" : "Optional")
+                LabeledContent("label.manual_imports") {
+                    Text(report.canUseManualExtensionImports ? "state.available" : "state.optional")
                         .foregroundStyle(report.canUseManualExtensionImports ? .green : .secondary)
                 }
             }
 
-            Section("Paste Permission") {
+            Section("action.paste_permission") {
                 Text(report.pastePermissionGuidance.title)
                     .font(.subheadline.weight(.semibold))
                 Text(report.pastePermissionGuidance.detail)
                     .foregroundStyle(.secondary)
                 if report.pastePermissionGuidance.shouldOfferSettingsAction {
-                    LabeledContent("Settings") {
+                    LabeledContent("label.settings") {
                         Text(report.pastePermissionGuidance.settingsPath)
                     }
                 }
@@ -126,7 +134,7 @@ public struct MobileOnboardingGuidanceView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Guidance") {
+            Section("label.guidance") {
                 ForEach(report.cards) { card in
                     MobileGuidanceCardRow(card: card)
                 }
@@ -203,10 +211,10 @@ public struct MobileKeyboardHistoryView: View {
     public var body: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("PasteBuddy")
+                Text("brand.pastebuddy")
                     .font(.headline)
                 Spacer()
-                Text(store.snapshot.mobile.hasKeyboardFullAccess ? "Full Access" : "Limited")
+                Text(store.snapshot.mobile.hasKeyboardFullAccess ? "label.full_access" : "label.limited")
                     .font(.caption)
                     .foregroundStyle(store.snapshot.mobile.hasKeyboardFullAccess ? .green : .secondary)
             }
@@ -216,15 +224,15 @@ public struct MobileKeyboardHistoryView: View {
                     Button {
                         store.selectedScope = .history
                     } label: {
-                        Label("History", systemImage: "clock.arrow.circlepath")
+                        Label("label.history", systemImage: "clock.arrow.circlepath")
                     }
                     Button {
                         store.selectedScope = .pasteStack
                     } label: {
-                        Label("Paste Stack", systemImage: "tray")
+                        Label("action.paste_stack", systemImage: "tray")
                     }
                     if !store.snapshot.pinboards.isEmpty {
-                        Section("Pinboards") {
+                        Section("label.pinboards") {
                             ForEach(store.snapshot.pinboards) { pinboard in
                                 Button {
                                     store.selectedScope = .pinboard(pinboard.id)
@@ -241,7 +249,7 @@ public struct MobileKeyboardHistoryView: View {
                 Spacer()
 
                 if store.mobileGuidanceReport.keyboardCapabilities.supportsDragAndDrop {
-                    Label("Drag", systemImage: "hand.draw")
+                    Label("label.drag", systemImage: "hand.draw")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -284,7 +292,7 @@ public struct MobileKeyboardHistoryView: View {
                     Button {
                         insert(item, format: .plainText)
                     } label: {
-                        Label("Insert", systemImage: "keyboard")
+                        Label("action.insert", systemImage: "keyboard")
                     }
 
                     Button {
@@ -292,7 +300,7 @@ public struct MobileKeyboardHistoryView: View {
                             ? "Copied for manual paste."
                             : "Copy is unavailable in this environment."
                     } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label("action.copy", systemImage: "doc.on.doc")
                     }
 
                     Button {
@@ -300,7 +308,7 @@ public struct MobileKeyboardHistoryView: View {
                             ? "Copied plain text for manual paste."
                             : "Plain text copy is unavailable in this environment."
                     } label: {
-                        Label("Copy Plain Text", systemImage: "textformat")
+                        Label("action.copy_plain_text", systemImage: "textformat")
                     }
 
                     if !store.snapshot.pinboards.isEmpty {
@@ -312,7 +320,7 @@ public struct MobileKeyboardHistoryView: View {
                                 }
                             }
                         } label: {
-                            Label("Pin to Pinboard", systemImage: "pin")
+                            Label("action.pin_to_pinboard", systemImage: "pin")
                         }
                     }
                 }

@@ -39,11 +39,13 @@ struct PasteBuddyApp: App {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("clipboardShelfPlacement") private var shelfPlacementRawValue = ClipboardShelfPlacement.top.rawValue
     @State private var store = PasteBuddyStore()
     @State private var monitor: ClipboardMonitor?
     @State private var storeLoadGate = PasteBuddyRuntimeLoadGate()
     @State private var shelfPanelController: ClipboardShelfPanelController?
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
+    @State private var statusItemController: PasteBuddyStatusItemController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
     @State private var isShowingNewTextItem = false
     @State private var mainWindowLaunchCoordinator = MainWindowLaunchCoordinator()
@@ -61,87 +63,6 @@ struct PasteBuddyApp: App {
 
         Settings {
             SettingsView(store: store)
-        }
-
-        MenuBarExtra {
-            Label(localized(store.macMenuBarStatus.captureStatusLine), systemImage: store.macMenuBarStatus.systemImageName)
-            Text(localized(store.macMenuBarStatus.captureDetail))
-            Text(localized(store.macMenuBarStatus.launchAtLoginStatusLine))
-
-            Divider()
-
-            Button("Show Clipboard Shelf") {
-                Task { @MainActor in
-                    await toggleClipboardShelf()
-                }
-            }
-            .keyboardShortcut("v", modifiers: [.command, .shift])
-
-            Button("Open PasteBuddy") {
-                Task { @MainActor in
-                    await openMainWindow()
-                }
-            }
-
-            Menu("Open Settings") {
-                ForEach(store.macMenuBarStatus.settingsDestinations) { destination in
-                    Button {
-                        store.requestSettingsDestination(destination)
-                        openSettings()
-                    } label: {
-                        Label(localizedSettingsTitle(destination), systemImage: destination.systemImageName)
-                    }
-                }
-            }
-
-            Button(localized(store.snapshot.general.launchAtLoginEnabled ? "Disable Launch at Login" : "Enable Launch at Login")) {
-                store.setLaunchAtLoginEnabled(
-                    !store.snapshot.general.launchAtLoginEnabled,
-                    applySystemRegistration: LaunchAtLoginService.isAvailable
-                )
-            }
-            .disabled(!LaunchAtLoginService.isAvailable)
-
-            Divider()
-
-            Button(localized(store.isPasteStackActive ? "Stop Paste Stack" : "Start Paste Stack")) {
-                store.togglePasteStack()
-            }
-            Button("Paste Next Stack Item") {
-                Task { @MainActor in
-                    if let item = store.pasteNextStackItem() {
-                        store.recordDirectPasteResult(
-                            await Self.pasteItemToTarget(
-                                item,
-                                format: store.defaultPasteFormat,
-                                tracker: frontmostApplicationTracker
-                            )
-                        )
-                    }
-                }
-            }
-            .disabled(store.pasteStackItems.isEmpty)
-            Divider()
-            Button(localized(store.macMenuBarStatus.captureActionTitle)) {
-                store.toggleCapturePaused()
-            }
-            Button("Pause Capture for 15 Minutes") {
-                store.pauseCapture(for: 15 * 60)
-            }
-            Button("Pause Capture for 1 Hour") {
-                store.pauseCapture(for: 60 * 60)
-            }
-            Divider()
-            ForEach(store.snapshot.items.prefix(6)) { item in
-                Button(item.title.menuBarTitle) {
-                    PasteboardWriter.copy(item)
-                }
-            }
-        } label: {
-            Label(localized(store.macMenuBarStatus.title), systemImage: store.macMenuBarStatus.systemImageName)
-                .task {
-                    await startRuntimeIfNeeded()
-                }
         }
     }
 
@@ -183,14 +104,14 @@ struct PasteBuddyApp: App {
                 }
         }
         .commands {
-            CommandMenu("Clipboard") {
-                Button("New Text Item") {
+            CommandMenu("label.clipboard") {
+                Button("label.new_text_item") {
                     Task { @MainActor in
                         await presentNewTextItemSheet()
                     }
                 }
 
-                Button("Open Clipboard Shelf") {
+                Button("action.open_clipboard_shelf") {
                     Task { @MainActor in
                         await toggleClipboardShelf()
                     }
@@ -199,33 +120,33 @@ struct PasteBuddyApp: App {
 
                 Divider()
 
-                Button(localized(store.isCapturePaused ? "Resume Capture" : "Pause Capture")) {
+                Button(localized(store.isCapturePaused ? "action.resume_capture" : "action.pause_capture")) {
                     store.toggleCapturePaused()
                 }
 
-                Button("Pause Capture for 15 Minutes") {
+                Button("action.pause_capture_for_15_minutes") {
                     store.pauseCapture(for: 15 * 60)
                 }
 
-                Button("Pause Capture for 1 Hour") {
+                Button("action.pause_capture_for_1_hour") {
                     store.pauseCapture(for: 60 * 60)
                 }
 
                 Divider()
 
-                Button("Clear Filters") {
+                Button("action.clear_filters") {
                     clearSearchAndFilters()
                 }
                 .disabled(!canClearSearchAndFilters)
 
                 Divider()
 
-                Button(localized(store.isPasteStackActive ? "Stop Paste Stack" : "Activate Paste Stack")) {
+                Button(localized(store.isPasteStackActive ? "action.stop_paste_stack" : "label.activate_paste_stack")) {
                     store.togglePasteStack()
                 }
                 .pasteBuddyKeyboardShortcut(store.snapshot.shortcuts.activatePasteStack)
 
-                Button("Paste Next Stack Item") {
+                Button("action.paste_next_stack_item") {
                     Task { @MainActor in
                         if let item = store.pasteNextStackItem() {
                             store.recordDirectPasteResult(
@@ -241,7 +162,7 @@ struct PasteBuddyApp: App {
                 .pasteBuddyKeyboardShortcut(store.snapshot.shortcuts.pasteNextStackItem)
                 .disabled(store.pasteStackItems.isEmpty)
 
-                Button("Reverse Paste Stack") {
+                Button("action.reverse_paste_stack") {
                     store.reversePasteStackDirection()
                 }
                 .keyboardShortcut("r", modifiers: [.command, .option])
@@ -249,13 +170,13 @@ struct PasteBuddyApp: App {
 
                 Divider()
 
-                Button("Copy PasteBuddy Item") {
+                Button("action.copy_pastebuddy_item") {
                     PasteboardWriter.copy(store.selectedItemsInDisplayOrder)
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
-                Button("Paste PasteBuddy Item") {
+                Button("action.paste_pastebuddy_item") {
                     Task { @MainActor in
                         let items = store.selectedItemsInDisplayOrder
                         store.recordDirectPasteResult(
@@ -269,13 +190,13 @@ struct PasteBuddyApp: App {
                 }
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
-                Button("Copy PasteBuddy Item as Plain Text") {
+                Button("action.copy_pastebuddy_item_as_plain") {
                     PasteboardWriter.copy(store.selectedItemsInDisplayOrder, format: .plainText)
                 }
                 .keyboardShortcut("c", modifiers: [.command, .control])
                 .disabled(store.selectedItemsInDisplayOrder.isEmpty)
 
-                Button("Paste PasteBuddy Item as Plain Text") {
+                Button("action.paste_pastebuddy_item_as_plain") {
                     Task { @MainActor in
                         let items = store.selectedItemsInDisplayOrder
                         store.recordDirectPasteResult(
@@ -293,7 +214,7 @@ struct PasteBuddyApp: App {
                     Divider()
 
                     ForEach(1...9, id: \.self) { index in
-                        Button("Quick Paste \(index)") {
+                        Button(localized("format.quick_paste_index", index)) {
                             Task { @MainActor in
                                 await quickPaste(index, format: store.defaultPasteFormat)
                             }
@@ -308,7 +229,7 @@ struct PasteBuddyApp: App {
                     Divider()
 
                     ForEach(1...9, id: \.self) { index in
-                        Button("Quick Paste \(index) as Plain Text") {
+                        Button(localized("format.quick_paste_index_as_plain_text", index)) {
                             Task { @MainActor in
                                 await quickPaste(index, format: .plainText)
                             }
@@ -321,15 +242,15 @@ struct PasteBuddyApp: App {
                     }
                 }
 
-                Button("Undo Delete PasteBuddy Item") {
+                Button("action.undo_delete_pastebuddy_item") {
                     store.undoLastDeletion()
                 }
                 .keyboardShortcut("z", modifiers: [.command])
                 .disabled(!store.canUndoDelete)
             }
 
-            CommandMenu("Pinboard") {
-                Button("New Pinboard") {
+            CommandMenu("label.pinboard") {
+                Button("label.new_pinboard") {
                     Task { @MainActor in
                         await createNewPinboard()
                     }
@@ -337,13 +258,13 @@ struct PasteBuddyApp: App {
 
                 Divider()
 
-                Menu("Pin Selected To") {
+                Menu("action.pin_selected_to") {
                     if store.snapshot.pinboards.isEmpty {
-                        Button("No Pinboards Available") {}
+                        Button("label.no_pinboards_available") {}
                             .disabled(true)
                     } else {
                         ForEach(store.snapshot.pinboards) { pinboard in
-                            Button("Pin to \(pinboard.name)") {
+                            Button(localized("format.pin_to", pinboard.name)) {
                                 pinSelectedItems(to: pinboard.id)
                             }
                             .disabled(!canPinSelection)
@@ -352,7 +273,7 @@ struct PasteBuddyApp: App {
                 }
                 .disabled(!canPinSelection)
 
-                Button("Unpin from Current Pinboard") {
+                Button("action.unpin_from_current_pinboard") {
                     unpinSelectedItemsFromCurrentPinboard()
                 }
                 .disabled(!canUnpinSelectionFromCurrentPinboard)
@@ -373,7 +294,172 @@ struct PasteBuddyApp: App {
     }
 
     private func localizedSettingsTitle(_ destination: MacSettingsDestination) -> String {
-        localized("%@ Settings", localized(destination.displayName))
+        localized("format.settings", localized(destination.displayName))
+    }
+
+    private var shelfPlacement: ClipboardShelfPlacement {
+        get {
+            ClipboardShelfPlacement(rawValue: shelfPlacementRawValue) ?? .top
+        }
+        nonmutating set {
+            shelfPlacementRawValue = newValue.rawValue
+            shelfPanelController?.placement = newValue
+        }
+    }
+
+    private func configureStatusItemIfNeeded() {
+        if statusItemController == nil {
+            statusItemController = PasteBuddyStatusItemController(
+                menuProvider: {
+                    makeStatusItemMenu()
+                }
+            )
+        }
+        updateStatusItem()
+    }
+
+    private func updateStatusItem() {
+        statusItemController?.update(status: store.macMenuBarStatus)
+    }
+
+    private func makeStatusItemMenu() -> NSMenu {
+        let status = store.macMenuBarStatus
+        let menu = NSMenu(title: "brand.pastebuddy")
+        menu.addItem(PasteBuddyStatusItemController.disabledMenuItem(
+            localized(status.captureStatusLine),
+            systemImageName: status.systemImageName
+        ))
+        menu.addItem(PasteBuddyStatusItemController.disabledMenuItem(localized(status.captureDetail)))
+        menu.addItem(PasteBuddyStatusItemController.disabledMenuItem(localized(status.launchAtLoginStatusLine)))
+        menu.addItem(.separator())
+
+        let shelfTitle = shelfPanelController?.isVisible == true ? "action.hide_clipboard_shelf" : "action.show_clipboard_shelf"
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized(shelfTitle),
+            systemImageName: "rectangle.bottomthird.inset.filled"
+        ) {
+            Task { @MainActor in
+                await toggleClipboardShelf()
+            }
+        })
+
+        let shelfPlacementItem = NSMenuItem(title: localized("label.shelf_position"), action: nil, keyEquivalent: "")
+        shelfPlacementItem.image = NSImage(
+            systemSymbolName: shelfPlacement.systemImageName,
+            accessibilityDescription: localized("label.shelf_position")
+        )
+        let shelfPlacementMenu = NSMenu(title: localized("label.shelf_position"))
+
+        let topPlacementItem = PasteBuddyStatusItemController.actionMenuItem(
+            localized("label.shelf_at_top"),
+            systemImageName: ClipboardShelfPlacement.top.systemImageName
+        ) {
+            shelfPlacement = .top
+        }
+        topPlacementItem.state = shelfPlacement == .top ? .on : .off
+        shelfPlacementMenu.addItem(topPlacementItem)
+
+        let bottomPlacementItem = PasteBuddyStatusItemController.actionMenuItem(
+            localized("label.shelf_at_bottom"),
+            systemImageName: ClipboardShelfPlacement.bottom.systemImageName
+        ) {
+            shelfPlacement = .bottom
+        }
+        bottomPlacementItem.state = shelfPlacement == .bottom ? .on : .off
+        shelfPlacementMenu.addItem(bottomPlacementItem)
+
+        shelfPlacementItem.submenu = shelfPlacementMenu
+        menu.addItem(shelfPlacementItem)
+
+        let settingsItem = NSMenuItem(title: localized("action.open_settings"), action: nil, keyEquivalent: "")
+        settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: localized("action.open_settings"))
+        let settingsMenu = NSMenu(title: localized("action.open_settings"))
+        for destination in status.settingsDestinations {
+            settingsMenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+                localizedSettingsTitle(destination),
+                systemImageName: destination.systemImageName
+            ) {
+                store.requestSettingsDestination(destination)
+                openSettings()
+                NSApp.activate(ignoringOtherApps: true)
+            })
+        }
+        settingsItem.submenu = settingsMenu
+        menu.addItem(settingsItem)
+
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized(store.snapshot.general.launchAtLoginEnabled ? "action.disable_launch_at_login" : "action.enable_launch_at_login"),
+            systemImageName: "poweron",
+            enabled: LaunchAtLoginService.isAvailable
+        ) {
+            store.setLaunchAtLoginEnabled(
+                !store.snapshot.general.launchAtLoginEnabled,
+                applySystemRegistration: LaunchAtLoginService.isAvailable
+            )
+            updateStatusItem()
+        })
+
+        menu.addItem(.separator())
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized(store.isPasteStackActive ? "action.stop_paste_stack" : "action.start_paste_stack"),
+            systemImageName: store.isPasteStackActive ? "stop.fill" : "play.fill"
+        ) {
+            store.togglePasteStack()
+        })
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.paste_next_stack_item"),
+            systemImageName: "text.insert",
+            enabled: !store.pasteStackItems.isEmpty
+        ) {
+            Task { @MainActor in
+                if let item = store.pasteNextStackItem() {
+                    store.recordDirectPasteResult(
+                        await Self.pasteItemToTarget(
+                            item,
+                            format: store.defaultPasteFormat,
+                            tracker: frontmostApplicationTracker
+                        )
+                    )
+                }
+            }
+        })
+
+        menu.addItem(.separator())
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized(status.captureActionTitle),
+            systemImageName: store.isCapturePaused ? "play.fill" : "pause.fill"
+        ) {
+            store.toggleCapturePaused()
+            updateStatusItem()
+        })
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.pause_capture_for_15_minutes"),
+            systemImageName: "timer"
+        ) {
+            store.pauseCapture(for: 15 * 60)
+            updateStatusItem()
+        })
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.pause_capture_for_1_hour"),
+            systemImageName: "timer"
+        ) {
+            store.pauseCapture(for: 60 * 60)
+            updateStatusItem()
+        })
+
+        let recentItems = Array(store.snapshot.items.prefix(6))
+        if !recentItems.isEmpty {
+            menu.addItem(.separator())
+            for item in recentItems {
+                menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+                    item.title.menuBarTitle,
+                    systemImageName: item.presentationContentType.systemImageName
+                ) {
+                    PasteboardWriter.copy(item)
+                })
+            }
+        }
+        return menu
     }
 
     private func openMainWindow() async {
@@ -464,6 +550,7 @@ struct PasteBuddyApp: App {
         await storeLoadGate.loadIfNeeded {
             await store.loadAsync()
         }
+        configureStatusItemIfNeeded()
 
         if monitor == nil {
             let createdMonitor = ClipboardMonitor(store: store)
@@ -472,8 +559,10 @@ struct PasteBuddyApp: App {
         }
 
         if shelfPanelController == nil {
+            let statusController = statusItemController
             shelfPanelController = ClipboardShelfPanelController(
                 store: store,
+                placement: shelfPlacement,
                 directPasteItem: { item, format in
                     let hydratedItem = await store.hydratedItem(for: item)
                     return await Self.pasteItemToTarget(hydratedItem, format: format, tracker: frontmostApplicationTracker)
@@ -481,9 +570,13 @@ struct PasteBuddyApp: App {
                 directPasteItems: { items, format in
                     let hydratedItems = await store.hydratedItems(for: items)
                     return await Self.pasteItemsToTarget(hydratedItems, format: format, tracker: frontmostApplicationTracker)
+                },
+                shouldIgnoreDismissalAt: { point in
+                    statusController?.containsScreenPoint(point) == true
                 }
             )
         }
+        shelfPanelController?.placement = shelfPlacement
 
         if panelHotKeyController == nil, shelfPanelController != nil {
             panelHotKeyController = PasteBuddyPanelHotKeyController {

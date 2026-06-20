@@ -15,11 +15,11 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $store.selectedScope) {
             Section {
-                Label("Clipboard History", systemImage: "clock.arrow.circlepath")
+                Label("label.clipboard_history", systemImage: "clock.arrow.circlepath")
                     .tag(PasteScope.history)
             }
 
-            Section("Paste Stack") {
+            Section("action.paste_stack") {
                 Label(
                     pasteStackTitle,
                     systemImage: store.isPasteStackActive ? "tray.full.fill" : "tray"
@@ -30,7 +30,7 @@ struct SidebarView: View {
                     store.togglePasteStack()
                 } label: {
                     Label(
-                        localized(store.isPasteStackActive ? "Stop Collecting" : "Start Collecting"),
+                        localized(store.isPasteStackActive ? "action.stop_collecting" : "action.start_collecting"),
                         systemImage: store.isPasteStackActive ? "stop.circle" : "play.circle"
                     )
                 }
@@ -43,8 +43,27 @@ struct SidebarView: View {
                 .disabled(store.pasteStackItems.isEmpty)
             }
 
-            Section("Pinboards") {
-                ForEach(store.snapshot.pinboards) { pinboard in
+            Section("label.smart_groups") {
+                ForEach(SmartPinboardCategory.allCases) { category in
+                    Button {
+                        let pinboard = store.syncSmartPinboard(for: category)
+                        store.selectedScope = .pinboard(pinboard.id)
+                    } label: {
+                        SidebarSmartGroupRow(
+                            title: localized(category.displayName),
+                            count: store.smartPinboardItemCount(for: category),
+                            systemImageName: category.systemImageName,
+                            color: Color(hex: category.colorHex) ?? .accentColor,
+                            isSelected: isSmartCategorySelected(category)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(localized("format.smart_group", localized(category.displayName)))
+                }
+            }
+
+            Section("label.pinboards") {
+                ForEach(store.userPinboards) { pinboard in
                     Label(pinboard.name, systemImage: "pin.fill")
                         .foregroundStyle(differentiateWithoutColor ? Color.primary : (Color(hex: pinboard.colorHex) ?? .primary))
                         .tag(PasteScope.pinboard(pinboard.id))
@@ -66,17 +85,17 @@ struct SidebarView: View {
                                     .fill(.tint.opacity(0.16))
                             }
                         }
-                        .accessibilityHint("Drop clipboard items here to pin them.")
-                        .accessibilityLabel(localized("Pinboard %@", pinboard.name))
-                        .accessibilityValue(localized("Color %@", pinboard.colorHex))
+                        .accessibilityHint("message.drop_clipboard_items_here_to_pin_them")
+                        .accessibilityLabel(localized("format.pinboard", pinboard.name))
+                        .accessibilityValue(localized("format.color", pinboard.colorHex))
                         .contextMenu {
-                            Button("Edit Pinboard") {
+                            Button("label.edit_pinboard") {
                                 renameDraft = PinboardRenameDraft(id: pinboard.id, name: pinboard.name, colorHex: pinboard.colorHex)
                             }
-                            Button("Share Pinboard") {
+                            Button("action.share_pinboard") {
                                 sharingDraft = PinboardSharingDraft(id: pinboard.id)
                             }
-                            Button("Delete Pinboard", role: .destructive) {
+                            Button("action.delete_pinboard", role: .destructive) {
                                 deleteDraft = PinboardDeleteDraft(
                                     id: pinboard.id,
                                     name: pinboard.name
@@ -85,21 +104,21 @@ struct SidebarView: View {
                         }
                 }
                 .onMove { offsets, offset in
-                    store.movePinboards(fromOffsets: offsets, toOffset: offset)
+                    store.moveUserPinboards(fromOffsets: offsets, toOffset: offset)
                 }
             }
 
-            Section("Filters") {
+            Section("label.filters") {
                 Menu {
-                    Picker(localized("Type"), selection: $store.contentTypeFilter) {
-                        Text(localized("Any Type")).tag(nil as ClipboardContentType?)
+                    Picker(localized("label.type"), selection: $store.contentTypeFilter) {
+                        Text(localized("label.any_type")).tag(nil as ClipboardContentType?)
                         ForEach(ClipboardContentType.allCases) { type in
                             Text(localized(type.displayName)).tag(Optional(type))
                         }
                     }
                 } label: {
                     SidebarFilterRow(
-                        title: localized("Type"),
+                        title: localized("label.type"),
                         value: contentTypeFilterTitle,
                         systemImageName: "doc.text.magnifyingglass",
                         isActive: store.contentTypeFilter != nil
@@ -107,46 +126,46 @@ struct SidebarView: View {
                 }
 
                 Menu {
-                    Picker(localized("App"), selection: $store.sourceAppFilter) {
-                        Text(localized("Any App")).tag(nil as String?)
+                    Picker(localized("label.app"), selection: $store.sourceAppFilter) {
+                        Text(localized("label.any_app")).tag(nil as String?)
                         ForEach(store.availableSourceApps, id: \.self) { appName in
                             Text(appName).tag(Optional(appName))
                         }
                     }
                 } label: {
                     SidebarFilterRow(
-                        title: localized("App"),
-                        value: store.sourceAppFilter ?? localized("Any App"),
+                        title: localized("label.app"),
+                        value: store.sourceAppFilter ?? localized("label.any_app"),
                         systemImageName: "app",
                         isActive: store.sourceAppFilter != nil
                     )
                 }
 
                 Menu {
-                    Picker(localized("Device"), selection: $store.deviceFilter) {
-                        Text(localized("Any Device")).tag(nil as String?)
+                    Picker(localized("label.device"), selection: $store.deviceFilter) {
+                        Text(localized("label.any_device")).tag(nil as String?)
                         ForEach(store.availableDevices, id: \.self) { deviceName in
                             Text(deviceName).tag(Optional(deviceName))
                         }
                     }
                 } label: {
                     SidebarFilterRow(
-                        title: localized("Device"),
-                        value: store.deviceFilter ?? localized("Any Device"),
+                        title: localized("label.device"),
+                        value: store.deviceFilter ?? localized("label.any_device"),
                         systemImageName: "desktopcomputer",
                         isActive: store.deviceFilter != nil
                     )
                 }
 
                 Menu {
-                    Picker(localized("Date"), selection: $store.dateFilter) {
+                    Picker(localized("label.date"), selection: $store.dateFilter) {
                         ForEach(ClipboardDateFilter.allCases) { filter in
                             Text(localized(filter.displayName)).tag(filter)
                         }
                     }
                 } label: {
                     SidebarFilterRow(
-                        title: localized("Date"),
+                        title: localized("label.date"),
                         value: localized(store.dateFilter.displayName),
                         systemImageName: "calendar",
                         isActive: store.dateFilter != .any
@@ -157,30 +176,30 @@ struct SidebarView: View {
                     Button {
                         store.clearFilters()
                     } label: {
-                        Label(localized("Clear Filters"), systemImage: "line.3.horizontal.decrease.circle")
+                        Label(localized("action.clear_filters"), systemImage: "line.3.horizontal.decrease.circle")
                     }
                 }
             }
 
-            Section("Privacy") {
+            Section("label.privacy") {
                 Button {
                     store.toggleCapturePaused()
                 } label: {
-                    Label(store.isCapturePaused ? "Capture Paused" : "Capture Active", systemImage: store.isCapturePaused ? "pause.circle.fill" : "checkmark.shield.fill")
+                    Label(store.isCapturePaused ? "label.capture_paused" : "label.capture_active", systemImage: store.isCapturePaused ? "pause.circle.fill" : "checkmark.shield.fill")
                 }
 
                 Button {
                     guard let application = currentExternalApplication() else {
-                        privacyActionMessage = localized("No external app is available to exclude.")
+                        privacyActionMessage = localized("message.no_external_app_is_available_to_exclude")
                         return
                     }
                     store.excludeApplication(
                         named: application.localizedName,
                         bundleIdentifier: application.bundleIdentifier
                     )
-                    privacyActionMessage = localized("Excluded %@.", application.localizedName)
+                    privacyActionMessage = localized("format.excluded", application.localizedName)
                 } label: {
-                    Label("Exclude Current App", systemImage: "eye.slash")
+                    Label("label.exclude_current_app", systemImage: "eye.slash")
                 }
 
                 if let privacyActionMessage {
@@ -217,30 +236,35 @@ struct SidebarView: View {
             ),
             presenting: deleteDraft
         ) { draft in
-            Button("Delete Pinboard", role: .destructive) {
+            Button("action.delete_pinboard", role: .destructive) {
                 store.deletePinboard(draft.id)
                 deleteDraft = nil
             }
-            Button("Cancel", role: .cancel) {
+            Button("action.cancel", role: .cancel) {
                 deleteDraft = nil
             }
         } message: { _ in
-            Text("Items stay in clipboard history. Only this pinboard collection is removed.")
+            Text("message.items_stay_in_clipboard_history_only_this")
         }
     }
 
     private var pasteStackTitle: String {
         if store.pasteStackItems.isEmpty {
-            return localized("Paste Stack")
+            return localized("action.paste_stack")
         }
-        return localized("Paste Stack (%d)", store.pasteStackItems.count)
+        return localized("format.paste_stack", store.pasteStackItems.count)
     }
 
     private var contentTypeFilterTitle: String {
         guard let contentTypeFilter = store.contentTypeFilter else {
-            return localized("Any Type")
+            return localized("label.any_type")
         }
         return localized(contentTypeFilter.displayName)
+    }
+
+    private func isSmartCategorySelected(_ category: SmartPinboardCategory) -> Bool {
+        guard let pinboard = store.smartPinboard(for: category) else { return false }
+        return store.selectedScope == .pinboard(pinboard.id)
     }
 
     private func localized(_ key: String) -> String {
@@ -253,6 +277,33 @@ struct SidebarView: View {
             locale: Locale.current,
             arguments: arguments
         )
+    }
+}
+
+private struct SidebarSmartGroupRow: View {
+    let title: String
+    let count: Int
+    let systemImageName: String
+    let color: Color
+    let isSelected: Bool
+
+    var body: some View {
+        Label {
+            HStack {
+                Text(title)
+                Spacer(minLength: 8)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } icon: {
+            Image(systemName: systemImageName)
+                .foregroundStyle(isSelected ? Color.accentColor : color)
+        }
+        .contentShape(Rectangle())
+        .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
     }
 }
 
@@ -306,10 +357,10 @@ private struct RenamePinboardSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Edit Pinboard")
+            Text("label.edit_pinboard")
                 .font(.headline)
 
-            TextField("Name", text: $name)
+            TextField("label.name", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit {
                     onSave(name, colorHex)
@@ -338,17 +389,17 @@ private struct RenamePinboardSheet: View {
                             }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(String(format: NSLocalizedString("Pinboard color %@", comment: ""), hex))
-                    .accessibilityValue(NSLocalizedString(colorHex.uppercased() == hex ? "Selected" : "Not selected", comment: ""))
+                    .accessibilityLabel(String(format: NSLocalizedString("format.pinboard_color", comment: ""), hex))
+                    .accessibilityValue(NSLocalizedString(colorHex.uppercased() == hex ? "state.selected" : "label.not_selected", comment: ""))
                 }
             }
 
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) {
+                Button("action.cancel", role: .cancel) {
                     onCancel()
                 }
-                Button("Save") {
+                Button("action.save") {
                     onSave(name, colorHex)
                 }
                 .keyboardShortcut(.defaultAction)

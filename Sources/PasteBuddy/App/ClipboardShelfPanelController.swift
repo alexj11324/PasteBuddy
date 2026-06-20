@@ -4,6 +4,31 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 
+enum ClipboardShelfPlacement: String, CaseIterable, Identifiable {
+    case top
+    case bottom
+
+    var id: String { rawValue }
+
+    var menuTitle: String {
+        switch self {
+        case .top:
+            "Shelf at Top"
+        case .bottom:
+            "Shelf at Bottom"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .top:
+            "rectangle.topthird.inset.filled"
+        case .bottom:
+            "rectangle.bottomthird.inset.filled"
+        }
+    }
+}
+
 @MainActor
 final class ClipboardShelfPanelController {
     private static let panelCornerRadius: CGFloat = 28
@@ -13,6 +38,13 @@ final class ClipboardShelfPanelController {
     private let store: PasteBuddyStore
     private let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     private let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
+    private let shouldIgnoreDismissalAt: @MainActor (CGPoint) -> Bool
+    var placement: ClipboardShelfPlacement {
+        didSet {
+            guard oldValue != placement, let panel else { return }
+            positionVisiblePanel(panel)
+        }
+    }
     private var panel: ClipboardShelfPanel?
     private var localMouseDownMonitor: Any?
     private var globalMouseDownMonitor: Any?
@@ -25,12 +57,16 @@ final class ClipboardShelfPanelController {
 
     init(
         store: PasteBuddyStore,
+        placement: ClipboardShelfPlacement = .top,
         directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
-        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
+        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
+        shouldIgnoreDismissalAt: @escaping @MainActor (CGPoint) -> Bool = { _ in false }
     ) {
         self.store = store
+        self.placement = placement
         self.directPasteItem = directPasteItem
         self.directPasteItems = directPasteItems
+        self.shouldIgnoreDismissalAt = shouldIgnoreDismissalAt
     }
 
     var isVisible: Bool {
@@ -51,7 +87,7 @@ final class ClipboardShelfPanelController {
         let panel = panel ?? makePanel()
         self.panel = panel
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
-        let finalFrame = bottomAttachedFrame(for: panel)
+        let finalFrame = attachedFrame(for: panel)
         PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
         isAnimatingPanelOut = false
         panelAnimationGeneration += 1
@@ -63,7 +99,7 @@ final class ClipboardShelfPanelController {
         panel.makeKey()
         animatePanelContentIn(panel)
         PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
-        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
+        postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_opened", comment: ""))
         startDismissalMonitoring(for: panel)
     }
 
@@ -79,7 +115,7 @@ final class ClipboardShelfPanelController {
         panel.animationBehavior = .none
         resetPanelContentPresentation(panel)
         panel.orderOut(nil)
-        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+        postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_closed", comment: ""))
     }
 
     func hide() {
@@ -94,7 +130,7 @@ final class ClipboardShelfPanelController {
             panel.animationBehavior = .none
             resetPanelContentPresentation(panel)
             panel.orderOut(nil)
-            postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+            postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_closed", comment: ""))
             return
         }
 
@@ -108,7 +144,7 @@ final class ClipboardShelfPanelController {
                 self.isAnimatingPanelOut = false
                 self.resetPanelContentPresentation(panel)
                 panel.orderOut(nil)
-                self.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+                self.postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_closed", comment: ""))
             }
         }
     }
@@ -120,7 +156,7 @@ final class ClipboardShelfPanelController {
             backing: .buffered,
             defer: false
         )
-        let shelfTitle = NSLocalizedString("Clipboard Shelf", comment: "")
+        let shelfTitle = NSLocalizedString("label.clipboard_shelf", comment: "")
         panel.title = shelfTitle
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -210,15 +246,36 @@ final class ClipboardShelfPanelController {
         layer.transform = CATransform3DIdentity
     }
 
-    private func bottomAttachedFrame(for panel: NSPanel) -> NSRect {
+    private func attachedFrame(for panel: NSPanel) -> NSRect {
         let screen = activeScreen()
         let screenFrame = screen.frame
         let height = panelHeight(for: panel, in: screenFrame)
-        return NSRect(
-            x: screenFrame.minX,
-            y: screenFrame.minY,
-            width: screenFrame.width,
+        return Self.attachedFrame(
+            for: placement,
+            screenFrame: screenFrame,
+            visibleFrame: screen.visibleFrame,
             height: height
+        )
+    }
+
+    nonisolated static func attachedFrame(
+        for placement: ClipboardShelfPlacement,
+        screenFrame: CGRect,
+        visibleFrame: CGRect,
+        height: CGFloat
+    ) -> CGRect {
+        let resolvedHeight = min(max(height, 0), screenFrame.height)
+        let y = switch placement {
+        case .top:
+            max(screenFrame.minY, min(visibleFrame.maxY, screenFrame.maxY) - resolvedHeight)
+        case .bottom:
+            screenFrame.minY
+        }
+        return CGRect(
+            x: screenFrame.minX,
+            y: y,
+            width: screenFrame.width,
+            height: resolvedHeight
         )
     }
 
@@ -234,7 +291,7 @@ final class ClipboardShelfPanelController {
     }
 
     private func positionVisiblePanel(_ panel: NSPanel) {
-        let finalFrame = bottomAttachedFrame(for: panel)
+        let finalFrame = attachedFrame(for: panel)
         panel.setFrame(finalFrame, display: panel.isVisible)
     }
 
@@ -334,6 +391,9 @@ final class ClipboardShelfPanelController {
 
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
+        if shouldIgnoreDismissalAt(NSEvent.mouseLocation) {
+            return
+        }
         let keyWindow = NSApp.keyWindow
         if keyWindow === panel || Self.isShelfAuxiliaryWindow(keyWindow) {
             return
@@ -347,7 +407,12 @@ final class ClipboardShelfPanelController {
             return
         }
         ignoreOutsideClicksUntil = nil
-        if !panel.frame.contains(location) {
+        if Self.shouldDismissForOutsideClick(
+            at: location,
+            panelFrame: panel.frame,
+            isShelfAuxiliaryWindowHit: shelfAuxiliaryWindowContains(location),
+            isIgnoredDismissalTargetHit: shouldIgnoreDismissalAt(location)
+        ) {
             hide()
         }
     }
@@ -364,7 +429,29 @@ final class ClipboardShelfPanelController {
         if window.identifier?.rawValue == ClipboardShelfWindowIdentifiers.sourceAppSuggestionPanel {
             return true
         }
-        return String(describing: type(of: window)).contains("Menu")
+        return isShelfAuxiliaryWindowClassName(String(describing: type(of: window)))
+    }
+
+    static func isShelfAuxiliaryWindowClassName(_ className: String) -> Bool {
+        className.contains("Menu") || className.contains("Popover")
+    }
+
+    static func shouldDismissForOutsideClick(
+        at location: CGPoint,
+        panelFrame: CGRect,
+        isShelfAuxiliaryWindowHit: Bool,
+        isIgnoredDismissalTargetHit: Bool
+    ) -> Bool {
+        guard !isIgnoredDismissalTargetHit else { return false }
+        return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
+    }
+
+    private func shelfAuxiliaryWindowContains(_ location: CGPoint) -> Bool {
+        NSApp.windows.contains { window in
+            window.isVisible
+                && Self.isShelfAuxiliaryWindow(window)
+                && window.frame.contains(location)
+        }
     }
 
     private func closeShelfAuxiliaryWindows() {

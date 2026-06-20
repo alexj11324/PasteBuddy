@@ -75,6 +75,8 @@ Shortcuts and Siri-capable system surfaces are documented in
 
 Accessibility and localization readiness notes are tracked in
 [Accessibility And Localization Baseline](docs/ACCESSIBILITY_LOCALIZATION.md).
+The Dify-backed String Catalog maintenance flow is documented in
+[Localization Workflow](docs/LOCALIZATION_WORKFLOW.md).
 
 ## iOS And iPadOS
 

@@ -28,20 +28,20 @@ final class ShareActionViewController: UIViewController {
     private func configureView() {
         view.backgroundColor = .systemBackground
 
-        titleLabel.text = source == .shareExtension ? "Save to PasteBuddy" : "Copy to PasteBuddy"
+        titleLabel.text = source == .shareExtension ? localized("action.save_to_pastebuddy") : localized("action.copy_to_pastebuddy")
         titleLabel.font = .preferredFont(forTextStyle: .title2)
         titleLabel.adjustsFontForContentSizeCategory = true
 
-        messageLabel.text = "Preparing shared content..."
+        messageLabel.text = localized("message.preparing_shared_content")
         messageLabel.font = .preferredFont(forTextStyle: .body)
         messageLabel.adjustsFontForContentSizeCategory = true
         messageLabel.numberOfLines = 0
         messageLabel.textColor = .secondaryLabel
 
-        doneButton.setTitle("Done", for: .normal)
+        doneButton.setTitle(localized("action.done"), for: .normal)
         doneButton.addTarget(self, action: #selector(done), for: .touchUpInside)
 
-        retryButton.setTitle("Retry", for: .normal)
+        retryButton.setTitle(localized("action.retry"), for: .normal)
         retryButton.addTarget(self, action: #selector(retry), for: .touchUpInside)
         retryButton.isHidden = true
 
@@ -79,7 +79,7 @@ final class ShareActionViewController: UIViewController {
     private func importSharedContent() async {
         retryButton.isHidden = true
         activityIndicator.startAnimating()
-        messageLabel.text = "Saving shared content to encrypted history..."
+        messageLabel.text = localized("message.saving_shared_content_to_encrypted_history")
 
         let providers = providersFromExtensionContext()
         guard !providers.isEmpty else {
@@ -131,5 +131,9 @@ final class ShareActionViewController: UIViewController {
 
     @objc private func retry() {
         Task { await importSharedContent() }
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
     }
 }

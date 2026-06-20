@@ -28,49 +28,49 @@ struct ItemListView: View {
                             ClipboardItemDragProvider.provider(for: draggableItems(for: item))
                         }
                         .contextMenu {
-                            Button("Copy") {
+                            Button("action.copy") {
                                 PasteboardWriter.copy(item)
                             }
-                            Button("Copy as Plain Text") {
+                            Button("action.copy_as_plain_text") {
                                 PasteboardWriter.copy(item, format: .plainText)
                             }
-                            Button("Paste to Active App") {
+                            Button("action.paste_to_active_app") {
                                 pasteItem(item, format: store.defaultPasteFormat)
                             }
-                            Button("Paste as Plain Text") {
+                            Button("action.paste_as_plain_text") {
                                 pasteItem(item, format: .plainText)
                             }
                             if let url = item.openableURL {
-                                Button("Open") {
+                                Button("action.open") {
                                     NSWorkspace.shared.open(url)
                                 }
                             }
                             if store.selectedScope == .pasteStack {
-                                Button("Remove from Paste Stack") {
+                                Button("action.remove_from_paste_stack") {
                                     store.removeStackItem(item.id)
                                 }
                             }
                             if case .pinboard(let pinboardID) = store.selectedScope {
-                                Button("Remove from Pinboard") {
+                                Button("action.remove_from_pinboard") {
                                     store.removeItem(item.id, fromPinboard: pinboardID)
                                 }
                             }
                             Divider()
                             if case .pinboard(let currentPinboardID) = store.selectedScope {
                                 ForEach(store.snapshot.pinboards.filter { $0.id != currentPinboardID }) { pinboard in
-                                    Button(String(format: localized("Move to %@"), pinboard.name)) {
+                                    Button(String(format: localized("format.move_to"), pinboard.name)) {
                                         store.movePinboardItem(item.id, from: currentPinboardID, to: pinboard.id)
                                     }
                                 }
                             } else {
                                 ForEach(store.snapshot.pinboards) { pinboard in
-                                    Button(String(format: localized("Pin to %@"), pinboard.name)) {
+                                    Button(String(format: localized("format.pin_to"), pinboard.name)) {
                                         store.pinItem(item.id, to: pinboard.id)
                                     }
                                 }
                             }
                             Divider()
-                            Button("Delete", role: .destructive) {
+                            Button("action.delete", role: .destructive) {
                                 store.removeItem(item.id)
                             }
                         }
@@ -109,7 +109,7 @@ struct ItemListView: View {
                     Button {
                         pasteSelectedItems(format: .plainText)
                     } label: {
-                        Label("Plain Text Paste", systemImage: "textformat")
+                        Label("label.plain_text_paste", systemImage: "textformat")
                     }
                     .disabled(!hasSelectedItems)
 
@@ -128,26 +128,26 @@ struct ItemListView: View {
                                 pasteItem(item, format: store.defaultPasteFormat)
                             }
                         } label: {
-                            Label("Paste Next", systemImage: "forward.end")
+                            Label("action.paste_next", systemImage: "forward.end")
                         }
                         .disabled(store.pasteStackItems.isEmpty)
 
                         Button {
                             store.reversePasteStackDirection()
                         } label: {
-                            Label("Reverse", systemImage: "arrow.up.arrow.down")
+                            Label("action.reverse", systemImage: "arrow.up.arrow.down")
                         }
                         .disabled(store.pasteStackItems.isEmpty)
 
                         Button(role: .destructive) {
                             store.clearPasteStack()
                         } label: {
-                            Label("Clear Stack", systemImage: "trash")
+                            Label("action.clear_stack", systemImage: "trash")
                         }
                         .disabled(store.pasteStackItems.isEmpty)
                     }
                 } label: {
-                    Label("More", systemImage: "ellipsis.circle")
+                    Label("label.more", systemImage: "ellipsis.circle")
                 }
                 .disabled(!hasSelectedItems && !hasPasteStackActions)
             }
@@ -157,11 +157,11 @@ struct ItemListView: View {
     private var title: String {
         switch store.selectedScope {
         case .history:
-            localized("History")
+            localized("label.history")
         case .pasteStack:
-            store.isPasteStackActive ? localized("Paste Stack - Collecting") : localized("Paste Stack")
+            store.isPasteStackActive ? localized("action.paste_stack_collecting") : localized("action.paste_stack")
         case .pinboard(let id):
-            store.snapshot.pinboards.first(where: { $0.id == id })?.name ?? localized("Pinboard")
+            store.snapshot.pinboards.first(where: { $0.id == id })?.name ?? localized("label.pinboard")
         }
     }
 
@@ -197,7 +197,7 @@ struct ItemListView: View {
     }
 
     private var copyTitle: String {
-        store.hasMultipleSelectedItems ? localized("Copy Selected") : localized("Copy")
+        store.hasMultipleSelectedItems ? localized("action.copy_selected") : localized("action.copy")
     }
 
     private var hasSelectedItems: Bool {
@@ -209,19 +209,19 @@ struct ItemListView: View {
     }
 
     private var pasteTitle: String {
-        store.hasMultipleSelectedItems ? localized("Paste Selected") : localized("Paste")
+        store.hasMultipleSelectedItems ? localized("action.paste_selected") : localized("action.paste")
     }
 
     private var deleteTitle: String {
-        store.hasMultipleSelectedItems ? localized("Delete Selected") : localized("Delete")
+        store.hasMultipleSelectedItems ? localized("action.delete_selected") : localized("action.delete")
     }
 
     private var reorderHint: String {
-        store.canReorderCurrentPinboard ? localized("Drag to reorder items.") : emptyDescription
+        store.canReorderCurrentPinboard ? localized("message.drag_to_reorder_items") : emptyDescription
     }
 
     private var emptyTitle: String {
-        store.selectedScope == .pasteStack ? localized("Paste Stack is Empty") : localized("No Clipboard Items")
+        store.selectedScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
     }
 
     private var emptySystemImage: String {
@@ -230,9 +230,9 @@ struct ItemListView: View {
 
     private var emptyDescription: String {
         if store.selectedScope == .pasteStack {
-            return store.isPasteStackActive ? localized("Collecting new copies") : localized("Stack collection paused")
+            return store.isPasteStackActive ? localized("label.collecting_new_copies") : localized("label.stack_collection_paused")
         }
-        return localized("Copy text, links, images, or files to start building local history.")
+        return localized("message.copy_text_links_images_or_files_to")
     }
 
     private func localized(_ key: String) -> String {
@@ -246,7 +246,7 @@ private struct PasteOrderPreviewBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Label("Paste Order", systemImage: "list.number")
+                Label("action.paste_order", systemImage: "list.number")
                     .font(.caption.weight(.semibold))
                 Text("\(preview.rows.count) items")
                     .font(.caption)
@@ -264,7 +264,7 @@ private struct PasteOrderPreviewBar: View {
             .scrollIndicators(.hidden)
 
             if preview.fallbackDescription != nil {
-                Label("Multiple selected items paste as plain text in this visible order, keeping mixed content predictable.", systemImage: "textformat")
+                Label("message.multiple_selected_items_paste_as_plain_text", systemImage: "textformat")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -274,7 +274,7 @@ private struct PasteOrderPreviewBar: View {
         .padding(.vertical, 8)
         .background(.bar)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Paste order preview")
+        .accessibilityLabel("action.paste_order_preview")
     }
 }
 
@@ -284,12 +284,12 @@ private struct PasteStackPreviewBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Label("Paste Stack", systemImage: "tray.full")
+                Label("action.paste_stack", systemImage: "tray.full")
                     .font(.caption.weight(.semibold))
                 Text("\(preview.rows.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Items")
+                Text("label.items")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -310,7 +310,7 @@ private struct PasteStackPreviewBar: View {
 
             if let nextRow = preview.nextRow {
                 HStack(spacing: 6) {
-                    Label("Next", systemImage: "forward.end")
+                    Label("label.next", systemImage: "forward.end")
                         .font(.caption.weight(.semibold))
                     Text(nextRow.title)
                         .font(.caption)
@@ -323,17 +323,17 @@ private struct PasteStackPreviewBar: View {
         .padding(.vertical, 8)
         .background(.bar)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Paste stack preview")
+        .accessibilityLabel("action.paste_stack_preview")
     }
 
     @ViewBuilder
     private var collectionStatusLabel: some View {
         if preview.isCollecting {
-            Label("Collecting", systemImage: "record.circle")
+            Label("label.collecting", systemImage: "record.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            Label("Paused", systemImage: "pause.circle")
+            Label("label.paused", systemImage: "pause.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -380,7 +380,7 @@ private struct PasteOrderChip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             String(
-                format: NSLocalizedString("Paste item %d, %@, %@", comment: ""),
+                format: NSLocalizedString("format.paste_item", comment: ""),
                 row.position,
                 row.title,
                 NSLocalizedString(row.contentType.displayName, comment: "")
@@ -447,7 +447,7 @@ struct ClipboardItemRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle)
         .accessibilityValue(accessibilityValue)
-        .accessibilityHint(NSLocalizedString("Select to preview or use the context menu for copy, paste, pin, and delete actions.", comment: ""))
+        .accessibilityHint(NSLocalizedString("message.select_to_preview_or_use_the_context", comment: ""))
     }
 
     private var accessibilityTitle: String {
@@ -455,7 +455,7 @@ struct ClipboardItemRow: View {
         let reuseCategory = NSLocalizedString(item.reuseCategory.displayName, comment: "")
         let labels = item.labels.isEmpty
             ? ""
-            : String(format: NSLocalizedString(", labels: %@", comment: ""), item.labels.joined(separator: ", "))
+            : String(format: NSLocalizedString("format.labels", comment: ""), item.labels.joined(separator: ", "))
         return "\(item.title), \(contentType), \(reuseCategory)\(labels)"
     }
 

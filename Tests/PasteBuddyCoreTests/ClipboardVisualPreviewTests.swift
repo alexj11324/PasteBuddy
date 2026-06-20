@@ -109,6 +109,66 @@ final class ClipboardVisualPreviewTests: XCTestCase {
         XCTAssertEqual(preview.badgeText, "Link")
     }
 
+    func testWholeTextURLPresentsAsLinkPreview() {
+        let item = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Copied URL",
+            payload: ClipboardPayload(text: "https://github.com/hypooo/app-store-price")
+        )
+
+        let preview = item.visualPreview
+
+        XCTAssertEqual(item.presentationContentType, .url)
+        XCTAssertEqual(preview.headline, "github.com")
+        XCTAssertEqual(preview.body, "https://github.com/hypooo/app-store-price")
+        XCTAssertEqual(preview.detail, "Link")
+        XCTAssertEqual(preview.badgeText, "Link")
+        XCTAssertEqual(preview.systemImageName, "link")
+        XCTAssertEqual(item.openableURL?.absoluteString, "https://github.com/hypooo/app-store-price")
+    }
+
+    func testStandaloneWWWTextPresentsAsNormalizedLinkPreview() {
+        let item = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Copied URL",
+            payload: ClipboardPayload(text: "www.example.com/research")
+        )
+
+        let preview = item.visualPreview
+
+        XCTAssertEqual(item.presentationContentType, .url)
+        XCTAssertEqual(preview.headline, "www.example.com")
+        XCTAssertEqual(preview.body, "https://www.example.com/research")
+        XCTAssertEqual(preview.detail, "Link")
+        XCTAssertEqual(preview.badgeText, "Link")
+        XCTAssertEqual(preview.systemImageName, "link")
+        XCTAssertEqual(item.openableURL?.absoluteString, "https://www.example.com/research")
+    }
+
+    func testMixedTextOnlyURLPresentsAsLinkPreview() {
+        let item = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "https://github.com/hypooo/app-store-price",
+            payload: ClipboardPayload(text: "https://github.com/hypooo/app-store-price")
+        )
+
+        let preview = item.visualPreview
+
+        XCTAssertEqual(item.presentationContentType, .url)
+        XCTAssertEqual(preview.headline, "github.com")
+        XCTAssertEqual(preview.body, "https://github.com/hypooo/app-store-price")
+        XCTAssertEqual(preview.detail, "Link")
+        XCTAssertEqual(preview.badgeText, "Link")
+        XCTAssertEqual(preview.systemImageName, "link")
+        XCTAssertEqual(item.openableURL?.absoluteString, "https://github.com/hypooo/app-store-price")
+    }
+
     func testFilePreviewShowsFirstFileAndRemainingCount() {
         let item = ClipboardItem(
             sourceAppName: "Finder",
@@ -150,7 +210,29 @@ final class ClipboardVisualPreviewTests: XCTestCase {
         XCTAssertTrue(preview.prefersImageThumbnail)
     }
 
-    func testMixedPreviewSummarizesContainedTypes() {
+    func testMixedImagePayloadPresentsAsImagePreview() {
+        let item = ClipboardItem(
+            sourceAppName: "PixPin",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Screenshot with metadata",
+            payload: ClipboardPayload(
+                text: "Screenshot metadata",
+                imageData: Data([0x09, 0x08, 0x07]),
+                ocrText: "Screenshot OCR"
+            ),
+            ocrState: .completed(Date())
+        )
+
+        let preview = item.visualPreview
+
+        XCTAssertEqual(item.presentationContentType, .image)
+        XCTAssertEqual(preview.badgeText, "Image")
+        XCTAssertEqual(preview.systemImageName, "photo")
+        XCTAssertTrue(preview.prefersImageThumbnail)
+    }
+
+    func testMixedPreviewWithImageAndFilePrefersImagePresentation() {
         let item = ClipboardItem(
             sourceAppName: "Pages",
             deviceName: "Test Mac",
@@ -166,10 +248,12 @@ final class ClipboardVisualPreviewTests: XCTestCase {
 
         let preview = item.visualPreview
 
+        XCTAssertEqual(item.presentationContentType, .image)
         XCTAssertEqual(preview.headline, "Launch Pack")
         XCTAssertEqual(preview.body, "Launch plan https://example.com file:///Users/alex/Desktop/logo.png")
-        XCTAssertEqual(preview.detail, "text, link, 1 file, image")
-        XCTAssertEqual(preview.badgeText, "Mixed")
+        XCTAssertEqual(preview.detail, "Not needed")
+        XCTAssertEqual(preview.badgeText, "Image")
+        XCTAssertEqual(preview.systemImageName, "photo")
         XCTAssertTrue(preview.prefersImageThumbnail)
     }
 }

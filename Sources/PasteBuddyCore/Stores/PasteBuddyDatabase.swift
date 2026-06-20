@@ -116,7 +116,7 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
                     content_type TEXT NOT NULL,
                     title TEXT NOT NULL,
                     reuse_category TEXT NOT NULL,
-                    dedupe_hash TEXT NOT NULL UNIQUE,
+                    dedupe_hash TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
                     searchable_text TEXT,
                     ocr_text TEXT,
@@ -201,7 +201,101 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
             }
             try migrateInlinePayloadAssets(db: db)
         }
+        migrator.registerMigration("allow duplicate item dedupe hashes") { db in
+            try removeClipboardItemsDedupeUniqueConstraintIfNeeded(db: db)
+        }
         return migrator
+    }
+
+    private static let clipboardItemColumnList = """
+        id, snapshot_order, created_at, updated_at, source_app_name,
+        source_bundle_identifier, device_name, content_type, title,
+        reuse_category, dedupe_hash, payload_json, searchable_text,
+        ocr_text, ocr_state_json, byte_count, thumbnail_asset_id, full_asset_id
+        """
+
+    private static func removeClipboardItemsDedupeUniqueConstraintIfNeeded(db: Database) throws {
+        guard let createSQL = try String.fetchOne(
+            db,
+            sql: "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'clipboard_items'"
+        ),
+              createSQL.localizedCaseInsensitiveContains("dedupe_hash TEXT NOT NULL UNIQUE") else {
+            return
+        }
+
+        try db.execute(sql: "DROP TABLE IF EXISTS pastebuddy_item_labels_backup")
+        try db.execute(sql: "DROP TABLE IF EXISTS pastebuddy_pinboard_items_backup")
+        try db.execute(sql: "CREATE TEMP TABLE pastebuddy_item_labels_backup AS SELECT * FROM item_labels")
+        try db.execute(sql: "CREATE TEMP TABLE pastebuddy_pinboard_items_backup AS SELECT * FROM pinboard_items")
+
+        try db.execute(sql: "DROP TABLE item_labels")
+        try db.execute(sql: "DROP TABLE pinboard_items")
+        try db.execute(sql: "ALTER TABLE clipboard_items RENAME TO clipboard_items_dedupe_unique")
+        try db.execute(sql: """
+            CREATE TABLE clipboard_items (
+                id TEXT PRIMARY KEY,
+                snapshot_order INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                source_app_name TEXT NOT NULL,
+                source_bundle_identifier TEXT,
+                device_name TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                reuse_category TEXT NOT NULL,
+                dedupe_hash TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                searchable_text TEXT,
+                ocr_text TEXT,
+                ocr_state_json TEXT NOT NULL,
+                byte_count INTEGER NOT NULL DEFAULT 0,
+                thumbnail_asset_id TEXT,
+                full_asset_id TEXT
+            )
+            """)
+        try db.execute(sql: """
+            INSERT INTO clipboard_items (\(clipboardItemColumnList))
+            SELECT \(clipboardItemColumnList)
+            FROM clipboard_items_dedupe_unique
+            """)
+        try db.execute(sql: "DROP TABLE clipboard_items_dedupe_unique")
+
+        try db.execute(sql: """
+            CREATE TABLE item_labels (
+                item_id TEXT NOT NULL REFERENCES clipboard_items(id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                normalized_label TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(item_id, normalized_label)
+            )
+            """)
+        try db.execute(sql: """
+            INSERT INTO item_labels (item_id, label, normalized_label, sort_order)
+            SELECT item_id, label, normalized_label, sort_order
+            FROM pastebuddy_item_labels_backup
+            """)
+        try db.execute(sql: """
+            CREATE TABLE pinboard_items (
+                pinboard_id TEXT NOT NULL REFERENCES pinboards(id) ON DELETE CASCADE,
+                item_id TEXT NOT NULL REFERENCES clipboard_items(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(pinboard_id, item_id)
+            )
+            """)
+        try db.execute(sql: """
+            INSERT INTO pinboard_items (pinboard_id, item_id, sort_order)
+            SELECT pinboard_id, item_id, sort_order
+            FROM pastebuddy_pinboard_items_backup
+            """)
+        try db.execute(sql: "DROP TABLE pastebuddy_item_labels_backup")
+        try db.execute(sql: "DROP TABLE pastebuddy_pinboard_items_backup")
+
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_created_at ON clipboard_items(created_at DESC)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_type_created ON clipboard_items(content_type, created_at DESC)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_source_created ON clipboard_items(source_app_name, created_at DESC)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_device_created ON clipboard_items(device_name, created_at DESC)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_dedupe ON clipboard_items(dedupe_hash)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_pinboard_items_order ON pinboard_items(pinboard_id, sort_order)")
     }
 
     private static func migrateInlinePayloadAssets(db: Database) throws {

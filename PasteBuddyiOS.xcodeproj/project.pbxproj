@@ -23,6 +23,14 @@
 		A1000000000000000000000E /* PasteBuddyCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000077 /* PasteBuddyCore */; };
 		A1000000000000000000000F /* PasteBuddyMobile in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000078 /* PasteBuddyMobile */; };
 		A10000000000000000000100 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* Assets.xcassets */; };
+		A10000000000000000000110 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000140 /* Localizable.xcstrings */; };
+		A10000000000000000000111 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000140 /* Localizable.xcstrings */; };
+		A10000000000000000000112 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000140 /* Localizable.xcstrings */; };
+		A10000000000000000000113 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000140 /* Localizable.xcstrings */; };
+		A10000000000000000000114 /* PasteBuddyiOS InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000131 /* PasteBuddyiOS InfoPlist.strings */; };
+		A10000000000000000000115 /* PasteBuddyKeyboard InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000132 /* PasteBuddyKeyboard InfoPlist.strings */; };
+		A10000000000000000000116 /* PasteBuddyShare InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000133 /* PasteBuddyShare InfoPlist.strings */; };
+		A10000000000000000000117 /* PasteBuddyAction InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000134 /* PasteBuddyAction InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -81,6 +89,17 @@
 		A10000000000000000000033 /* PasteBuddyShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PasteBuddyShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000034 /* PasteBuddyActionExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PasteBuddyActionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000101 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A10000000000000000000120 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Sources/PasteBuddy/Resources/en.lproj/Localizable.strings; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000121 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Sources/PasteBuddy/Resources/zh-Hans.lproj/Localizable.strings"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000122 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyiOS/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000123 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Support/InfoPlist/PasteBuddyiOS/zh-Hans.lproj/InfoPlist.strings"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000124 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyKeyboard/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000125 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Support/InfoPlist/PasteBuddyKeyboard/zh-Hans.lproj/InfoPlist.strings"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000126 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyShare/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000127 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Support/InfoPlist/PasteBuddyShare/zh-Hans.lproj/InfoPlist.strings"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000128 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyAction/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000129 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Support/InfoPlist/PasteBuddyAction/zh-Hans.lproj/InfoPlist.strings"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000140 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Sources/PasteBuddy/Resources/Localizable.xcstrings; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +176,8 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000101 /* Assets.xcassets */,
+				A10000000000000000000140 /* Localizable.xcstrings */,
+				A10000000000000000000130 /* Localizable.strings */,
 				A10000000000000000000087 /* InfoPlist */,
 				A10000000000000000000088 /* Entitlements */,
 			);
@@ -194,6 +215,10 @@
 				A10000000000000000000024 /* PasteBuddyKeyboard-Info.plist */,
 				A10000000000000000000028 /* PasteBuddyShare-Info.plist */,
 				A10000000000000000000029 /* PasteBuddyAction-Info.plist */,
+				A10000000000000000000131 /* PasteBuddyiOS InfoPlist.strings */,
+				A10000000000000000000132 /* PasteBuddyKeyboard InfoPlist.strings */,
+				A10000000000000000000133 /* PasteBuddyShare InfoPlist.strings */,
+				A10000000000000000000134 /* PasteBuddyAction InfoPlist.strings */,
 			);
 			path = InfoPlist;
 			sourceTree = "<group>";
@@ -243,6 +268,7 @@
 			buildPhases = (
 				A10000000000000000000015 /* Sources */,
 				A10000000000000000000013 /* Frameworks */,
+				A10000000000000000000103 /* Resources */,
 				A10000000000000000000017 /* Clear Extended Attributes */,
 			);
 			buildRules = (
@@ -264,6 +290,7 @@
 			buildPhases = (
 				A1000000000000000000001A /* Sources */,
 				A10000000000000000000018 /* Frameworks */,
+				A10000000000000000000104 /* Resources */,
 				A1000000000000000000001C /* Clear Extended Attributes */,
 			);
 			buildRules = (
@@ -285,6 +312,7 @@
 			buildPhases = (
 				A1000000000000000000001B /* Sources */,
 				A10000000000000000000019 /* Frameworks */,
+				A10000000000000000000105 /* Resources */,
 				A1000000000000000000001D /* Clear Extended Attributes */,
 			);
 			buildRules = (
@@ -330,6 +358,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = A10000000000000000000080;
@@ -354,6 +383,35 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000100 /* Assets.xcassets in Resources */,
+				A10000000000000000000110 /* Localizable.xcstrings in Resources */,
+				A10000000000000000000114 /* PasteBuddyiOS InfoPlist.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000103 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000111 /* Localizable.xcstrings in Resources */,
+				A10000000000000000000115 /* PasteBuddyKeyboard InfoPlist.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000104 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000112 /* Localizable.xcstrings in Resources */,
+				A10000000000000000000116 /* PasteBuddyShare InfoPlist.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000105 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000113 /* Localizable.xcstrings in Resources */,
+				A10000000000000000000117 /* PasteBuddyAction InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -498,6 +556,54 @@
 			targetProxy = A10000000000000000000044 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		A10000000000000000000130 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A10000000000000000000120 /* en */,
+				A10000000000000000000121 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000131 /* PasteBuddyiOS InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A10000000000000000000122 /* en */,
+				A10000000000000000000123 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000132 /* PasteBuddyKeyboard InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A10000000000000000000124 /* en */,
+				A10000000000000000000125 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000133 /* PasteBuddyShare InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A10000000000000000000126 /* en */,
+				A10000000000000000000127 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000134 /* PasteBuddyAction InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A10000000000000000000128 /* en */,
+				A10000000000000000000129 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		A100000000000000000000B0 /* Debug */ = {

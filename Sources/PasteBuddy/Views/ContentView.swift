@@ -60,19 +60,19 @@ struct ContentView: View {
                 Button {
                     store.createPinboard()
                 } label: {
-                    Label("New Pinboard", systemImage: "plus.circle")
+                    Label("label.new_pinboard", systemImage: "plus.circle")
                 }
 
                 Button {
                     isShowingNewTextItem = true
                 } label: {
-                    Label("New Text Item", systemImage: "square.and.pencil")
+                    Label("label.new_text_item", systemImage: "square.and.pencil")
                 }
 
                 Button {
                     store.undoLastDeletion()
                 } label: {
-                    Label("Undo Delete", systemImage: "arrow.uturn.backward")
+                    Label("action.undo_delete", systemImage: "arrow.uturn.backward")
                 }
                 .disabled(!store.canUndoDelete)
             }
@@ -80,7 +80,7 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingNewTextItem) {
             NewTextItemSheet { title, text in
                 guard store.createTextItem(text: text, title: title) != nil else {
-                    return store.lastErrorMessage ?? NSLocalizedString("PasteBuddy could not create this item.", comment: "")
+                    return store.lastErrorMessage ?? NSLocalizedString("message.pastebuddy_could_not_create_this_item", comment: "")
                 }
                 isShowingNewTextItem = false
                 return nil
@@ -106,7 +106,7 @@ struct ContentView: View {
     }
 
     private var captureActionTitle: String {
-        NSLocalizedString(store.isCapturePaused ? "Resume Capture" : "Pause Capture", comment: "")
+        NSLocalizedString(store.isCapturePaused ? "action.resume_capture" : "action.pause_capture", comment: "")
     }
 }
 
@@ -132,7 +132,7 @@ private struct PrivacyCaptureStatusBar: View {
 
             Spacer()
 
-            Button("Resume") {
+            Button("action.resume") {
                 onResume()
             }
             .buttonStyle(.borderless)
@@ -151,7 +151,7 @@ private struct PrivacyCaptureStatusBar: View {
         case .pausedIndefinitely:
             report.captureStatus.detail
         case .pausedUntil(let date):
-            "\(report.captureStatus.detail) \(String(format: NSLocalizedString("Resumes at %@.", comment: ""), date.formatted(date: .omitted, time: .shortened)))"
+            "\(report.captureStatus.detail) \(String(format: NSLocalizedString("format.resumes_at", comment: ""), date.formatted(date: .omitted, time: .shortened)))"
         }
     }
 }
@@ -187,7 +187,7 @@ private struct DirectPasteStatusBar: View {
                 .buttonStyle(.borderless)
             }
 
-            Button("Dismiss") {
+            Button("action.dismiss") {
                 onDismiss()
             }
             .buttonStyle(.borderless)
@@ -226,10 +226,10 @@ struct NewTextItemSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New Text Item")
+            Text("label.new_text_item")
                 .font(.headline)
 
-            TextField("Title", text: $title)
+            TextField("label.title", text: $title)
                 .textFieldStyle(.roundedBorder)
 
             TextEditor(text: $text)
@@ -245,10 +245,10 @@ struct NewTextItemSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) {
+                Button("action.cancel", role: .cancel) {
                     onCancel()
                 }
-                Button("Create") {
+                Button("action.create") {
                     errorMessage = onSave(title, text)
                 }
                 .keyboardShortcut(.defaultAction)

@@ -17,32 +17,32 @@ public struct MobileClipboardBrowserView: View {
     public var body: some View {
         NavigationSplitView {
             List(selection: scopeBinding) {
-                Section("Library") {
-                    Label("History", systemImage: "clock.arrow.circlepath")
+                Section("label.library") {
+                    Label("label.history", systemImage: "clock.arrow.circlepath")
                         .tag(PasteScope.history)
-                    Label("Paste Stack", systemImage: "tray")
+                    Label("action.paste_stack", systemImage: "tray")
                         .tag(PasteScope.pasteStack)
                 }
 
-                Section("Pinboards") {
+                Section("label.pinboards") {
                     ForEach(store.snapshot.pinboards) { pinboard in
                         pinboardLabel(pinboard)
                     }
                 }
 
-                Section("Setup") {
+                Section("label.setup") {
                     NavigationLink {
                         MobileOnboardingGuidanceView(report: store.mobileGuidanceReport)
-                            .navigationTitle("Mobile Setup")
+                            .navigationTitle("label.mobile_setup")
                     } label: {
-                        Label("Mobile Setup", systemImage: store.mobileGuidanceReport.needsUserAction ? "exclamationmark.circle" : "checkmark.circle")
+                        Label("label.mobile_setup", systemImage: store.mobileGuidanceReport.needsUserAction ? "exclamationmark.circle" : "checkmark.circle")
                     }
                     Text(store.mobileGuidanceReport.summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("PasteBuddy")
+            .navigationTitle("brand.pastebuddy")
         } content: {
             VStack(spacing: 0) {
                 MobileActiveFilterBar(store: store)
@@ -55,19 +55,19 @@ public struct MobileClipboardBrowserView: View {
                             Button {
                                 previewRoute = MobilePreviewRoute(item: item)
                             } label: {
-                                Label("Preview", systemImage: "rectangle.expand.vertical")
+                                Label("label.preview", systemImage: "rectangle.expand.vertical")
                             }
 
                             Button {
                                 MobilePasteboardWriter.copy(item)
                             } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
+                                Label("action.copy", systemImage: "doc.on.doc")
                             }
 
                             Button {
                                 MobilePasteboardWriter.copy(item, format: .plainText)
                             } label: {
-                                Label("Copy Plain Text", systemImage: "textformat")
+                                Label("action.copy_plain_text", systemImage: "textformat")
                             }
 
                             if !store.snapshot.pinboards.isEmpty {
@@ -79,7 +79,7 @@ public struct MobileClipboardBrowserView: View {
                                         }
                                     }
                                 } label: {
-                                    Label("Pin to Pinboard", systemImage: "pin")
+                                    Label("action.pin_to_pinboard", systemImage: "pin")
                                 }
                             }
 
@@ -87,7 +87,7 @@ public struct MobileClipboardBrowserView: View {
                                 Button(role: .destructive) {
                                     store.removeItem(item.id, fromPinboard: pinboardID)
                                 } label: {
-                                    Label("Remove from Pinboard", systemImage: "pin.slash")
+                                    Label("action.remove_from_pinboard", systemImage: "pin.slash")
                                 }
                             }
                         }
@@ -95,13 +95,13 @@ public struct MobileClipboardBrowserView: View {
                             Button {
                                 MobilePasteboardWriter.copy(item, format: .plainText)
                             } label: {
-                                Label("Plain", systemImage: "textformat")
+                                Label("label.plain", systemImage: "textformat")
                             }
 
                             Button {
                                 MobilePasteboardWriter.copy(item)
                             } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
+                                Label("action.copy", systemImage: "doc.on.doc")
                             }
                         }
                 }
@@ -122,48 +122,48 @@ public struct MobileClipboardBrowserView: View {
                     Button {
                         isShowingTextEntry = true
                     } label: {
-                        Label("New Text", systemImage: "square.and.pencil")
+                        Label("label.new_text", systemImage: "square.and.pencil")
                     }
 
                     Menu {
-                        Picker("Type", selection: $store.contentTypeFilter) {
-                            Text("Any Type").tag(nil as ClipboardContentType?)
+                        Picker("label.type", selection: $store.contentTypeFilter) {
+                            Text("label.any_type").tag(nil as ClipboardContentType?)
                             ForEach(ClipboardContentType.allCases) { type in
                                 Text(type.displayName).tag(Optional(type))
                             }
                         }
-                        Picker("Date", selection: $store.dateFilter) {
+                        Picker("label.date", selection: $store.dateFilter) {
                             ForEach(ClipboardDateFilter.allCases) { filter in
                                 Text(filter.displayName).tag(filter)
                             }
                         }
-                        Button("Clear Filters") {
+                        Button("action.clear_filters") {
                             store.clearFilters()
                         }
                         .disabled(!store.hasActiveFilters)
 
-                        Picker("Source App", selection: $store.sourceAppFilter) {
-                            Text("Any App").tag(nil as String?)
+                        Picker("label.source_app", selection: $store.sourceAppFilter) {
+                            Text("label.any_app").tag(nil as String?)
                             ForEach(store.availableSourceApps, id: \.self) { app in
                                 Text(app).tag(Optional(app))
                             }
                         }
 
-                        Picker("Device", selection: $store.deviceFilter) {
-                            Text("Any Device").tag(nil as String?)
+                        Picker("label.device", selection: $store.deviceFilter) {
+                            Text("label.any_device").tag(nil as String?)
                             ForEach(store.availableDevices, id: \.self) { device in
                                 Text(device).tag(Optional(device))
                             }
                         }
                     } label: {
-                        Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
+                        Label("label.filters", systemImage: "line.3.horizontal.decrease.circle")
                     }
 
                     if let selectedItem {
                         Button {
                             previewRoute = MobilePreviewRoute(item: selectedItem)
                         } label: {
-                            Label("Full Screen Preview", systemImage: "rectangle.expand.vertical")
+                            Label("label.full_screen_preview", systemImage: "rectangle.expand.vertical")
                         }
                     }
 
@@ -171,7 +171,7 @@ public struct MobileClipboardBrowserView: View {
                         Button {
                             sharingRoute = MobilePinboardSharingRoute(id: pinboardID)
                         } label: {
-                            Label("Share Pinboard", systemImage: "person.2.badge.plus")
+                            Label("action.share_pinboard", systemImage: "person.2.badge.plus")
                         }
                     }
                 }
@@ -180,7 +180,7 @@ public struct MobileClipboardBrowserView: View {
             if let selectedItem {
                 MobileClipboardItemDetailView(item: selectedItem)
             } else {
-                ContentUnavailableView("Select an Item", systemImage: "doc.on.clipboard")
+                ContentUnavailableView("label.select_an_item", systemImage: "doc.on.clipboard")
             }
         }
         .sheet(item: $sharingRoute) { route in
@@ -257,21 +257,21 @@ private struct MobileTextEntryView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Content") {
-                    TextField("Title", text: $title)
+                Section("label.content") {
+                    TextField("label.title", text: $title)
                     TextEditor(text: $text)
                         .frame(minHeight: 180)
                 }
             }
-            .navigationTitle("New Text")
+            .navigationTitle("label.new_text")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("action.cancel") {
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button("action.save") {
                         save()
                     }
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -315,7 +315,7 @@ private struct MobilePreviewNavigation: View {
             MobileClipboardItemDetailView(item: item, isFullScreen: true)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") {
+                        Button("action.done") {
                             previewRoute = nil
                         }
                     }
@@ -339,7 +339,7 @@ private struct MobileActiveFilterBar: View {
                                 .labelStyle(.titleAndIcon)
                         }
                         .buttonStyle(.borderless)
-                        .accessibilityLabel("Remove \(summary.title)")
+                        .accessibilityLabel(String(format: NSLocalizedString("format.remove", comment: ""), summary.title))
                     }
                 }
                 .padding(.horizontal)
@@ -347,7 +347,7 @@ private struct MobileActiveFilterBar: View {
             }
             .background(.bar)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Active clipboard filters")
+            .accessibilityLabel("label.active_clipboard_filters")
         }
     }
 }
@@ -422,28 +422,28 @@ private struct MobileClipboardItemDetailView: View {
 
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                     GridRow {
-                        Text("Type")
+                        Text("label.type")
                             .foregroundStyle(.secondary)
                         Text(item.contentType.displayName)
                     }
                     GridRow {
-                        Text("Source")
+                        Text("label.source")
                             .foregroundStyle(.secondary)
                         Text(item.sourceAppName)
                     }
                     GridRow {
-                        Text("Device")
+                        Text("label.device")
                             .foregroundStyle(.secondary)
                         Text(item.deviceName)
                     }
                     GridRow {
-                        Text("Category")
+                        Text("label.category")
                             .foregroundStyle(.secondary)
                         Text(item.reuseCategory.displayName)
                     }
                     if !item.labels.isEmpty {
                         GridRow {
-                            Text("Labels")
+                            Text("label.labels")
                                 .foregroundStyle(.secondary)
                             Text(item.labels.joined(separator: ", "))
                         }
@@ -455,20 +455,20 @@ private struct MobileClipboardItemDetailView: View {
                     Button {
                         MobilePasteboardWriter.copy(item)
                     } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label("action.copy", systemImage: "doc.on.doc")
                     }
 
                     Button {
                         MobilePasteboardWriter.copy(item, format: .plainText)
                     } label: {
-                        Label("Plain Text", systemImage: "textformat")
+                        Label("label.plain_text", systemImage: "textformat")
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
-        .navigationTitle("Preview")
+        .navigationTitle("label.preview")
     }
 }
 
@@ -478,7 +478,7 @@ private struct MobileVisualPreviewSummary: View {
     var body: some View {
         let preview = item.visualPreview
         VStack(alignment: .leading, spacing: 6) {
-            Label(preview.badgeText, systemImage: preview.systemImageName)
+            Label(NSLocalizedString(preview.badgeText, comment: ""), systemImage: preview.systemImageName)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(preview.headline)
