@@ -1250,7 +1250,7 @@ struct ShelfExpandedPreview: View {
         }
         .padding(14)
         .frame(width: previewFrameWidth, height: previewFrameHeight, alignment: .topLeading)
-        .background(.regularMaterial)
+        .pasteBuddyGlassSurface(cornerRadius: 18, glassTintOpacity: 0, showsStroke: false)
         .background {
             ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)
                 .frame(width: 0, height: 0)
@@ -1358,11 +1358,8 @@ struct ShelfExpandedPreview: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(12)
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(tint.opacity(0.28), lineWidth: 1)
-        }
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
     }
 
     private func localized(_ key: String) -> String {
@@ -1491,10 +1488,6 @@ private struct ShelfExpandedImagePreview: View {
         }
         .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(tint.opacity(0.25), lineWidth: 1)
-        }
         .accessibilityLabel(localized("label.captured_image_preview"))
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
             let cachedImage = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)

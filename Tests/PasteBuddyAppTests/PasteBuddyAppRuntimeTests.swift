@@ -242,6 +242,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(previewSource.contains("case .upArrow:"))
         XCTAssertTrue(previewSource.contains("case .downArrow:"))
         XCTAssertTrue(previewSource.contains("clipboard-expanded-preview-"))
+        XCTAssertTrue(previewSource.contains(".pasteBuddyGlassSurface(cornerRadius: 18, glassTintOpacity: 0, showsStroke: false)"))
         XCTAssertTrue(previewSource.contains("previewText(ClipboardPlainTextRenderer.plainText(for: item))"))
         XCTAssertFalse(previewSource.contains("Label(localized(item.presentationContentType.displayName)"))
         XCTAssertFalse(previewSource.contains("SourceApplicationIconBadge(item: item, size: 24)"))
@@ -250,6 +251,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(previewSource.contains("TextEditor(text:"))
         XCTAssertFalse(previewSource.contains("onSaveText"))
         XCTAssertFalse(previewSource.contains("Button(\"action.save_text\")"))
+        XCTAssertFalse(previewSource.contains("strokeBorder(tint.opacity"))
+        XCTAssertFalse(previewSource.contains("Color(nsColor: .textBackgroundColor)"))
+        XCTAssertFalse(previewSource.contains(".background(.regularMaterial)"))
+        XCTAssertTrue(previewSource.contains(".scrollContentBackground(.hidden)"))
     }
 
     func testPreviewPresentationUsesNativeCollectionPopoverForShelfAndSidePanel() throws {
@@ -400,6 +405,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(expandedPreviewSource.contains("if !isImageAssetPreview"))
         XCTAssertTrue(imagePreviewSource.contains("let displaySize: CGSize?"))
         XCTAssertTrue(imagePreviewSource.contains(".frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)"))
+        XCTAssertFalse(imagePreviewSource.contains("strokeBorder(tint.opacity"))
         XCTAssertTrue(source.contains("ClipboardImageCache.fittedDisplaySize("))
         XCTAssertFalse(source.contains("import QuickLookUI"))
         XCTAssertFalse(imagePreviewSource.contains("QLPreviewView"))
