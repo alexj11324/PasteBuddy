@@ -359,6 +359,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("panelPresentationID = UUID()"))
         XCTAssertTrue(controllerSource.contains(".id(panelPresentationID)"))
         XCTAssertTrue(controllerSource.contains("resetPanelPresentationState()"))
+        XCTAssertTrue(controllerSource.contains("store.selectSingleItem(store.filteredItems(for: store.selectedScope).first?.id)"))
         XCTAssertTrue(controllerSource.contains("closeShelfAuxiliaryWindows()"))
         XCTAssertTrue(controllerSource.contains("for window in NSApp.windows where Self.isShelfAuxiliaryWindow(window)"))
     }

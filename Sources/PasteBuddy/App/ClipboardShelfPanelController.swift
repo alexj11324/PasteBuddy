@@ -239,6 +239,7 @@ final class ClipboardShelfPanelController {
     private func resetPanelPresentationState() {
         store.searchQuery = ""
         store.clearFilters()
+        store.selectSingleItem(store.filteredItems(for: store.selectedScope).first?.id)
     }
 
     private func configurePanelForCurrentMode(_ panel: ClipboardShelfPanel) {
