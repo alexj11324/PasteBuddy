@@ -24,10 +24,11 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
 
     func update(status: MacMenuBarStatus) {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(
-            systemSymbolName: status.systemImageName,
+        button.image = Self.menuBarIcon(
             accessibilityDescription: NSLocalizedString(status.title, comment: "")
         )
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
         button.toolTip = NSLocalizedString("message.click_for_pastebuddy_menu", comment: "")
         button.setAccessibilityLabel(NSLocalizedString("label.pastebuddy_menu_bar_item", comment: ""))
     }
@@ -82,6 +83,39 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
     private static func image(named systemImageName: String?, description: String) -> NSImage? {
         guard let systemImageName else { return nil }
         return NSImage(systemSymbolName: systemImageName, accessibilityDescription: description)
+    }
+
+    private static func menuBarIcon(accessibilityDescription: String) -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            let path = Self.appIconOutlinePath(in: rect.insetBy(dx: 2.4, dy: 2.2))
+            path.lineWidth = 1.8
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            NSColor.black.setStroke()
+            path.stroke()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = accessibilityDescription
+        return image
+    }
+
+    nonisolated private static func appIconOutlinePath(in rect: CGRect) -> NSBezierPath {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+
+        let path = NSBezierPath()
+        path.move(to: point(0.18, 0.08))
+        path.line(to: point(0.18, 0.72))
+        path.curve(to: point(0.36, 0.92), controlPoint1: point(0.18, 0.84), controlPoint2: point(0.24, 0.92))
+        path.line(to: point(0.62, 0.92))
+        path.curve(to: point(0.95, 0.62), controlPoint1: point(0.82, 0.92), controlPoint2: point(0.95, 0.80))
+        path.curve(to: point(0.66, 0.39), controlPoint1: point(0.95, 0.47), controlPoint2: point(0.82, 0.39))
+        path.curve(to: point(0.51, 0.16), controlPoint1: point(0.57, 0.39), controlPoint2: point(0.53, 0.26))
+        path.curve(to: point(0.34, 0.08), controlPoint1: point(0.47, 0.08), controlPoint2: point(0.40, 0.08))
+        path.close()
+        return path
     }
 }
 
