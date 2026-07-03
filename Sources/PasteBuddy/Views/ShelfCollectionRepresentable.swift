@@ -169,7 +169,6 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         init(_ parent: ShelfCollectionRepresentable) {
             self.parent = parent
             popover.behavior = .applicationDefined
-            popover.animates = false
             super.init()
             popover.delegate = self
         }

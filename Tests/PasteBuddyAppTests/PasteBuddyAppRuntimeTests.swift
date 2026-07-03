@@ -284,6 +284,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("private let popover = NSPopover()"))
         XCTAssertTrue(collectionSource.contains("static func dismantleNSView"))
         XCTAssertTrue(collectionSource.contains("coordinator.closePreviewPopover()"))
+        XCTAssertFalse(collectionSource.contains("popover.animates = false"))
         XCTAssertTrue(collectionSource.contains("popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)"))
         XCTAssertTrue(collectionSource.contains("var previewAvoidsContainingWindowOverlap: Bool"))
         XCTAssertTrue(collectionSource.contains("windowEdgePreviewAnchor(for: id, desiredContentSize: desiredContentSize, in: clipView)"))
