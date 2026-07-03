@@ -54,12 +54,14 @@ struct ClipboardSidePanelView: View {
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
         .onAppear {
+            store.searchQuery = ""
+            store.clearFilters()
             sideScope = store.selectedScope
             isPinnedVisual = isPinned
             refreshSideItems()
             Task { @MainActor in
                 await Task.yield()
-                isSearchFocused = true
+                setSearchFocused(false)
             }
         }
         .onDisappear {
@@ -139,13 +141,16 @@ struct ClipboardSidePanelView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 14, weight: .semibold))
                 .focused($isSearchFocused)
+                .onTapGesture {
+                    setSearchFocused(true)
+                }
                 .accessibilityIdentifier("clipboard-side-panel-search-field")
                 .accessibilityLabel(localized("label.search_or_app"))
 
             if hasSearchText {
                 Button {
                     store.searchQuery = ""
-                    isSearchFocused = true
+                    setSearchFocused(true)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12, weight: .semibold))
@@ -161,7 +166,7 @@ struct ClipboardSidePanelView: View {
         .pasteBuddyGlassSurface(cornerRadius: 18, interactive: true, showsStroke: true)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture {
-            isSearchFocused = true
+            setSearchFocused(true)
         }
     }
 
@@ -273,7 +278,8 @@ struct ClipboardSidePanelView: View {
                                 onDismiss: {
                                     interaction.dismissPreview()
                                 },
-                                onMove: moveSelection
+                                onMove: moveSelection,
+                                onTextInput: beginSearch
                             )
                         )
                     },
@@ -399,8 +405,7 @@ struct ClipboardSidePanelView: View {
             interaction.select(item.id, modifiers: modifiers)
         }
         scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
-        isSearchFocused = false
-        isListFocused = true
+        setSearchFocused(false)
     }
 
     private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
@@ -408,6 +413,11 @@ struct ClipboardSidePanelView: View {
             interaction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
         scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
+    }
+
+    private func setSearchFocused(_ isFocused: Bool) {
+        isSearchFocused = isFocused
+        isListFocused = !isFocused
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
@@ -452,7 +462,7 @@ struct ClipboardSidePanelView: View {
         if modifiers == .command {
             let characters = keyPress.characters.lowercased()
             if characters == "f" {
-                isSearchFocused = true
+                setSearchFocused(true)
                 return .handled
             }
             if let index = Int(characters), (1...9).contains(index),
@@ -462,24 +472,27 @@ struct ClipboardSidePanelView: View {
             }
         }
 
+        if ClipboardPanelSearchInput.accepts(modifiers), !isSearchFocused, beginSearch(with: keyPress.characters) {
+            return .handled
+        }
+
         return .ignored
+    }
+
+    private func beginSearch(with characters: String) -> Bool {
+        guard ClipboardPanelSearchInput.accepts(characters) else { return false }
+        interaction.dismissPreview()
+        store.searchQuery += characters
+        setSearchFocused(true)
+        return true
     }
 
     private func toggleSelectedItemPreview() {
         guard let item = selectedItemsInDisplayOrder.first else { return }
-        isSearchFocused = false
-        isListFocused = true
+        setSearchFocused(false)
         if interaction.togglePreview(for: item.id) {
             selectSingleItem(item.id)
         }
-    }
-
-    private func previewItem(_ item: ClipboardItem) {
-        guard renderedItems.contains(where: { $0.id == item.id }) else { return }
-        isSearchFocused = false
-        isListFocused = true
-        guard interaction.presentPreview(for: item.id) else { return }
-        selectSingleItem(item.id)
     }
 
     private func pasteSelected(format: PasteFormat) {
@@ -524,8 +537,7 @@ struct ClipboardSidePanelView: View {
                 store.searchQuery = ""
                 refreshSideItems()
             }
-            isSearchFocused = false
-            isListFocused = true
+            setSearchFocused(false)
             return
         }
         if interaction.previewedID != nil {

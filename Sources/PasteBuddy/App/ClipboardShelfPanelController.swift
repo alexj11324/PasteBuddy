@@ -70,11 +70,9 @@ final class ClipboardShelfPanelController {
     var displayMode: ClipboardPanelDisplayMode {
         didSet {
             guard oldValue != displayMode, let panel else { return }
+            closeShelfAuxiliaryWindows()
             configurePanelForCurrentMode(panel)
-            if let hostingView = panel.contentView as? FirstMouseHostingView<AnyView> {
-                hostingView.rootView = panelContentView()
-                hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
-            }
+            reloadPanelContent(panel)
             positionVisiblePanel(panel)
         }
     }
@@ -94,6 +92,7 @@ final class ClipboardShelfPanelController {
     private var isAnimatingPanelOut = false
     private var isPinned = false
     private var panelAnimationGeneration = 0
+    private var panelPresentationID = UUID()
 
     init(
         store: PasteBuddyStore,
@@ -128,6 +127,10 @@ final class ClipboardShelfPanelController {
         PasteBuddyDiagnostics.record(.shelf, "showRequested")
         let panel = panel ?? makePanel()
         self.panel = panel
+        closeShelfAuxiliaryWindows()
+        resetPanelPresentationState()
+        panelPresentationID = UUID()
+        reloadPanelContent(panel)
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = attachedFrame(for: panel)
         PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
@@ -226,6 +229,18 @@ final class ClipboardShelfPanelController {
         return panel
     }
 
+    private func reloadPanelContent(_ panel: ClipboardShelfPanel) {
+        guard let hostingView = panel.contentView as? FirstMouseHostingView<AnyView> else { return }
+        closeShelfAuxiliaryWindows()
+        hostingView.rootView = panelContentView()
+        hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
+    }
+
+    private func resetPanelPresentationState() {
+        store.searchQuery = ""
+        store.clearFilters()
+    }
+
     private func configurePanelForCurrentMode(_ panel: ClipboardShelfPanel) {
         let title = NSLocalizedString(displayMode.menuTitleKey, comment: "")
         panel.title = title
@@ -255,6 +270,7 @@ final class ClipboardShelfPanelController {
                 } onDismissImmediately: { [weak self] in
                     self?.hideImmediately()
                 }
+                .id(panelPresentationID)
             )
         case .sidePanel:
             AnyView(
@@ -268,6 +284,7 @@ final class ClipboardShelfPanelController {
                 } onDismissImmediately: { [weak self] in
                     self?.hideImmediately()
                 }
+                .id(panelPresentationID)
             )
         }
     }
@@ -589,7 +606,7 @@ final class ClipboardShelfPanelController {
     }
 
     private func closeShelfAuxiliaryWindows() {
-        for window in NSApp.windows where window.identifier?.rawValue == ClipboardShelfWindowIdentifiers.sourceAppSuggestionPanel {
+        for window in NSApp.windows where Self.isShelfAuxiliaryWindow(window) {
             window.orderOut(nil)
         }
     }

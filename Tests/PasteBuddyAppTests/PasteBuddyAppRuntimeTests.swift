@@ -282,6 +282,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(sideSource.contains("private func sidePreview(_ item: ClipboardItem) -> some View"))
         XCTAssertFalse(sideSource.contains("if let item = previewedSideItem"))
         XCTAssertTrue(collectionSource.contains("private let popover = NSPopover()"))
+        XCTAssertTrue(collectionSource.contains("static func dismantleNSView"))
+        XCTAssertTrue(collectionSource.contains("coordinator.closePreviewPopover()"))
         XCTAssertTrue(collectionSource.contains("popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)"))
         XCTAssertTrue(collectionSource.contains("var previewAvoidsContainingWindowOverlap: Bool"))
         XCTAssertTrue(collectionSource.contains("windowEdgePreviewAnchor(for: id, desiredContentSize: desiredContentSize, in: clipView)"))
@@ -310,6 +312,49 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("pendingPreviewSelectionID"))
         XCTAssertFalse(source.contains("previewScrollTargetID"))
         XCTAssertFalse(source.contains("cancelPreviewFollow"))
+    }
+
+    func testPanelModesShareDefaultSelectionAndTypeToSearchScaffold() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("store.searchQuery = \"\""))
+            XCTAssertTrue(source.contains("store.clearFilters()"))
+            XCTAssertTrue(source.contains("await Task.yield()"))
+            XCTAssertTrue(source.contains("setSearchFocused(false)"))
+            XCTAssertTrue(source.contains("ClipboardPanelSearchInput.accepts(modifiers)"))
+            XCTAssertTrue(source.contains("beginSearch(with: keyPress.characters)"))
+            XCTAssertTrue(source.contains("ClipboardPanelSearchInput.accepts(characters)"))
+            XCTAssertTrue(source.contains("store.searchQuery += characters"))
+            XCTAssertTrue(source.contains("setSearchFocused(true)"))
+            XCTAssertTrue(source.contains("onTextInput: beginSearch"))
+            XCTAssertFalse(source.contains("previewFirstRenderedItem"))
+            XCTAssertFalse(source.contains("previewsFirstItemWhenIdle"))
+        }
+
+        XCTAssertTrue(shelfSource.contains("refreshShelfItems()"))
+        XCTAssertTrue(sideSource.contains("refreshSideItems()"))
+        XCTAssertTrue(shelfSource.contains("enum ClipboardPanelSearchInput"))
+        XCTAssertTrue(shelfSource.contains("modifiers.subtracting([.shift, .capsLock]).isEmpty"))
+        XCTAssertTrue(shelfSource.contains("characters.rangeOfCharacter(from: .controlCharacters) == nil"))
+        XCTAssertTrue(shelfSource.contains("let onTextInput: (String) -> Bool"))
+        XCTAssertTrue(shelfSource.contains("ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)"))
+        XCTAssertTrue(shelfSource.contains("ClipboardPanelSearchInput.accepts(event.modifierFlags)"))
+        XCTAssertTrue(shelfSource.contains("return onTextInput(characters)"))
+        XCTAssertTrue(shelfSource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
+        XCTAssertTrue(shelfSource.contains("event.window === self.window"))
+        XCTAssertTrue(shelfSource.contains("NSEvent.removeMonitor(keyMonitor)"))
+        XCTAssertTrue(shelfSource.contains("nsView.startMonitoring()"))
+        XCTAssertTrue(shelfSource.contains("nsView.focusSelf()"))
+        XCTAssertTrue(controllerSource.contains("reloadPanelContent(panel)"))
+        XCTAssertTrue(controllerSource.contains("hostingView.rootView = panelContentView()"))
+        XCTAssertTrue(controllerSource.contains("panelPresentationID = UUID()"))
+        XCTAssertTrue(controllerSource.contains(".id(panelPresentationID)"))
+        XCTAssertTrue(controllerSource.contains("resetPanelPresentationState()"))
+        XCTAssertTrue(controllerSource.contains("closeShelfAuxiliaryWindows()"))
+        XCTAssertTrue(controllerSource.contains("for window in NSApp.windows where Self.isShelfAuxiliaryWindow(window)"))
     }
 
     func testShelfExpandedImagePreviewUsesAppleLiveTextInsteadOfOCRTextBox() throws {

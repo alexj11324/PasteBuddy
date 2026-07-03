@@ -58,6 +58,23 @@ private enum ClipboardShelfDisplayItem: Identifiable {
     }
 }
 
+enum ClipboardPanelSearchInput {
+    static func accepts(_ modifiers: SwiftUI.EventModifiers) -> Bool {
+        modifiers.subtracting([.shift, .capsLock]).isEmpty
+    }
+
+    static func accepts(_ modifiers: NSEvent.ModifierFlags) -> Bool {
+        let deviceModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
+        return deviceModifiers.isEmpty || deviceModifiers.subtracting([.shift, .capsLock]).isEmpty
+    }
+
+    static func accepts(_ characters: String) -> Bool {
+        guard !characters.isEmpty else { return false }
+        guard characters.rangeOfCharacter(from: .newlines) == nil else { return false }
+        return characters.rangeOfCharacter(from: .controlCharacters) == nil
+    }
+}
+
 struct ClipboardShelfPanelView: View {
     private static let basePasteSearchAnimation = Animation.smooth(duration: 0.24, extraBounce: 0)
 
@@ -95,13 +112,14 @@ struct ClipboardShelfPanelView: View {
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
         .onAppear {
+            store.searchQuery = ""
+            store.clearFilters()
             shelfScope = store.selectedScope
             refreshShelfItems()
             isSearchRailPresented = true
             Task { @MainActor in
                 await Task.yield()
-                await Task.yield()
-                setSearchFocused(true)
+                setSearchFocused(false)
             }
         }
         .onDisappear {
@@ -303,7 +321,6 @@ struct ClipboardShelfPanelView: View {
                 onSelect: { appName in
                     store.applySourceAppSuggestion(appName)
                     refreshShelfItems()
-                    setSearchFocused(true)
                 }
             )
         }
@@ -541,7 +558,8 @@ struct ClipboardShelfPanelView: View {
                         onDismiss: {
                             shelfInteraction.dismissPreview()
                         },
-                        onMove: moveSelection
+                        onMove: moveSelection,
+                        onTextInput: beginSearch
                     )
                 )
             },
@@ -781,7 +799,6 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
-        guard self.isSearchFocused != isFocused else { return }
         guard isFocused else {
             self.isSearchFocused = false
             self.isShelfFocused = true
@@ -825,7 +842,19 @@ struct ClipboardShelfPanelView: View {
             }
         }
 
+        if ClipboardPanelSearchInput.accepts(modifiers), !isSearchFocused, beginSearch(with: keyPress.characters) {
+            return .handled
+        }
+
         return .ignored
+    }
+
+    private func beginSearch(with characters: String) -> Bool {
+        guard ClipboardPanelSearchInput.accepts(characters) else { return false }
+        shelfInteraction.dismissPreview()
+        store.searchQuery += characters
+        setSearchFocused(true)
+        return true
     }
 
     private func scheduleStoreSelectionSync(primaryID: UUID?, ids: Set<UUID>) {
@@ -852,13 +881,6 @@ struct ClipboardShelfPanelView: View {
         if shelfInteraction.togglePreview(for: item.id) {
             selectSingleItem(item.id)
         }
-    }
-
-    private func previewItem(_ item: ClipboardItem) {
-        guard renderedShelfItems.contains(where: { $0.id == item.id }) else { return }
-        setSearchFocused(false)
-        guard shelfInteraction.presentPreview(for: item.id) else { return }
-        selectSingleItem(item.id)
     }
 
     private func handleExitCommand() {
@@ -1220,6 +1242,7 @@ struct ShelfExpandedPreview: View {
     var maxWidth: CGFloat = 640
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
+    let onTextInput: (String) -> Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1229,29 +1252,32 @@ struct ShelfExpandedPreview: View {
         .frame(width: previewFrameWidth, height: previewFrameHeight, alignment: .topLeading)
         .background(.regularMaterial)
         .background {
-            ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove)
+            ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)
                 .frame(width: 0, height: 0)
         }
         .onMoveCommand(perform: onMove)
         .onExitCommand(perform: onDismiss)
         .onKeyPress(phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else {
-                return .ignored
-            }
-
             switch keyPress.key {
             case .space:
+                guard keyPress.modifiers.isEmpty else { return .ignored }
                 onDismiss()
             case .upArrow:
+                guard keyPress.modifiers.isEmpty else { return .ignored }
                 onMove(.up)
             case .downArrow:
+                guard keyPress.modifiers.isEmpty else { return .ignored }
                 onMove(.down)
             case .leftArrow:
+                guard keyPress.modifiers.isEmpty else { return .ignored }
                 onMove(.left)
             case .rightArrow:
+                guard keyPress.modifiers.isEmpty else { return .ignored }
                 onMove(.right)
             default:
-                return .ignored
+                guard ClipboardPanelSearchInput.accepts(keyPress.modifiers), onTextInput(keyPress.characters) else {
+                    return .ignored
+                }
             }
             return .handled
         }
@@ -1347,6 +1373,7 @@ struct ShelfExpandedPreview: View {
 private struct ShelfPreviewKeyboardHandler: NSViewRepresentable {
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
+    let onTextInput: (String) -> Bool
 
     func makeNSView(context: Context) -> KeyCatcherView {
         let view = KeyCatcherView()
@@ -1356,12 +1383,16 @@ private struct ShelfPreviewKeyboardHandler: NSViewRepresentable {
 
     func updateNSView(_ nsView: KeyCatcherView, context: Context) {
         nsView.onKeyDown = handleKeyDown
+        nsView.startMonitoring()
+        nsView.focusSelf()
+    }
+
+    static func dismantleNSView(_ nsView: KeyCatcherView, coordinator: ()) {
+        nsView.stopMonitoring()
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else {
-            return false
-        }
+        guard ClipboardPanelSearchInput.accepts(event.modifierFlags) else { return false }
 
         switch Int(event.keyCode) {
         case kVK_Space:
@@ -1375,21 +1406,50 @@ private struct ShelfPreviewKeyboardHandler: NSViewRepresentable {
         case kVK_RightArrow:
             onMove(.right)
         default:
-            return false
+            guard let characters = event.characters else { return false }
+            return onTextInput(characters)
         }
         return true
     }
 
     final class KeyCatcherView: NSView {
         var onKeyDown: ((NSEvent) -> Bool)?
+        private var keyMonitor: Any?
 
         override var acceptsFirstResponder: Bool { true }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if window == nil {
+                stopMonitoring()
+                return
+            }
+            startMonitoring()
+            focusSelf()
+        }
+
+        func focusSelf() {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.window?.makeFirstResponder(self)
+            }
+        }
+
+        func stopMonitoring() {
+            if let keyMonitor {
+                NSEvent.removeMonitor(keyMonitor)
+                self.keyMonitor = nil
+            }
+        }
+
+        func startMonitoring() {
+            guard window != nil else { return }
+            stopMonitoring()
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, event.window === self.window else {
+                    return event
+                }
+                return self.onKeyDown?(event) == true ? nil : event
             }
         }
 

@@ -147,6 +147,10 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         context.coordinator.syncData()
     }
 
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.closePreviewPopover()
+    }
+
     @MainActor
     final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout, NSPopoverDelegate {
         var parent: ShelfCollectionRepresentable
@@ -168,6 +172,13 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             popover.animates = false
             super.init()
             popover.delegate = self
+        }
+
+        func closePreviewPopover() {
+            if popover.isShown {
+                popover.close()
+            }
+            currentPopoverAnchorView = nil
         }
 
         func syncData() {
