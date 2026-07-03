@@ -39,6 +39,7 @@ struct PasteBuddyApp: App {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("clipboardPanelDisplayMode") private var panelDisplayModeRawValue = ClipboardPanelDisplayMode.sidePanel.rawValue
     @AppStorage("clipboardShelfPlacement") private var shelfPlacementRawValue = ClipboardShelfPlacement.top.rawValue
     @State private var store = PasteBuddyStore()
     @State private var monitor: ClipboardMonitor?
@@ -307,6 +308,17 @@ struct PasteBuddyApp: App {
         }
     }
 
+    private var panelDisplayMode: ClipboardPanelDisplayMode {
+        get {
+            ClipboardPanelDisplayMode(rawValue: panelDisplayModeRawValue) ?? .sidePanel
+        }
+        nonmutating set {
+            panelDisplayModeRawValue = newValue.rawValue
+            shelfPanelController?.displayMode = newValue
+            updateStatusItem()
+        }
+    }
+
     private func configureStatusItemIfNeeded() {
         if statusItemController == nil {
             statusItemController = PasteBuddyStatusItemController(
@@ -333,15 +345,34 @@ struct PasteBuddyApp: App {
         menu.addItem(PasteBuddyStatusItemController.disabledMenuItem(localized(status.launchAtLoginStatusLine)))
         menu.addItem(.separator())
 
-        let shelfTitle = shelfPanelController?.isVisible == true ? "action.hide_clipboard_shelf" : "action.show_clipboard_shelf"
+        let shelfTitle = shelfPanelController?.isVisible == true ? "action.hide_clipboard_shelf" : "action.show_hide_panel"
         menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
             localized(shelfTitle),
-            systemImageName: "rectangle.bottomthird.inset.filled"
+            systemImageName: panelDisplayMode.systemImageName
         ) {
             Task { @MainActor in
                 await toggleClipboardShelf()
             }
         })
+
+        let panelStyleItem = NSMenuItem(title: localized("label.panel_style"), action: nil, keyEquivalent: "")
+        panelStyleItem.image = NSImage(
+            systemSymbolName: panelDisplayMode.systemImageName,
+            accessibilityDescription: localized("label.panel_style")
+        )
+        let panelStyleMenu = NSMenu(title: localized("label.panel_style"))
+        for mode in ClipboardPanelDisplayMode.allCases {
+            let item = PasteBuddyStatusItemController.actionMenuItem(
+                localized(mode.menuTitleKey),
+                systemImageName: mode.systemImageName
+            ) {
+                panelDisplayMode = mode
+            }
+            item.state = panelDisplayMode == mode ? .on : .off
+            panelStyleMenu.addItem(item)
+        }
+        panelStyleItem.submenu = panelStyleMenu
+        menu.addItem(panelStyleItem)
 
         let shelfPlacementItem = NSMenuItem(title: localized("label.shelf_position"), action: nil, keyEquivalent: "")
         shelfPlacementItem.image = NSImage(
@@ -563,6 +594,7 @@ struct PasteBuddyApp: App {
             shelfPanelController = ClipboardShelfPanelController(
                 store: store,
                 placement: shelfPlacement,
+                displayMode: panelDisplayMode,
                 directPasteItem: { item, format in
                     let hydratedItem = await store.hydratedItem(for: item)
                     return await Self.pasteItemToTarget(hydratedItem, format: format, tracker: frontmostApplicationTracker)
@@ -576,6 +608,7 @@ struct PasteBuddyApp: App {
                 }
             )
         }
+        shelfPanelController?.displayMode = panelDisplayMode
         shelfPanelController?.placement = shelfPlacement
 
         if panelHotKeyController == nil, shelfPanelController != nil {

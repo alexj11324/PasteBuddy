@@ -149,6 +149,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testSidePanelDisplayModeFramesAsRightAnchoredFloatingHistoryList() {
+        let frame = ClipboardShelfPanelController.rightAnchoredSidePanelFrame(
+            screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: CGRect(x: 0, y: 40, width: 1512, height: 900),
+            preferredSize: CGSize(width: 360, height: 697)
+        )
+
+        XCTAssertEqual(frame.width, 360)
+        XCTAssertEqual(frame.height, 697)
+        XCTAssertEqual(frame.minX, 1138)
+        XCTAssertEqual(frame.minY, 235)
+    }
+
     func testShelfPlacementFramesAttachToFullScreenTopOrBottomEdges() {
         let screenFrame = CGRect(x: -100, y: 50, width: 1512, height: 982)
         let visibleFrame = CGRect(x: -100, y: 111, width: 1512, height: 888)
@@ -176,7 +189,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testShelfExpandedTextPreviewIsEditableAndSaveable() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let previewStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedPreview"))
+        let previewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
         let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
         let previewSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
 
@@ -298,6 +311,23 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(menuSource.contains("shelfPlacementMenu"))
         XCTAssertTrue(menuSource.contains("shelfPlacement = .top"))
         XCTAssertTrue(menuSource.contains("shelfPlacement = .bottom"))
+    }
+
+    func testStatusItemMenuExposesClipboardPanelDisplayModeChooser() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
+        let menuEnd = try XCTUnwrap(appSource.range(of: "private func openMainWindow()"))
+        let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
+
+        XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardPanelDisplayMode")"#))
+        XCTAssertTrue(appSource.contains("ClipboardPanelDisplayMode.sidePanel.rawValue"))
+        XCTAssertTrue(appSource.contains("shelfPanelController?.displayMode = panelDisplayMode"))
+        XCTAssertTrue(controllerSource.contains("case sidePanel"))
+        XCTAssertTrue(controllerSource.contains("label.side_panel"))
+        XCTAssertTrue(menuSource.contains("label.panel_style"))
+        XCTAssertTrue(menuSource.contains("ClipboardPanelDisplayMode.allCases"))
+        XCTAssertTrue(menuSource.contains("panelDisplayMode = mode"))
     }
 
     func testStatusItemUsesNativeMenuInsteadOfCustomClickRouting() throws {
@@ -444,6 +474,41 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(bottomSheetSurface.contains("opacity(0.82)"))
         XCTAssertTrue(smallNativeGlassBranch.contains("Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)).interactive()"))
         XCTAssertFalse(smallNativeGlassBranch.contains(".background"))
+    }
+
+    func testClipboardSidePanelReusesShelfGlassAndActions() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+
+        XCTAssertTrue(source.contains("struct ClipboardSidePanelView"))
+        XCTAssertTrue(source.contains(".pasteBuddyBottomSheetSurface(cornerRadius: 28"))
+        XCTAssertTrue(source.contains("ShelfToolbarCircleIcon"))
+        XCTAssertTrue(source.contains("ShelfInteractionModel"))
+        XCTAssertTrue(source.contains("ShelfCollectionRepresentable"))
+        XCTAssertTrue(source.contains("scrollDirection: .vertical"))
+        XCTAssertTrue(source.contains("interaction.togglePreview"))
+        XCTAssertTrue(source.contains("ShelfExpandedPreview"))
+        XCTAssertTrue(source.contains("ClipboardImageThumbnailView"))
+        XCTAssertTrue(source.contains(".focusEffectDisabled()"))
+        XCTAssertTrue(source.contains("ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal"))
+        XCTAssertTrue(source.contains("label.all"))
+        XCTAssertTrue(source.contains("label.today"))
+        XCTAssertFalse(source.contains("square.grid.2x2"))
+        XCTAssertFalse(source.contains("onTapGesture(count: 2)"))
+        XCTAssertTrue(controllerSource.contains("ClipboardSidePanelView("))
+        XCTAssertTrue(shelfSource.contains("enum ClipboardShelfGlass"))
+        XCTAssertTrue(shelfSource.contains("struct ShelfToolbarCircleIcon"))
+        XCTAssertTrue(shelfSource.contains("struct ClipboardImageThumbnailView"))
+        XCTAssertTrue(shelfSource.contains("extension View"))
+    }
+
+    func testShelfCollectionSuppressesRectangularFocusRing() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
+
+        XCTAssertTrue(source.contains("collectionView.focusRingType = .none"))
+        XCTAssertTrue(source.contains("scrollView.focusRingType = .none"))
+        XCTAssertTrue(source.contains("var scrollDirection: NSCollectionView.ScrollDirection"))
     }
 
     func testShelfCollectionScrollViewSuppressesVisibleScrollers() throws {

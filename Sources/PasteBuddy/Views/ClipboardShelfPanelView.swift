@@ -20,7 +20,7 @@ private enum ClipboardShelfMetrics {
     static let renderLimit = 200
 }
 
-private enum ClipboardShelfGlass {
+enum ClipboardShelfGlass {
     static let defaultTintOpacity = 0.30
     static let detailSuppressionOpacity = 0.28
 }
@@ -1217,7 +1217,7 @@ private struct ClipboardShelfCard: View {
     }
 }
 
-private struct ShelfExpandedPreview: View {
+struct ShelfExpandedPreview: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
@@ -1919,26 +1919,45 @@ private struct ShelfThumbnailView: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
+
+    var body: some View {
+        ClipboardImageThumbnailView(
+            item: item,
+            imageDataProvider: imageDataProvider,
+            tint: tint,
+            contentMode: .fill,
+            placeholderIconSize: 30
+        )
+        .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+}
+
+struct ClipboardImageThumbnailView: View {
+    let item: ClipboardItem
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let tint: Color
+    let contentMode: ContentMode
+    let placeholderIconSize: CGFloat
     @State private var thumbnail: NSImage?
     @State private var loadedImageData: Data?
 
     var body: some View {
         ZStack {
+            Rectangle()
+                .fill(tint.opacity(0.10))
+
             if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData) {
                 Image(nsImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: contentMode)
             } else {
-                Rectangle()
-                    .fill(tint.opacity(0.10))
                 Image(systemName: item.presentationContentType.systemImageName)
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: placeholderIconSize, weight: .semibold))
                     .foregroundStyle(tint)
             }
         }
-        .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
-        .frame(maxWidth: .infinity)
-        .clipped()
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item)) {
             thumbnail = ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData)
             guard thumbnail == nil else { return }
@@ -1984,7 +2003,7 @@ private struct ShelfSourceAppToken: View {
     }
 }
 
-private struct ShelfToolbarCircleIcon: View {
+struct ShelfToolbarCircleIcon: View {
     let systemName: String
     @State private var isHovered = false
 
@@ -2500,7 +2519,7 @@ private final class NativeSourceAppSuggestionRow: NSControl {
     }
 }
 
-private struct SourceApplicationIconImage: View {
+struct SourceApplicationIconImage: View {
     let appName: String
     let size: CGFloat
 
@@ -2515,7 +2534,7 @@ private struct SourceApplicationIconImage: View {
     }
 }
 
-private struct SourceApplicationIconBadge: View {
+struct SourceApplicationIconBadge: View {
     let item: ClipboardItem
     let size: CGFloat
 
@@ -2547,7 +2566,7 @@ private struct SourceApplicationIconBadge: View {
 }
 
 @MainActor
-private enum SourceApplicationIconResolver {
+enum SourceApplicationIconResolver {
     private static let cache = NSCache<NSString, NSImage>()
 
     static func icon(for item: ClipboardItem) -> NSImage? {
@@ -2702,7 +2721,7 @@ private struct EmptyShelfCard: View {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
     func pasteBuddyBottomSheetSurface(
         cornerRadius: CGFloat,
@@ -2840,7 +2859,7 @@ private extension View {
     }
 }
 
-private extension ClipboardContentType {
+extension ClipboardContentType {
     var shelfTint: Color {
         switch self {
         case .text:

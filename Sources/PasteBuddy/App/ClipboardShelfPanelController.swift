@@ -29,16 +29,55 @@ enum ClipboardShelfPlacement: String, CaseIterable, Identifiable {
     }
 }
 
+enum ClipboardPanelDisplayMode: String, CaseIterable, Identifiable {
+    case shelf
+    case sidePanel
+
+    var id: String { rawValue }
+
+    var menuTitleKey: String {
+        switch self {
+        case .shelf:
+            "label.clipboard_shelf"
+        case .sidePanel:
+            "label.side_panel"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .shelf:
+            "rectangle.bottomthird.inset.filled"
+        case .sidePanel:
+            "sidebar.right"
+        }
+    }
+}
+
 @MainActor
 final class ClipboardShelfPanelController {
     private static let panelCornerRadius: CGFloat = 28
     private static let shelfEntranceDuration: CFTimeInterval = 0.18
     private static let shelfExitDuration: CFTimeInterval = 0.12
+    private static let sidePanelPreferredSize = CGSize(width: 360, height: 697)
+    nonisolated private static let sidePanelHorizontalInset: CGFloat = 14
+    nonisolated private static let sidePanelTopInset: CGFloat = 8
 
     private let store: PasteBuddyStore
     private let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     private let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     private let shouldIgnoreDismissalAt: @MainActor (CGPoint) -> Bool
+    var displayMode: ClipboardPanelDisplayMode {
+        didSet {
+            guard oldValue != displayMode, let panel else { return }
+            configurePanelForCurrentMode(panel)
+            if let hostingView = panel.contentView as? FirstMouseHostingView<AnyView> {
+                hostingView.rootView = panelContentView()
+                hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
+            }
+            positionVisiblePanel(panel)
+        }
+    }
     var placement: ClipboardShelfPlacement {
         didSet {
             guard oldValue != placement, let panel else { return }
@@ -58,12 +97,14 @@ final class ClipboardShelfPanelController {
     init(
         store: PasteBuddyStore,
         placement: ClipboardShelfPlacement = .top,
+        displayMode: ClipboardPanelDisplayMode = .sidePanel,
         directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
         directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
         shouldIgnoreDismissalAt: @escaping @MainActor (CGPoint) -> Bool = { _ in false }
     ) {
         self.store = store
         self.placement = placement
+        self.displayMode = displayMode
         self.directPasteItem = directPasteItem
         self.directPasteItems = directPasteItems
         self.shouldIgnoreDismissalAt = shouldIgnoreDismissalAt
@@ -150,14 +191,14 @@ final class ClipboardShelfPanelController {
     }
 
     private func makePanel() -> ClipboardShelfPanel {
+        let initialSize = preferredContentSize(for: displayMode, screenFrame: activeScreen().frame)
         let panel = ClipboardShelfPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 292),
+            contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        let shelfTitle = NSLocalizedString("label.clipboard_shelf", comment: "")
-        panel.title = shelfTitle
+        configurePanelForCurrentMode(panel)
         panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -174,30 +215,62 @@ final class ClipboardShelfPanelController {
         panel.hidesOnDeactivate = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = false
         panel.ignoresMouseEvents = false
-        panel.minSize = NSSize(width: 760, height: 250)
-        panel.setAccessibilityLabel(shelfTitle)
         panel.onCancel = { [weak self] in
             self?.hide()
         }
-        let hostingView = FirstMouseHostingView(
-            rootView: ClipboardShelfPanelView(
-                store: store,
-                directPasteItem: directPasteItem,
-                directPasteItems: directPasteItems,
-                reloadClipboardHistory: { [store] in
-                    await store.loadAsync()
-                }
-            ) { [weak self] in
-                self?.hide()
-            } onDismissImmediately: { [weak self] in
-                self?.hideImmediately()
-            }
-        )
+        let hostingView = FirstMouseHostingView(rootView: panelContentView())
         hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
         panel.contentView = hostingView
         return panel
+    }
+
+    private func configurePanelForCurrentMode(_ panel: ClipboardShelfPanel) {
+        let title = NSLocalizedString(displayMode.menuTitleKey, comment: "")
+        panel.title = title
+        panel.hasShadow = displayMode == .sidePanel
+        panel.minSize = switch displayMode {
+        case .shelf:
+            NSSize(width: 760, height: 250)
+        case .sidePanel:
+            NSSize(width: 320, height: 480)
+        }
+        panel.setAccessibilityLabel(title)
+    }
+
+    private func panelContentView() -> AnyView {
+        switch displayMode {
+        case .shelf:
+            AnyView(
+                ClipboardShelfPanelView(
+                    store: store,
+                    directPasteItem: directPasteItem,
+                    directPasteItems: directPasteItems,
+                    reloadClipboardHistory: { [store] in
+                        await store.loadAsync()
+                    }
+                ) { [weak self] in
+                    self?.hide()
+                } onDismissImmediately: { [weak self] in
+                    self?.hideImmediately()
+                }
+            )
+        case .sidePanel:
+            AnyView(
+                ClipboardSidePanelView(
+                    store: store,
+                    directPasteItem: directPasteItem,
+                    directPasteItems: directPasteItems,
+                    reloadClipboardHistory: { [store] in
+                        await store.loadAsync()
+                    }
+                ) { [weak self] in
+                    self?.hide()
+                } onDismissImmediately: { [weak self] in
+                    self?.hideImmediately()
+                }
+            )
+        }
     }
 
     private func preparePanelContentForPresentation(_ panel: NSPanel) {
@@ -249,13 +322,25 @@ final class ClipboardShelfPanelController {
     private func attachedFrame(for panel: NSPanel) -> NSRect {
         let screen = activeScreen()
         let screenFrame = screen.frame
-        let height = panelHeight(for: panel, in: screenFrame)
-        return Self.attachedFrame(
-            for: placement,
-            screenFrame: screenFrame,
-            visibleFrame: screen.visibleFrame,
-            height: height
-        )
+        switch displayMode {
+        case .shelf:
+            let height = panelHeight(for: panel, in: screenFrame)
+            return Self.attachedFrame(
+                for: placement,
+                screenFrame: screenFrame,
+                visibleFrame: screen.visibleFrame,
+                height: height
+            )
+        case .sidePanel:
+            let preferredSize = preferredContentSize(for: .sidePanel, screenFrame: screenFrame)
+            panel.contentView?.setFrameSize(preferredSize)
+            panel.contentView?.layoutSubtreeIfNeeded()
+            return Self.rightAnchoredSidePanelFrame(
+                screenFrame: screenFrame,
+                visibleFrame: screen.visibleFrame,
+                preferredSize: preferredSize
+            )
+        }
     }
 
     nonisolated static func attachedFrame(
@@ -288,6 +373,32 @@ final class ClipboardShelfPanelController {
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
         let preferredHeight = fittingHeight > 0 && fittingHeight.isFinite ? fittingHeight : 260
         return min(max(preferredHeight, minimumHeight), maximumHeight)
+    }
+
+    private func preferredContentSize(for displayMode: ClipboardPanelDisplayMode, screenFrame: NSRect) -> NSSize {
+        switch displayMode {
+        case .shelf:
+            NSSize(width: screenFrame.width, height: 292)
+        case .sidePanel:
+            NSSize(
+                width: min(Self.sidePanelPreferredSize.width, max(320, screenFrame.width - Self.sidePanelHorizontalInset * 2)),
+                height: min(Self.sidePanelPreferredSize.height, max(480, screenFrame.height - Self.sidePanelTopInset * 2))
+            )
+        }
+    }
+
+    nonisolated static func rightAnchoredSidePanelFrame(
+        screenFrame: CGRect,
+        visibleFrame: CGRect,
+        preferredSize: CGSize
+    ) -> CGRect {
+        let width = min(max(preferredSize.width, 320), max(320, screenFrame.width - sidePanelHorizontalInset * 2))
+        let height = min(max(preferredSize.height, 480), max(480, screenFrame.height - sidePanelTopInset * 2))
+        let rightEdge = min(screenFrame.maxX, visibleFrame.maxX)
+        let topEdge = min(screenFrame.maxY, visibleFrame.maxY) - sidePanelTopInset
+        let x = max(screenFrame.minX + sidePanelHorizontalInset, rightEdge - width - sidePanelHorizontalInset)
+        let y = max(screenFrame.minY + sidePanelTopInset, topEdge - height)
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     private func positionVisiblePanel(_ panel: NSPanel) {
