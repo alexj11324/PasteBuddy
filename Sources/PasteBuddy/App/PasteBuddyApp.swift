@@ -324,6 +324,11 @@ struct PasteBuddyApp: App {
             statusItemController = PasteBuddyStatusItemController(
                 menuProvider: {
                     makeStatusItemMenu()
+                },
+                primaryAction: {
+                    Task { @MainActor in
+                        await toggleClipboardShelf()
+                    }
                 }
             )
         }

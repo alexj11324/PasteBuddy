@@ -6,14 +6,16 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let statusMenu: NSMenu
     private let menuProvider: () -> NSMenu
+    private let primaryAction: () -> Void
 
-    init(menuProvider: @escaping () -> NSMenu) {
+    init(menuProvider: @escaping () -> NSMenu, primaryAction: @escaping () -> Void) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.statusMenu = NSMenu(title: "brand.pastebuddy")
         self.menuProvider = menuProvider
+        self.primaryAction = primaryAction
         super.init()
         statusMenu.delegate = self
-        statusItem.menu = statusMenu
+        installButtonAction()
     }
 
     deinit {
@@ -70,6 +72,31 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusMenu else { return }
+        reloadStatusMenu(into: menu)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard menu === statusMenu else { return }
+        statusItem.menu = nil
+        installButtonAction()
+    }
+
+    @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            showStatusMenu()
+        } else {
+            primaryAction()
+        }
+    }
+
+    private func showStatusMenu() {
+        reloadStatusMenu(into: statusMenu)
+        statusItem.menu = statusMenu
+        statusItem.button?.performClick(nil)
+    }
+
+    private func reloadStatusMenu(into menu: NSMenu) {
         menu.removeAllItems()
 
         let latestMenu = menuProvider()
@@ -78,6 +105,13 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
             latestMenu.removeItem(at: 0)
             menu.addItem(item)
         }
+    }
+
+    private func installButtonAction() {
+        guard let button = statusItem.button else { return }
+        button.target = self
+        button.action = #selector(handleStatusItemClick(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private static func image(named systemImageName: String?, description: String) -> NSImage? {

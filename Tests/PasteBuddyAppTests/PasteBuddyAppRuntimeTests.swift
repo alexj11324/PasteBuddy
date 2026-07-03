@@ -278,12 +278,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(appSource.contains("MenuBarExtra"))
         XCTAssertFalse(appSource.contains("handleDockIconReopen"))
         XCTAssertTrue(appSource.contains("statusItemController = PasteBuddyStatusItemController"))
-        XCTAssertTrue(statusItemSource.contains("statusItem.menu = statusMenu"))
+        XCTAssertTrue(statusItemSource.contains("primaryAction"))
         XCTAssertTrue(statusItemSource.contains("func menuNeedsUpdate(_ menu: NSMenu)"))
         XCTAssertTrue(statusItemSource.contains("menu.removeAllItems()"))
         XCTAssertTrue(statusItemSource.contains("menu.addItem(item)"))
         XCTAssertFalse(statusItemSource.contains("statusItem.popUpMenu(menu)"))
-        XCTAssertFalse(statusItemSource.contains("statusItem.button?.performClick(nil)"))
     }
 
     func testMenuBarStatusItemDoesNotExposeDirectMainWindowOpenAction() throws {
@@ -330,13 +329,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(menuSource.contains("panelDisplayMode = mode"))
     }
 
-    func testStatusItemUsesNativeMenuInsteadOfCustomClickRouting() throws {
+    func testStatusItemLeftClickRunsPrimaryActionAndKeepsMenuOnSecondaryClick() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let statusItemSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyStatusItemController.swift")
 
-        XCTAssertTrue(statusItemSource.contains("statusItem.menu = statusMenu"))
-        XCTAssertFalse(statusItemSource.contains("button.target = self"))
-        XCTAssertFalse(statusItemSource.contains("handleStatusItemClick"))
-        XCTAssertFalse(statusItemSource.contains("shouldOpenMenu(for:"))
+        XCTAssertTrue(statusItemSource.contains("button.target = self"))
+        XCTAssertTrue(statusItemSource.contains("button.sendAction(on: [.leftMouseUp, .rightMouseUp])"))
+        XCTAssertTrue(statusItemSource.contains("handleStatusItemClick"))
+        XCTAssertTrue(statusItemSource.contains("primaryAction()"))
+        XCTAssertTrue(statusItemSource.contains("showStatusMenu()"))
+        XCTAssertTrue(statusItemSource.contains("event?.type == .rightMouseUp"))
+        XCTAssertTrue(statusItemSource.contains("event?.modifierFlags.contains(.control)"))
+        XCTAssertTrue(appSource.contains("primaryAction:"))
+        XCTAssertTrue(appSource.contains("await toggleClipboardShelf()"))
     }
 
     func testMCPSettingsShowAgentConnectionWithoutToolDetails() throws {
