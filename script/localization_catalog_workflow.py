@@ -228,6 +228,22 @@ EXTRA_CATALOG_ENTRIES = [
         "Users can add Save to PasteBuddy and Copy to PasteBuddy to iOS Share sheet favorites and reorder them from the system Share sheet edit screen.",
         "用户可以把“保存到 PasteBuddy”和“复制到 PasteBuddy”添加到 iOS 分享面板收藏，并在系统分享面板编辑界面重新排序。",
     ),
+    semantic_entry(
+        "mobile.share_action.import_result_history",
+        "Saved %d item(s) to history.",
+        "已将 %d 个项目保存到历史。",
+    ),
+    semantic_entry(
+        "mobile.share_action.import_result_history_and_pinboard",
+        "Saved %d item(s) to history and selected pinboard.",
+        "已将 %d 个项目保存到历史和所选收藏板。",
+    ),
+    semantic_entry("mobile.share_action.saved_to_history", "Saved to history.", "已保存到历史。"),
+    semantic_entry(
+        "mobile.share_action.saved_to_history_and_pinboard",
+        "Saved to history and selected pinboard.",
+        "已保存到历史和所选收藏板。",
+    ),
     semantic_entry("mobile.paste_permission.settings_path", "Settings > Apps > PasteBuddy > Allow Paste From Other Apps > Allow", "设置 > App > PasteBuddy > 允许从其他 App 粘贴 > 允许"),
     semantic_entry(
         "mobile.paste_permission.manual_workflows_remain_available",

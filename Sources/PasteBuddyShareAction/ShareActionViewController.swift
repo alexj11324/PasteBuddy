@@ -134,6 +134,6 @@ final class ShareActionViewController: UIViewController {
     }
 
     private func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
+        return NSLocalizedString(key, comment: "")
     }
 }

@@ -2245,12 +2245,14 @@ public enum SyncProvider: String, CaseIterable, Codable, Identifiable, Sendable 
 public enum SyncRequirement: String, CaseIterable, Codable, Equatable, Sendable {
     case explicitCloudSyncOptIn
     case cloudKitContainerIdentifier
+    case endToEndKeyHierarchy
     case cloudKitCapability
 
     public var displayName: String {
         switch self {
         case .explicitCloudSyncOptIn: "Explicit CloudKit sync opt-in"
         case .cloudKitContainerIdentifier: "CloudKit container identifier"
+        case .endToEndKeyHierarchy: "End-to-end encryption key hierarchy"
         case .cloudKitCapability: "Signed app with CloudKit capability"
         }
     }
@@ -2348,9 +2350,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
         }
         let warnings = findings.filter { $0.severity == .warning }.count
         if warnings > 0 {
-            return "CloudKit sync is ready with \(warnings) warning\(warnings == 1 ? "" : "s")."
+            return "Encrypted CloudKit sync is ready with \(warnings) warning\(warnings == 1 ? "" : "s")."
         }
-        return "CloudKit sync is ready."
+        return "Encrypted CloudKit sync is ready."
     }
 
     private static func makeFindings(
@@ -2430,6 +2432,14 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 title: "CloudKit container identifier missing",
                 detail: "The app cannot address the user's private iCloud database without a configured container.",
                 recoveryAction: "Configure the signed app target with the PasteBuddy iCloud container identifier."
+            )
+        case .endToEndKeyHierarchy:
+            CloudSyncDiagnosticFinding(
+                id: "missing-end-to-end-key-hierarchy",
+                severity: .blocker,
+                title: "End-to-end key hierarchy missing",
+                detail: "Encrypted sync packages require a positive key hierarchy version.",
+                recoveryAction: "Provision or migrate the local key hierarchy before creating CloudKit packages."
             )
         case .cloudKitCapability:
             CloudSyncDiagnosticFinding(
@@ -2521,6 +2531,9 @@ public struct SyncConfiguration: Codable, Equatable, Sendable {
         }
         if cloudKitContainerIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             missing.append(.cloudKitContainerIdentifier)
+        }
+        if keyHierarchyVersion ?? 0 < 1 {
+            missing.append(.endToEndKeyHierarchy)
         }
         if !isCloudKitCapabilityConfigured {
             missing.append(.cloudKitCapability)

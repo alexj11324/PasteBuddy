@@ -84,8 +84,14 @@ public struct MobileShareImportView: View {
         do {
             _ = try SharedContentImportService().importContent(mutableInput, into: store)
             statusMessage = selectedPinboardID == nil
-                ? "Saved to history."
-                : "Saved to history and selected pinboard."
+                ? PasteBuddyLocalization.string(
+                    "mobile.share_action.saved_to_history",
+                    defaultValue: "Saved to history."
+                )
+                : PasteBuddyLocalization.string(
+                    "mobile.share_action.saved_to_history_and_pinboard",
+                    defaultValue: "Saved to history and selected pinboard."
+                )
         } catch {
             statusMessage = error.localizedDescription
         }

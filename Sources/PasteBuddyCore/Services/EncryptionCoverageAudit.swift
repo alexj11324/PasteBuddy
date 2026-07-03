@@ -113,8 +113,7 @@ public enum EncryptionCoverageAudit {
         ),
         EncryptionCoverageItem(
             surface: .syncPackages,
-            protection: "Cloud sync package builder emits private CloudKit snapshot records and rejects blocked sync states.",
-            plaintextFallbackAllowed: true
+            protection: "Cloud sync package builder only emits encrypted snapshot envelopes and rejects blocked sync states."
         ),
         EncryptionCoverageItem(
             surface: .sharedPinboardMetadata,

@@ -18,8 +18,17 @@ public struct MobileShareActionImportResult: Equatable, Sendable {
 
     public var statusMessage: String {
         let count = importedItems.count
-        let destination = targetPinboardID == nil ? "history" : "history and selected pinboard"
-        return "Saved \(count) item\(count == 1 ? "" : "s") to \(destination)."
+        return targetPinboardID == nil
+            ? PasteBuddyLocalization.format(
+                "mobile.share_action.import_result_history",
+                defaultValue: "Saved %d item(s) to history.",
+                count
+            )
+            : PasteBuddyLocalization.format(
+                "mobile.share_action.import_result_history_and_pinboard",
+                defaultValue: "Saved %d item(s) to history and selected pinboard.",
+                count
+            )
     }
 }
 

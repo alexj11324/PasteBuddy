@@ -405,15 +405,17 @@ final class PasteBuddyStoreTests: XCTestCase {
             provider: .cloudKit,
             isCloudSyncEnabled: true,
             cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
             isCloudKitCapabilityConfigured: true
         )
-        let package = try CloudSyncPackageBuilder()
+        let package = try CloudSyncPackageBuilder(encryptor: harness.encryptionService)
             .makeUploadPackage(from: store.snapshot)
         let packageString = String(decoding: try JSONEncoder.pasteBuddy.encode(package), as: UTF8.self)
-        XCTAssertTrue(packageString.contains("Research"))
-        XCTAssertTrue(packageString.contains("Launch"))
-        XCTAssertEqual(package.snapshot.pinboards.map(\.id), [launchID, favoritesID, researchID])
-        XCTAssertEqual(package.snapshot.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
+        XCTAssertFalse(packageString.contains("Research"))
+        XCTAssertFalse(packageString.contains("Launch"))
+        let decrypted = try harness.encryptionService.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
+        XCTAssertEqual(decrypted.pinboards.map(\.id), [launchID, favoritesID, researchID])
+        XCTAssertEqual(decrypted.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
@@ -1265,7 +1267,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(standardRaw.contains("clipboard content"))
     }
 
-    func testStoreLoadNormalizesLegacyEncryptedSnapshotBackToStandardStorage() throws {
+    func testStoreLoadPreservesLegacyEncryptedSnapshotStorageMode() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -1284,15 +1286,15 @@ final class PasteBuddyStoreTests: XCTestCase {
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
         store.load()
 
-        XCTAssertEqual(store.snapshot.security.storageMode, .standard)
-        XCTAssertEqual(harness.snapshotStore.storageMode, .standard)
+        XCTAssertEqual(store.snapshot.security.storageMode, .encrypted)
+        XCTAssertEqual(harness.snapshotStore.storageMode, .encrypted)
         XCTAssertEqual(store.filteredItems.map(\.title), ["Legacy Secret"])
 
-        store.createTextItem(text: "new standard content", title: "New Standard Item")
+        store.createTextItem(text: "new encrypted content", title: "New Encrypted Item")
 
-        let standardRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
-        XCTAssertTrue(standardRaw.contains("legacy encrypted content"))
-        XCTAssertTrue(standardRaw.contains("new standard content"))
+        let encryptedRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
+        XCTAssertFalse(encryptedRaw.contains("legacy encrypted content"))
+        XCTAssertFalse(encryptedRaw.contains("new encrypted content"))
     }
 
     func testTeamPlanSeatBillingMetadataPersistsThroughEncryptedStore() throws {
@@ -1612,16 +1614,18 @@ final class PasteBuddyStoreTests: XCTestCase {
             provider: .cloudKit,
             isCloudSyncEnabled: true,
             cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
             isCloudKitCapabilityConfigured: true
         )
-        let package = try CloudSyncPackageBuilder()
+        let package = try CloudSyncPackageBuilder(encryptor: harness.encryptionService)
             .makeUploadPackage(from: store.snapshot)
         let packageString = String(decoding: try JSONEncoder.pasteBuddy.encode(package), as: UTF8.self)
-        XCTAssertTrue(packageString.contains("Client Launch Board"))
-        XCTAssertTrue(packageString.contains("Important"))
-        XCTAssertEqual(package.snapshot.items.first?.title, "Client Launch Board")
-        XCTAssertEqual(package.snapshot.items.first?.labels, ["Important", "Launch"])
-        XCTAssertEqual(package.snapshot.pinboards.first?.itemIDs, [item.id])
+        XCTAssertFalse(packageString.contains("Client Launch Board"))
+        XCTAssertFalse(packageString.contains("Important"))
+        let decrypted = try harness.encryptionService.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
+        XCTAssertEqual(decrypted.items.first?.title, "Client Launch Board")
+        XCTAssertEqual(decrypted.items.first?.labels, ["Important", "Launch"])
+        XCTAssertEqual(decrypted.pinboards.first?.itemIDs, [item.id])
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
@@ -2220,24 +2224,29 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(sync.readiness.canAttemptCloudSync)
     }
 
-    func testCloudSyncRequiresCloudKitConfiguration() {
+    func testCloudSyncRequiresEncryptedCloudKitConfiguration() {
         var sync = SyncConfiguration(
             provider: .cloudKit,
             isCloudSyncEnabled: true,
             cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy"
         )
 
-        XCTAssertEqual(sync.readiness, .blocked([.cloudKitCapability]))
+        XCTAssertEqual(sync.readiness, .blocked([.endToEndKeyHierarchy, .cloudKitCapability]))
         XCTAssertFalse(sync.readiness.canAttemptCloudSync)
 
         sync.isCloudKitCapabilityConfigured = true
+
+        XCTAssertEqual(sync.readiness, .blocked([.endToEndKeyHierarchy]))
+        XCTAssertFalse(sync.readiness.canAttemptCloudSync)
+
+        sync.keyHierarchyVersion = 1
 
         XCTAssertEqual(sync.readiness, .ready)
         XCTAssertTrue(sync.readiness.canAttemptCloudSync)
         XCTAssertFalse(sync.allowsPlaintextFallback)
     }
 
-    func testCloudSyncPreflightExplainsLocalOnlyMode() {
+    func testCloudSyncPreflightExplainsLocalOnlyModeAndEncryptionBoundary() {
         let report = CloudSyncPreflightReport(configuration: PasteBuddySnapshot().sync)
 
         XCTAssertEqual(report.readiness, .localOnly)
@@ -2258,12 +2267,13 @@ final class PasteBuddyStoreTests: XCTestCase {
 
         XCTAssertEqual(
             report.readiness,
-            .blocked([.cloudKitContainerIdentifier, .cloudKitCapability])
+            .blocked([.cloudKitContainerIdentifier, .endToEndKeyHierarchy, .cloudKitCapability])
         )
         XCTAssertFalse(report.canAttemptCloudSync)
         XCTAssertTrue(report.hasBlockers)
-        XCTAssertEqual(report.summary, "CloudKit sync is blocked by 3 required setup items.")
+        XCTAssertEqual(report.summary, "CloudKit sync is blocked by 4 required setup items.")
         XCTAssertTrue(report.findings.contains { $0.id == "missing-cloudkit-container" })
+        XCTAssertTrue(report.findings.contains { $0.id == "missing-end-to-end-key-hierarchy" })
         XCTAssertTrue(report.findings.contains { $0.id == "missing-cloudkit-capability" })
         XCTAssertTrue(report.findings.contains { $0.id == "shared-pinboards-blocked" })
     }
@@ -2273,6 +2283,7 @@ final class PasteBuddyStoreTests: XCTestCase {
             provider: .cloudKit,
             isCloudSyncEnabled: true,
             cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
             isCloudKitCapabilityConfigured: true,
             lastSyncConflictCount: 2
         )
@@ -2282,7 +2293,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(report.readiness, .ready)
         XCTAssertTrue(report.canAttemptCloudSync)
         XCTAssertFalse(report.hasBlockers)
-        XCTAssertEqual(report.summary, "CloudKit sync is ready with 2 warnings.")
+        XCTAssertEqual(report.summary, "Encrypted CloudKit sync is ready with 2 warnings.")
         XCTAssertTrue(report.findings.contains { $0.id == "cloud-sync-ready" })
         XCTAssertTrue(report.findings.contains { $0.id == "first-sync-pending" })
         XCTAssertTrue(report.findings.contains { $0.id == "last-sync-conflicts" })
@@ -2291,11 +2302,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         sync.lastSyncConflictCount = 0
         report = CloudSyncPreflightReport(configuration: sync)
 
-        XCTAssertEqual(report.summary, "CloudKit sync is ready.")
+        XCTAssertEqual(report.summary, "Encrypted CloudKit sync is ready.")
         XCTAssertFalse(report.findings.contains { $0.severity == .warning })
     }
 
-    func testSharedPinboardsRequireReadyCloudKitSync() throws {
+    func testSharedPinboardsRequireReadyEncryptedSync() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -2303,7 +2314,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         store.setSharedPinboardsEnabled(true)
 
         XCTAssertFalse(store.snapshot.sync.isSharedPinboardsEnabled)
-        XCTAssertEqual(store.lastErrorMessage, "Shared pinboards require configured CloudKit sync.")
+        XCTAssertEqual(store.lastErrorMessage, "Shared pinboards require configured CloudKit sync and end-to-end encryption.")
 
         store.configureCloudKitSync(
             containerIdentifier: "iCloud.com.example.PasteBuddy",

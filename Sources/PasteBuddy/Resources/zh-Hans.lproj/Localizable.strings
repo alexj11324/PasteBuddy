@@ -562,6 +562,10 @@
 "mobile.permission_state.denied" = "拒绝";
 "mobile.permission_state.unknown" = "未知";
 "mobile.share_action.favorite_reorder_guidance" = "用户可以把“保存到 PasteBuddy”和“复制到 PasteBuddy”添加到 iOS 分享面板收藏，并在系统分享面板编辑界面重新排序。";
+"mobile.share_action.import_result_history" = "已将 %d 个项目保存到历史。";
+"mobile.share_action.import_result_history_and_pinboard" = "已将 %d 个项目保存到历史和所选收藏板。";
+"mobile.share_action.saved_to_history" = "已保存到历史。";
+"mobile.share_action.saved_to_history_and_pinboard" = "已保存到历史和所选收藏板。";
 "mobile.share_action.unsupported_input_explanation" = "PasteBuddy 可以保存分享的文本、链接、图片和受支持的文件 URL。不受支持的提供方载荷应给出清晰失败信息，且不留下明文临时文件。";
 "mobile.summary.needs_actions" = "移动端设置还需要 %d 项操作。";
 "mobile.summary.needs_one_action" = "移动端设置还需要 1 项操作。";

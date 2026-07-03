@@ -341,7 +341,7 @@ struct PasteBuddyApp: App {
 
     private func makeStatusItemMenu() -> NSMenu {
         let status = store.macMenuBarStatus
-        let menu = NSMenu(title: "brand.pastebuddy")
+        let menu = NSMenu(title: localized("brand.pastebuddy"))
         menu.addItem(PasteBuddyStatusItemController.disabledMenuItem(
             localized(status.captureStatusLine),
             systemImageName: status.systemImageName

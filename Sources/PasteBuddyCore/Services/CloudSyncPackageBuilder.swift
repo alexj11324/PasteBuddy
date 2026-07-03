@@ -1,30 +1,47 @@
 import Foundation
 
+public protocol EnvelopeEncrypting: Sendable {
+    var keyID: String { get }
+
+    func encrypt<T: Encodable>(_ value: T) throws -> EncryptedEnvelope
+}
+
+public protocol EnvelopeDecrypting: Sendable {
+    func decrypt<T: Decodable>(_ type: T.Type, from envelope: EncryptedEnvelope) throws -> T
+}
+
+extension EncryptionService: EnvelopeEncrypting {}
+extension EncryptionService: EnvelopeDecrypting {}
+
 public struct CloudSyncUploadPackage: Codable, Equatable, Sendable {
     public var id: UUID
     public var createdAt: Date
     public var containerIdentifier: String
+    public var keyHierarchyVersion: Int
     public var schemaVersion: Int
-    public var snapshot: PasteBuddySnapshot
+    public var encryptedSnapshot: EncryptedEnvelope
 
     public init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
         containerIdentifier: String,
+        keyHierarchyVersion: Int,
         schemaVersion: Int,
-        snapshot: PasteBuddySnapshot
+        encryptedSnapshot: EncryptedEnvelope
     ) {
         self.id = id
         self.createdAt = createdAt
         self.containerIdentifier = containerIdentifier
+        self.keyHierarchyVersion = keyHierarchyVersion
         self.schemaVersion = schemaVersion
-        self.snapshot = snapshot
+        self.encryptedSnapshot = encryptedSnapshot
     }
 }
 
 public enum CloudSyncPackageError: LocalizedError, Equatable {
     case syncNotReady(String)
     case missingContainerIdentifier
+    case missingKeyHierarchy
 
     public var errorDescription: String? {
         switch self {
@@ -32,6 +49,8 @@ public enum CloudSyncPackageError: LocalizedError, Equatable {
             "Cloud sync package cannot be created: \(reason)"
         case .missingContainerIdentifier:
             "Cloud sync package requires a CloudKit container identifier."
+        case .missingKeyHierarchy:
+            "Cloud sync package requires an end-to-end key hierarchy version."
         }
     }
 }
@@ -102,13 +121,14 @@ public struct CloudSyncMergeReport: Codable, Equatable, Sendable {
     }
 
     public var summary: String {
-        "Imported CloudKit package \(packageID.uuidString): \(addedItems) new items, \(updatedItems) updated items, \(addedPinboards) new pinboards, \(updatedPinboards) updated pinboards, \(conflicts.count) conflicts."
+        "Imported encrypted package \(packageID.uuidString): \(addedItems) new items, \(updatedItems) updated items, \(addedPinboards) new pinboards, \(updatedPinboards) updated pinboards, \(conflicts.count) conflicts."
     }
 }
 
 public enum CloudSyncImportError: LocalizedError, Equatable {
     case syncNotReady(String)
     case containerMismatch(expected: String, actual: String)
+    case keyHierarchyMismatch(expected: Int, actual: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -116,12 +136,18 @@ public enum CloudSyncImportError: LocalizedError, Equatable {
             "Cloud sync package cannot be imported: \(reason)"
         case .containerMismatch(let expected, let actual):
             "Cloud sync package belongs to \(actual), but this Mac is configured for \(expected)."
+        case .keyHierarchyMismatch(let expected, let actual):
+            "Cloud sync package uses key hierarchy \(actual), but this Mac requires \(expected)."
         }
     }
 }
 
 public final class CloudSyncPackageBuilder: @unchecked Sendable {
-    public init() {}
+    private let encryptor: any EnvelopeEncrypting
+
+    public init(encryptor: any EnvelopeEncrypting = EncryptionService()) {
+        self.encryptor = encryptor
+    }
 
     public func makeUploadPackage(
         from snapshot: PasteBuddySnapshot,
@@ -136,19 +162,28 @@ public final class CloudSyncPackageBuilder: @unchecked Sendable {
               !containerIdentifier.isEmpty else {
             throw CloudSyncPackageError.missingContainerIdentifier
         }
+        guard let keyHierarchyVersion = snapshot.sync.keyHierarchyVersion, keyHierarchyVersion > 0 else {
+            throw CloudSyncPackageError.missingKeyHierarchy
+        }
 
+        let encryptedSnapshot = try encryptor.encrypt(snapshot)
         return CloudSyncUploadPackage(
             id: packageID,
             createdAt: createdAt,
             containerIdentifier: containerIdentifier,
+            keyHierarchyVersion: keyHierarchyVersion,
             schemaVersion: snapshot.schemaVersion,
-            snapshot: snapshot
+            encryptedSnapshot: encryptedSnapshot
         )
     }
 }
 
 public final class CloudSyncPackageImporter: @unchecked Sendable {
-    public init() {}
+    private let decryptor: any EnvelopeDecrypting
+
+    public init(decryptor: any EnvelopeDecrypting = EncryptionService()) {
+        self.decryptor = decryptor
+    }
 
     public func importPackage(
         _ package: CloudSyncUploadPackage,
@@ -166,8 +201,15 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
                 actual: package.containerIdentifier
             )
         }
+        let expectedKeyHierarchy = localSnapshot.sync.keyHierarchyVersion ?? 0
+        guard expectedKeyHierarchy == package.keyHierarchyVersion else {
+            throw CloudSyncImportError.keyHierarchyMismatch(
+                expected: expectedKeyHierarchy,
+                actual: package.keyHierarchyVersion
+            )
+        }
 
-        let remoteSnapshot = package.snapshot
+        let remoteSnapshot = try decryptor.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
         var merged = localSnapshot
         var report = CloudSyncMergeReport(packageID: package.id, importedAt: importedAt)
 

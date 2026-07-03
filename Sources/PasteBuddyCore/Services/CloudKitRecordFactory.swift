@@ -3,35 +3,39 @@ import CloudKit
 import Foundation
 
 public enum CloudKitRecordFactoryError: LocalizedError {
-    case snapshotEncodingFailed(Error)
-    case snapshotDecodingFailed(Error)
+    case envelopeEncodingFailed(Error)
+    case envelopeDecodingFailed(Error)
     case invalidField(String)
     case missingField(String)
     case wrongRecordType(String)
 
     public var errorDescription: String? {
         switch self {
-        case .snapshotEncodingFailed(let error):
-            "CloudKit record could not encode snapshot payload: \(error.localizedDescription)"
-        case .snapshotDecodingFailed(let error):
-            "CloudKit record could not decode snapshot payload: \(error.localizedDescription)"
+        case .envelopeEncodingFailed(let error):
+            "CloudKit record could not encode encrypted payload: \(error.localizedDescription)"
+        case .envelopeDecodingFailed(let error):
+            "CloudKit record could not decode encrypted payload: \(error.localizedDescription)"
         case .invalidField(let field):
             "CloudKit record contains an invalid \(field) field."
         case .missingField(let field):
             "CloudKit record is missing the \(field) field."
         case .wrongRecordType(let recordType):
-            "CloudKit record type \(recordType) is not a PasteBuddy snapshot."
+            "CloudKit record type \(recordType) is not a PasteBuddy encrypted snapshot."
         }
     }
 }
 
 public struct CloudKitRecordFactory: Sendable {
-    public static let snapshotRecordType = "PasteBuddySnapshot"
+    public static let encryptedSnapshotRecordType = "PasteBuddyEncryptedSnapshot"
     public static let packageIDField = "packageID"
     public static let createdAtField = "createdAt"
     public static let containerIdentifierField = "containerIdentifier"
     public static let schemaVersionField = "schemaVersion"
-    public static let snapshotField = "snapshot"
+    public static let keyHierarchyVersionField = "keyHierarchyVersion"
+    public static let envelopeVersionField = "envelopeVersion"
+    public static let envelopeAlgorithmField = "envelopeAlgorithm"
+    public static let keyIDField = "keyID"
+    public static let encryptedSnapshotField = "encryptedSnapshot"
 
     public init() {}
 
@@ -42,24 +46,28 @@ public struct CloudKitRecordFactory: Sendable {
     public func makeRecord(from remoteRecord: CloudSyncRemoteRecord) throws -> CKRecord {
         let recordID = CKRecord.ID(recordName: remoteRecord.recordName)
         let record = CKRecord(
-            recordType: Self.snapshotRecordType,
+            recordType: Self.encryptedSnapshotRecordType,
             recordID: recordID
         )
         record[Self.packageIDField] = remoteRecord.packageID.uuidString as NSString
         record[Self.createdAtField] = remoteRecord.createdAt as NSDate
         record[Self.containerIdentifierField] = remoteRecord.containerIdentifier as NSString
         record[Self.schemaVersionField] = NSNumber(value: remoteRecord.schemaVersion)
+        record[Self.keyHierarchyVersionField] = NSNumber(value: remoteRecord.keyHierarchyVersion)
+        record[Self.envelopeVersionField] = NSNumber(value: remoteRecord.encryptedSnapshot.version)
+        record[Self.envelopeAlgorithmField] = remoteRecord.encryptedSnapshot.algorithm as NSString
+        record[Self.keyIDField] = remoteRecord.encryptedSnapshot.keyID as NSString
         do {
-            record[Self.snapshotField] = try JSONEncoder.pasteBuddy
-                .encode(remoteRecord.snapshot) as NSData
+            record[Self.encryptedSnapshotField] = try JSONEncoder.pasteBuddy
+                .encode(remoteRecord.encryptedSnapshot) as NSData
         } catch {
-            throw CloudKitRecordFactoryError.snapshotEncodingFailed(error)
+            throw CloudKitRecordFactoryError.envelopeEncodingFailed(error)
         }
         return record
     }
 
     public func makeRemoteRecord(from record: CKRecord) throws -> CloudSyncRemoteRecord {
-        guard record.recordType == Self.snapshotRecordType else {
+        guard record.recordType == Self.encryptedSnapshotRecordType else {
             throw CloudKitRecordFactoryError.wrongRecordType(record.recordType)
         }
 
@@ -67,15 +75,15 @@ public struct CloudKitRecordFactory: Sendable {
         guard let packageID = UUID(uuidString: packageIDString) else {
             throw CloudKitRecordFactoryError.invalidField(Self.packageIDField)
         }
-        let snapshotData = try dataField(Self.snapshotField, in: record)
-        let snapshot: PasteBuddySnapshot
+        let encryptedSnapshotData = try dataField(Self.encryptedSnapshotField, in: record)
+        let encryptedSnapshot: EncryptedEnvelope
         do {
-            snapshot = try JSONDecoder.pasteBuddy.decode(
-                PasteBuddySnapshot.self,
-                from: snapshotData
+            encryptedSnapshot = try JSONDecoder.pasteBuddy.decode(
+                EncryptedEnvelope.self,
+                from: encryptedSnapshotData
             )
         } catch {
-            throw CloudKitRecordFactoryError.snapshotDecodingFailed(error)
+            throw CloudKitRecordFactoryError.envelopeDecodingFailed(error)
         }
 
         return CloudSyncRemoteRecord(
@@ -83,8 +91,9 @@ public struct CloudKitRecordFactory: Sendable {
             packageID: packageID,
             createdAt: try dateField(Self.createdAtField, in: record),
             containerIdentifier: try stringField(Self.containerIdentifierField, in: record),
+            keyHierarchyVersion: try intField(Self.keyHierarchyVersionField, in: record),
             schemaVersion: try intField(Self.schemaVersionField, in: record),
-            snapshot: snapshot
+            encryptedSnapshot: encryptedSnapshot
         )
     }
 

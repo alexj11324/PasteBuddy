@@ -10,7 +10,7 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
 
     init(menuProvider: @escaping () -> NSMenu, primaryAction: @escaping () -> Void) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        self.statusMenu = NSMenu(title: "brand.pastebuddy")
+        self.statusMenu = NSMenu(title: NSLocalizedString("brand.pastebuddy", comment: ""))
         self.menuProvider = menuProvider
         self.primaryAction = primaryAction
         super.init()

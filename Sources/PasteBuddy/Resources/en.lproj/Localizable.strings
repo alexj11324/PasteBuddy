@@ -562,6 +562,10 @@
 "mobile.permission_state.denied" = "Denied";
 "mobile.permission_state.unknown" = "Unknown";
 "mobile.share_action.favorite_reorder_guidance" = "Users can add Save to PasteBuddy and Copy to PasteBuddy to iOS Share sheet favorites and reorder them from the system Share sheet edit screen.";
+"mobile.share_action.import_result_history" = "Saved %d item(s) to history.";
+"mobile.share_action.import_result_history_and_pinboard" = "Saved %d item(s) to history and selected pinboard.";
+"mobile.share_action.saved_to_history" = "Saved to history.";
+"mobile.share_action.saved_to_history_and_pinboard" = "Saved to history and selected pinboard.";
 "mobile.share_action.unsupported_input_explanation" = "PasteBuddy can save shared text, links, images, and supported file URLs. Unsupported provider payloads should fail with a clear message and no plaintext temporary files.";
 "mobile.summary.needs_actions" = "Mobile setup needs %d actions.";
 "mobile.summary.needs_one_action" = "Mobile setup needs 1 action.";

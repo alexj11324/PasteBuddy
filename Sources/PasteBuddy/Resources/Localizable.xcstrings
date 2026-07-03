@@ -16676,6 +16676,70 @@
         }
       }
     },
+    "mobile.share_action.import_result_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved %d item(s) to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 %d 个项目保存到历史。"
+          }
+        }
+      }
+    },
+    "mobile.share_action.import_result_history_and_pinboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved %d item(s) to history and selected pinboard."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 %d 个项目保存到历史和所选收藏板。"
+          }
+        }
+      }
+    },
+    "mobile.share_action.saved_to_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存到历史。"
+          }
+        }
+      }
+    },
+    "mobile.share_action.saved_to_history_and_pinboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved to history and selected pinboard."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存到历史和所选收藏板。"
+          }
+        }
+      }
+    },
     "mobile.share_action.unsupported_input_explanation": {
       "localizations": {
         "en": {
