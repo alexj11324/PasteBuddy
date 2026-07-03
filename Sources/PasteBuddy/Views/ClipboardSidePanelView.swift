@@ -7,6 +7,7 @@ private enum ClipboardSidePanelMetrics {
     static let rowHeight: CGFloat = 82
     static let thumbnailSize: CGFloat = 42
     static let previewMaxWidth: CGFloat = 640
+    static let sourceAppSuggestionWidth: CGFloat = 220
 }
 
 private struct ClipboardSidePanelQueryState: Equatable {
@@ -167,6 +168,18 @@ struct ClipboardSidePanelView: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture {
             setSearchFocused(true)
+        }
+        .background {
+            SourceAppSuggestionPanelPresenter(
+                isPresented: shouldShowSourceAppSuggestions,
+                appNames: sourceAppSuggestions,
+                query: store.searchQuery,
+                width: ClipboardSidePanelMetrics.sourceAppSuggestionWidth,
+                onSelect: { appName in
+                    store.applySourceAppSuggestion(appName)
+                    refreshSideItems()
+                }
+            )
         }
     }
 
@@ -362,6 +375,17 @@ struct ClipboardSidePanelView: View {
 
     private var hasSearchText: Bool {
         !store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var sourceAppSuggestions: [String] {
+        store.sourceAppSuggestions(matching: store.searchQuery, limit: 3)
+    }
+
+    private var shouldShowSourceAppSuggestions: Bool {
+        isSearchFocused
+            && store.sourceAppFilter == nil
+            && hasSearchText
+            && !sourceAppSuggestions.isEmpty
     }
 
     private var emptyTitle: String {

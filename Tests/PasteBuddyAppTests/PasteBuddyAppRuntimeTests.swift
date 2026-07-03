@@ -336,6 +336,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertTrue(shelfSource.contains("refreshShelfItems()"))
         XCTAssertTrue(sideSource.contains("refreshSideItems()"))
+        XCTAssertTrue(shelfSource.contains("struct SourceAppSuggestionPanelPresenter"))
+        XCTAssertFalse(shelfSource.contains("private struct SourceAppSuggestionPanelPresenter"))
+        XCTAssertTrue(shelfSource.contains("SourceAppSuggestionPanelPresenter("))
+        XCTAssertTrue(sideSource.contains("SourceAppSuggestionPanelPresenter("))
+        XCTAssertTrue(sideSource.contains("sourceAppSuggestions(matching: store.searchQuery, limit: 3)"))
+        XCTAssertTrue(sideSource.contains("store.applySourceAppSuggestion(appName)"))
         XCTAssertTrue(shelfSource.contains("enum ClipboardPanelSearchInput"))
         XCTAssertTrue(shelfSource.contains("modifiers.subtracting([.shift, .capsLock]).isEmpty"))
         XCTAssertTrue(shelfSource.contains("characters.rangeOfCharacter(from: .controlCharacters) == nil"))

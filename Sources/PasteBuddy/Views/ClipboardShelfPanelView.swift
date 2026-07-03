@@ -2049,7 +2049,7 @@ struct ShelfToolbarCircleIcon: View {
     }
 }
 
-private struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
+struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
     let isPresented: Bool
     let appNames: [String]
     let query: String
