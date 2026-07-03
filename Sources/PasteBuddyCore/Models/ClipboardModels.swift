@@ -2758,19 +2758,19 @@ public enum ShortcutModifier: String, CaseIterable, Codable, Sendable {
 
     public var sortOrder: Int {
         switch self {
-        case .command: 0
+        case .control: 0
         case .option: 1
-        case .control: 2
-        case .shift: 3
+        case .shift: 2
+        case .command: 3
         }
     }
 
     public var displayName: String {
         switch self {
-        case .command: "Command"
-        case .option: "Option"
-        case .shift: "Shift"
-        case .control: "Control"
+        case .command: "⌘"
+        case .option: "⌥"
+        case .shift: "⇧"
+        case .control: "⌃"
         }
     }
 }
@@ -2815,7 +2815,7 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
 
     public var displayName: String {
         guard let key, !key.isEmpty else { return "Not set" }
-        return (modifiers.map(\.displayName) + [key.uppercased()]).joined(separator: "+")
+        return (Self.normalizedModifiers(modifiers).map(\.displayName) + [key.uppercased()]).joined()
     }
 
     public static func normalizedModifiers(_ modifiers: [ShortcutModifier]) -> [ShortcutModifier] {
@@ -2887,7 +2887,7 @@ public struct ShortcutConfiguration: Codable, Equatable, Sendable {
     }
 
     private func modifiersDisplayName(_ modifiers: [ShortcutModifier], digitRange: String) -> String {
-        (ShortcutBinding.normalizedModifiers(modifiers).map(\.displayName) + [digitRange]).joined(separator: "+")
+        (ShortcutBinding.normalizedModifiers(modifiers).map(\.displayName) + [digitRange]).joined()
     }
 }
 
@@ -3359,7 +3359,7 @@ public struct AccessibilityLocalizationQualityReport: Codable, Equatable, Sendab
     public init() {
         summary = "Core clipboard workflows have code-level accessibility labels, semantic appearance, non-color status cues, and localization resources for English and Simplified Chinese."
         supportedLocaleIdentifiers = ["en", "zh-Hans"]
-        localizationReadyStatement = "English and Simplified Chinese Localizable.strings resources keep matching key sets, with priority Mac, mobile, filtering, Settings, MCP, sync, extension, and monetization strings covered by tests."
+        localizationReadyStatement = "English and Simplified Chinese String Catalog entries and SwiftPM compatibility resources keep matching key sets, with priority Mac, mobile, filtering, Settings, MCP, sync, extension, and monetization strings covered by tests."
         releaseAuditStatement = "Before App Store release, run a manual VoiceOver, Larger Text, high-contrast, and localized-layout pass on signed Mac, iPhone, iPad, keyboard, Share, and Action extension targets."
         findings = [
             AccessibilityQualityFinding(

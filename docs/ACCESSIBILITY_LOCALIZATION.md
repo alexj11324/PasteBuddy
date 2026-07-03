@@ -41,9 +41,9 @@ VoiceOver, Dark Mode, and localization workflows.
   Shortcuts-facing strings.
 - Localization is maintained through the Dify-backed String Catalog workflow in
   `docs/LOCALIZATION_WORKFLOW.md`.
-- The SwiftPM app target keeps expanded `Localizable.strings` resources for
-  English and Simplified Chinese, while the iOS app and extensions consume
-  `Localizable.xcstrings`.
+- The Apple-facing iOS app and extensions consume `Localizable.xcstrings`; the
+  SwiftPM app target keeps expanded `Localizable.strings` only as a compatibility
+  copy generated from the same workflow.
 - Core-generated mobile guidance and keyboard status copy uses semantic
   localization keys through `PasteBuddyLocalization` rather than hard-coded
   English strings.

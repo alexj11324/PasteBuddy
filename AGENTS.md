@@ -5,9 +5,14 @@
 - IMPORTANT: 当用户提问类似“json 里面这么写吗”“怎么配”“配置项怎么写”且未指明对象时，默认按 Codex 配置回答（优先参考 `~/.codex/config.toml` 与官方 Codex 文档）。
 - IMPORTANT: 仅当用户明确说明是其他工具/API/框架时，才切换到对应语境回答。
 
+## 删除语义（IMPORTANT）
+- IMPORTANT: 当用户明确要求删除某个地方、布局、格局、结构或入口时，必须在代码层面彻底删除对应实现、引用、状态和布局占位；禁止仅用隐藏、透明、禁用、条件恒 false、移出屏幕或零尺寸等方式保留旧代码。
+- IMPORTANT: 只有用户明确要求临时隐藏、保留开关、保留回滚入口或 feature flag 时，才允许保留相关代码；否则按彻底删除处理。
+
 ## smoke/ probe test
 - IMPORTANT: 所有 test 文件,除非是正式 pipeline 所需的,一律写入 tmp 文件夹,不可以持久化保存
 - IMPORTANT: 谨慎持久化 test 文件
+- IMPORTANT: 进行测试时，特别是涉及截图自动化的程序，必须使用 Computer Use 操作真实界面；不允许使用脚本驱动截图自动化，因为脚本会干扰正常操作。
 
 ## PasteBuddy 国际化/本地化工作流（IMPORTANT）
 - IMPORTANT: PasteBuddy 新增用户可见文案必须使用语义 key（例如 `action.save_text`、`label.mobile_setup`、`format.items_count`），不要把完整英文句子直接写成 UI key。

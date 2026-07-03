@@ -1,4 +1,5 @@
 /* Canonical semantic keys. Prefer these keys in SwiftUI and code. */
+"action.add_app" = "Add App";
 "action.add_item_or_pinboard" = "Add item or pinboard";
 "action.add_rule" = "Add Rule";
 "action.allow_local_agent_connection" = "Allow local Agent connection";
@@ -13,6 +14,7 @@
 "action.clear_shortcut" = "Clear Shortcut";
 "action.clear_stack" = "Clear Stack";
 "action.clear_unpinned_history" = "Clear Unpinned History";
+"action.close" = "Close";
 "action.copy" = "Copy";
 "action.copy_as_plain_text" = "Copy as Plain Text";
 "action.copy_pastebuddy_item" = "Copy PasteBuddy Item";
@@ -34,6 +36,7 @@
 "action.insert" = "Insert";
 "action.invite_participant" = "Invite Participant";
 "action.lock_history" = "Lock History";
+"action.manage_apps" = "Manage Apps";
 "action.open" = "Open";
 "action.open_at_login" = "Open at Login";
 "action.open_at_login.a7a8de0b" = "Open at login";
@@ -109,6 +112,24 @@
 "action.undo_delete_pastebuddy_item" = "Undo Delete PasteBuddy Item";
 "action.unlock_history" = "Unlock History";
 "action.unpin_from_current_pinboard" = "Unpin from Current Pinboard";
+"automation.create_item.created" = "Created PasteBuddy item \"%@\".";
+"automation.create_item.saved_to_pinboard" = "Created PasteBuddy item \"%@\" and saved it to %@.";
+"automation.destination.clipboard" = "Clipboard";
+"automation.destination.frontmost_app" = "Frontmost App";
+"automation.error.capture_rule_blocked" = "PasteBuddy blocked this action because it matched the local capture rule \"%@\".";
+"automation.error.content_type_disabled" = "%@ capture is disabled for PasteBuddy Shortcuts.";
+"automation.error.empty_content" = "Enter content before creating a PasteBuddy item.";
+"automation.error.empty_pinboard_name" = "Enter a pinboard name before running this PasteBuddy action.";
+"automation.error.empty_query" = "Enter a search query before running this PasteBuddy action.";
+"automation.error.empty_text" = "Enter text before creating a PasteBuddy item.";
+"automation.error.no_matching_item" = "No matching PasteBuddy item was found.";
+"automation.error.pinboard_not_found" = "No PasteBuddy pinboard named \"%@\" was found.";
+"automation.error.sensitive_text_blocked" = "PasteBuddy blocked this action because the text looks sensitive.";
+"automation.search.match_many" = "%d PasteBuddy items matched \"%@\": %@";
+"automation.search.match_one" = "%d PasteBuddy item matched \"%@\": %@";
+"automation.search.no_matches" = "No PasteBuddy items matched \"%@\".";
+"automation.transfer.copied_to_clipboard" = "Copied PasteBuddy item \"%@\" to the clipboard.";
+"automation.transfer.prepared_for_frontmost_app" = "Prepared PasteBuddy item \"%@\" for insertion into the frontmost app.";
 "brand.pastebuddy" = "PasteBuddy";
 "dialog.clear_all_history" = "Clear All History?";
 "dialog.clear_unpinned_history" = "Clear Unpinned History?";
@@ -259,6 +280,7 @@
 "label.images" = "Images";
 "label.implemented" = "Implemented";
 "label.includes_image_data" = "Includes image data";
+"label.installed_apps" = "Installed Apps";
 "label.integrations" = "Integrations";
 "label.invitation_only" = "Invitation Only";
 "label.items" = "Items";
@@ -304,8 +326,10 @@
 "label.new_text" = "New Text";
 "label.new_text_item" = "New Text Item";
 "label.next" = "Next";
+"label.no_app_selected" = "No App Selected";
 "label.no_clipboard_items" = "No Clipboard Items";
 "label.no_custom_capture_rules" = "No custom capture rules";
+"label.no_excluded_apps" = "No excluded apps";
 "label.no_participants" = "No participants";
 "label.no_pinboards_available" = "No Pinboards Available";
 "label.none" = "None";
@@ -359,6 +383,7 @@
 "label.rule_pattern" = "Rule Pattern";
 "label.rule_type" = "Rule Type";
 "label.search" = "Search";
+"label.search_apps" = "Search Apps";
 "label.search_clipboard" = "Search clipboard";
 "label.search_clipboard.e89d5a13" = "Search Clipboard";
 "label.search_or_app" = "Search or @App";
@@ -444,6 +469,8 @@
 "message.new_copies_will_appear_here" = "New copies will appear here.";
 "message.no_chinese_or_english_text_was_recognized" = "No Chinese or English text was recognized.";
 "message.no_external_app_is_available_to_exclude" = "No external app is available to exclude.";
+"message.no_installed_apps_found" = "No installed apps were found.";
+"message.no_matching_apps" = "No matching apps.";
 "message.opened_from_the_menu_bar_the_related" = "Opened from the menu bar. The related settings section is available below without starting a clipboard workflow.";
 "message.pastebuddy_could_not_create_this_item" = "PasteBuddy could not create this item.";
 "message.pastebuddy_does_not_send_clipboard_payloads_to" = "PasteBuddy does not send clipboard payloads to vendor servers for capture, search, OCR, keyboard insertion, Shortcuts, or local MCP access.";
@@ -564,8 +591,10 @@
 "mobile.permission_state.denied" = "Denied";
 "mobile.permission_state.unknown" = "Unknown";
 "mobile.share_action.favorite_reorder_guidance" = "Users can add Save to PasteBuddy and Copy to PasteBuddy to iOS Share sheet favorites and reorder them from the system Share sheet edit screen.";
-"mobile.share_action.import_result_history" = "Saved %d item(s) to history.";
-"mobile.share_action.import_result_history_and_pinboard" = "Saved %d item(s) to history and selected pinboard.";
+"mobile.share_action.import_result_history" = "Saved %d items to history.";
+"mobile.share_action.import_result_history_and_pinboard" = "Saved %d items to history and selected pinboard.";
+"mobile.share_action.import_result_history_and_pinboard_one" = "Saved %d item to history and selected pinboard.";
+"mobile.share_action.import_result_history_one" = "Saved %d item to history.";
 "mobile.share_action.saved_to_history" = "Saved to history.";
 "mobile.share_action.saved_to_history_and_pinboard" = "Saved to history and selected pinboard.";
 "mobile.share_action.unsupported_input_explanation" = "PasteBuddy can save shared text, links, images, and supported file URLs. Unsupported provider payloads should fail with a clear message and no plaintext temporary files.";
@@ -695,6 +724,7 @@
 "Undo Delete PasteBuddy Item" = "Undo Delete PasteBuddy Item";
 "Unlock History" = "Unlock History";
 "Unpin from Current Pinboard" = "Unpin from Current Pinboard";
+"Clipboard" = "Clipboard";
 "PasteBuddy" = "PasteBuddy";
 "Clear All History?" = "Clear All History?";
 "Clear Unpinned History?" = "Clear Unpinned History?";
@@ -774,7 +804,6 @@
 "Capture text" = "Capture text";
 "Captured image preview" = "Captured image preview";
 "Category" = "Category";
-"Clipboard" = "Clipboard";
 "Clipboard collections" = "Clipboard collections";
 "Clipboard History" = "Clipboard History";
 "Clipboard item labels" = "Clipboard item labels";

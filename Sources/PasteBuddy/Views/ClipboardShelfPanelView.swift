@@ -1229,45 +1229,7 @@ struct ShelfExpandedPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !isImageAssetPreview {
-                HStack(alignment: .center, spacing: 8) {
-                    Button {
-                        onDismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help(localized("label.close_preview"))
-
-                    Label(localized(item.presentationContentType.displayName), systemImage: item.presentationContentType.systemImageName)
-                        .font(.headline)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 12)
-
-                    SourceApplicationIconBadge(item: item, size: 24)
-                }
-            }
-
             previewContent
-
-            if !isImageAssetPreview {
-                HStack(spacing: 10) {
-                    Text(footnote)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if let url = item.openableURL {
-                        Button {
-                            NSWorkspace.shared.open(url)
-                        } label: {
-                            Label("action.open", systemImage: "arrow.up.right.square")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
         }
         .padding(14)
         .frame(width: previewFrameWidth, alignment: .leading)
@@ -1350,10 +1312,6 @@ struct ShelfExpandedPreview: View {
         )
     }
 
-    private var isImageAssetPreview: Bool {
-        item.presentationContentType == .image && item.payload.hasImageAsset
-    }
-
     private func previewText(_ text: String) -> some View {
         ScrollView {
             Text(text.isEmpty ? item.visualPreview.body : text)
@@ -1370,35 +1328,8 @@ struct ShelfExpandedPreview: View {
         }
     }
 
-    private var footnote: String {
-        switch item.presentationContentType {
-        case .image:
-            return localized(item.ocrState.displayName)
-        case .file:
-            let count = item.payload.allFileURLStrings.count
-            return localized(count == 1 ? "format.file" : "format.files", count)
-        case .text, .url, .mixed:
-            return localized("format.chars", presentationCharacterCount)
-        }
-    }
-
-    private var presentationCharacterCount: Int {
-        item.payload.text?.count
-            ?? item.payload.urlString?.count
-            ?? item.payload.ocrText?.count
-            ?? item.searchDocument.normalizedText.count
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
-    }
-
-    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
-        String(
-            format: NSLocalizedString(key, comment: ""),
-            locale: Locale.current,
-            arguments: arguments
-        )
     }
 }
 
@@ -1467,7 +1398,6 @@ private struct ShelfExpandedImagePreview: View {
     let displaySize: CGSize?
     @State private var liveTextImage: NSImage?
     @State private var fallbackImage: NSImage?
-    @State private var loadedImageData: Data?
 
     var body: some View {
         ZStack {
@@ -1476,11 +1406,7 @@ private struct ShelfExpandedImagePreview: View {
                     image: liveTextImage,
                     analysisID: analysisID
                 )
-            } else if let image = fallbackImage ?? ClipboardImageCache.cachedThumbnail(
-                for: item,
-                imageData: loadedImageData,
-                maxPixelSize: maxPixelSize
-            ) {
+            } else if let image = fallbackImage ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -1501,20 +1427,10 @@ private struct ShelfExpandedImagePreview: View {
         }
         .accessibilityLabel(localized("label.captured_image_preview"))
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
-            let cachedImage = ClipboardImageCache.cachedThumbnail(
-                for: item,
-                imageData: loadedImageData,
-                maxPixelSize: maxPixelSize
-            )
+            let cachedImage = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)
             fallbackImage = cachedImage
 
-            let imageData: Data?
-            if let loadedImageData {
-                imageData = loadedImageData
-            } else {
-                imageData = await imageDataProvider(item)
-            }
-            loadedImageData = imageData
+            let imageData = await imageDataProvider(item)
 
             if let imageData, let image = NSImage(data: imageData) {
                 guard !Task.isCancelled else { return }
@@ -1984,11 +1900,10 @@ struct ClipboardImageThumbnailView: View {
     let contentMode: ContentMode
     let placeholderIconSize: CGFloat
     @State private var thumbnail: NSImage?
-    @State private var loadedImageData: Data?
 
     var body: some View {
         ZStack {
-            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData) {
+            if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
@@ -2001,16 +1916,10 @@ struct ClipboardImageThumbnailView: View {
             }
         }
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item)) {
-            thumbnail = ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData)
+            thumbnail = ClipboardImageCache.cachedThumbnail(for: item)
             guard thumbnail == nil else { return }
 
-            let imageData: Data?
-            if let loadedImageData {
-                imageData = loadedImageData
-            } else {
-                imageData = await imageDataProvider(item)
-            }
-            loadedImageData = imageData
+            let imageData = await imageDataProvider(item)
             let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item, imageData: imageData)
             guard !Task.isCancelled else { return }
             thumbnail = loadedThumbnail

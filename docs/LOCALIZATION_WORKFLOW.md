@@ -1,13 +1,19 @@
 # Localization Workflow
 
-PasteBuddy localization is maintained through the existing Dify workflow, then
-materialized into Xcode String Catalog format. The source of truth is:
+PasteBuddy follows Apple's Xcode 15+ localization path: user-facing app strings
+are materialized into `Localizable.xcstrings`, and iOS targets consume that
+String Catalog directly. The repo still keeps `.strings` files as reviewed Dify
+interchange and SwiftPM compatibility resources, but they are not the iOS target
+resource source.
+
+The maintained resources are:
 
 - `Sources/PasteBuddy/Resources/en.lproj/Localizable.strings`
 - `Sources/PasteBuddy/Resources/zh-Hans.lproj/Localizable.strings`
 - `Sources/PasteBuddy/Resources/Localizable.xcstrings`
 
 Use semantic keys in code. Do not use complete English sentences as keys.
+Do not add `Localizable.strings` back to iOS target resource phases.
 
 ## Daily Commands
 
@@ -58,6 +64,24 @@ PasteBuddyLocalization.string(
 
 The fallback must match the English catalog value. The checker fails if the key
 is missing or the fallback drifts.
+
+For count-based copy, follow Apple's pluralization guidance instead of using
+`item(s)` or another English-only shortcut. Prefer existing singular/plural keys
+or add paired semantic keys before syncing the catalog.
+
+For device- or width-specific wording, add the variants in the String Catalog
+workflow rather than branching visible English literals in Swift.
+
+## Apple Localization QA
+
+Before treating a localization pass as release-ready:
+
+- Build the catalog so Xcode or `xcstringstool` proves it compiles.
+- Test every supported language and region, currently `en` and `zh-Hans`.
+- Run a pseudolanguage or double-length pass for layout expansion.
+- Run a right-to-left pseudolanguage pass before adding any RTL locale.
+- Localize app and extension `InfoPlist.strings` / purpose strings together with
+  visible app copy.
 
 ## Dify And Secrets
 

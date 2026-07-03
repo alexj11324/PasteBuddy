@@ -66,6 +66,22 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(events, ["dismiss", "focus-restored", "paste"])
     }
 
+    func testPinnedDirectPasteCanSkipImmediateDismissal() async {
+        var events: [String] = []
+
+        await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            dismissBeforePaste: false,
+            dismiss: {
+                events.append("dismiss")
+            },
+            operation: {
+                events.append("paste")
+            }
+        )
+
+        XCTAssertEqual(events, ["paste"])
+    }
+
     func testShelfPreviewToggleDismissesAlreadyPreviewedCard() {
         let item = makeShelfItem(title: "Screenshot")
         let interaction = ShelfInteractionModel(items: [item])
@@ -212,7 +228,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testShelfExpandedTextPreviewIsReadOnlyAndKeyboardNavigable() throws {
+    func testShelfExpandedPreviewKeepsKeyboardSelectionAndOmitsChrome() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let previewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
         let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
@@ -227,12 +243,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(previewSource.contains("case .downArrow:"))
         XCTAssertTrue(previewSource.contains("clipboard-expanded-preview-"))
         XCTAssertTrue(previewSource.contains("previewText(ClipboardPlainTextRenderer.plainText(for: item))"))
+        XCTAssertFalse(previewSource.contains("Label(localized(item.presentationContentType.displayName)"))
+        XCTAssertFalse(previewSource.contains("SourceApplicationIconBadge(item: item, size: 24)"))
+        XCTAssertFalse(previewSource.contains("Text(footnote)"))
+        XCTAssertFalse(previewSource.contains("item.openableURL"))
         XCTAssertFalse(previewSource.contains("TextEditor(text:"))
         XCTAssertFalse(previewSource.contains("onSaveText"))
         XCTAssertFalse(previewSource.contains("Button(\"action.save_text\")"))
     }
 
-    func testPreviewPopoversAreOwnedByListsInsteadOfReusedCells() throws {
+    func testSidePanelPreviewPopoverIsAnchoredToSelectedRow() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
@@ -249,8 +269,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(shelfCardSource.contains(".popover("))
         XCTAssertFalse(shelfCardSource.contains("@Binding var isPreviewPresented"))
 
-        XCTAssertTrue(sideSource.contains(".popover(isPresented: isPreviewPresented, arrowEdge: .trailing)"))
-        XCTAssertTrue(sideSource.contains("private var previewedItem: ClipboardItem?"))
+        XCTAssertTrue(sideSource.contains(".popover(isPresented: previewPresentationBinding(for: item.id), arrowEdge: .trailing)"))
+        XCTAssertTrue(sideSource.contains("private func previewPresentationBinding(for itemID: UUID) -> Binding<Bool>"))
+        XCTAssertFalse(sideSource.contains(".popover(isPresented: isPreviewPresented, arrowEdge: .trailing)"))
+        XCTAssertFalse(sideSource.contains("private var previewedItem: ClipboardItem?"))
         XCTAssertFalse(sideRowSource.contains(".popover("))
         XCTAssertFalse(sideRowSource.contains("@Binding var isPreviewPresented"))
     }
@@ -275,8 +297,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(imagePreviewSource.contains("NSImage(data: imageData)"))
         XCTAssertTrue(source.contains("private var previewFrameWidth: CGFloat"))
         XCTAssertTrue(source.contains("private var imagePreviewDisplaySize: CGSize?"))
-        XCTAssertTrue(expandedPreviewSource.contains("private var isImageAssetPreview: Bool"))
-        XCTAssertTrue(expandedPreviewSource.contains("if !isImageAssetPreview"))
+        XCTAssertFalse(expandedPreviewSource.contains("private var isImageAssetPreview: Bool"))
+        XCTAssertFalse(expandedPreviewSource.contains("if !isImageAssetPreview"))
         XCTAssertTrue(imagePreviewSource.contains("let displaySize: CGSize?"))
         XCTAssertTrue(imagePreviewSource.contains(".frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)"))
         XCTAssertTrue(source.contains("ClipboardImageCache.fittedDisplaySize("))
@@ -371,18 +393,36 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testMenuBarStatusItemDoesNotExposeDirectMainWindowOpenAction() throws {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
-        let menuEnd = try XCTUnwrap(appSource.range(of: "private func openMainWindow()"))
+        let menuEnd = try XCTUnwrap(appSource.range(of: "private func toggleClipboardShelf()"))
         let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
 
+        XCTAssertFalse(appSource.contains(#"WindowGroup("PasteBuddy""#))
+        XCTAssertFalse(appSource.contains("ContentView("))
+        XCTAssertFalse(appSource.contains("mainWindowScene"))
+        XCTAssertFalse(appSource.contains("MainWindowLaunchGuard"))
+        XCTAssertFalse(appSource.contains("MainWindowLaunchCoordinator"))
         XCTAssertFalse(menuSource.contains("Open PasteBuddy"))
         XCTAssertFalse(menuSource.contains("openMainWindow()"))
         XCTAssertFalse(menuSource.contains("openWindow(id: \"main\""))
     }
 
+    func testMainHistoryWindowInterfaceFilesAreRemoved() {
+        for removedPath in [
+            "Sources/PasteBuddy/Views/ContentView.swift",
+            "Sources/PasteBuddy/Views/SidebarView.swift",
+            "Sources/PasteBuddy/Views/ItemListView.swift",
+            "Sources/PasteBuddy/Views/ItemDetailView.swift",
+            "Sources/PasteBuddy/Views/PinboardSharingSheet.swift",
+            "Sources/PasteBuddy/Models/ClipboardItemDragProvider.swift"
+        ] {
+            XCTAssertThrowsError(try sourceFileContents(removedPath))
+        }
+    }
+
     func testStatusItemMenuExposesShelfPlacementModeChooser() throws {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
-        let menuEnd = try XCTUnwrap(appSource.range(of: "private func openMainWindow()"))
+        let menuEnd = try XCTUnwrap(appSource.range(of: "private func toggleClipboardShelf()"))
         let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
 
         XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardShelfPlacement")"#))
@@ -399,7 +439,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
         let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
-        let menuEnd = try XCTUnwrap(appSource.range(of: "private func openMainWindow()"))
+        let menuEnd = try XCTUnwrap(appSource.range(of: "private func toggleClipboardShelf()"))
         let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
 
         XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardPanelDisplayMode")"#))
@@ -480,10 +520,77 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
         XCTAssertTrue(source.contains(".background(.regularMaterial)"))
+        XCTAssertTrue(source.contains(".toolbar(removing: .sidebarToggle)"))
         XCTAssertTrue(source.contains("case .sync:"))
         XCTAssertTrue(source.contains("self = .integrations"))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
+    }
+
+    func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        XCTAssertTrue(source.contains("InstalledApplicationPickerSheet"))
+        XCTAssertTrue(source.contains("newCaptureRuleCondition.requiresInstalledApplication"))
+        XCTAssertTrue(source.contains("newCaptureRuleCondition.rulePattern(for: application)"))
+        XCTAssertTrue(source.contains("captureRulePatternForSubmit"))
+        XCTAssertTrue(source.contains("showingExcludedApplicationsSheet"))
+        XCTAssertTrue(source.contains("store.excludeApplication("))
+    }
+
+    func testInstalledApplicationCatalogReadsAppsFromLocalBundles() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("PasteBuddyInstalledApplicationCatalog-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        try makeTemporaryApp(
+            at: root.appendingPathComponent("Code.app", isDirectory: true),
+            displayName: "Code",
+            bundleIdentifier: "com.example.code"
+        )
+        try makeTemporaryApp(
+            at: root.appendingPathComponent("Copies/Code Copy.app", isDirectory: true),
+            displayName: "Code Copy",
+            bundleIdentifier: "com.example.code"
+        )
+        try makeTemporaryApp(
+            at: root.appendingPathComponent("Utilities/No Bundle.app", isDirectory: true),
+            displayName: "No Bundle",
+            bundleIdentifier: nil
+        )
+
+        let applications = InstalledApplicationCatalog(applicationDirectories: [root]).applications()
+
+        XCTAssertEqual(applications.filter { $0.bundleIdentifier == "com.example.code" }.count, 1)
+        XCTAssertTrue(applications.contains { $0.displayName == "Code" && $0.bundleIdentifier == "com.example.code" })
+        XCTAssertTrue(applications.contains { $0.displayName == "No Bundle" && $0.bundleIdentifier == nil })
+    }
+
+    func testShortcutSettingsRecordKeyCombinationsInsteadOfManualToggles() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        XCTAssertTrue(source.contains("ShortcutCaptureButton"))
+        XCTAssertTrue(source.contains("ShortcutRecorderState"))
+        XCTAssertTrue(source.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
+        XCTAssertTrue(source.contains("NSEvent.removeMonitor(eventMonitor)"))
+        XCTAssertTrue(source.contains("NotificationCenter.default.post(name: .pasteBuddyShortcutRecordingDidChange"))
+        XCTAssertTrue(source.contains("store.setShortcutBinding("))
+        XCTAssertTrue(source.contains("store.setQuickPasteModifiers(shortcut.modifiers"))
+        XCTAssertFalse(source.contains("ShortcutModifierToggles"))
+        XCTAssertFalse(source.contains("Toggle(modifier.displayName"))
+        XCTAssertFalse(source.contains("TextField(\"label.key\""))
+    }
+
+    func testPanelHotKeyControllerPausesGlobalHotKeysWhileRecordingShortcuts() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+
+        XCTAssertTrue(source.contains("forName: .pasteBuddyShortcutRecordingDidChange"))
+        XCTAssertTrue(source.contains("registration?.setEnabled(!isRecording)"))
+        XCTAssertTrue(source.contains("eventTap?.setEnabled(!isRecording)"))
+        XCTAssertTrue(source.contains("ignoredDuringShortcutRecording"))
+        XCTAssertTrue(source.contains("UnregisterEventHotKey(hotKeyRef)"))
+        XCTAssertTrue(source.contains("CGEvent.tapEnable(tap: eventTap, enable: isEnabled)"))
     }
 
     func testPlansSettingsDoesNotExposeInternalPurchaseCopy() throws {
@@ -636,6 +743,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("ClipboardImageThumbnailView"))
         XCTAssertTrue(source.contains(".focusEffectDisabled()"))
         XCTAssertTrue(source.contains("ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal"))
+        XCTAssertTrue(source.contains("dismissBeforePaste: !isPinned"))
         XCTAssertTrue(source.contains("label.all"))
         XCTAssertTrue(source.contains("label.today"))
         XCTAssertFalse(source.contains("label.filters"))
@@ -817,6 +925,24 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             title: title,
             payload: ClipboardPayload(text: title)
         )
+    }
+
+    private func makeTemporaryApp(
+        at url: URL,
+        displayName: String,
+        bundleIdentifier: String?
+    ) throws {
+        let contentsURL = url.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contentsURL, withIntermediateDirectories: true)
+        var info: [String: String] = [
+            "CFBundleDisplayName": displayName,
+            "CFBundleName": displayName
+        ]
+        if let bundleIdentifier {
+            info["CFBundleIdentifier"] = bundleIdentifier
+        }
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: contentsURL.appendingPathComponent("Info.plist"))
     }
 
     private func sourceFileContents(_ relativePath: String) throws -> String {

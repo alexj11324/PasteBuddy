@@ -1274,7 +1274,7 @@
           }
         }
       },
-      "comment": "Legacy alias for label.clipboard. Prefer the semantic key in code."
+      "comment": "Legacy alias for automation.destination.clipboard. Prefer the semantic key in code."
     },
     "Clipboard History": {
       "localizations": {
@@ -7668,6 +7668,22 @@
       },
       "comment": "Legacy alias for label.voiceover. Prefer the semantic key in code."
     },
+    "action.add_app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add App"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加应用"
+          }
+        }
+      }
+    },
     "action.add_item_or_pinboard": {
       "localizations": {
         "en": {
@@ -7888,6 +7904,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "清除未固定历史"
+          }
+        }
+      }
+    },
+    "action.close": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭"
           }
         }
       }
@@ -8224,6 +8256,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "锁定历史"
+          }
+        }
+      }
+    },
+    "action.manage_apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage Apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理应用"
           }
         }
       }
@@ -9424,6 +9472,294 @@
           "stringUnit": {
             "state": "translated",
             "value": "从当前收藏板取消固定"
+          }
+        }
+      }
+    },
+    "automation.create_item.created": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created PasteBuddy item \"%@\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已创建 PasteBuddy 项目“%@”。"
+          }
+        }
+      }
+    },
+    "automation.create_item.saved_to_pinboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created PasteBuddy item \"%@\" and saved it to %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已创建 PasteBuddy 项目“%@”并保存到 %@。"
+          }
+        }
+      }
+    },
+    "automation.destination.clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板"
+          }
+        }
+      }
+    },
+    "automation.destination.frontmost_app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frontmost App"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最前面的 App"
+          }
+        }
+      }
+    },
+    "automation.error.capture_rule_blocked": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy blocked this action because it matched the local capture rule \"%@\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 已阻止此操作，因为它匹配本地捕获规则“%@”。"
+          }
+        }
+      }
+    },
+    "automation.error.content_type_disabled": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ capture is disabled for PasteBuddy Shortcuts."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 快捷指令已停用 %@ 捕获。"
+          }
+        }
+      }
+    },
+    "automation.error.empty_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter content before creating a PasteBuddy item."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "创建 PasteBuddy 项目前请输入内容。"
+          }
+        }
+      }
+    },
+    "automation.error.empty_pinboard_name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a pinboard name before running this PasteBuddy action."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行此 PasteBuddy 操作前请输入收藏板名称。"
+          }
+        }
+      }
+    },
+    "automation.error.empty_query": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a search query before running this PasteBuddy action."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行此 PasteBuddy 操作前请输入搜索查询。"
+          }
+        }
+      }
+    },
+    "automation.error.empty_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter text before creating a PasteBuddy item."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "创建 PasteBuddy 项目前请输入文本。"
+          }
+        }
+      }
+    },
+    "automation.error.no_matching_item": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matching PasteBuddy item was found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到匹配的 PasteBuddy 项目。"
+          }
+        }
+      }
+    },
+    "automation.error.pinboard_not_found": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No PasteBuddy pinboard named \"%@\" was found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到名为“%@”的 PasteBuddy 收藏板。"
+          }
+        }
+      }
+    },
+    "automation.error.sensitive_text_blocked": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy blocked this action because the text looks sensitive."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 已阻止此操作，因为文本看起来包含敏感内容。"
+          }
+        }
+      }
+    },
+    "automation.search.match_many": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d PasteBuddy items matched \"%@\": %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 个 PasteBuddy 项目匹配“%@”：%@"
+          }
+        }
+      }
+    },
+    "automation.search.match_one": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d PasteBuddy item matched \"%@\": %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 个 PasteBuddy 项目匹配“%@”：%@"
+          }
+        }
+      }
+    },
+    "automation.search.no_matches": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No PasteBuddy items matched \"%@\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配“%@”的 PasteBuddy 项目。"
+          }
+        }
+      }
+    },
+    "automation.transfer.copied_to_clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied PasteBuddy item \"%@\" to the clipboard."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 PasteBuddy 项目“%@”复制到剪贴板。"
+          }
+        }
+      }
+    },
+    "automation.transfer.prepared_for_frontmost_app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepared PasteBuddy item \"%@\" for insertion into the frontmost app."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已准备将 PasteBuddy 项目“%@”插入最前面的 App。"
           }
         }
       }
@@ -11828,6 +12164,22 @@
         }
       }
     },
+    "label.installed_apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed Apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装应用"
+          }
+        }
+      }
+    },
     "label.integrations": {
       "localizations": {
         "en": {
@@ -12548,6 +12900,22 @@
         }
       }
     },
+    "label.no_app_selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No App Selected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未选择应用"
+          }
+        }
+      }
+    },
     "label.no_clipboard_items": {
       "localizations": {
         "en": {
@@ -12576,6 +12944,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有自定义捕获规则"
+          }
+        }
+      }
+    },
+    "label.no_excluded_apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No excluded apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有已排除应用"
           }
         }
       }
@@ -13424,6 +13808,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索"
+          }
+        }
+      }
+    },
+    "label.search_apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索应用"
           }
         }
       }
@@ -14784,6 +15184,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有可排除的外部应用。"
+          }
+        }
+      }
+    },
+    "message.no_installed_apps_found": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No installed apps were found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到已安装应用。"
+          }
+        }
+      }
+    },
+    "message.no_matching_apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matching apps."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配的应用。"
           }
         }
       }
@@ -16713,7 +17145,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Saved %d item(s) to history."
+            "value": "Saved %d items to history."
           }
         },
         "zh-Hans": {
@@ -16729,13 +17161,45 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Saved %d item(s) to history and selected pinboard."
+            "value": "Saved %d items to history and selected pinboard."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "已将 %d 个项目保存到历史和所选收藏板。"
+          }
+        }
+      }
+    },
+    "mobile.share_action.import_result_history_and_pinboard_one": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved %d item to history and selected pinboard."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 %d 个项目保存到历史和所选收藏板。"
+          }
+        }
+      }
+    },
+    "mobile.share_action.import_result_history_one": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved %d item to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 %d 个项目保存到历史。"
           }
         }
       }

@@ -1,4 +1,5 @@
 /* Canonical semantic keys. Prefer these keys in SwiftUI and code. */
+"action.add_app" = "添加应用";
 "action.add_item_or_pinboard" = "添加项目或收藏板";
 "action.add_rule" = "添加规则";
 "action.allow_local_agent_connection" = "允许本地 Agent 连接";
@@ -13,6 +14,7 @@
 "action.clear_shortcut" = "清空快捷键";
 "action.clear_stack" = "清空粘贴栈";
 "action.clear_unpinned_history" = "清除未固定历史";
+"action.close" = "关闭";
 "action.copy" = "复制";
 "action.copy_as_plain_text" = "复制为纯文本";
 "action.copy_pastebuddy_item" = "复制 PasteBuddy 项目";
@@ -34,6 +36,7 @@
 "action.insert" = "插入";
 "action.invite_participant" = "邀请参与者";
 "action.lock_history" = "锁定历史";
+"action.manage_apps" = "管理应用";
 "action.open" = "打开";
 "action.open_at_login" = "登录时打开";
 "action.open_at_login.a7a8de0b" = "登录时打开";
@@ -109,6 +112,24 @@
 "action.undo_delete_pastebuddy_item" = "撤销删除 PasteBuddy 项目";
 "action.unlock_history" = "解锁历史";
 "action.unpin_from_current_pinboard" = "从当前收藏板取消固定";
+"automation.create_item.created" = "已创建 PasteBuddy 项目“%@”。";
+"automation.create_item.saved_to_pinboard" = "已创建 PasteBuddy 项目“%@”并保存到 %@。";
+"automation.destination.clipboard" = "剪贴板";
+"automation.destination.frontmost_app" = "最前面的 App";
+"automation.error.capture_rule_blocked" = "PasteBuddy 已阻止此操作，因为它匹配本地捕获规则“%@”。";
+"automation.error.content_type_disabled" = "PasteBuddy 快捷指令已停用 %@ 捕获。";
+"automation.error.empty_content" = "创建 PasteBuddy 项目前请输入内容。";
+"automation.error.empty_pinboard_name" = "运行此 PasteBuddy 操作前请输入收藏板名称。";
+"automation.error.empty_query" = "运行此 PasteBuddy 操作前请输入搜索查询。";
+"automation.error.empty_text" = "创建 PasteBuddy 项目前请输入文本。";
+"automation.error.no_matching_item" = "未找到匹配的 PasteBuddy 项目。";
+"automation.error.pinboard_not_found" = "未找到名为“%@”的 PasteBuddy 收藏板。";
+"automation.error.sensitive_text_blocked" = "PasteBuddy 已阻止此操作，因为文本看起来包含敏感内容。";
+"automation.search.match_many" = "%d 个 PasteBuddy 项目匹配“%@”：%@";
+"automation.search.match_one" = "%d 个 PasteBuddy 项目匹配“%@”：%@";
+"automation.search.no_matches" = "没有匹配“%@”的 PasteBuddy 项目。";
+"automation.transfer.copied_to_clipboard" = "已将 PasteBuddy 项目“%@”复制到剪贴板。";
+"automation.transfer.prepared_for_frontmost_app" = "已准备将 PasteBuddy 项目“%@”插入最前面的 App。";
 "brand.pastebuddy" = "PasteBuddy";
 "dialog.clear_all_history" = "清除所有历史？";
 "dialog.clear_unpinned_history" = "清除未固定历史？";
@@ -259,6 +280,7 @@
 "label.images" = "图片";
 "label.implemented" = "已实现";
 "label.includes_image_data" = "包含图片数据";
+"label.installed_apps" = "已安装应用";
 "label.integrations" = "集成";
 "label.invitation_only" = "仅邀请";
 "label.items" = "项目";
@@ -304,8 +326,10 @@
 "label.new_text" = "新建文本";
 "label.new_text_item" = "新建文本项";
 "label.next" = "下一个";
+"label.no_app_selected" = "未选择应用";
 "label.no_clipboard_items" = "没有剪贴板项目";
 "label.no_custom_capture_rules" = "没有自定义捕获规则";
+"label.no_excluded_apps" = "没有已排除应用";
 "label.no_participants" = "没有参与者";
 "label.no_pinboards_available" = "没有可用的收藏板";
 "label.none" = "无";
@@ -359,6 +383,7 @@
 "label.rule_pattern" = "规则模式";
 "label.rule_type" = "规则类型";
 "label.search" = "搜索";
+"label.search_apps" = "搜索应用";
 "label.search_clipboard" = "搜索剪贴板";
 "label.search_clipboard.e89d5a13" = "搜索剪贴板";
 "label.search_or_app" = "搜索或 @App";
@@ -444,6 +469,8 @@
 "message.new_copies_will_appear_here" = "新的复制内容会显示在这里。";
 "message.no_chinese_or_english_text_was_recognized" = "未识别到中文或英文文本。";
 "message.no_external_app_is_available_to_exclude" = "没有可排除的外部应用。";
+"message.no_installed_apps_found" = "未找到已安装应用。";
+"message.no_matching_apps" = "没有匹配的应用。";
 "message.opened_from_the_menu_bar_the_related" = "从菜单栏打开。无需启动剪贴板工作流程，即可在下方使用相关设置部分。";
 "message.pastebuddy_could_not_create_this_item" = "PasteBuddy 无法创建此项目。";
 "message.pastebuddy_does_not_send_clipboard_payloads_to" = "PasteBuddy 不会将剪贴板内容发送到供应商服务器，用于捕获、搜索、OCR、键盘插入、Shortcuts 或本地 MCP 访问。";
@@ -566,6 +593,8 @@
 "mobile.share_action.favorite_reorder_guidance" = "用户可以把“保存到 PasteBuddy”和“复制到 PasteBuddy”添加到 iOS 分享面板收藏，并在系统分享面板编辑界面重新排序。";
 "mobile.share_action.import_result_history" = "已将 %d 个项目保存到历史。";
 "mobile.share_action.import_result_history_and_pinboard" = "已将 %d 个项目保存到历史和所选收藏板。";
+"mobile.share_action.import_result_history_and_pinboard_one" = "已将 %d 个项目保存到历史和所选收藏板。";
+"mobile.share_action.import_result_history_one" = "已将 %d 个项目保存到历史。";
 "mobile.share_action.saved_to_history" = "已保存到历史。";
 "mobile.share_action.saved_to_history_and_pinboard" = "已保存到历史和所选收藏板。";
 "mobile.share_action.unsupported_input_explanation" = "PasteBuddy 可以保存分享的文本、链接、图片和受支持的文件 URL。不受支持的提供方载荷应给出清晰失败信息，且不留下明文临时文件。";
@@ -695,6 +724,7 @@
 "Undo Delete PasteBuddy Item" = "撤销删除 PasteBuddy 项目";
 "Unlock History" = "解锁历史";
 "Unpin from Current Pinboard" = "从当前收藏板取消固定";
+"Clipboard" = "剪贴板";
 "PasteBuddy" = "PasteBuddy";
 "Clear All History?" = "清除所有历史？";
 "Clear Unpinned History?" = "清除未固定历史？";
@@ -774,7 +804,6 @@
 "Capture text" = "捕获文本";
 "Captured image preview" = "已捕获图片预览";
 "Category" = "类别";
-"Clipboard" = "剪贴板";
 "Clipboard collections" = "剪贴板集合";
 "Clipboard History" = "剪贴板历史";
 "Clipboard item labels" = "剪贴板项目标签";

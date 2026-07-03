@@ -276,6 +276,31 @@ final class MobileIntegrationTests: XCTestCase {
         XCTAssertTrue(store.snapshot.pinboards[0].itemIDs.contains(result.importedItems[0].id))
     }
 
+    func testShareActionImportResultUsesLocalizedSingularAndPluralMessages() {
+        let item = ClipboardItem(
+            sourceAppName: "Share",
+            deviceName: "Test iPhone",
+            contentType: .text,
+            title: "Shared text",
+            payload: ClipboardPayload(text: "Shared text")
+        )
+        let singular = MobileShareActionImportResult(
+            importedItems: [item],
+            targetPinboardID: nil,
+            source: .shareExtension
+        )
+        let plural = MobileShareActionImportResult(
+            importedItems: [item, item],
+            targetPinboardID: UUID(),
+            source: .shareExtension
+        )
+
+        XCTAssertEqual(singular.statusMessage, "Saved 1 item to history.")
+        XCTAssertEqual(plural.statusMessage, "Saved 2 items to history and selected pinboard.")
+        XCTAssertFalse(singular.statusMessage.contains("item(s)"))
+        XCTAssertFalse(plural.statusMessage.contains("item(s)"))
+    }
+
     func testShareActionExtensionResultDoesNotReportMissingPinboardTarget() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

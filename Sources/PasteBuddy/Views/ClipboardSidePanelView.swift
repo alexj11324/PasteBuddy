@@ -283,6 +283,17 @@ struct ClipboardSidePanelView: View {
                         pinboards: store.userPinboards
                     )
                     .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
+                    .popover(isPresented: previewPresentationBinding(for: item.id), arrowEdge: .trailing) {
+                        ShelfExpandedPreview(
+                            item: item,
+                            imageDataProvider: store.imageData,
+                            tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                            onDismiss: {
+                                interaction.dismissPreview()
+                            },
+                            onMove: moveSelection
+                        )
+                    }
                 } onSelect: { id, modifiers in
                     guard let item = renderedItems.first(where: { $0.id == id }) else { return }
                     selectItem(item, modifiers: modifiers)
@@ -300,19 +311,6 @@ struct ClipboardSidePanelView: View {
             }
         }
         .padding(.vertical, 10)
-        .popover(isPresented: isPreviewPresented, arrowEdge: .trailing) {
-            if let item = previewedItem {
-                ShelfExpandedPreview(
-                    item: item,
-                    imageDataProvider: store.imageData,
-                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                    onDismiss: {
-                        interaction.dismissPreview()
-                    },
-                    onMove: moveSelection
-                )
-            }
-        }
     }
 
     private var footer: some View {
@@ -483,6 +481,7 @@ struct ClipboardSidePanelView: View {
         guard !items.isEmpty else { return }
         Task { @MainActor in
             let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismissBeforePaste: !isPinned,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
@@ -496,6 +495,7 @@ struct ClipboardSidePanelView: View {
         selectSingleItem(item.id)
         Task { @MainActor in
             let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismissBeforePaste: !isPinned,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItem = await store.hydratedItem(for: item)
@@ -566,16 +566,11 @@ struct ClipboardSidePanelView: View {
         )
     }
 
-    private var previewedItem: ClipboardItem? {
-        guard let previewedID = interaction.previewedID else { return nil }
-        return renderedItems.first { $0.id == previewedID }
-    }
-
-    private var isPreviewPresented: Binding<Bool> {
+    private func previewPresentationBinding(for itemID: UUID) -> Binding<Bool> {
         Binding {
-            previewedItem != nil
+            interaction.previewedID == itemID
         } set: { isPresented in
-            if !isPresented {
+            if !isPresented, interaction.previewedID == itemID {
                 interaction.dismissPreview()
             }
         }

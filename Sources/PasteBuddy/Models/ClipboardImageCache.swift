@@ -17,7 +17,7 @@ enum ClipboardImageCache {
     }()
     private static let genericApplicationIcon = icon(from: NSWorkspace.shared.icon(for: .applicationBundle))
 
-    static func cachedThumbnail(for item: ClipboardItem, imageData: Data? = nil, maxPixelSize: Int = 640) -> NSImage? {
+    static func cachedThumbnail(for item: ClipboardItem, maxPixelSize: Int = 640) -> NSImage? {
         guard let key = thumbnailCacheKeyObject(for: item, maxPixelSize: maxPixelSize) else { return nil }
         return thumbnailCache.object(forKey: key)
     }

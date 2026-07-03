@@ -672,6 +672,8 @@ final class PasteBuddyPanelHotKeyController {
     private var registration: PasteBuddyCarbonHotKeyRegistration?
     private var eventTap: PasteBuddyPanelHotKeyEventTap?
     private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
+    private var shortcutRecordingObserver: NSObjectProtocol?
+    private var isShortcutRecordingActive = false
 
     init(onToggle: @escaping @MainActor () -> Void) {
         self.onToggle = onToggle
@@ -680,11 +682,32 @@ final class PasteBuddyPanelHotKeyController {
         }
         eventTap = PasteBuddyPanelHotKeyEventTap(onToggle: { handler(.eventTap) })
         registration = PasteBuddyCarbonHotKeyRegistration(onToggle: { handler(.carbon) })
+        shortcutRecordingObserver = NotificationCenter.default.addObserver(
+            forName: .pasteBuddyShortcutRecordingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let isRecording = notification.object as? Bool ?? false
+            Task { @MainActor [weak self] in
+                self?.setShortcutRecordingActive(isRecording)
+            }
+        }
     }
 
     private func triggerToggle(source: PasteBuddyPanelHotKeySource) {
+        guard !isShortcutRecordingActive else {
+            PasteBuddyDiagnostics.record(.hotKey, "ignoredDuringShortcutRecording", detail: "source=\(source.rawValue)")
+            return
+        }
         guard triggerGate.shouldTrigger(source: source) else { return }
         onToggle()
+    }
+
+    private func setShortcutRecordingActive(_ isRecording: Bool) {
+        guard isShortcutRecordingActive != isRecording else { return }
+        isShortcutRecordingActive = isRecording
+        registration?.setEnabled(!isRecording)
+        eventTap?.setEnabled(!isRecording)
     }
 }
 
@@ -720,11 +743,17 @@ private final class PasteBuddyCarbonHotKeyRegistration {
     }
 
     deinit {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-        }
+        unregisterShowHideHotKey()
         if let eventHandler {
             RemoveEventHandler(eventHandler)
+        }
+    }
+
+    func setEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            registerShowHideHotKey()
+        } else {
+            unregisterShowHideHotKey()
         }
     }
 
@@ -773,10 +802,7 @@ private final class PasteBuddyCarbonHotKeyRegistration {
     }
 
     private func registerShowHideHotKey() {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
-        }
+        unregisterShowHideHotKey()
         let hotKeyID = EventHotKeyID(signature: pasteBuddyHotKeySignature, id: pasteBuddyShowHideHotKeyID)
         let status = RegisterEventHotKey(
             UInt32(kVK_ANSI_V),
@@ -790,6 +816,13 @@ private final class PasteBuddyCarbonHotKeyRegistration {
         guard status == noErr else {
             hotKeyRef = nil
             return
+        }
+    }
+
+    private func unregisterShowHideHotKey() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
         }
     }
 
@@ -816,6 +849,12 @@ final class PasteBuddyPanelHotKeyEventTap {
         }
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+    }
+
+    func setEnabled(_ isEnabled: Bool) {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: isEnabled)
         }
     }
 

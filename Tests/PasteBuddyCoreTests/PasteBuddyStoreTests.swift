@@ -1056,8 +1056,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "Command+Option+1-9")
-        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "Command+Option+Control+1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "⌥⌘1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "⌃⌥⌘1-9")
 
         store.setQuickPasteShortcutsEnabled(false)
 
@@ -1069,7 +1069,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         reloaded.resetShortcutConfiguration()
 
         XCTAssertTrue(reloaded.snapshot.shortcuts.isQuickPasteEnabled)
-        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "Command+Shift+V")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "⇧⌘V")
     }
 
     func testShortcutCustomizationPersistsAndSupportsClearedBindings() throws {
@@ -1091,11 +1091,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         reloaded.load()
 
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.key, "p")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.command, .shift])
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "Command+Shift+P")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.shift, .command])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "⇧⌘P")
         XCTAssertFalse(reloaded.snapshot.shortcuts.pasteSelectedPlainText.isEnabled)
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedPlainText.displayName, "Not set")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.command, .control])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.control, .command])
         XCTAssertEqual(reloaded.snapshot.shortcuts.plainTextQuickPasteModifiers, [.shift])
     }
 
@@ -1106,8 +1106,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(binding.key, "r")
-        XCTAssertEqual(binding.modifiers, [.command, .option, .shift])
-        XCTAssertEqual(binding.displayName, "Command+Option+Shift+R")
+        XCTAssertEqual(binding.modifiers, [.option, .shift, .command])
+        XCTAssertEqual(binding.displayName, "⌥⇧⌘R")
+
+        var legacyOrderedBinding = ShortcutBinding(key: "v", modifiers: [])
+        legacyOrderedBinding.modifiers = [.command, .shift]
+        XCTAssertEqual(legacyOrderedBinding.displayName, "⇧⌘V")
 
         let cleared = ShortcutBinding(key: "   ", modifiers: [.control])
 

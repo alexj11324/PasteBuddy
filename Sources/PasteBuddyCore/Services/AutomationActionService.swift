@@ -33,10 +33,20 @@ public struct AutomationSearchResult: Codable, Equatable, Sendable {
 
     public var displaySummary: String {
         guard !items.isEmpty else {
-            return "No PasteBuddy items matched \"\(query)\"."
+            return PasteBuddyLocalization.format(
+                "automation.search.no_matches",
+                defaultValue: "No PasteBuddy items matched \"%@\".",
+                query
+            )
         }
         let titles = items.map(\.title).joined(separator: ", ")
-        return "\(items.count) PasteBuddy item(s) matched \"\(query)\": \(titles)"
+        return PasteBuddyLocalization.format(
+            items.count == 1 ? "automation.search.match_one" : "automation.search.match_many",
+            defaultValue: items.count == 1 ? "%d PasteBuddy item matched \"%@\": %@" : "%d PasteBuddy items matched \"%@\": %@",
+            items.count,
+            query,
+            titles
+        )
     }
 }
 
@@ -91,9 +101,18 @@ public struct AutomationCreatedItemResult: Codable, Equatable, Sendable {
 
     public var displaySummary: String {
         if let pinboard {
-            return "Created PasteBuddy item \"\(item.title)\" and saved it to \(pinboard.name)."
+            return PasteBuddyLocalization.format(
+                "automation.create_item.saved_to_pinboard",
+                defaultValue: "Created PasteBuddy item \"%@\" and saved it to %@.",
+                item.title,
+                pinboard.name
+            )
         }
-        return "Created PasteBuddy item \"\(item.title)\"."
+        return PasteBuddyLocalization.format(
+            "automation.create_item.created",
+            defaultValue: "Created PasteBuddy item \"%@\".",
+            item.title
+        )
     }
 }
 
@@ -105,8 +124,10 @@ public enum AutomationItemTransferDestination: String, CaseIterable, Codable, Id
 
     public var displayName: String {
         switch self {
-        case .clipboard: "Clipboard"
-        case .frontmostApp: "Frontmost App"
+        case .clipboard:
+            PasteBuddyLocalization.string("automation.destination.clipboard", defaultValue: "Clipboard")
+        case .frontmostApp:
+            PasteBuddyLocalization.string("automation.destination.frontmost_app", defaultValue: "Frontmost App")
         }
     }
 }
@@ -129,9 +150,17 @@ public struct AutomationItemTransferResult: Codable, Equatable, Sendable {
     public var displaySummary: String {
         switch destination {
         case .clipboard:
-            return "Copied PasteBuddy item \"\(item.title)\" to the clipboard."
+            return PasteBuddyLocalization.format(
+                "automation.transfer.copied_to_clipboard",
+                defaultValue: "Copied PasteBuddy item \"%@\" to the clipboard.",
+                item.title
+            )
         case .frontmostApp:
-            return "Prepared PasteBuddy item \"\(item.title)\" for insertion into the frontmost app."
+            return PasteBuddyLocalization.format(
+                "automation.transfer.prepared_for_frontmost_app",
+                defaultValue: "Prepared PasteBuddy item \"%@\" for insertion into the frontmost app.",
+                item.title
+            )
         }
     }
 }
@@ -150,23 +179,53 @@ public enum AutomationActionError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .emptyQuery:
-            "Enter a search query before running this PasteBuddy action."
+            PasteBuddyLocalization.string(
+                "automation.error.empty_query",
+                defaultValue: "Enter a search query before running this PasteBuddy action."
+            )
         case .emptyText:
-            "Enter text before creating a PasteBuddy item."
+            PasteBuddyLocalization.string(
+                "automation.error.empty_text",
+                defaultValue: "Enter text before creating a PasteBuddy item."
+            )
         case .emptyContent:
-            "Enter content before creating a PasteBuddy item."
+            PasteBuddyLocalization.string(
+                "automation.error.empty_content",
+                defaultValue: "Enter content before creating a PasteBuddy item."
+            )
         case .emptyPinboardName:
-            "Enter a pinboard name before running this PasteBuddy action."
+            PasteBuddyLocalization.string(
+                "automation.error.empty_pinboard_name",
+                defaultValue: "Enter a pinboard name before running this PasteBuddy action."
+            )
         case .contentTypeDisabled(let type):
-            "\(type.displayName) capture is disabled for PasteBuddy Shortcuts."
+            PasteBuddyLocalization.format(
+                "automation.error.content_type_disabled",
+                defaultValue: "%@ capture is disabled for PasteBuddy Shortcuts.",
+                type.displayName
+            )
         case .sensitiveTextBlocked:
-            "PasteBuddy blocked this action because the text looks sensitive."
+            PasteBuddyLocalization.string(
+                "automation.error.sensitive_text_blocked",
+                defaultValue: "PasteBuddy blocked this action because the text looks sensitive."
+            )
         case .captureRuleBlocked(let ruleName):
-            "PasteBuddy blocked this action because it matched the local capture rule \"\(ruleName)\"."
+            PasteBuddyLocalization.format(
+                "automation.error.capture_rule_blocked",
+                defaultValue: "PasteBuddy blocked this action because it matched the local capture rule \"%@\".",
+                ruleName
+            )
         case .noMatchingItem:
-            "No matching PasteBuddy item was found."
+            PasteBuddyLocalization.string(
+                "automation.error.no_matching_item",
+                defaultValue: "No matching PasteBuddy item was found."
+            )
         case .pinboardNotFound(let name):
-            "No PasteBuddy pinboard named \"\(name)\" was found."
+            PasteBuddyLocalization.format(
+                "automation.error.pinboard_not_found",
+                defaultValue: "No PasteBuddy pinboard named \"%@\" was found.",
+                name
+            )
         }
     }
 }
