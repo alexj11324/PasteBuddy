@@ -46,8 +46,11 @@ swift test
 ./script/build_and_run.sh
 ```
 
-The run script builds the SwiftPM app, stages a local `.app` bundle in `dist/`,
-and launches it as a foreground macOS app.
+The run script builds the SwiftPM app, signs and installs
+`/Applications/PasteBuddy Dev.app`, prints runtime diagnostics, and launches it
+as a foreground macOS app. Use `./script/build_and_run.sh --verify` when you
+need stable signing and Accessibility/TCC proof. See
+[Development Signing](docs/DEVELOPMENT_SIGNING.md).
 
 ## macOS Permissions
 
@@ -75,6 +78,8 @@ Shortcuts and Siri-capable system surfaces are documented in
 
 Accessibility and localization readiness notes are tracked in
 [Accessibility And Localization Baseline](docs/ACCESSIBILITY_LOCALIZATION.md).
+The Dify-backed String Catalog maintenance flow is documented in
+[Localization Workflow](docs/LOCALIZATION_WORKFLOW.md).
 
 ## iOS And iPadOS
 

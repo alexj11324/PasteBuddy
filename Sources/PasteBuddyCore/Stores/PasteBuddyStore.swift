@@ -508,6 +508,10 @@ public final class PasteBuddyStore {
         availableFilterValues().devices
     }
 
+    public var userPinboards: [Pinboard] {
+        snapshot.pinboards.filter { !SmartPinboardCategory.isSmartPinboardName($0.name) }
+    }
+
     public var hasActiveFilters: Bool {
         contentTypeFilter != nil || sourceAppFilter != nil || deviceFilter != nil || dateFilter != .any
     }
@@ -534,7 +538,8 @@ public final class PasteBuddyStore {
     }
 
     public var canReorderCurrentPinboard: Bool {
-        guard case .pinboard = selectedScope else { return false }
+        guard case .pinboard(let pinboardID) = selectedScope,
+              !isSmartPinboard(pinboardID) else { return false }
         return !hasActiveFilters && searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -654,6 +659,34 @@ public final class PasteBuddyStore {
         return items[zeroBasedIndex]
     }
 
+    public func smartPinboard(for category: SmartPinboardCategory) -> Pinboard? {
+        snapshot.pinboards.first { $0.name == category.pinboardName }
+    }
+
+    public func smartPinboardItemCount(for category: SmartPinboardCategory) -> Int {
+        smartPinboardItemIDs(for: category).count
+    }
+
+    public func smartPinboardItems(for category: SmartPinboardCategory, in scope: PasteScope = .history) -> [ClipboardItem] {
+        filteredItems(for: scope).filter(category.matches)
+    }
+
+    @discardableResult
+    public func syncSmartPinboard(for category: SmartPinboardCategory) -> Pinboard {
+        removeObsoleteSmartPinboards()
+        let pinboards = upsertSmartPinboards(categories: [category], createMissing: true)
+        save()
+        return pinboards[0]
+    }
+
+    @discardableResult
+    public func syncSmartPinboards() -> [Pinboard] {
+        removeObsoleteSmartPinboards()
+        let pinboards = upsertSmartPinboards(categories: SmartPinboardCategory.allCases, createMissing: true)
+        save()
+        return pinboards
+    }
+
     public var isCapturePaused: Bool {
         snapshot.privacy.isCaptureCurrentlyPaused()
     }
@@ -672,7 +705,7 @@ public final class PasteBuddyStore {
            let report = presentationCache.storageUsageReport {
             return report
         }
-        let pinnedItemIDs = Set(snapshot.pinboards.flatMap(\.itemIDs))
+        let pinnedItemIDs = userPinnedItemIDs()
         let pinnedItems = snapshot.items.filter { pinnedItemIDs.contains($0.id) }
         let unpinnedItems = snapshot.items.filter { !pinnedItemIDs.contains($0.id) }
         let pinnedBytes = pinnedItems.reduce(0) { $0 + Self.estimatedStorageBytes(for: $1) }
@@ -802,6 +835,7 @@ public final class PasteBuddyStore {
         }
         selectSingleItem(storedItem.id)
         pruneHistory(maxItems: maxItems)
+        refreshExistingSmartPinboards()
         save()
         return storedItem
     }
@@ -847,6 +881,7 @@ public final class PasteBuddyStore {
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
         rebuildDedupeIndex()
+        refreshExistingSmartPinboards()
         save()
     }
 
@@ -857,6 +892,7 @@ public final class PasteBuddyStore {
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
         rebuildDedupeIndex()
+        refreshExistingSmartPinboards()
         save()
     }
 
@@ -865,13 +901,16 @@ public final class PasteBuddyStore {
         snapshot.items[index].ocrState = .failed(Date(), message)
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
+        refreshExistingSmartPinboards()
         save()
     }
 
     @discardableResult
     public func createPinboard(named name: String = "New Pinboard", colorHex: String = "#7C9A92") -> Pinboard {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pinboard = Pinboard(name: trimmed.isEmpty ? "New Pinboard" : trimmed, colorHex: colorHex)
+        let pinboard = Pinboard(
+            name: Self.userPinboardName(for: name, fallback: "New Pinboard"),
+            colorHex: colorHex
+        )
         snapshot.pinboards.append(pinboard)
         selectedScope = .pinboard(pinboard.id)
         save()
@@ -888,15 +927,23 @@ public final class PasteBuddyStore {
 
     public func renamePinboard(_ id: UUID, to name: String) {
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == id }) else { return }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        snapshot.pinboards[pinboardIndex].name = trimmed
+        guard !isSmartPinboard(at: pinboardIndex) else {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
+        snapshot.pinboards[pinboardIndex].name = Self.userPinboardName(for: name, fallback: snapshot.pinboards[pinboardIndex].name)
         snapshot.pinboards[pinboardIndex].updatedAt = Date()
         save()
     }
 
     public func updatePinboardColor(_ id: UUID, to colorHex: String) {
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == id }) else { return }
+        guard !isSmartPinboard(at: pinboardIndex) else {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
         let normalized = Self.normalizedColorHex(colorHex)
         guard !normalized.isEmpty else { return }
         snapshot.pinboards[pinboardIndex].colorHex = normalized
@@ -913,6 +960,25 @@ public final class PasteBuddyStore {
         save()
     }
 
+    public func moveUserPinboards(fromOffsets offsets: IndexSet, toOffset offset: Int) {
+        var reorderedUserIDs = userPinboards.map(\.id)
+        guard !reorderedUserIDs.isEmpty else { return }
+        reorderedUserIDs.move(fromOffsets: offsets, toOffset: offset)
+
+        let pinboardsByID = Dictionary(uniqueKeysWithValues: snapshot.pinboards.map { ($0.id, $0) })
+        var reorderedUsers = reorderedUserIDs.compactMap { pinboardsByID[$0] }
+        guard reorderedUsers.count == reorderedUserIDs.count else { return }
+
+        let now = Date()
+        for index in snapshot.pinboards.indices where !isSmartPinboard(at: index) {
+            guard !reorderedUsers.isEmpty else { break }
+            var pinboard = reorderedUsers.removeFirst()
+            pinboard.updatedAt = now
+            snapshot.pinboards[index] = pinboard
+        }
+        save()
+    }
+
     public func pinSelectedItem(to pinboardID: UUID) {
         guard let selectedItemID else { return }
         pinItem(selectedItemID, to: pinboardID)
@@ -924,6 +990,11 @@ public final class PasteBuddyStore {
 
     public func pinItems(_ itemIDs: [UUID], to pinboardID: UUID) {
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return }
+        if isSmartPinboard(at: pinboardIndex) {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
         let storedItemIDs = Set(snapshot.items.map(\.id))
         var seenItemIDs = Set<UUID>()
         var pinnedItemIDs: [UUID] = []
@@ -942,6 +1013,11 @@ public final class PasteBuddyStore {
 
     public func removeItem(_ itemID: UUID, fromPinboard pinboardID: UUID) {
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return }
+        guard !isSmartPinboard(at: pinboardIndex) else {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
         let originalCount = snapshot.pinboards[pinboardIndex].itemIDs.count
         snapshot.pinboards[pinboardIndex].itemIDs.removeAll { $0 == itemID }
         guard snapshot.pinboards[pinboardIndex].itemIDs.count != originalCount else { return }
@@ -956,6 +1032,11 @@ public final class PasteBuddyStore {
         guard snapshot.items.contains(where: { $0.id == itemID }) else { return }
         guard let sourceIndex = snapshot.pinboards.firstIndex(where: { $0.id == sourcePinboardID }) else { return }
         guard let destinationIndex = snapshot.pinboards.firstIndex(where: { $0.id == destinationPinboardID }) else { return }
+        guard !isSmartPinboard(at: sourceIndex), !isSmartPinboard(at: destinationIndex) else {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
 
         snapshot.pinboards[sourceIndex].itemIDs.removeAll { $0 == itemID }
         if !snapshot.pinboards[destinationIndex].itemIDs.contains(itemID) {
@@ -972,6 +1053,11 @@ public final class PasteBuddyStore {
 
     public func moveItems(inPinboard pinboardID: UUID, fromOffsets offsets: IndexSet, toOffset offset: Int) {
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return }
+        guard !isSmartPinboard(at: pinboardIndex) else {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
         snapshot.pinboards[pinboardIndex].itemIDs.move(fromOffsets: offsets, toOffset: offset)
         snapshot.pinboards[pinboardIndex].updatedAt = Date()
         save()
@@ -995,6 +1081,7 @@ public final class PasteBuddyStore {
         let deletedItems = orderedIDs.compactMap { id -> DeletedClipboardItem? in
             guard let item = snapshot.items.first(where: { $0.id == id }) else { return nil }
             let pinboardIDs = snapshot.pinboards
+                .filter { !SmartPinboardCategory.isSmartPinboardName($0.name) }
                 .filter { $0.itemIDs.contains(id) }
                 .map(\.id)
             return DeletedClipboardItem(item: item, pinboardIDs: pinboardIDs)
@@ -1013,6 +1100,7 @@ public final class PasteBuddyStore {
         if selectedItemID.map(deletedIDs.contains) == true {
             selectSingleItem(filteredItems.first?.id)
         }
+        refreshExistingSmartPinboards()
         save()
     }
 
@@ -1037,6 +1125,7 @@ public final class PasteBuddyStore {
         self.lastDeletedItem = nil
         self.lastDeletedItems = []
         selectSingleItem(restoredSelectionID)
+        refreshExistingSmartPinboards()
         save()
     }
 
@@ -1499,6 +1588,9 @@ public final class PasteBuddyStore {
 
     public func setMCPServerEnabled(_ isEnabled: Bool) {
         snapshot.mcp.isServerEnabled = isEnabled
+        if isEnabled {
+            snapshot.mcp.enabledTools = MCPToolName.defaultEnabledTools
+        }
         save()
     }
 
@@ -1592,7 +1684,7 @@ public final class PasteBuddyStore {
             return
         }
 
-        let pinnedItemIDs = Set(snapshot.pinboards.flatMap(\.itemIDs))
+        let pinnedItemIDs = userPinnedItemIDs()
         snapshot.items.removeAll { !pinnedItemIDs.contains($0.id) }
         rebuildDedupeIndex()
         let remainingIDs = Set(snapshot.items.map(\.id))
@@ -1600,6 +1692,7 @@ public final class PasteBuddyStore {
             !remainingIDs.contains(item.id)
         }
         selectSingleItem(filteredItems.first?.id)
+        refreshExistingSmartPinboards()
         saveAndFlush()
     }
 
@@ -2270,7 +2363,7 @@ public final class PasteBuddyStore {
     }
 
     private func pruneHistory(now: Date = Date(), maxItems: Int? = nil) {
-        let pinnedItemIDs = Set(snapshot.pinboards.flatMap(\.itemIDs))
+        let pinnedItemIDs = userPinnedItemIDs()
         let maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(maxItems ?? snapshot.storage.maxHistoryItems)
         let maxStorageBytes = StorageConfiguration.clampMaxStorageBytes(snapshot.storage.maxStorageBytes)
         let cutoff = snapshot.storage.retentionDays > 0
@@ -2316,6 +2409,7 @@ public final class PasteBuddyStore {
                 remainingIDs.contains(id) || pasteStackIDs.contains(id)
             })
         }
+        refreshExistingSmartPinboards()
         rebuildDedupeIndex()
     }
 
@@ -2514,7 +2608,7 @@ public final class PasteBuddyStore {
     }
 
     private func matchesStructuredFilters(_ item: ClipboardItem, sourceAppName: String? = nil) -> Bool {
-        if let contentTypeFilter, item.contentType != contentTypeFilter {
+        if let contentTypeFilter, !item.effectiveContentTypes.contains(contentTypeFilter) {
             return false
         }
         if let sourceAppName = sourceAppName ?? sourceAppFilter, item.sourceAppName != sourceAppName {
@@ -2664,6 +2758,85 @@ public final class PasteBuddyStore {
             .map(String.init)
             .joined()
             .lowercased()
+    }
+
+    private func isSmartPinboard(_ id: UUID) -> Bool {
+        guard let index = snapshot.pinboards.firstIndex(where: { $0.id == id }) else { return false }
+        return isSmartPinboard(at: index)
+    }
+
+    private func isSmartPinboard(at index: Int) -> Bool {
+        snapshot.pinboards.indices.contains(index)
+            && SmartPinboardCategory.isSmartPinboardName(snapshot.pinboards[index].name)
+    }
+
+    private static func userPinboardName(for name: String, fallback: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = trimmed.isEmpty ? fallback : trimmed
+        guard SmartPinboardCategory.isSmartPinboardName(resolved) else { return resolved }
+        return "\(resolved) Pinboard"
+    }
+
+    @discardableResult
+    private func refreshExistingSmartPinboards(now: Date = Date()) -> Bool {
+        let removedObsolete = removeObsoleteSmartPinboards()
+        let categories = snapshot.pinboards.compactMap { SmartPinboardCategory.category(forPinboardName: $0.name) }
+        guard !categories.isEmpty else { return removedObsolete }
+        _ = upsertSmartPinboards(categories: categories, createMissing: false, now: now)
+        return true
+    }
+
+    @discardableResult
+    private func removeObsoleteSmartPinboards() -> Bool {
+        let oldCount = snapshot.pinboards.count
+        snapshot.pinboards.removeAll { pinboard in
+            SmartPinboardCategory.obsoletePinboardNames.contains(
+                pinboard.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+        return snapshot.pinboards.count != oldCount
+    }
+
+    @discardableResult
+    private func upsertSmartPinboards(
+        categories: [SmartPinboardCategory],
+        createMissing: Bool,
+        now: Date = Date()
+    ) -> [Pinboard] {
+        var result: [Pinboard] = []
+        for category in categories {
+            let itemIDs = smartPinboardItemIDs(for: category)
+            if let index = snapshot.pinboards.firstIndex(where: { $0.name == category.pinboardName }) {
+                if snapshot.pinboards[index].itemIDs != itemIDs
+                    || snapshot.pinboards[index].colorHex != category.colorHex {
+                    snapshot.pinboards[index].itemIDs = itemIDs
+                    snapshot.pinboards[index].colorHex = category.colorHex
+                    snapshot.pinboards[index].updatedAt = now
+                }
+                result.append(snapshot.pinboards[index])
+            } else if createMissing {
+                let pinboard = Pinboard(
+                    name: category.pinboardName,
+                    colorHex: category.colorHex,
+                    itemIDs: itemIDs,
+                    createdAt: now,
+                    updatedAt: now
+                )
+                snapshot.pinboards.append(pinboard)
+                result.append(pinboard)
+            }
+        }
+        return result
+    }
+
+    private func smartPinboardItemIDs(for category: SmartPinboardCategory) -> [UUID] {
+        snapshot.items
+            .filter(category.matches)
+            .map(\.id)
+    }
+
+    private func userPinnedItemIDs() -> Set<UUID> {
+        Set(userPinboards.flatMap(\.itemIDs))
     }
 }
 

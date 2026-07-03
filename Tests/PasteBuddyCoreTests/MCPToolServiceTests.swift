@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class MCPToolServiceTests: XCTestCase {
-    func testMCPToolsAreDisabledByDefault() throws {
+    func testMCPServerIsDisabledByDefault() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -11,11 +11,24 @@ final class MCPToolServiceTests: XCTestCase {
         let service = MCPToolService(store: store)
 
         XCTAssertFalse(store.snapshot.mcp.isServerEnabled)
-        XCTAssertFalse(store.snapshot.mcp.enabledTools.contains(.retrieveItem))
+        XCTAssertEqual(store.snapshot.mcp.enabledTools, MCPToolName.defaultEnabledTools)
         XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
             XCTAssertEqual(error as? MCPToolServiceError, .serverDisabled)
         }
         XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
+    }
+
+    func testMCPAgentConnectionEnablesStandardTools() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setMCPTool(.retrieveItem, enabled: false)
+        store.setMCPServerEnabled(true)
+
+        XCTAssertTrue(store.snapshot.mcp.isServerEnabled)
+        XCTAssertEqual(store.snapshot.mcp.enabledTools, MCPToolName.defaultEnabledTools)
+        XCTAssertTrue(store.snapshot.mcp.enabledTools.contains(.retrieveItem))
     }
 
     func testMCPToolLevelAccessControls() throws {
@@ -24,6 +37,7 @@ final class MCPToolServiceTests: XCTestCase {
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
         store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: false)
         store.setMCPTool(.listPinboards, enabled: false)
         let service = MCPToolService(store: store)
 
@@ -68,7 +82,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(logJSON.contains("raw clipboard payload"))
     }
 
-    func testMCPRetrieveItemRequiresExplicitToolOptInAndReturnsPayload() throws {
+    func testMCPRetrieveItemReturnsPayloadAfterAgentConnectionIsAllowed() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -83,15 +97,6 @@ final class MCPToolServiceTests: XCTestCase {
         ))
         let service = MCPToolService(store: store)
 
-        XCTAssertThrowsError(try service.retrieveItem(itemID: item.id)) { error in
-            XCTAssertEqual(error as? MCPToolServiceError, .toolDisabled(.retrieveItem))
-        }
-        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.tool, .retrieveItem)
-        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.outcome, .denied)
-        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.itemID, item.id)
-        XCTAssertFalse(store.snapshot.mcp.accessLog.first?.payloadIncluded ?? true)
-
-        store.setMCPTool(.retrieveItem, enabled: true)
         let response = try service.retrieveItem(itemID: item.id)
 
         XCTAssertEqual(response.item.id, item.id)

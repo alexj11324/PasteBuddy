@@ -21,15 +21,15 @@ public struct MobilePinboardSharingView: View {
         NavigationStack {
             Form {
                 if let pinboard {
-                    Section("Share Settings") {
-                        LabeledContent("Pinboard") {
+                    Section("action.share_settings") {
+                        LabeledContent("label.pinboard") {
                             Text(pinboard.name)
                         }
-                        LabeledContent("Readiness") {
+                        LabeledContent("label.readiness") {
                             Text(store.syncReadiness.displayName)
                                 .foregroundStyle(store.canManageSharedPinboards ? .green : .orange)
                         }
-                        Text(store.canManageSharedPinboards ? "Shared pinboards are encrypted and ready." : "Configure CloudKit sync and turn on Shared Pinboards before sharing.")
+                        Text(store.canManageSharedPinboards ? "message.shared_pinboards_are_ready" : "message.configure_cloudkit_sync_and_turn_on_shared")
                             .foregroundStyle(.secondary)
                         if let error = store.lastErrorMessage {
                             Text(error)
@@ -37,18 +37,18 @@ public struct MobilePinboardSharingView: View {
                         }
                     }
 
-                    Section("Access") {
-                        Picker("Access Mode", selection: $accessMode) {
+                    Section("label.access") {
+                        Picker("label.access_mode", selection: $accessMode) {
                             ForEach(PinboardShareAccessMode.allCases) { mode in
                                 Text(mode.displayName).tag(mode)
                             }
                         }
-                        Picker("Default Permission", selection: $defaultPermission) {
+                        Picker("label.default_permission", selection: $defaultPermission) {
                             ForEach(PinboardSharePermission.allCases) { permission in
                                 Text(permission.displayName).tag(permission)
                             }
                         }
-                        Button(pinboard.sharing == nil ? "Start Sharing" : "Update Sharing") {
+                        Button(pinboard.sharing == nil ? "action.start_sharing" : "label.update_sharing") {
                             generatedShareToken = store.sharePinboard(
                                 pinboardID,
                                 accessMode: accessMode,
@@ -58,26 +58,26 @@ public struct MobilePinboardSharingView: View {
                         }
                         .disabled(!store.canManageSharedPinboards)
                         if let generatedShareToken {
-                            LabeledContent("Share link token") {
+                            LabeledContent("action.share_link_token") {
                                 Text(generatedShareToken)
                                     .textSelection(.enabled)
                                     .monospaced()
                             }
-                            Text("PasteBuddy stores only the hash of this token.")
+                            Text("message.pastebuddy_stores_only_the_hash_of_this")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
-                    Section("Participants") {
+                    Section("label.participants") {
                         if pinboard.sharing?.participants.isEmpty != false {
-                            Text("No participants")
+                            Text("label.no_participants")
                                 .foregroundStyle(.secondary)
                         } else if let participants = pinboard.sharing?.participants {
                             ForEach(participants) { participant in
                                 VStack(alignment: .leading, spacing: 8) {
                                     LabeledContent(participant.displayName) {
-                                        Button("Remove") {
+                                        Button("action.remove") {
                                             store.removeParticipant(pinboardID: pinboardID, participantID: participant.id)
                                         }
                                     }
@@ -86,7 +86,7 @@ public struct MobilePinboardSharingView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
-                                    Picker("Permission", selection: Binding(
+                                    Picker("label.permission", selection: Binding(
                                         get: { participant.permission },
                                         set: { permission in
                                             store.updateParticipantPermission(
@@ -105,19 +105,19 @@ public struct MobilePinboardSharingView: View {
                         }
                     }
 
-                    Section("Invite Participant") {
-                        TextField("Name", text: $inviteName)
-                        TextField("Email", text: $inviteEmail)
+                    Section("action.invite_participant") {
+                        TextField("label.name", text: $inviteName)
+                        TextField("label.email", text: $inviteEmail)
                             #if os(iOS)
                             .textInputAutocapitalization(.never)
                             .keyboardType(.emailAddress)
                             #endif
-                        Picker("Permission", selection: $invitePermission) {
+                        Picker("label.permission", selection: $invitePermission) {
                             ForEach(PinboardSharePermission.allCases) { permission in
                                 Text(permission.displayName).tag(permission)
                             }
                         }
-                        Button("Invite Participant") {
+                        Button("action.invite_participant") {
                             _ = store.inviteParticipant(
                                 to: pinboardID,
                                 displayName: inviteName,
@@ -132,7 +132,7 @@ public struct MobilePinboardSharingView: View {
 
                     if pinboard.sharing != nil {
                         Section {
-                            Button("Stop Sharing", role: .destructive) {
+                            Button("action.stop_sharing", role: .destructive) {
                                 store.stopSharingPinboard(pinboardID)
                                 generatedShareToken = nil
                                 syncDraftsFromSharing()
@@ -140,10 +140,10 @@ public struct MobilePinboardSharingView: View {
                         }
                     }
                 } else {
-                    ContentUnavailableView("Pinboard", systemImage: "pin.slash", description: Text("Not found"))
+                    ContentUnavailableView("label.pinboard", systemImage: "pin.slash", description: Text("label.not_found"))
                 }
             }
-            .navigationTitle("Share Pinboard")
+            .navigationTitle("action.share_pinboard")
             .onAppear(perform: syncDraftsFromSharing)
         }
     }

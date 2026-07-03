@@ -66,13 +66,22 @@ final class ShelfInteractionModel {
         selectSingle(id)
     }
 
-    func selectSingle(_ id: UUID?) {
+    func selectSingle(_ id: UUID?, keepsPreviewOpen: Bool = false) {
         let ids = id.map { Set([$0]) } ?? []
-        guard primarySelectedID != id || selectedIDs != ids else { return }
+        guard primarySelectedID != id || selectedIDs != ids else {
+            if keepsPreviewOpen {
+                previewedID = id
+            }
+            return
+        }
         selectedIDs = ids
         primarySelectedID = id
         selectionAnchorID = id
-        clearPreviewUnlessSelected()
+        if keepsPreviewOpen {
+            previewedID = id
+        } else {
+            clearPreviewUnlessSelected()
+        }
     }
 
     func setSelectedIDs(_ ids: Set<UUID>, anchorID: UUID? = nil) {
@@ -90,6 +99,31 @@ final class ShelfInteractionModel {
             selectionAnchorID = anchorID
         }
         clearPreviewUnlessSelected()
+    }
+
+    @discardableResult
+    func presentPreview(for id: UUID) -> Bool {
+        guard itemIDs.contains(id) else { return false }
+        selectSingle(id)
+        previewedID = id
+        return true
+    }
+
+    @discardableResult
+    func togglePreview(for id: UUID) -> Bool {
+        guard itemIDs.contains(id) else { return false }
+        if previewedID == id {
+            previewedID = nil
+            return false
+        }
+        selectSingle(id)
+        previewedID = id
+        return true
+    }
+
+    func dismissPreview(for id: UUID? = nil) {
+        guard id == nil || previewedID == id else { return }
+        previewedID = nil
     }
 
     func replaceItems(

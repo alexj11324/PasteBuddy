@@ -10,11 +10,16 @@ public enum MobileKeyboardPasteOutcome: String, Codable, Equatable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .insertedText: "Inserted text"
-        case .fullAccessRequired: "Full Access required"
-        case .noTextAvailable: "No text available"
-        case .insertionFailed: "Insertion failed"
-        case .emptySelection: "No item selected"
+        case .insertedText:
+            PasteBuddyLocalization.string("mobile.keyboard_paste.outcome.inserted_text", defaultValue: "Inserted text")
+        case .fullAccessRequired:
+            PasteBuddyLocalization.string("mobile.keyboard_paste.outcome.full_access_required", defaultValue: "Full Access required")
+        case .noTextAvailable:
+            PasteBuddyLocalization.string("mobile.keyboard_paste.outcome.no_text_available", defaultValue: "No text available")
+        case .insertionFailed:
+            PasteBuddyLocalization.string("mobile.keyboard_paste.outcome.insertion_failed", defaultValue: "Insertion failed")
+        case .emptySelection:
+            PasteBuddyLocalization.string("mobile.keyboard_paste.outcome.empty_selection", defaultValue: "No item selected")
         }
     }
 }
@@ -25,9 +30,9 @@ public struct MobileKeyboardFullAccessExplanation: Codable, Equatable, Sendable 
     public var actionTitle: String
 
     public init(
-        title: String = "Enable Full Access for PasteBuddy Keyboard",
+        title: String = PasteBuddyLocalization.string("mobile.keyboard_full_access_explanation.title", defaultValue: "Enable Full Access for PasteBuddy Keyboard"),
         detail: String = MobileKeyboardExtensionCapabilities().fullAccessPrivacyExplanation,
-        actionTitle: String = "Open Keyboard Settings"
+        actionTitle: String = PasteBuddyLocalization.string("mobile.keyboard_full_access_explanation.action_title", defaultValue: "Open Keyboard Settings")
     ) {
         self.title = title
         self.detail = detail
@@ -56,15 +61,32 @@ public struct MobileKeyboardPasteResult: Equatable, Sendable {
     public var statusMessage: String {
         switch outcome {
         case .insertedText:
-            return "Inserted \(characterCount) character\(characterCount == 1 ? "" : "s")."
+            return PasteBuddyLocalization.format(
+                "mobile.keyboard_paste.status_inserted_characters",
+                defaultValue: "Inserted %d character(s).",
+                characterCount
+            )
         case .fullAccessRequired:
-            return fullAccessExplanation?.title ?? "Keyboard Full Access is required."
+            return fullAccessExplanation?.title
+                ?? PasteBuddyLocalization.string(
+                    "mobile.keyboard_paste.status_full_access_required",
+                    defaultValue: "Keyboard Full Access is required."
+                )
         case .noTextAvailable:
-            return "This item has no text representation the keyboard can insert."
+            return PasteBuddyLocalization.string(
+                "mobile.keyboard_paste.status_no_text_available",
+                defaultValue: "This item has no text representation the keyboard can insert."
+            )
         case .insertionFailed:
-            return "The host app did not accept inserted text."
+            return PasteBuddyLocalization.string(
+                "mobile.keyboard_paste.status_insertion_failed",
+                defaultValue: "The host app did not accept inserted text."
+            )
         case .emptySelection:
-            return "Select a saved item before inserting from the keyboard."
+            return PasteBuddyLocalization.string(
+                "mobile.keyboard_paste.status_empty_selection",
+                defaultValue: "Select a saved item before inserting from the keyboard."
+            )
         }
     }
 }

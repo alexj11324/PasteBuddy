@@ -13,9 +13,9 @@ public enum SnapshotStoreError: LocalizedError {
         case .missingAppGroupContainer(let groupIdentifier):
             "Could not locate the app group container for \(groupIdentifier). Check the App Group entitlement."
         case .unreadableStore(let error):
-            "Could not read the encrypted PasteBuddy store: \(error.localizedDescription)"
+            "Could not read the PasteBuddy store: \(error.localizedDescription)"
         case .legacyMigrationFailed(let error):
-            "Could not migrate the legacy PasteBuddy store into encrypted storage: \(error.localizedDescription)"
+            "Could not migrate the legacy PasteBuddy store into current storage: \(error.localizedDescription)"
         }
     }
 }

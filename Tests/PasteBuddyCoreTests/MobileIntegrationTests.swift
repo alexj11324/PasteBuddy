@@ -125,7 +125,7 @@ final class MobileIntegrationTests: XCTestCase {
             Set(capabilities.iPadLayoutModes),
             Set([.stageManager, .splitView, .slideOver, .dragAndDrop])
         )
-        XCTAssertTrue(capabilities.fullAccessPrivacyExplanation.contains("encrypted shared App Group history"))
+        XCTAssertTrue(capabilities.fullAccessPrivacyExplanation.contains("shared App Group history"))
         XCTAssertTrue(capabilities.fullAccessPrivacyExplanation.contains("device or private iCloud"))
         XCTAssertEqual(report.card(id: "keyboard-extension")?.severity, .actionRequired)
         XCTAssertTrue(report.card(id: "keyboard-extension")?.detail.contains("Full Access") ?? false)
@@ -276,6 +276,31 @@ final class MobileIntegrationTests: XCTestCase {
         XCTAssertTrue(store.snapshot.pinboards[0].itemIDs.contains(result.importedItems[0].id))
     }
 
+    func testShareActionImportResultUsesLocalizedSingularAndPluralMessages() {
+        let item = ClipboardItem(
+            sourceAppName: "Share",
+            deviceName: "Test iPhone",
+            contentType: .text,
+            title: "Shared text",
+            payload: ClipboardPayload(text: "Shared text")
+        )
+        let singular = MobileShareActionImportResult(
+            importedItems: [item],
+            targetPinboardID: nil,
+            source: .shareExtension
+        )
+        let plural = MobileShareActionImportResult(
+            importedItems: [item, item],
+            targetPinboardID: UUID(),
+            source: .shareExtension
+        )
+
+        XCTAssertEqual(singular.statusMessage, "Saved 1 item to history.")
+        XCTAssertEqual(plural.statusMessage, "Saved 2 items to history and selected pinboard.")
+        XCTAssertFalse(singular.statusMessage.contains("item(s)"))
+        XCTAssertFalse(plural.statusMessage.contains("item(s)"))
+    }
+
     func testShareActionExtensionResultDoesNotReportMissingPinboardTarget() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -358,7 +383,7 @@ final class MobileIntegrationTests: XCTestCase {
         XCTAssertEqual(report.card(id: "keyboard-extension")?.severity, .actionRequired)
         XCTAssertEqual(report.card(id: "share-extension")?.severity, .ready)
         XCTAssertEqual(report.card(id: "action-extension")?.severity, .ready)
-        XCTAssertEqual(report.card(id: "encrypted-app-group-store")?.severity, .actionRequired)
+        XCTAssertEqual(report.card(id: "app-group-store")?.severity, .actionRequired)
         XCTAssertTrue(report.card(id: "ios-paste-permission")?.actions.contains {
             $0.kind == .continueManualImport
         } ?? false)

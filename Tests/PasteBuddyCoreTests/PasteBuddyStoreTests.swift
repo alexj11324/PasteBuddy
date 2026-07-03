@@ -424,6 +424,27 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
     }
 
+    func testUserPinboardReorderKeepsSmartPinboardsOutOfDisplayedOffsets() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let favoritesID = store.snapshot.pinboards[0].id
+        let smartLinksID = store.syncSmartPinboard(for: .links).id
+        store.createPinboard(named: "Research")
+        let researchID = store.snapshot.pinboards.last!.id
+        store.createPinboard(named: "Launch")
+        let launchID = store.snapshot.pinboards.last!.id
+
+        XCTAssertEqual(store.snapshot.pinboards.map(\.id), [favoritesID, smartLinksID, researchID, launchID])
+        XCTAssertEqual(store.userPinboards.map(\.id), [favoritesID, researchID, launchID])
+
+        store.moveUserPinboards(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+
+        XCTAssertEqual(store.userPinboards.map(\.id), [launchID, favoritesID, researchID])
+        XCTAssertEqual(store.snapshot.pinboards.map(\.id), [launchID, smartLinksID, favoritesID, researchID])
+    }
+
     func testPinboardItemReorderControlsDisplayOrder() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -455,6 +476,224 @@ final class PasteBuddyStoreTests: XCTestCase {
 
         XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [first.id, second.id])
         XCTAssertEqual(store.filteredItems.map(\.title), ["First", "Second"])
+    }
+
+    func testEmbeddedTextURLsStayTextButWholeTextURLsAreLinks() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let note = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Plain Note",
+            payload: ClipboardPayload(text: "regular note body")
+        ))
+        let pastedURL = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Messages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Message With URL",
+            payload: ClipboardPayload(text: "Read this: https://example.com/research")
+        ))
+        let copiedURLText = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pasted URL",
+            payload: ClipboardPayload(text: "https://example.com/research")
+        ))
+        let copiedURLMixed = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "https://example.com/research",
+            payload: ClipboardPayload(text: "https://example.com/research")
+        ))
+        let explicitLink = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Research Link",
+            payload: ClipboardPayload(urlString: "https://example.com/research")
+        ))
+
+        XCTAssertFalse(SmartPinboardCategory.links.matches(note))
+        XCTAssertTrue(SmartPinboardCategory.text.matches(pastedURL))
+        XCTAssertFalse(SmartPinboardCategory.links.matches(pastedURL))
+        XCTAssertFalse(SmartPinboardCategory.text.matches(copiedURLText))
+        XCTAssertTrue(SmartPinboardCategory.links.matches(copiedURLText))
+        XCTAssertFalse(SmartPinboardCategory.text.matches(copiedURLMixed))
+        XCTAssertTrue(SmartPinboardCategory.links.matches(copiedURLMixed))
+        XCTAssertTrue(SmartPinboardCategory.links.matches(explicitLink))
+
+        store.contentTypeFilter = .url
+
+        XCTAssertEqual(store.filteredItems.map(\.id), [explicitLink.id, copiedURLMixed.id, copiedURLText.id])
+    }
+
+    func testSmartPinboardsCreateRefreshAndDoNotProtectHistoryRetention() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let text = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Note",
+            payload: ClipboardPayload(text: "plain text")
+        ))
+        let textWithURL = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Messages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Text With URL",
+            payload: ClipboardPayload(text: "www.example.com/research")
+        ))
+        let link = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Link",
+            payload: ClipboardPayload(urlString: "https://example.com/research")
+        ))
+        let file = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Report",
+            payload: ClipboardPayload(fileURLString: "file:///Users/example/Report.pdf")
+        ))
+
+        let smartPinboards = store.syncSmartPinboards()
+
+        XCTAssertEqual(smartPinboards.count, SmartPinboardCategory.allCases.count)
+        XCTAssertEqual(store.smartPinboard(for: .text)?.itemIDs, [text.id])
+        XCTAssertEqual(store.smartPinboard(for: .links)?.itemIDs, [link.id, textWithURL.id])
+        XCTAssertEqual(store.smartPinboard(for: .files)?.itemIDs, [file.id])
+        XCTAssertTrue(store.userPinboards.allSatisfy { !SmartPinboardCategory.isSmartPinboardName($0.name) })
+
+        let newerLink = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "New Link",
+            payload: ClipboardPayload(urlString: "https://example.com/new")
+        ))
+
+        XCTAssertEqual(store.smartPinboard(for: .links)?.itemIDs, [newerLink.id, link.id, textWithURL.id])
+
+        store.updateMaxHistoryItems(1)
+
+        XCTAssertEqual(store.snapshot.items.map(\.id), [newerLink.id])
+        XCTAssertEqual(store.smartPinboard(for: .links)?.itemIDs, [newerLink.id])
+        XCTAssertEqual(store.smartPinboard(for: .files)?.itemIDs, [])
+    }
+
+    func testSmartPinboardsDoNotExposeMixedAndRouteMixedAssetsToConcreteCategories() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let obsoleteMixedPinboard = Pinboard(
+            name: "Smart: Mixed",
+            colorHex: "#7C9A92",
+            itemIDs: [],
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        store.snapshot.pinboards.append(obsoleteMixedPinboard)
+
+        let mixedImage = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "PixPin",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Screenshot with metadata",
+            payload: ClipboardPayload(
+                text: "Screenshot metadata",
+                imageData: Data([0x01, 0x02]),
+                ocrText: "Detected text"
+            )
+        ))
+        let mixedFile = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "File with note",
+            payload: ClipboardPayload(
+                text: "Attachment note",
+                fileURLString: "file:///Users/example/Brief.pdf"
+            )
+        ))
+        let mixedImageWithURL = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "PixPin",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Screenshot with link metadata",
+            payload: ClipboardPayload(
+                text: "Screenshot metadata",
+                urlString: "https://example.com/research",
+                imageData: Data([0x03, 0x04]),
+                ocrText: "Detected text"
+            )
+        ))
+
+        let smartPinboards = store.syncSmartPinboards()
+
+        XCTAssertFalse(SmartPinboardCategory.allCases.map(\.displayName).contains("Mixed"))
+        XCTAssertEqual(smartPinboards.count, 4)
+        XCTAssertEqual(store.smartPinboard(for: .images)?.itemIDs, [mixedImageWithURL.id, mixedImage.id])
+        XCTAssertEqual(store.smartPinboard(for: .files)?.itemIDs, [mixedFile.id])
+        XCTAssertFalse(SmartPinboardCategory.links.matches(mixedImageWithURL))
+        XCTAssertFalse(store.snapshot.pinboards.contains { $0.name == "Smart: Mixed" })
+        XCTAssertFalse(store.userPinboards.contains { $0.name == "Smart: Mixed" })
+    }
+
+    func testSmartPinboardReservedNamesAndDerivedBoardsCannotBeMutatedManually() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let reservedNamePinboard = store.createPinboard(named: SmartPinboardCategory.links.pinboardName)
+
+        XCTAssertFalse(SmartPinboardCategory.isSmartPinboardName(reservedNamePinboard.name))
+        XCTAssertTrue(store.userPinboards.contains { $0.id == reservedNamePinboard.id })
+
+        store.renamePinboard(reservedNamePinboard.id, to: SmartPinboardCategory.images.pinboardName)
+        let renamedUserPinboard = try XCTUnwrap(store.snapshot.pinboards.first { $0.id == reservedNamePinboard.id })
+        XCTAssertFalse(SmartPinboardCategory.isSmartPinboardName(renamedUserPinboard.name))
+
+        let link = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Messages",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Link",
+            payload: ClipboardPayload(urlString: "https://example.com/research")
+        ))
+        let text = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Note",
+            payload: ClipboardPayload(text: "plain text")
+        ))
+        let smartLinks = store.syncSmartPinboard(for: .links)
+
+        store.selectedScope = .pinboard(smartLinks.id)
+        XCTAssertFalse(store.canReorderCurrentPinboard)
+
+        store.renamePinboard(smartLinks.id, to: "Reading")
+        store.updatePinboardColor(smartLinks.id, to: "#FFFFFF")
+        store.removeItem(link.id, fromPinboard: smartLinks.id)
+        store.moveItems(inPinboard: smartLinks.id, fromOffsets: IndexSet(integer: 0), toOffset: 0)
+        store.pinItem(text.id, to: smartLinks.id)
+
+        let refreshedSmartLinks = try XCTUnwrap(store.smartPinboard(for: .links))
+        XCTAssertEqual(refreshedSmartLinks.name, SmartPinboardCategory.links.pinboardName)
+        XCTAssertEqual(refreshedSmartLinks.colorHex, SmartPinboardCategory.links.colorHex)
+        XCTAssertEqual(refreshedSmartLinks.itemIDs, [link.id])
     }
 
     func testMoveItemBetweenPinboardsRemovesSourceAndPreservesHistory() throws {
@@ -817,8 +1056,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "Command+Option+1-9")
-        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "Command+Option+Control+1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "⌥⌘1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "⌃⌥⌘1-9")
 
         store.setQuickPasteShortcutsEnabled(false)
 
@@ -830,7 +1069,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         reloaded.resetShortcutConfiguration()
 
         XCTAssertTrue(reloaded.snapshot.shortcuts.isQuickPasteEnabled)
-        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "Command+Shift+V")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "⇧⌘V")
     }
 
     func testShortcutCustomizationPersistsAndSupportsClearedBindings() throws {
@@ -852,11 +1091,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         reloaded.load()
 
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.key, "p")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.command, .shift])
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "Command+Shift+P")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.shift, .command])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "⇧⌘P")
         XCTAssertFalse(reloaded.snapshot.shortcuts.pasteSelectedPlainText.isEnabled)
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedPlainText.displayName, "Not set")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.command, .control])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.control, .command])
         XCTAssertEqual(reloaded.snapshot.shortcuts.plainTextQuickPasteModifiers, [.shift])
     }
 
@@ -867,8 +1106,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(binding.key, "r")
-        XCTAssertEqual(binding.modifiers, [.command, .option, .shift])
-        XCTAssertEqual(binding.displayName, "Command+Option+Shift+R")
+        XCTAssertEqual(binding.modifiers, [.option, .shift, .command])
+        XCTAssertEqual(binding.displayName, "⌥⇧⌘R")
+
+        var legacyOrderedBinding = ShortcutBinding(key: "v", modifiers: [])
+        legacyOrderedBinding.modifiers = [.command, .shift]
+        XCTAssertEqual(legacyOrderedBinding.displayName, "⇧⌘V")
 
         let cleared = ShortcutBinding(key: "   ", modifiers: [.control])
 
@@ -897,7 +1140,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("limited mode"))
         XCTAssertTrue(activeOverview.crossDeviceStatement.contains("Mac, iPhone, and iPad"))
         XCTAssertEqual(activeOverview.purchaseOptions.map(\.plan), [.monthly, .annual, .lifetime, .family])
-        XCTAssertTrue(activeOverview.billingSafetyStatement.contains("encrypted entitlement metadata"))
+        XCTAssertTrue(activeOverview.billingSafetyStatement.contains("Payment details stay with the App Store"))
 
         let endingSoonOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(12 * 24 * 60 * 60))
         XCTAssertEqual(endingSoonOverview.trialState, .endingSoon)
@@ -905,7 +1148,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         let endedOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(15 * 24 * 60 * 60))
         XCTAssertEqual(endedOverview.trialState, .ended)
         XCTAssertTrue(endedOverview.trialSummary.contains("Trial ended"))
-        XCTAssertTrue(endedOverview.trialOutcomeStatement.contains("do not delete local encrypted clipboard data"))
+        XCTAssertTrue(endedOverview.trialOutcomeStatement.contains("do not delete local clipboard data"))
 
         store.cancelFreeTrial(now: now.addingTimeInterval(120))
 
@@ -1026,6 +1269,36 @@ final class PasteBuddyStoreTests: XCTestCase {
         let standardRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
         XCTAssertTrue(standardRaw.contains("Visible Secret"))
         XCTAssertTrue(standardRaw.contains("clipboard content"))
+    }
+
+    func testStoreLoadPreservesLegacyEncryptedSnapshotStorageMode() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let legacyItem = ClipboardItem(
+            sourceAppName: "Unit Test",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Legacy Secret",
+            payload: ClipboardPayload(text: "legacy encrypted content")
+        )
+        var legacySnapshot = PasteBuddySnapshot(items: [legacyItem])
+        legacySnapshot.security.storageMode = .encrypted
+        harness.snapshotStore.storageMode = .encrypted
+        try harness.snapshotStore.save(legacySnapshot)
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.load()
+
+        XCTAssertEqual(store.snapshot.security.storageMode, .encrypted)
+        XCTAssertEqual(harness.snapshotStore.storageMode, .encrypted)
+        XCTAssertEqual(store.filteredItems.map(\.title), ["Legacy Secret"])
+
+        store.createTextItem(text: "new encrypted content", title: "New Encrypted Item")
+
+        let encryptedRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
+        XCTAssertFalse(encryptedRaw.contains("legacy encrypted content"))
+        XCTAssertFalse(encryptedRaw.contains("new encrypted content"))
     }
 
     func testTeamPlanSeatBillingMetadataPersistsThroughEncryptedStore() throws {
@@ -1774,7 +2047,6 @@ final class PasteBuddyStoreTests: XCTestCase {
             provider: .cloudKit,
             isCloudSyncEnabled: true,
             cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
-            keyHierarchyVersion: 1,
             isCloudKitCapabilityConfigured: true
         )
         snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.searchHistory])
@@ -1791,11 +2063,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(report.coverageStatement.contains("Shortcuts"))
         XCTAssertTrue(report.coverageStatement.contains("keyboard"))
         XCTAssertTrue(report.coverageStatement.contains("MCP"))
-        XCTAssertTrue(report.localBoundaryStatement.contains("local encrypted snapshot"))
+        XCTAssertEqual(report.localBoundaryStatement, "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy")
         XCTAssertTrue(report.syncBoundaryStatement.contains("private iCloud"))
-        XCTAssertTrue(report.syncBoundaryStatement.contains("must not downgrade to plaintext"))
+        XCTAssertFalse(report.syncBoundaryStatement.contains("encrypted records"))
         XCTAssertTrue(report.vendorServerStatement.contains("does not send clipboard payloads to vendor servers"))
-        XCTAssertTrue(report.mcpBoundaryStatement.contains("per-tool opt-in"))
+        XCTAssertTrue(report.mcpBoundaryStatement.contains("MCP Agent connection is on"))
     }
 
     func testManualTextCreationRespectsPrivacyRulesBeforeHistoryPinboardsAndSearch() throws {
@@ -1960,14 +2232,18 @@ final class PasteBuddyStoreTests: XCTestCase {
         var sync = SyncConfiguration(
             provider: .cloudKit,
             isCloudSyncEnabled: true,
-            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
-            keyHierarchyVersion: 1
+            cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy"
         )
 
-        XCTAssertEqual(sync.readiness, .blocked([.cloudKitCapability]))
+        XCTAssertEqual(sync.readiness, .blocked([.endToEndKeyHierarchy, .cloudKitCapability]))
         XCTAssertFalse(sync.readiness.canAttemptCloudSync)
 
         sync.isCloudKitCapabilityConfigured = true
+
+        XCTAssertEqual(sync.readiness, .blocked([.endToEndKeyHierarchy]))
+        XCTAssertFalse(sync.readiness.canAttemptCloudSync)
+
+        sync.keyHierarchyVersion = 1
 
         XCTAssertEqual(sync.readiness, .ready)
         XCTAssertTrue(sync.readiness.canAttemptCloudSync)
@@ -1982,7 +2258,6 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(report.hasBlockers)
         XCTAssertEqual(report.summary, "Local only: CloudKit sync is disabled.")
         XCTAssertTrue(report.findings.contains { $0.id == "cloud-sync-local-only" })
-        XCTAssertTrue(report.findings.contains { $0.id == "plaintext-fallback-disabled" })
     }
 
     func testCloudSyncPreflightReportsMissingRequirementsAndSharedPinboardBlocker() {

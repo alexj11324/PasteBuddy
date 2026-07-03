@@ -39,17 +39,24 @@ VoiceOver, Dark Mode, and localization workflows.
   follows Light/Dark appearance without a fixed custom theme.
 - App Intents use `LocalizedStringResource` titles and descriptions for
   Shortcuts-facing strings.
-- The SwiftPM app target includes expanded `Localizable.strings` resources for
-  English and Simplified Chinese across core Mac, mobile browsing, filtering,
-  settings, MCP, sync, and extension setup surfaces.
+- Localization is maintained through the Dify-backed String Catalog workflow in
+  `docs/LOCALIZATION_WORKFLOW.md`.
+- The Apple-facing iOS app and extensions consume `Localizable.xcstrings`; the
+  SwiftPM app target keeps expanded `Localizable.strings` only as a compatibility
+  copy generated from the same workflow.
+- Core-generated mobile guidance and keyboard status copy uses semantic
+  localization keys through `PasteBuddyLocalization` rather than hard-coded
+  English strings.
 - Tests assert English and Simplified Chinese resource keys stay in sync,
-  priority user-facing strings have Simplified Chinese translations, and the
+  priority user-facing strings have Simplified Chinese translations,
+  `Localizable.xcstrings` matches the reviewed `.strings` values, and the
   quality report covers the release criteria areas.
 
 ## Required Before Release
 
-- Continue expanding localization coverage for dynamic/interpolated strings and
-  move remaining low-level status copy into the resource catalog.
+- Run `python3 script/localization_catalog_workflow.py check` before release to
+  block raw English UI literals, missing catalog keys, placeholder drift, and
+  String Catalog target membership regressions.
 - Run a VoiceOver pass over history browsing, pinboards, settings, Shortcuts,
   and direct-paste permission prompts.
 - Add high-contrast checks for pinboard colors and sync/sharing status

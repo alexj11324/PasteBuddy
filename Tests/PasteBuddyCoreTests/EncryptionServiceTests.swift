@@ -202,7 +202,7 @@ final class EncryptionServiceTests: XCTestCase {
 
         XCTAssertThrowsError(try store.load()) { error in
             let message = error.localizedDescription
-            XCTAssertTrue(message.contains("Could not read the encrypted PasteBuddy store"))
+            XCTAssertTrue(message.contains("Could not read the PasteBuddy store"))
             XCTAssertFalse(message.contains("payroll token"))
         }
     }
@@ -307,14 +307,7 @@ final class EncryptionServiceTests: XCTestCase {
     }
 
     func testCloudSyncPackageRejectsBlockedSyncConfiguration() throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
-        let builder = CloudSyncPackageBuilder(encryptor: service)
+        let builder = CloudSyncPackageBuilder()
         let snapshot = PasteBuddySnapshot(items: [
             ClipboardItem(
                 sourceAppName: "Unit Test",
@@ -337,7 +330,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let builder = CloudSyncPackageBuilder(encryptor: service)
         let secretItem = ClipboardItem(
             sourceAppName: "Preview",
@@ -390,7 +382,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let transport = InMemoryCloudSyncRemoteTransport()
         let syncService = CloudKitSyncService(
             transport: transport,
@@ -441,7 +432,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let transport = InMemoryCloudSyncRemoteTransport()
         let syncService = CloudKitSyncService(
             transport: transport,
@@ -483,19 +473,8 @@ final class EncryptionServiceTests: XCTestCase {
     }
 
     func testCloudKitSyncServiceRejectsBlockedReadinessBeforeRemoteSave() async throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
         let transport = InMemoryCloudSyncRemoteTransport()
-        let syncService = CloudKitSyncService(
-            transport: transport,
-            builder: CloudSyncPackageBuilder(encryptor: service),
-            importer: CloudSyncPackageImporter(decryptor: service)
-        )
+        let syncService = CloudKitSyncService(transport: transport)
         let snapshot = PasteBuddySnapshot(items: [
             ClipboardItem(
                 sourceAppName: "Notes",
@@ -524,7 +503,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let transport = InMemoryCloudSyncRemoteTransport()
         let syncService = CloudKitSyncService(
             transport: transport,
@@ -658,7 +636,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let localItem = ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Local Mac",
@@ -712,7 +689,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let itemID = UUID()
         let older = Date(timeIntervalSince1970: 1_000)
         let newer = Date(timeIntervalSince1970: 2_000)
@@ -767,7 +743,6 @@ final class EncryptionServiceTests: XCTestCase {
             keyID: "test-key"
         )
         defer { try? service.deleteKeyForTesting() }
-
         let snapshot = PasteBuddySnapshot(
             items: [
                 ClipboardItem(

@@ -70,8 +70,23 @@ required_identity_prefix() {
   esac
 }
 
+resolve_code_sign_keychain() {
+  local keychain
+  keychain="${PASTEBUDDY_CODESIGN_KEYCHAIN:-}"
+  if [[ -z "$keychain" ]]; then
+    keychain="$(/usr/bin/security default-keychain -d user 2>/dev/null | tr -d '" ' || true)"
+  fi
+  [[ -n "$keychain" ]] || die "Could not resolve a code signing keychain. Set PASTEBUDDY_CODESIGN_KEYCHAIN to a local keychain path."
+  if [[ -n "$keychain" && ! -f "$keychain" ]]; then
+    die "Configured code signing keychain does not exist: $keychain"
+  fi
+  printf '%s\n' "$keychain"
+}
+
+CODESIGN_KEYCHAIN="$(resolve_code_sign_keychain)"
+
 code_signing_identities() {
-  /usr/bin/security find-identity -v -p codesigning 2>/dev/null || true
+  /usr/bin/security find-identity -v -p codesigning "$CODESIGN_KEYCHAIN" 2>/dev/null || true
 }
 
 parse_identity_line() {
@@ -312,7 +327,11 @@ verify_code_signature() {
 sign_app() {
   local bundle="$1"
   assert_safe_bundle_path "$bundle"
-  /usr/bin/codesign --force --deep --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID" "$bundle"
+  local codesign_args=(--force --deep --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID")
+  if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
+    codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
+  fi
+  /usr/bin/codesign "${codesign_args[@]}" "$bundle"
   verify_code_signature "$bundle"
 }
 

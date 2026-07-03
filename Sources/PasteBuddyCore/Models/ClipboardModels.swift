@@ -31,6 +31,71 @@ public enum ClipboardContentType: String, CaseIterable, Codable, Identifiable, S
     }
 }
 
+public enum SmartPinboardCategory: String, CaseIterable, Codable, Identifiable, Sendable {
+    case text
+    case links
+    case images
+    case files
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .text: "Text"
+        case .links: "Links"
+        case .images: "Images"
+        case .files: "Files"
+        }
+    }
+
+    public var pinboardName: String {
+        "Smart: \(displayName)"
+    }
+
+    public var systemImageName: String {
+        switch self {
+        case .text: "text.alignleft"
+        case .links: "link"
+        case .images: "photo"
+        case .files: "doc"
+        }
+    }
+
+    public var colorHex: String {
+        switch self {
+        case .text: "#4EA7FC"
+        case .links: "#70C1B3"
+        case .images: "#B388EB"
+        case .files: "#FF9F1C"
+        }
+    }
+
+    public var matchedContentType: ClipboardContentType {
+        switch self {
+        case .text: .text
+        case .links: .url
+        case .images: .image
+        case .files: .file
+        }
+    }
+
+    public func matches(_ item: ClipboardItem) -> Bool {
+        item.presentationContentType == matchedContentType
+    }
+
+    public static func category(forPinboardName name: String) -> SmartPinboardCategory? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return allCases.first { $0.pinboardName == trimmed }
+    }
+
+    public static func isSmartPinboardName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return category(forPinboardName: trimmed) != nil || obsoletePinboardNames.contains(trimmed)
+    }
+
+    public static let obsoletePinboardNames: Set<String> = ["Smart: Mixed"]
+}
+
 public enum ClipboardReuseCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     case general
     case snippet
@@ -372,7 +437,31 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
     }
 
     public var allURLStrings: [String] {
+        let explicitURLs = explicitURLStrings
+        if !explicitURLs.isEmpty {
+            return explicitURLs
+        }
+        return Self.detectedURLStrings(in: text ?? htmlString?.pasteBuddyPlainTextFromHTML ?? "")
+    }
+
+    public var explicitURLStrings: [String] {
         [urlString].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+    }
+
+    public var presentationURLString: String? {
+        explicitURLStrings.first ?? standaloneDetectedURLString
+    }
+
+    private var standaloneDetectedURLString: String? {
+        let candidateText = text ?? htmlString?.pasteBuddyPlainTextFromHTML
+        guard let trimmed = candidateText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              !trimmed.contains(where: \.isWhitespace),
+              let detected = Self.detectedURLStrings(in: trimmed).first,
+              Self.normalizedURLComparisonKey(detected) == Self.normalizedURLComparisonKey(trimmed) else {
+            return nil
+        }
+        return detected
     }
 
     public var primaryText: String {
@@ -411,6 +500,41 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
             result.append(trimmed)
         }
         return result
+    }
+
+    private static func detectedURLStrings(in value: String) -> [String] {
+        value
+            .split(whereSeparator: \.isWhitespace)
+            .compactMap { rawToken -> String? in
+                let token = rawToken.trimmingCharacters(in: CharacterSet(charactersIn: "<>()[]{}\"'"))
+                    .trimmingCharacters(in: .punctuationCharacters)
+                guard token.contains(".") else { return nil }
+                let candidate: String
+                if token.hasPrefix("http://") || token.hasPrefix("https://") {
+                    candidate = token
+                } else if token.hasPrefix("www.") {
+                    candidate = "https://\(token)"
+                } else {
+                    return nil
+                }
+                guard let url = URL(string: candidate),
+                      let host = url.host(percentEncoded: false),
+                      host.contains(".") else {
+                    return nil
+                }
+                return candidate
+            }
+    }
+
+    private static func normalizedURLComparisonKey(_ value: String) -> String {
+        let normalized = value
+            .trimmingCharacters(in: CharacterSet(charactersIn: "<>()[]{}\"'"))
+            .trimmingCharacters(in: .punctuationCharacters)
+            .lowercased()
+        if normalized.hasPrefix("www.") {
+            return "https://\(normalized)"
+        }
+        return normalized
     }
 }
 
@@ -736,7 +860,33 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
+    public var presentationContentType: ClipboardContentType {
+        if payload.presentationURLString != nil,
+           contentType == .url || contentType == .text {
+            return .url
+        }
+        guard contentType == .mixed else { return contentType }
+        if payload.hasImageAsset {
+            return .image
+        }
+        if !payload.allFileURLStrings.isEmpty {
+            return .file
+        }
+        if payload.presentationURLString != nil {
+            return .url
+        }
+        if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || payload.hasRTFAsset {
+            return .text
+        }
+        return .mixed
+    }
+
     public var visualPreview: ClipboardVisualPreview {
+        if presentationContentType == .url {
+            return linkVisualPreview
+        }
         switch contentType {
         case .text:
             let body = searchDocument.previewBody.nilIfEmpty ?? title
@@ -749,15 +899,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 systemImageName: "text.alignleft"
             )
         case .url:
-            let urlString = payload.urlString ?? title
-            let host = URL(string: urlString)?.host?.nilIfEmpty
-            return ClipboardVisualPreview(
-                headline: host ?? title,
-                body: urlString,
-                detail: host == nil ? nil : "Link",
-                badgeText: contentType.displayName,
-                systemImageName: "link"
-            )
+            return linkVisualPreview
         case .file:
             let fileNames = payload.allFileURLStrings.map { value in
                 URL(string: value)?.lastPathComponent.nilIfEmpty ?? value
@@ -784,6 +926,55 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 prefersImageThumbnail: payload.hasImageAsset
             )
         case .mixed:
+            switch presentationContentType {
+            case .text:
+                let body = searchDocument.previewBody.nilIfEmpty ?? title
+                let detail = payload.htmlString?.isEmpty == false || payload.hasRTFAsset ? "Rich text available" : nil
+                return ClipboardVisualPreview(
+                    headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
+                    body: body,
+                    detail: detail,
+                    badgeText: ClipboardContentType.text.displayName,
+                    systemImageName: "text.alignleft"
+                )
+            case .url:
+                let urlString = payload.urlString ?? title
+                let host = URL(string: urlString)?.host?.nilIfEmpty
+                return ClipboardVisualPreview(
+                    headline: host ?? title,
+                    body: urlString,
+                    detail: host == nil ? nil : "Link",
+                    badgeText: ClipboardContentType.url.displayName,
+                    systemImageName: "link"
+                )
+            case .file:
+                let fileNames = payload.allFileURLStrings.map { value in
+                    URL(string: value)?.lastPathComponent.nilIfEmpty ?? value
+                }
+                let body = fileNames.first ?? title
+                let remainingCount = max(fileNames.count - 1, 0)
+                let detail = remainingCount > 0 ? "\(remainingCount) more \(remainingCount == 1 ? "file" : "files")" : nil
+                return ClipboardVisualPreview(
+                    headline: body,
+                    body: payload.allFileURLStrings.first ?? body,
+                    detail: detail,
+                    badgeText: ClipboardContentType.file.displayName,
+                    systemImageName: "doc"
+                )
+            case .image:
+                let body = searchDocument.previewBody.nilIfEmpty
+                    ?? (ocrState.isPending ? "OCR pending" : "Image preview")
+                return ClipboardVisualPreview(
+                    headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
+                    body: body,
+                    detail: ocrState.displayName,
+                    badgeText: ClipboardContentType.image.displayName,
+                    systemImageName: "photo",
+                    prefersImageThumbnail: payload.hasImageAsset
+                )
+            case .mixed:
+                break
+            }
             let body = searchDocument.previewBody.nilIfEmpty ?? title
             var detailParts: [String] = []
             if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
@@ -810,7 +1001,10 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var openableURL: URL? {
-        switch contentType {
+        if let presentationURLString = payload.presentationURLString {
+            return URL(string: presentationURLString)
+        }
+        return switch contentType {
         case .url:
             payload.urlString.flatMap { URL(string: $0) }
         case .file:
@@ -835,14 +1029,13 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
-        guard contentType == .mixed else { return [contentType] }
-        var types: Set<ClipboardContentType> = [.mixed]
+        var types: Set<ClipboardContentType> = [contentType]
         if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.hasRTFAsset {
             types.insert(.text)
         }
-        if !payload.allURLStrings.isEmpty {
+        if payload.presentationURLString != nil {
             types.insert(.url)
         }
         if !payload.allFileURLStrings.isEmpty {
@@ -852,6 +1045,18 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             types.insert(.image)
         }
         return types
+    }
+
+    private var linkVisualPreview: ClipboardVisualPreview {
+        let urlString = payload.presentationURLString ?? payload.urlString ?? title
+        let host = URL(string: urlString)?.host?.nilIfEmpty
+        return ClipboardVisualPreview(
+            headline: host ?? title,
+            body: urlString,
+            detail: host == nil ? nil : "Link",
+            badgeText: ClipboardContentType.url.displayName,
+            systemImageName: "link"
+        )
     }
 
     public static func normalizedLabels(_ labels: [String]) -> [String] {
@@ -1477,13 +1682,13 @@ public struct TeamPlanOverview: Codable, Equatable, Sendable {
             TeamPlanValueProposition(
                 id: "shared-pinboards",
                 title: "Shared pinboards",
-                detail: "Collect team ideas, links, files, screenshots, and reusable snippets in encrypted shared boards.",
+                detail: "Collect team ideas, links, files, screenshots, and reusable snippets in shared boards.",
                 systemImageName: "pin.2"
             ),
             TeamPlanValueProposition(
                 id: "stay-in-sync",
                 title: "Stay in sync",
-                detail: "Keep shared clipboard collections aligned across team devices when encrypted sync and sharing are configured.",
+            detail: "Keep shared clipboard collections aligned across team devices when CloudKit sync and sharing are configured.",
                 systemImageName: "arrow.triangle.2.circlepath"
             ),
             TeamPlanValueProposition(
@@ -1566,7 +1771,7 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
         restoreSummary = Self.restoreSummary(for: entitlement, now: now)
         restoreActionStatement = Self.restoreActionStatement(for: entitlement)
         purchaseOptions = Self.allPurchaseOptions
-        billingSafetyStatement = "PasteBuddy stores only encrypted entitlement metadata. Payment cards, receipts, signed transactions, billing tokens, and invoice credentials stay out of the local snapshot."
+        billingSafetyStatement = "PasteBuddy stores entitlement status only. Payment details stay with the App Store."
     }
 
     private static let allPurchaseOptions: [PersonalPurchaseOption] = [
@@ -1653,11 +1858,11 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
     ) -> String {
         switch state {
         case .active, .endingSoon:
-            return "When the trial ends, PasteBuddy keeps local data encrypted and returns paid-only features to limited mode unless monthly, annual, lifetime, or family access is active."
+            return "When the trial ends, PasteBuddy keeps local data and returns paid-only features to limited mode unless monthly, annual, lifetime, or family access is active."
         case .canceled:
             return "Canceled trials stop granting full access; users can still activate monthly, annual, lifetime, or family access later."
         case .ended:
-            return "Ended trials do not delete local encrypted clipboard data; they only stop granting paid access."
+            return "Ended trials do not delete local clipboard data; they only stop granting paid access."
         case .converted:
             return "The active \(entitlement.plan.displayName) entitlement replaces trial access while StoreKit reports it as valid."
         case .notStarted:
@@ -2066,18 +2271,18 @@ public enum SyncReadiness: Equatable, Sendable {
         switch self {
         case .localOnly: "Local only"
         case .blocked: "Setup required"
-        case .ready: "Encrypted sync ready"
+        case .ready: "CloudKit sync ready"
         }
     }
 
     public var detail: String {
         switch self {
         case .localOnly:
-            "Sync is off. Clipboard data stays on this Mac unless you explicitly configure encrypted CloudKit sync."
+            "Sync is off. Clipboard data stays on this Mac."
         case .blocked(let requirements):
             "Cloud sync is blocked until: \(requirements.map(\.displayName).joined(separator: ", "))."
         case .ready:
-            "CloudKit sync may upload encrypted records. Plaintext fallback is not available."
+            "CloudKit sync is ready to use private iCloud records."
         }
     }
 }
@@ -2163,7 +2368,7 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 severity: .info,
                 title: "CloudKit sync is off",
                 detail: "Clipboard history, OCR metadata, images, files, and pinboards remain on this device.",
-                recoveryAction: "Enable CloudKit sync only when the user explicitly wants encrypted cross-device access."
+                recoveryAction: "Enable CloudKit sync only when the user explicitly wants cross-device iCloud access."
             ))
         case .blocked(let requirements):
             findings.append(contentsOf: requirements.map(finding(for:)))
@@ -2171,9 +2376,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
             findings.append(CloudSyncDiagnosticFinding(
                 id: "cloud-sync-ready",
                 severity: .info,
-                title: "Encrypted CloudKit sync can run",
-                detail: "Readiness gates are satisfied and plaintext fallback remains disabled.",
-                recoveryAction: "Upload and download only encrypted CloudKit records."
+                title: "CloudKit sync can run",
+                detail: "Readiness gates are satisfied for the user's private iCloud database.",
+                recoveryAction: "Upload and download private CloudKit snapshot records."
             ))
         }
 
@@ -2181,9 +2386,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
             findings.append(CloudSyncDiagnosticFinding(
                 id: "shared-pinboards-blocked",
                 severity: .blocker,
-                title: "Shared pinboards need ready encrypted sync",
-                detail: "Invitation packages and shared pinboard metadata must not be sent before CloudKit and the key hierarchy are ready.",
-                recoveryAction: "Finish CloudKit container, signing, and key hierarchy setup before enabling shared pinboards."
+                title: "Shared pinboards need ready CloudKit sync",
+                detail: "Invitation packages and shared pinboard metadata must not be sent before CloudKit is ready.",
+                recoveryAction: "Finish CloudKit container and signing setup before enabling shared pinboards."
             ))
         }
 
@@ -2192,7 +2397,7 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 id: "last-sync-conflicts",
                 severity: .warning,
                 title: "Last sync reported merge conflicts",
-                detail: "\(configuration.lastSyncConflictCount) encrypted item or pinboard conflict\(configuration.lastSyncConflictCount == 1 ? " was" : "s were") resolved by timestamp.",
+                detail: "\(configuration.lastSyncConflictCount) item or pinboard conflict\(configuration.lastSyncConflictCount == 1 ? " was" : "s were") resolved by timestamp.",
                 recoveryAction: "Review recently changed history items and pinboards before uploading another package."
             ))
         }
@@ -2201,19 +2406,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
             findings.append(CloudSyncDiagnosticFinding(
                 id: "first-sync-pending",
                 severity: .warning,
-                title: "First encrypted sync has not completed",
+                title: "First CloudKit sync has not completed",
                 detail: "The configuration is ready, but this device has not recorded a successful upload or import yet.",
-                recoveryAction: "Run the first encrypted upload/download after signed CloudKit account access is available."
-            ))
-        }
-
-        if !configuration.allowsPlaintextFallback {
-            findings.append(CloudSyncDiagnosticFinding(
-                id: "plaintext-fallback-disabled",
-                severity: .info,
-                title: "Plaintext fallback is disabled",
-                detail: "Cloud sync and sharing must use encrypted packages rather than silently downgrading.",
-                recoveryAction: "Keep this invariant in place for local, synced, and shared clipboard data."
+                recoveryAction: "Run the first upload/download after signed CloudKit account access is available."
             ))
         }
 
@@ -2228,7 +2423,7 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 severity: .blocker,
                 title: "Explicit CloudKit opt-in missing",
                 detail: "Cloud sync must remain local-only until the user enables it.",
-                recoveryAction: "Enable CloudKit sync from Settings after explaining that only encrypted records are uploaded."
+                recoveryAction: "Enable CloudKit sync from Settings after explaining that records are stored in the user's private iCloud database."
             )
         case .cloudKitContainerIdentifier:
             CloudSyncDiagnosticFinding(
@@ -2563,19 +2758,19 @@ public enum ShortcutModifier: String, CaseIterable, Codable, Sendable {
 
     public var sortOrder: Int {
         switch self {
-        case .command: 0
+        case .control: 0
         case .option: 1
-        case .control: 2
-        case .shift: 3
+        case .shift: 2
+        case .command: 3
         }
     }
 
     public var displayName: String {
         switch self {
-        case .command: "Command"
-        case .option: "Option"
-        case .shift: "Shift"
-        case .control: "Control"
+        case .command: "⌘"
+        case .option: "⌥"
+        case .shift: "⇧"
+        case .control: "⌃"
         }
     }
 }
@@ -2620,7 +2815,7 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
 
     public var displayName: String {
         guard let key, !key.isEmpty else { return "Not set" }
-        return (modifiers.map(\.displayName) + [key.uppercased()]).joined(separator: "+")
+        return (Self.normalizedModifiers(modifiers).map(\.displayName) + [key.uppercased()]).joined()
     }
 
     public static func normalizedModifiers(_ modifiers: [ShortcutModifier]) -> [ShortcutModifier] {
@@ -2692,7 +2887,7 @@ public struct ShortcutConfiguration: Codable, Equatable, Sendable {
     }
 
     private func modifiersDisplayName(_ modifiers: [ShortcutModifier], digitRange: String) -> String {
-        (ShortcutBinding.normalizedModifiers(modifiers).map(\.displayName) + [digitRange]).joined(separator: "+")
+        (ShortcutBinding.normalizedModifiers(modifiers).map(\.displayName) + [digitRange]).joined()
     }
 }
 
@@ -2706,7 +2901,7 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
     public var id: String { rawValue }
 
     public static var defaultEnabledTools: Set<MCPToolName> {
-        Set(allCases).subtracting([.retrieveItem])
+        Set(allCases)
     }
 
     public var displayName: String {
@@ -2827,16 +3022,16 @@ public enum SnapshotStorageMode: String, CaseIterable, Codable, Identifiable, Se
         case .standard:
             "Standard Local Storage"
         case .encrypted:
-            "Encrypted Local Storage"
+            "Legacy Protected Storage"
         }
     }
 
     public var detail: String {
         switch self {
         case .standard:
-            "Stores PasteBuddy history in the user's local Application Support folder without app-managed AES-GCM. This avoids Keychain prompts in unsigned debug builds."
+            "Stores PasteBuddy history in the local Application Support folder."
         case .encrypted:
-            "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards with AES-GCM. The local encryption key is stored separately in Keychain."
+            "Legacy protected store support is kept only so older data can be migrated back to standard local storage."
         }
     }
 
@@ -2980,7 +3175,7 @@ public enum PrivacyCaptureStatus: Equatable, Sendable {
     public var detail: String {
         switch self {
         case .active:
-            "New clipboard content is evaluated by local privacy rules before it enters encrypted history."
+            "New clipboard content is evaluated by local privacy rules before it enters local history."
         case .pausedIndefinitely:
             "Automatic clipboard capture is stopped until you resume it."
         case .pausedUntil:
@@ -3053,16 +3248,16 @@ public struct PrivacyPostureReport: Equatable, Sendable {
         excludedBundleIdentifierCount = privacy.excludedBundleIdentifiers.count
         activeCustomCaptureRuleCount = privacy.customCaptureRules.filter(\.isEnabled).count
         sensitiveTextBlockingEnabled = privacy.blockLikelySensitiveText
-        localBoundaryStatement = "Clipboard payloads, screenshots, OCR metadata, thumbnails, privacy rules, pinboards, and search metadata stay in the local encrypted snapshot unless the user explicitly enables sync, sharing, or MCP."
+        localBoundaryStatement = "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy"
         vendorServerStatement = "PasteBuddy does not send clipboard payloads to vendor servers for capture, search, OCR, keyboard insertion, Shortcuts, or local MCP access."
         mcpBoundaryStatement = snapshot.mcp.isServerEnabled
-            ? "MCP is enabled locally over stdio and still requires per-tool opt-in; search is summary-only and payload retrieval is a separate audited tool."
-            : "MCP access is off by default. Enabling it requires local user opt-in plus per-tool permissions."
+            ? "MCP Agent connection is on. Connected local Agents can use PasteBuddy on this Mac."
+            : "MCP Agent connection is off. Local Agents cannot connect to PasteBuddy."
 
         if snapshot.sync.provider == .cloudKit {
-            syncBoundaryStatement = "CloudKit sync uses the user's private iCloud account and requires the encrypted remote-record boundary; it must not downgrade to plaintext."
+            syncBoundaryStatement = "CloudKit sync uses your private iCloud account."
         } else {
-            syncBoundaryStatement = "Sync is local-only. Clipboard history and pinboards do not leave this device unless sync or sharing is explicitly enabled."
+            syncBoundaryStatement = "Sync is local-only."
         }
         coverageStatement = "The same local privacy boundary covers history, pinboards, search, Shortcuts, keyboard insertion, Share/Action imports, and MCP access."
     }
@@ -3164,7 +3359,7 @@ public struct AccessibilityLocalizationQualityReport: Codable, Equatable, Sendab
     public init() {
         summary = "Core clipboard workflows have code-level accessibility labels, semantic appearance, non-color status cues, and localization resources for English and Simplified Chinese."
         supportedLocaleIdentifiers = ["en", "zh-Hans"]
-        localizationReadyStatement = "English and Simplified Chinese Localizable.strings resources keep matching key sets, with priority Mac, mobile, filtering, Settings, MCP, sync, extension, and monetization strings covered by tests."
+        localizationReadyStatement = "English and Simplified Chinese String Catalog entries and SwiftPM compatibility resources keep matching key sets, with priority Mac, mobile, filtering, Settings, MCP, sync, extension, and monetization strings covered by tests."
         releaseAuditStatement = "Before App Store release, run a manual VoiceOver, Larger Text, high-contrast, and localized-layout pass on signed Mac, iPhone, iPad, keyboard, Share, and Action extension targets."
         findings = [
             AccessibilityQualityFinding(

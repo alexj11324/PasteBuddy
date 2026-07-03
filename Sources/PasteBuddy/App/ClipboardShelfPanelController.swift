@@ -4,15 +4,86 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 
+enum ClipboardShelfPlacement: String, CaseIterable, Identifiable {
+    case top
+    case bottom
+
+    var id: String { rawValue }
+
+    var menuTitle: String {
+        switch self {
+        case .top:
+            "Shelf at Top"
+        case .bottom:
+            "Shelf at Bottom"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .top:
+            "rectangle.topthird.inset.filled"
+        case .bottom:
+            "rectangle.bottomthird.inset.filled"
+        }
+    }
+}
+
+enum ClipboardPanelDisplayMode: String, CaseIterable, Identifiable {
+    case shelf
+    case sidePanel
+
+    var id: String { rawValue }
+
+    var menuTitleKey: String {
+        switch self {
+        case .shelf:
+            "label.clipboard_shelf"
+        case .sidePanel:
+            "label.side_panel"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .shelf:
+            "rectangle.bottomthird.inset.filled"
+        case .sidePanel:
+            "sidebar.right"
+        }
+    }
+}
+
 @MainActor
 final class ClipboardShelfPanelController {
     private static let panelCornerRadius: CGFloat = 28
     private static let shelfEntranceDuration: CFTimeInterval = 0.18
     private static let shelfExitDuration: CFTimeInterval = 0.12
+    private static let sidePanelPreferredSize = CGSize(width: 360, height: 697)
+    nonisolated private static let sidePanelHorizontalInset: CGFloat = 14
+    nonisolated private static let sidePanelTopInset: CGFloat = 8
 
     private let store: PasteBuddyStore
     private let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     private let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
+    private let shouldIgnoreDismissalAt: @MainActor (CGPoint) -> Bool
+    var displayMode: ClipboardPanelDisplayMode {
+        didSet {
+            guard oldValue != displayMode, let panel else { return }
+            configurePanelForCurrentMode(panel)
+            if let hostingView = panel.contentView as? FirstMouseHostingView<AnyView> {
+                hostingView.rootView = panelContentView()
+                hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
+            }
+            positionVisiblePanel(panel)
+        }
+    }
+    var placement: ClipboardShelfPlacement {
+        didSet {
+            guard oldValue != placement, let panel else { return }
+            positionVisiblePanel(panel)
+        }
+    }
     private var panel: ClipboardShelfPanel?
     private var localMouseDownMonitor: Any?
     private var globalMouseDownMonitor: Any?
@@ -21,16 +92,23 @@ final class ClipboardShelfPanelController {
     private var screenParametersObserver: NSObjectProtocol?
     private var ignoreOutsideClicksUntil: Date?
     private var isAnimatingPanelOut = false
+    private var isPinned = false
     private var panelAnimationGeneration = 0
 
     init(
         store: PasteBuddyStore,
+        placement: ClipboardShelfPlacement = .top,
+        displayMode: ClipboardPanelDisplayMode = .sidePanel,
         directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
-        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
+        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
+        shouldIgnoreDismissalAt: @escaping @MainActor (CGPoint) -> Bool = { _ in false }
     ) {
         self.store = store
+        self.placement = placement
+        self.displayMode = displayMode
         self.directPasteItem = directPasteItem
         self.directPasteItems = directPasteItems
+        self.shouldIgnoreDismissalAt = shouldIgnoreDismissalAt
     }
 
     var isVisible: Bool {
@@ -51,7 +129,7 @@ final class ClipboardShelfPanelController {
         let panel = panel ?? makePanel()
         self.panel = panel
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
-        let finalFrame = bottomAttachedFrame(for: panel)
+        let finalFrame = attachedFrame(for: panel)
         PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
         isAnimatingPanelOut = false
         panelAnimationGeneration += 1
@@ -63,7 +141,7 @@ final class ClipboardShelfPanelController {
         panel.makeKey()
         animatePanelContentIn(panel)
         PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
-        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf opened", comment: ""))
+        postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_opened", comment: ""))
         startDismissalMonitoring(for: panel)
     }
 
@@ -79,7 +157,7 @@ final class ClipboardShelfPanelController {
         panel.animationBehavior = .none
         resetPanelContentPresentation(panel)
         panel.orderOut(nil)
-        postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+        postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_closed", comment: ""))
     }
 
     func hide() {
@@ -94,7 +172,7 @@ final class ClipboardShelfPanelController {
             panel.animationBehavior = .none
             resetPanelContentPresentation(panel)
             panel.orderOut(nil)
-            postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+            postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_closed", comment: ""))
             return
         }
 
@@ -108,20 +186,20 @@ final class ClipboardShelfPanelController {
                 self.isAnimatingPanelOut = false
                 self.resetPanelContentPresentation(panel)
                 panel.orderOut(nil)
-                self.postVoiceOverAnnouncement(NSLocalizedString("Clipboard Shelf closed", comment: ""))
+                self.postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_closed", comment: ""))
             }
         }
     }
 
     private func makePanel() -> ClipboardShelfPanel {
+        let initialSize = preferredContentSize(for: displayMode, screenFrame: activeScreen().frame)
         let panel = ClipboardShelfPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 292),
+            contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        let shelfTitle = NSLocalizedString("Clipboard Shelf", comment: "")
-        panel.title = shelfTitle
+        configurePanelForCurrentMode(panel)
         panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -138,30 +216,60 @@ final class ClipboardShelfPanelController {
         panel.hidesOnDeactivate = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = false
         panel.ignoresMouseEvents = false
-        panel.minSize = NSSize(width: 760, height: 250)
-        panel.setAccessibilityLabel(shelfTitle)
         panel.onCancel = { [weak self] in
             self?.hide()
         }
-        let hostingView = FirstMouseHostingView(
-            rootView: ClipboardShelfPanelView(
-                store: store,
-                directPasteItem: directPasteItem,
-                directPasteItems: directPasteItems,
-                reloadClipboardHistory: { [store] in
-                    await store.loadAsync()
-                }
-            ) { [weak self] in
-                self?.hide()
-            } onDismissImmediately: { [weak self] in
-                self?.hideImmediately()
-            }
-        )
+        let hostingView = FirstMouseHostingView(rootView: panelContentView())
         hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
         panel.contentView = hostingView
         return panel
+    }
+
+    private func configurePanelForCurrentMode(_ panel: ClipboardShelfPanel) {
+        let title = NSLocalizedString(displayMode.menuTitleKey, comment: "")
+        panel.title = title
+        panel.hasShadow = displayMode == .sidePanel
+        panel.minSize = switch displayMode {
+        case .shelf:
+            NSSize(width: 760, height: 250)
+        case .sidePanel:
+            NSSize(width: 320, height: 480)
+        }
+        panel.setAccessibilityLabel(title)
+    }
+
+    private func panelContentView() -> AnyView {
+        switch displayMode {
+        case .shelf:
+            AnyView(
+                ClipboardShelfPanelView(
+                    store: store,
+                    directPasteItem: directPasteItem,
+                    directPasteItems: directPasteItems,
+                    reloadClipboardHistory: { [store] in
+                        await store.loadAsync()
+                    }
+                ) { [weak self] in
+                    self?.hide()
+                } onDismissImmediately: { [weak self] in
+                    self?.hideImmediately()
+                }
+            )
+        case .sidePanel:
+            AnyView(
+                ClipboardSidePanelView(
+                    store: store,
+                    isPinned: sidePanelPinnedBinding(),
+                    directPasteItem: directPasteItem,
+                    directPasteItems: directPasteItems
+                ) { [weak self] in
+                    self?.hide()
+                } onDismissImmediately: { [weak self] in
+                    self?.hideImmediately()
+                }
+            )
+        }
     }
 
     private func preparePanelContentForPresentation(_ panel: NSPanel) {
@@ -210,15 +318,48 @@ final class ClipboardShelfPanelController {
         layer.transform = CATransform3DIdentity
     }
 
-    private func bottomAttachedFrame(for panel: NSPanel) -> NSRect {
+    private func attachedFrame(for panel: NSPanel) -> NSRect {
         let screen = activeScreen()
         let screenFrame = screen.frame
-        let height = panelHeight(for: panel, in: screenFrame)
-        return NSRect(
+        switch displayMode {
+        case .shelf:
+            let height = panelHeight(for: panel, in: screenFrame)
+            return Self.attachedFrame(
+                for: placement,
+                screenFrame: screenFrame,
+                visibleFrame: screen.visibleFrame,
+                height: height
+            )
+        case .sidePanel:
+            let preferredSize = preferredContentSize(for: .sidePanel, screenFrame: screenFrame)
+            panel.contentView?.setFrameSize(preferredSize)
+            panel.contentView?.layoutSubtreeIfNeeded()
+            return Self.rightAnchoredSidePanelFrame(
+                screenFrame: screenFrame,
+                visibleFrame: screen.visibleFrame,
+                preferredSize: preferredSize
+            )
+        }
+    }
+
+    nonisolated static func attachedFrame(
+        for placement: ClipboardShelfPlacement,
+        screenFrame: CGRect,
+        visibleFrame: CGRect,
+        height: CGFloat
+    ) -> CGRect {
+        let resolvedHeight = min(max(height, 0), screenFrame.height)
+        let y = switch placement {
+        case .top:
+            max(screenFrame.minY, min(visibleFrame.maxY, screenFrame.maxY) - resolvedHeight)
+        case .bottom:
+            screenFrame.minY
+        }
+        return CGRect(
             x: screenFrame.minX,
-            y: screenFrame.minY,
+            y: y,
             width: screenFrame.width,
-            height: height
+            height: resolvedHeight
         )
     }
 
@@ -233,8 +374,34 @@ final class ClipboardShelfPanelController {
         return min(max(preferredHeight, minimumHeight), maximumHeight)
     }
 
+    private func preferredContentSize(for displayMode: ClipboardPanelDisplayMode, screenFrame: NSRect) -> NSSize {
+        switch displayMode {
+        case .shelf:
+            NSSize(width: screenFrame.width, height: 292)
+        case .sidePanel:
+            NSSize(
+                width: min(Self.sidePanelPreferredSize.width, max(320, screenFrame.width - Self.sidePanelHorizontalInset * 2)),
+                height: min(Self.sidePanelPreferredSize.height, max(480, screenFrame.height - Self.sidePanelTopInset * 2))
+            )
+        }
+    }
+
+    nonisolated static func rightAnchoredSidePanelFrame(
+        screenFrame: CGRect,
+        visibleFrame: CGRect,
+        preferredSize: CGSize
+    ) -> CGRect {
+        let width = min(max(preferredSize.width, 320), max(320, screenFrame.width - sidePanelHorizontalInset * 2))
+        let height = min(max(preferredSize.height, 480), max(480, screenFrame.height - sidePanelTopInset * 2))
+        let rightEdge = min(screenFrame.maxX, visibleFrame.maxX)
+        let topEdge = min(screenFrame.maxY, visibleFrame.maxY) - sidePanelTopInset
+        let x = max(screenFrame.minX + sidePanelHorizontalInset, rightEdge - width - sidePanelHorizontalInset)
+        let y = max(screenFrame.minY + sidePanelTopInset, topEdge - height)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
     private func positionVisiblePanel(_ panel: NSPanel) {
-        let finalFrame = bottomAttachedFrame(for: panel)
+        let finalFrame = attachedFrame(for: panel)
         panel.setFrame(finalFrame, display: panel.isVisible)
     }
 
@@ -295,7 +462,7 @@ final class ClipboardShelfPanelController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.hideImmediately()
+                self?.hideIfAppLostFocus()
             }
         }
     }
@@ -334,6 +501,10 @@ final class ClipboardShelfPanelController {
 
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
+        guard !isPinned else { return }
+        if shouldIgnoreDismissalAt(NSEvent.mouseLocation) {
+            return
+        }
         let keyWindow = NSApp.keyWindow
         if keyWindow === panel || Self.isShelfAuxiliaryWindow(keyWindow) {
             return
@@ -347,7 +518,13 @@ final class ClipboardShelfPanelController {
             return
         }
         ignoreOutsideClicksUntil = nil
-        if !panel.frame.contains(location) {
+        if Self.shouldDismissForOutsideClick(
+            at: location,
+            panelFrame: panel.frame,
+            isShelfAuxiliaryWindowHit: shelfAuxiliaryWindowContains(location),
+            isIgnoredDismissalTargetHit: shouldIgnoreDismissalAt(location),
+            isPinned: isPinned
+        ) {
             hide()
         }
     }
@@ -364,7 +541,51 @@ final class ClipboardShelfPanelController {
         if window.identifier?.rawValue == ClipboardShelfWindowIdentifiers.sourceAppSuggestionPanel {
             return true
         }
-        return String(describing: type(of: window)).contains("Menu")
+        return isShelfAuxiliaryWindowClassName(String(describing: type(of: window)))
+    }
+
+    static func isShelfAuxiliaryWindowClassName(_ className: String) -> Bool {
+        className.contains("Menu") || className.contains("Popover")
+    }
+
+    static func shouldDismissForOutsideClick(
+        at location: CGPoint,
+        panelFrame: CGRect,
+        isShelfAuxiliaryWindowHit: Bool,
+        isIgnoredDismissalTargetHit: Bool,
+        isPinned: Bool = false
+    ) -> Bool {
+        guard !isPinned else { return false }
+        guard !isIgnoredDismissalTargetHit else { return false }
+        return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
+    }
+
+    private func hideIfAppLostFocus() {
+        guard !isPinned else { return }
+        hideImmediately()
+    }
+
+    private func sidePanelPinnedBinding() -> Binding<Bool> {
+        Binding(
+            get: { [weak self] in self?.isPinned ?? false },
+            set: { [weak self] value in
+                self?.setPinned(value)
+            }
+        )
+    }
+
+    private func setPinned(_ value: Bool) {
+        guard isPinned != value else { return }
+        isPinned = value
+        PasteBuddyDiagnostics.record(.shelf, "pinChanged", detail: "pinned=\(value)")
+    }
+
+    private func shelfAuxiliaryWindowContains(_ location: CGPoint) -> Bool {
+        NSApp.windows.contains { window in
+            window.isVisible
+                && Self.isShelfAuxiliaryWindow(window)
+                && window.frame.contains(location)
+        }
     }
 
     private func closeShelfAuxiliaryWindows() {
@@ -451,6 +672,8 @@ final class PasteBuddyPanelHotKeyController {
     private var registration: PasteBuddyCarbonHotKeyRegistration?
     private var eventTap: PasteBuddyPanelHotKeyEventTap?
     private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
+    private var shortcutRecordingObserver: NSObjectProtocol?
+    private var isShortcutRecordingActive = false
 
     init(onToggle: @escaping @MainActor () -> Void) {
         self.onToggle = onToggle
@@ -459,11 +682,32 @@ final class PasteBuddyPanelHotKeyController {
         }
         eventTap = PasteBuddyPanelHotKeyEventTap(onToggle: { handler(.eventTap) })
         registration = PasteBuddyCarbonHotKeyRegistration(onToggle: { handler(.carbon) })
+        shortcutRecordingObserver = NotificationCenter.default.addObserver(
+            forName: .pasteBuddyShortcutRecordingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let isRecording = notification.object as? Bool ?? false
+            Task { @MainActor [weak self] in
+                self?.setShortcutRecordingActive(isRecording)
+            }
+        }
     }
 
     private func triggerToggle(source: PasteBuddyPanelHotKeySource) {
+        guard !isShortcutRecordingActive else {
+            PasteBuddyDiagnostics.record(.hotKey, "ignoredDuringShortcutRecording", detail: "source=\(source.rawValue)")
+            return
+        }
         guard triggerGate.shouldTrigger(source: source) else { return }
         onToggle()
+    }
+
+    private func setShortcutRecordingActive(_ isRecording: Bool) {
+        guard isShortcutRecordingActive != isRecording else { return }
+        isShortcutRecordingActive = isRecording
+        registration?.setEnabled(!isRecording)
+        eventTap?.setEnabled(!isRecording)
     }
 }
 
@@ -499,11 +743,17 @@ private final class PasteBuddyCarbonHotKeyRegistration {
     }
 
     deinit {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-        }
+        unregisterShowHideHotKey()
         if let eventHandler {
             RemoveEventHandler(eventHandler)
+        }
+    }
+
+    func setEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            registerShowHideHotKey()
+        } else {
+            unregisterShowHideHotKey()
         }
     }
 
@@ -552,10 +802,7 @@ private final class PasteBuddyCarbonHotKeyRegistration {
     }
 
     private func registerShowHideHotKey() {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
-        }
+        unregisterShowHideHotKey()
         let hotKeyID = EventHotKeyID(signature: pasteBuddyHotKeySignature, id: pasteBuddyShowHideHotKeyID)
         let status = RegisterEventHotKey(
             UInt32(kVK_ANSI_V),
@@ -569,6 +816,13 @@ private final class PasteBuddyCarbonHotKeyRegistration {
         guard status == noErr else {
             hotKeyRef = nil
             return
+        }
+    }
+
+    private func unregisterShowHideHotKey() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
         }
     }
 
@@ -595,6 +849,12 @@ final class PasteBuddyPanelHotKeyEventTap {
         }
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+    }
+
+    func setEnabled(_ isEnabled: Bool) {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: isEnabled)
         }
     }
 

@@ -61,7 +61,7 @@ private final class PasteBuddyMCPServer {
                 "title": "PasteBuddy Local MCP",
                 "version": "0.1.0"
             ],
-            "instructions": "Local-first PasteBuddy MCP server. Enable MCP access and individual tools in PasteBuddy Settings before calling tools. Search results omit clipboard payloads; pastebuddy.retrieve_item is a separate opt-in tool for item payload access."
+            "instructions": "Local-first PasteBuddy MCP server. Turn on Agent Connection in PasteBuddy Settings before calling tools. Tool details are exposed here for the connected Agent, not in the user settings UI."
         ]
     }
 
@@ -80,7 +80,7 @@ private final class PasteBuddyMCPServer {
             return [
                 "name": tool.rawValue,
                 "title": tool.displayName,
-                "description": "Search local encrypted PasteBuddy history and return metadata summaries without raw clipboard payloads.",
+                "description": "Search local PasteBuddy history and return metadata summaries without raw clipboard payloads.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -121,7 +121,7 @@ private final class PasteBuddyMCPServer {
             return [
                 "name": tool.rawValue,
                 "title": tool.displayName,
-                "description": "Create a local encrypted PasteBuddy pinboard.",
+                "description": "Create a local PasteBuddy pinboard.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [

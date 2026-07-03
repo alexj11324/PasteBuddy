@@ -17,7 +17,7 @@ enum ClipboardImageCache {
     }()
     private static let genericApplicationIcon = icon(from: NSWorkspace.shared.icon(for: .applicationBundle))
 
-    static func cachedThumbnail(for item: ClipboardItem, imageData: Data? = nil, maxPixelSize: Int = 640) -> NSImage? {
+    static func cachedThumbnail(for item: ClipboardItem, maxPixelSize: Int = 640) -> NSImage? {
         guard let key = thumbnailCacheKeyObject(for: item, maxPixelSize: maxPixelSize) else { return nil }
         return thumbnailCache.object(forKey: key)
     }
@@ -66,6 +66,18 @@ enum ClipboardImageCache {
         let size = NSSize(width: width, height: height)
         sizeCache.setObject(NSValue(size: size), forKey: key)
         return size
+    }
+
+    static func fittedDisplaySize(for imageSize: NSSize?, within maxSize: CGSize) -> CGSize {
+        guard let imageSize,
+              imageSize.width > 0,
+              imageSize.height > 0,
+              maxSize.width > 0,
+              maxSize.height > 0 else {
+            return maxSize
+        }
+        let scale = min(maxSize.width / imageSize.width, maxSize.height / imageSize.height)
+        return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
     }
 
     static func genericAppIcon() -> NSImage {

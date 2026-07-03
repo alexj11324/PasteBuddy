@@ -8,6 +8,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
     var primarySelectedID: UUID?
     var itemSize: CGSize
     var interitemSpacing: CGFloat
+    var scrollDirection: NSCollectionView.ScrollDirection
     var contentRevision: Int
     var isSelectable: (Item) -> Bool
     var content: (Item, Bool) -> Content
@@ -21,6 +22,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         primarySelectedID: UUID?,
         itemSize: CGSize,
         interitemSpacing: CGFloat,
+        scrollDirection: NSCollectionView.ScrollDirection = .horizontal,
         contentRevision: Int = 0,
         isSelectable: @escaping (Item) -> Bool = { _ in true },
         @ViewBuilder content: @escaping (Item, Bool) -> Content,
@@ -33,6 +35,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         self.primarySelectedID = primarySelectedID
         self.itemSize = itemSize
         self.interitemSpacing = interitemSpacing
+        self.scrollDirection = scrollDirection
         self.contentRevision = contentRevision
         self.isSelectable = isSelectable
         self.content = content
@@ -47,13 +50,14 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
     func makeNSView(context: Context) -> NSScrollView {
         let layout = NSCollectionViewFlowLayout()
-        layout.scrollDirection = .horizontal
+        layout.scrollDirection = scrollDirection
         layout.minimumInteritemSpacing = interitemSpacing
         layout.minimumLineSpacing = interitemSpacing
         layout.itemSize = itemSize
         layout.sectionInset = NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
 
         let collectionView = ShelfCollectionView()
+        collectionView.focusRingType = .none
         collectionView.collectionViewLayout = layout
         collectionView.dataSource = context.coordinator
         collectionView.delegate = context.coordinator
@@ -77,17 +81,21 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         collectionView.setDraggingSourceOperationMask(.copy, forLocal: true)
 
         let scrollView = ShelfCollectionScrollView()
+        scrollView.focusRingType = .none
+        scrollView.scrollDirection = scrollDirection
         scrollView.documentView = collectionView
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
+        scrollView.horizontalScroller = nil
+        scrollView.verticalScroller = nil
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
         scrollView.postsBoundsChangedNotifications = true
-        scrollView.horizontalScrollElasticity = .automatic
-        scrollView.verticalScrollElasticity = .none
-        scrollView.usesPredominantAxisScrolling = false
+        scrollView.horizontalScrollElasticity = scrollDirection == .horizontal ? .automatic : .none
+        scrollView.verticalScrollElasticity = scrollDirection == .vertical ? .automatic : .none
+        scrollView.usesPredominantAxisScrolling = scrollDirection == .vertical
 
         context.coordinator.collectionView = collectionView
         context.coordinator.parent = self
@@ -277,8 +285,23 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
         private func applySelection(to collectionView: NSCollectionView, selectedIDs: Set<UUID>) {
             let selectedIndexPaths = indexPaths(for: selectedIDs)
-            guard collectionView.selectionIndexPaths != selectedIndexPaths else { return }
-            setCollectionSelection(selectedIndexPaths, in: collectionView)
+            if collectionView.selectionIndexPaths != selectedIndexPaths {
+                setCollectionSelection(selectedIndexPaths, in: collectionView)
+            }
+            scrollPrimarySelectionIntoView(in: collectionView)
+        }
+
+        private func scrollPrimarySelectionIntoView(in collectionView: NSCollectionView) {
+            guard let primarySelectedID = parent.primarySelectedID,
+                  let index = indexByID[primarySelectedID] else { return }
+
+            let scrollPosition: NSCollectionView.ScrollPosition = parent.scrollDirection == .vertical
+                ? .nearestVerticalEdge
+                : .nearestHorizontalEdge
+            collectionView.scrollToItems(
+                at: [IndexPath(item: index, section: 0)],
+                scrollPosition: scrollPosition
+            )
         }
 
         private func setCollectionSelection(_ selection: Set<IndexPath>, in collectionView: NSCollectionView) {
@@ -370,13 +393,56 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 }
 
 private final class ShelfCollectionScrollView: NSScrollView {
+    var scrollDirection: NSCollectionView.ScrollDirection = .horizontal
+
+    override var horizontalScroller: NSScroller? {
+        get { nil }
+        set { super.horizontalScroller = nil }
+    }
+
+    override var verticalScroller: NSScroller? {
+        get { nil }
+        set { super.verticalScroller = nil }
+    }
+
+    override var hasHorizontalScroller: Bool {
+        get { false }
+        set { super.hasHorizontalScroller = false }
+    }
+
+    override var hasVerticalScroller: Bool {
+        get { false }
+        set { super.hasVerticalScroller = false }
+    }
+
+    override var autohidesScrollers: Bool {
+        get { true }
+        set { super.autohidesScrollers = true }
+    }
+
     override func scrollWheel(with event: NSEvent) {
+        guard scrollDirection == .horizontal else {
+            super.scrollWheel(with: event)
+            hideScrollers()
+            return
+        }
         guard event.scrollingDeltaX == 0, event.scrollingDeltaY != 0 else {
             super.scrollWheel(with: event)
+            hideScrollers()
             return
         }
 
         scrollHorizontally(by: -normalizedScrollDelta(event.scrollingDeltaY, for: event))
+    }
+
+    override func reflectScrolledClipView(_ clipView: NSClipView) {
+        super.reflectScrolledClipView(clipView)
+        hideScrollers()
+    }
+
+    override func tile() {
+        super.tile()
+        hideScrollers()
     }
 
     private func normalizedScrollDelta(_ delta: CGFloat, for event: NSEvent) -> CGFloat {
@@ -394,6 +460,11 @@ private final class ShelfCollectionScrollView: NSScrollView {
 
         clipView.scroll(to: NSPoint(x: nextX, y: clipView.bounds.origin.y))
         reflectScrolledClipView(clipView)
+    }
+
+    private func hideScrollers() {
+        horizontalScroller?.isHidden = true
+        verticalScroller?.isHidden = true
     }
 }
 
