@@ -1771,7 +1771,7 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
         restoreSummary = Self.restoreSummary(for: entitlement, now: now)
         restoreActionStatement = Self.restoreActionStatement(for: entitlement)
         purchaseOptions = Self.allPurchaseOptions
-        billingSafetyStatement = "PasteBuddy stores only encrypted entitlement metadata. Payment cards, receipts, signed transactions, billing tokens, and invoice credentials stay out of the local snapshot."
+        billingSafetyStatement = "PasteBuddy stores entitlement status only. Payment details stay with the App Store."
     }
 
     private static let allPurchaseOptions: [PersonalPurchaseOption] = [
@@ -2278,11 +2278,11 @@ public enum SyncReadiness: Equatable, Sendable {
     public var detail: String {
         switch self {
         case .localOnly:
-            "Sync is off. Clipboard data stays on this Mac unless you explicitly configure encrypted CloudKit sync."
+            "Sync is off. Clipboard data stays on this Mac."
         case .blocked(let requirements):
             "Cloud sync is blocked until: \(requirements.map(\.displayName).joined(separator: ", "))."
         case .ready:
-            "CloudKit sync may upload encrypted records. Plaintext fallback is not available."
+            "CloudKit sync is ready to use encrypted records."
         }
     }
 }
@@ -2911,7 +2911,7 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
     public var id: String { rawValue }
 
     public static var defaultEnabledTools: Set<MCPToolName> {
-        Set(allCases).subtracting([.retrieveItem])
+        Set(allCases)
     }
 
     public var displayName: String {
@@ -3039,9 +3039,9 @@ public enum SnapshotStorageMode: String, CaseIterable, Codable, Identifiable, Se
     public var detail: String {
         switch self {
         case .standard:
-            "Stores PasteBuddy history in the user's local Application Support folder without app-managed AES-GCM. This avoids Keychain prompts in unsigned debug builds."
+            "Stores PasteBuddy history in the local Application Support folder."
         case .encrypted:
-            "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards with AES-GCM. The local encryption key is stored separately in Keychain."
+            "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain."
         }
     }
 
@@ -3258,16 +3258,16 @@ public struct PrivacyPostureReport: Equatable, Sendable {
         excludedBundleIdentifierCount = privacy.excludedBundleIdentifiers.count
         activeCustomCaptureRuleCount = privacy.customCaptureRules.filter(\.isEnabled).count
         sensitiveTextBlockingEnabled = privacy.blockLikelySensitiveText
-        localBoundaryStatement = "Clipboard payloads, screenshots, OCR metadata, thumbnails, privacy rules, pinboards, and search metadata stay in the local encrypted snapshot unless the user explicitly enables sync, sharing, or MCP."
+        localBoundaryStatement = "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy"
         vendorServerStatement = "PasteBuddy does not send clipboard payloads to vendor servers for capture, search, OCR, keyboard insertion, Shortcuts, or local MCP access."
         mcpBoundaryStatement = snapshot.mcp.isServerEnabled
-            ? "MCP is enabled locally over stdio and still requires per-tool opt-in; search is summary-only and payload retrieval is a separate audited tool."
-            : "MCP access is off by default. Enabling it requires local user opt-in plus per-tool permissions."
+            ? "MCP Agent connection is on. Connected local Agents can use PasteBuddy on this Mac."
+            : "MCP Agent connection is off. Local Agents cannot connect to PasteBuddy."
 
         if snapshot.sync.provider == .cloudKit {
-            syncBoundaryStatement = "CloudKit sync uses the user's private iCloud account and requires the encrypted remote-record boundary; it must not downgrade to plaintext."
+            syncBoundaryStatement = "CloudKit sync uses your private iCloud account and encrypted records."
         } else {
-            syncBoundaryStatement = "Sync is local-only. Clipboard history and pinboards do not leave this device unless sync or sharing is explicitly enabled."
+            syncBoundaryStatement = "Sync is local-only."
         }
         coverageStatement = "The same local privacy boundary covers history, pinboards, search, Shortcuts, keyboard insertion, Share/Action imports, and MCP access."
     }

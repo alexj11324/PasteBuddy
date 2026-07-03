@@ -309,17 +309,21 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(statusItemSource.contains("shouldOpenMenu(for:"))
     }
 
-    func testMCPToolTogglesRemainConfigurableWhenServerIsOff() throws {
+    func testMCPSettingsShowAgentConnectionWithoutToolDetails() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let mcpStart = try XCTUnwrap(source.range(of: "Section(\"label.mcp\")"))
+        let mcpStart = try XCTUnwrap(source.range(of: "Section(\"label.agent_connection\")"))
         let syncStart = try XCTUnwrap(source.range(of: "Section(\"action.sync_sharing\")"))
         let mcpSource = String(source[mcpStart.lowerBound..<syncStart.lowerBound])
 
-        XCTAssertTrue(mcpSource.contains("label.mcp_access_status"))
-        XCTAssertTrue(mcpSource.contains("label.mcp_is_currently_on"))
-        XCTAssertTrue(mcpSource.contains("label.mcp_is_currently_off"))
-        XCTAssertTrue(mcpSource.contains("message.tool_selections_are_saved_and_take_effect"))
-        XCTAssertFalse(mcpSource.contains(".disabled(!store.snapshot.mcp.isServerEnabled)"))
+        XCTAssertTrue(mcpSource.contains("action.allow_local_agent_connection"))
+        XCTAssertTrue(mcpSource.contains("label.agent_connection_status"))
+        XCTAssertTrue(mcpSource.contains("message.agent_connection_runs_on_this_mac"))
+        XCTAssertTrue(mcpSource.contains("message.swift_run_pastebuddymcp_print_client_config_codex"))
+        XCTAssertFalse(mcpSource.contains("ForEach(MCPToolName.allCases)"))
+        XCTAssertFalse(mcpSource.contains("setMCPTool"))
+        XCTAssertFalse(mcpSource.contains("label.last_mcp_access"))
+        XCTAssertFalse(mcpSource.contains("action.revoke_mcp_access"))
+        XCTAssertFalse(mcpSource.contains("message.tool_selections_are_saved_and_take_effect"))
     }
 
     func testPushTestFlightFetchRefreshesRemoteTrackingBranchBeforeAheadCheck() throws {

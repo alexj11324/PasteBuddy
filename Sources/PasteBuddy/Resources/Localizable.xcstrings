@@ -284,7 +284,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "添加项目或钉板"
+            "value": "添加项目或收藏板"
           }
         }
       },
@@ -715,40 +715,6 @@
       },
       "comment": "Legacy alias for label.bottom_to_top. Prefer the semantic key in code."
     },
-    "Bundle Identifier": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle Identifier"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle ID"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.bundle_identifier. Prefer the semantic key in code."
-    },
-    "Bundle Path": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle Path"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle 路径"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.bundle_path. Prefer the semantic key in code."
-    },
     "Can Edit": {
       "localizations": {
         "en": {
@@ -1100,7 +1066,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "清除所有历史，包括钉住项目"
+            "value": "清除所有历史，包括固定项目"
           }
         }
       },
@@ -1139,40 +1105,6 @@
         }
       },
       "comment": "Legacy alias for action.clear_filters. Prefer the semantic key in code."
-    },
-    "Clear MCP Audit Log": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear MCP Audit Log"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除 MCP 审计日志"
-          }
-        }
-      },
-      "comment": "Legacy alias for action.clear_mcp_audit_log. Prefer the semantic key in code."
-    },
-    "Clear MCP Audit Log?": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear MCP Audit Log?"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除 MCP 审计日志？"
-          }
-        }
-      },
-      "comment": "Legacy alias for dialog.clear_mcp_audit_log. Prefer the semantic key in code."
     },
     "Clear Settings Focus": {
       "localizations": {
@@ -1497,23 +1429,6 @@
       },
       "comment": "Legacy alias for label.clipboard_item_title. Prefer the semantic key in code."
     },
-    "Clipboard payloads, screenshots, OCR metadata, thumbnails, privacy rules, pinboards, and search metadata stay in the local encrypted snapshot unless the user explicitly enables sync, sharing, or MCP.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clipboard payloads, screenshots, OCR metadata, thumbnails, privacy rules, pinboards, and search metadata stay in the local encrypted snapshot unless the user explicitly enables sync, sharing, or MCP."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "除非用户明确启用同步、共享或 MCP，否则剪贴板内容、屏幕截图、OCR 元数据、缩略图、隐私规则、钉板和搜索元数据都会保留在本地加密快照中。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy. Prefer the semantic key in code."
-    },
     "Clipboard text body": {
       "localizations": {
         "en": {
@@ -1548,39 +1463,39 @@
       },
       "comment": "Legacy alias for label.close_preview. Prefer the semantic key in code."
     },
-    "CloudKit sync uses the user's private iCloud account and requires the encrypted remote-record boundary; it must not downgrade to plaintext.": {
+    "CloudKit container identifier": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "CloudKit sync uses the user's private iCloud account and requires the encrypted remote-record boundary; it must not downgrade to plaintext."
+            "value": "CloudKit container identifier"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "CloudKit 同步使用用户的私有 iCloud 账户，并要求加密的远程记录边界；不得降级为明文。"
+            "value": "CloudKit 容器标识符"
           }
         }
       },
-      "comment": "Legacy alias for message.cloudkit_sync_uses_the_user_s_private. Prefer the semantic key in code."
+      "comment": "Legacy alias for label.cloudkit_container_identifier. Prefer the semantic key in code."
     },
-    "CloudKit upload code must be wired only after the signed app has an iCloud container entitlement and an end-to-end key hierarchy. Plaintext fallback is not supported.": {
+    "CloudKit sync is ready to use encrypted records.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "CloudKit upload code must be wired only after the signed app has an iCloud container entitlement and an end-to-end key hierarchy. Plaintext fallback is not supported."
+            "value": "CloudKit sync is ready to use encrypted records."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "只有在已签名应用具备 iCloud 容器权限和端到端密钥层级后，才能接入 CloudKit 上传代码。不支持纯文本回退。"
+            "value": "CloudKit 同步已准备好使用加密记录。"
           }
         }
       },
-      "comment": "Legacy alias for message.cloudkit_upload_code_must_be_wired_only. Prefer the semantic key in code."
+      "comment": "Legacy alias for message.cloudkit_sync_is_ready_to_use_encrypted. Prefer the semantic key in code."
     },
     "Code": {
       "localizations": {
@@ -1695,7 +1610,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请先配置 CloudKit 同步并开启共享钉板，然后再分享。"
+            "value": "请先配置 CloudKit 同步并开启共享收藏板，然后再分享。"
           }
         }
       },
@@ -2103,7 +2018,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "删除钉板"
+            "value": "删除收藏板"
           }
         }
       },
@@ -2120,7 +2035,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "删除钉板？"
+            "value": "删除收藏板？"
           }
         }
       },
@@ -2409,7 +2324,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将剪贴板项目拖到这里即可钉住。"
+            "value": "将剪贴板项目拖到这里即可固定。"
           }
         }
       },
@@ -2426,7 +2341,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "编辑钉板"
+            "value": "编辑收藏板"
           }
         }
       },
@@ -2500,23 +2415,6 @@
       },
       "comment": "Legacy alias for action.enable_quick_paste_1_9. Prefer the semantic key in code."
     },
-    "Enable local MCP server access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Enable local MCP server access"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "启用本地 MCP 服务器访问"
-          }
-        }
-      },
-      "comment": "Legacy alias for action.enable_local_mcp_server_access. Prefer the semantic key in code."
-    },
     "Enabled": {
       "localizations": {
         "en": {
@@ -2568,22 +2466,39 @@
       },
       "comment": "Legacy alias for label.encrypted_local_storage. Prefer the semantic key in code."
     },
-    "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards with AES-GCM. The local encryption key is stored separately in Keychain.": {
+    "Encrypted sync ready": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards with AES-GCM. The local encryption key is stored separately in Keychain."
+            "value": "Encrypted sync ready"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 AES-GCM 加密剪贴板历史记录、OCR 元数据、缩略图和钉板。本地加密密钥单独存储在 Keychain 中。"
+            "value": "加密同步已就绪"
           }
         }
       },
-      "comment": "Legacy alias for message.encrypts_clipboard_history_ocr_metadata_thumbnails_and. Prefer the semantic key in code."
+      "comment": "Legacy alias for label.encrypted_sync_ready. Prefer the semantic key in code."
+    },
+    "End-to-end encryption key hierarchy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End-to-end encryption key hierarchy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "端到端加密密钥层级"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.end_to_end_encryption_key. Prefer the semantic key in code."
     },
     "Estimated History Size": {
       "localizations": {
@@ -2653,39 +2568,22 @@
       },
       "comment": "Legacy alias for label.excluded_apps. Prefer the semantic key in code."
     },
-    "Executable Path": {
+    "Explicit CloudKit sync opt-in": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Executable Path"
+            "value": "Explicit CloudKit sync opt-in"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可执行文件路径"
+            "value": "明确开启 CloudKit 同步"
           }
         }
       },
-      "comment": "Legacy alias for label.executable_path. Prefer the semantic key in code."
-    },
-    "Expected App Path": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Expected App Path"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "预期应用路径"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.expected_app_path. Prefer the semantic key in code."
+      "comment": "Legacy alias for label.explicit_cloudkit_sync_opt_in. Prefer the semantic key in code."
     },
     "Extension Setup": {
       "localizations": {
@@ -3174,7 +3072,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "项目会保留在剪贴板历史中，只移除此钉板集合。"
+            "value": "项目会保留在剪贴板历史中，只移除此收藏板集合。"
           }
         }
       },
@@ -3349,40 +3247,6 @@
         }
       },
       "comment": "Legacy alias for label.last_imported_package. Prefer the semantic key in code."
-    },
-    "Last MCP Access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last MCP Access"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上次 MCP 访问"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.last_mcp_access. Prefer the semantic key in code."
-    },
-    "Last MCP Access Time": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last MCP Access Time"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上次 MCP 访问时间"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.last_mcp_access_time. Prefer the semantic key in code."
     },
     "Last Sync": {
       "localizations": {
@@ -3605,6 +3469,57 @@
       },
       "comment": "Legacy alias for label.local_ocr. Prefer the semantic key in code."
     },
+    "Local Only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local Only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅本地"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.local_only. Prefer the semantic key in code."
+    },
+    "Local only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅本地"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.local_only.dd2a3056. Prefer the semantic key in code."
+    },
+    "Local only: CloudKit sync is disabled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local only: CloudKit sync is disabled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅本地：CloudKit 同步已关闭。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.local_only_cloudkit_sync_is_disabled. Prefer the semantic key in code."
+    },
     "Localization": {
       "localizations": {
         "en": {
@@ -3655,108 +3570,6 @@
         }
       },
       "comment": "Legacy alias for label.mcp. Prefer the semantic key in code."
-    },
-    "MCP Access Status": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP Access Status"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 访问状态"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.mcp_access_status. Prefer the semantic key in code."
-    },
-    "MCP access is off by default. Enabling it requires local user opt-in plus per-tool permissions.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP access is off by default. Enabling it requires local user opt-in plus per-tool permissions."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 访问默认关闭。启用它需要本地用户选择加入，以及针对每个工具的权限。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.mcp_access_is_off_by_default_enabling. Prefer the semantic key in code."
-    },
-    "MCP is currently off": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is currently off"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 当前已关闭"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.mcp_is_currently_off. Prefer the semantic key in code."
-    },
-    "MCP is currently on": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is currently on"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 当前已开启"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.mcp_is_currently_on. Prefer the semantic key in code."
-    },
-    "MCP is enabled locally over stdio and still requires per-tool opt-in; search is summary-only and payload retrieval is a separate audited tool.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is enabled locally over stdio and still requires per-tool opt-in; search is summary-only and payload retrieval is a separate audited tool."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 通过 stdio 在本地启用，且仍需对每个工具分别选择加入；搜索仅提供摘要，内容检索则是一个单独接受审计的工具。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.mcp_is_enabled_locally_over_stdio_and. Prefer the semantic key in code."
-    },
-    "MCP is local-only and disabled by default. Search results omit clipboard payloads; Retrieve Clipboard Item is a separate opt-in tool for payload access.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is local-only and disabled by default. Search results omit clipboard payloads; Retrieve Clipboard Item is a separate opt-in tool for payload access."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 仅限本地使用，且默认禁用。搜索结果不包含剪贴板载荷；Retrieve Clipboard Item 是一个单独的按需启用工具，用于访问载荷。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.mcp_is_local_only_and_disabled_by. Prefer the semantic key in code."
     },
     "Managed Distribution": {
       "localizations": {
@@ -4058,7 +3871,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新建钉板"
+            "value": "新建收藏板"
           }
         }
       },
@@ -4194,7 +4007,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有可用的钉板"
+            "value": "没有可用的收藏板"
           }
         }
       },
@@ -5265,7 +5078,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将所选项钉到"
+            "value": "将所选项固定到"
           }
         }
       },
@@ -5299,7 +5112,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "固定到钉板"
+            "value": "固定到收藏板"
           }
         }
       },
@@ -5316,7 +5129,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板"
+            "value": "收藏板"
           }
         }
       },
@@ -5333,7 +5146,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板 %@"
+            "value": "收藏板 %@"
           }
         }
       },
@@ -5350,7 +5163,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板颜色 %@"
+            "value": "收藏板颜色 %@"
           }
         }
       },
@@ -5367,7 +5180,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板"
+            "value": "收藏板"
           }
         }
       },
@@ -5384,7 +5197,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉住历史大小"
+            "value": "已固定历史大小"
           }
         }
       },
@@ -5526,23 +5339,6 @@
       },
       "comment": "Legacy alias for label.plans. Prefer the semantic key in code."
     },
-    "Preflight": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preflight"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "预检"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.preflight. Prefer the semantic key in code."
-    },
     "Preparing shared content...": {
       "localizations": {
         "en": {
@@ -5644,23 +5440,6 @@
         }
       },
       "comment": "Legacy alias for label.protected_surfaces. Prefer the semantic key in code."
-    },
-    "Quality Bar": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quality Bar"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "质量栏"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.quality_bar. Prefer the semantic key in code."
     },
     "Quick Paste": {
       "localizations": {
@@ -5945,7 +5724,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从钉板移除"
+            "value": "从收藏板移除"
           }
         }
       },
@@ -5996,7 +5775,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从历史和钉板中移除此剪贴板项目。可使用撤销删除恢复。"
+            "value": "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。"
           }
         }
       },
@@ -6290,40 +6069,6 @@
         }
       },
       "comment": "Legacy alias for action.reverse_paste_stack. Prefer the semantic key in code."
-    },
-    "Revoke MCP Access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revoke MCP Access"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销 MCP 访问"
-          }
-        }
-      },
-      "comment": "Legacy alias for action.revoke_mcp_access. Prefer the semantic key in code."
-    },
-    "Revoke MCP Access?": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revoke MCP Access?"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销 MCP 访问？"
-          }
-        }
-      },
-      "comment": "Legacy alias for dialog.revoke_mcp_access. Prefer the semantic key in code."
     },
     "Rule Name": {
       "localizations": {
@@ -6767,6 +6512,23 @@
       },
       "comment": "Legacy alias for label.setup. Prefer the semantic key in code."
     },
+    "Setup required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup required"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要设置"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.setup_required. Prefer the semantic key in code."
+    },
     "Share Pinboard": {
       "localizations": {
         "en": {
@@ -6778,7 +6540,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "分享钉板"
+            "value": "分享收藏板"
           }
         }
       },
@@ -6863,7 +6625,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "共享钉板"
+            "value": "共享收藏板"
           }
         }
       },
@@ -6880,7 +6642,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "共享钉板已加密并准备就绪。"
+            "value": "共享收藏板已加密并准备就绪。"
           }
         }
       },
@@ -7056,39 +6818,22 @@
       },
       "comment": "Legacy alias for format.showing_first_items. Prefer the semantic key in code."
     },
-    "Signing Channel": {
+    "Signed app with CloudKit capability": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Signing Channel"
+            "value": "Signed app with CloudKit capability"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "签名渠道"
+            "value": "已签名且具备 CloudKit 能力的应用"
           }
         }
       },
-      "comment": "Legacy alias for label.signing_channel. Prefer the semantic key in code."
-    },
-    "Signing Identity": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signing Identity"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "签名身份"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.signing_identity. Prefer the semantic key in code."
+      "comment": "Legacy alias for label.signed_app_with_cloudkit_capability. Prefer the semantic key in code."
     },
     "Single Invoice": {
       "localizations": {
@@ -7242,23 +6987,6 @@
         }
       },
       "comment": "Legacy alias for label.source_app_filter. Prefer the semantic key in code."
-    },
-    "Stable Launch Path": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stable Launch Path"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "稳定启动路径"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.stable_launch_path. Prefer the semantic key in code."
     },
     "Stack Paused": {
       "localizations": {
@@ -7583,40 +7311,6 @@
       },
       "comment": "Legacy alias for label.storage_security. Prefer the semantic key in code."
     },
-    "StoreKit 2 purchase and restore adapters are available in core; this SwiftPM debug UI still uses local plan simulation until a signed App Store target supplies production product IDs.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "StoreKit 2 purchase and restore adapters are available in core; this SwiftPM debug UI still uses local plan simulation until a signed App Store target supplies production product IDs."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "核心中已提供 StoreKit 2 购买和恢复适配器；此 SwiftPM 调试 UI 仍使用本地方案模拟，直到已签名的 App Store 目标提供生产环境产品 ID。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.storekit_2_purchase_and_restore_adapters_are. Prefer the semantic key in code."
-    },
-    "Stores PasteBuddy history in the user's local Application Support folder without app-managed AES-GCM. This avoids Keychain prompts in unsigned debug builds.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stores PasteBuddy history in the user's local Application Support folder without app-managed AES-GCM. This avoids Keychain prompts in unsigned debug builds."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将 PasteBuddy 历史记录存储在用户本地的“Application Support”文件夹中，不使用应用管理的 AES-GCM。这样可避免在未签名的调试构建中出现 Keychain 提示。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.stores_pastebuddy_history_in_the_user_s. Prefer the semantic key in code."
-    },
     "Supported Locales": {
       "localizations": {
         "en": {
@@ -7662,28 +7356,28 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同步智能钉板"
+            "value": "同步智能收藏板"
           }
         }
       },
       "comment": "Legacy alias for action.sync_smart_pinboards. Prefer the semantic key in code."
     },
-    "Sync is local-only. Clipboard history and pinboards do not leave this device unless sync or sharing is explicitly enabled.": {
+    "Sync is off. Clipboard data stays on this Mac.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sync is local-only. Clipboard history and pinboards do not leave this device unless sync or sharing is explicitly enabled."
+            "value": "Sync is off. Clipboard data stays on this Mac."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同步仅限本地。除非明确启用同步或共享，否则剪贴板历史和钉板不会离开此设备。"
+            "value": "同步已关闭。剪贴板数据会留在这台 Mac 上。"
           }
         }
       },
-      "comment": "Legacy alias for message.sync_is_local_only_clipboard_history_and. Prefer the semantic key in code."
+      "comment": "Legacy alias for message.sync_is_off_clipboard_data_stays_on. Prefer the semantic key in code."
     },
     "Team Name": {
       "localizations": {
@@ -7701,23 +7395,6 @@
         }
       },
       "comment": "Legacy alias for label.team_name. Prefer the semantic key in code."
-    },
-    "Team Plan": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Team Plan"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "团队套餐"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.team_plan. Prefer the semantic key in code."
     },
     "Template": {
       "localizations": {
@@ -7764,45 +7441,11 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "相同的本地隐私边界适用于历史记录、钉板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
+            "value": "相同的本地隐私边界适用于历史记录、收藏板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
           }
         }
       },
       "comment": "Legacy alias for message.the_same_local_privacy_boundary_covers_history. Prefer the semantic key in code."
-    },
-    "This disables local MCP access and clears enabled MCP tools until you turn them on again.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This disables local MCP access and clears enabled MCP tools until you turn them on again."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这会停用本地 MCP 访问，并清除已启用的 MCP 工具，直到你再次开启。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.this_disables_local_mcp_access_and_clears. Prefer the semantic key in code."
-    },
-    "This permanently clears the local MCP access log.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This permanently clears the local MCP access log."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这会永久清除本地 MCP 访问日志。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.this_permanently_clears_the_local_mcp_access. Prefer the semantic key in code."
     },
     "This removes all local clipboard history, including pinned item memberships. This action cannot be undone.": {
       "localizations": {
@@ -7872,23 +7515,6 @@
       },
       "comment": "Legacy alias for action.toggle_launch_at_login. Prefer the semantic key in code."
     },
-    "Tool selections are saved and take effect when MCP access is on.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tool selections are saved and take effect when MCP access is on."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "工具选择会保存，并在 MCP 访问开启后生效。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.tool_selections_are_saved_and_take_effect. Prefer the semantic key in code."
-    },
     "Top to Bottom": {
       "localizations": {
         "en": {
@@ -7922,23 +7548,6 @@
         }
       },
       "comment": "Legacy alias for format.touch_id_grace_period_seconds. Prefer the semantic key in code."
-    },
-    "Touch ID protects access to the history UI without tying normal app launch to a Keychain password prompt. Encrypted mode is optional; when enabled, PasteBuddy stores the local encryption key separately in Keychain and never stores the key beside encrypted clipboard data.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Touch ID protects access to the history UI without tying normal app launch to a Keychain password prompt. Encrypted mode is optional; when enabled, PasteBuddy stores the local encryption key separately in Keychain and never stores the key beside encrypted clipboard data."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Touch ID 可保护对历史记录界面的访问，而不会让正常启动应用时绑定到 Keychain 密码提示。加密模式是可选的；启用后，PasteBuddy 会将本地加密密钥单独存储在 Keychain 中，绝不会将密钥与加密的剪贴板数据存放在一起。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.touch_id_protects_access_to_the_history. Prefer the semantic key in code."
     },
     "Trial": {
       "localizations": {
@@ -8087,7 +7696,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从当前钉板取消固定"
+            "value": "从当前收藏板取消固定"
           }
         }
       },
@@ -8104,7 +7713,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未钉住历史大小"
+            "value": "未固定历史大小"
           }
         }
       },
@@ -8206,7 +7815,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "添加项目或钉板"
+            "value": "添加项目或收藏板"
           }
         }
       }
@@ -8223,6 +7832,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "添加规则"
+          }
+        }
+      }
+    },
+    "action.allow_local_agent_connection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow local Agent connection"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许本地 Agent 连接"
           }
         }
       }
@@ -8286,7 +7911,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "清除所有历史，包括钉住项目"
+            "value": "清除所有历史，包括固定项目"
           }
         }
       }
@@ -8319,22 +7944,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "清除过滤器"
-          }
-        }
-      }
-    },
-    "action.clear_mcp_audit_log": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear MCP Audit Log"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除 MCP 审计日志"
           }
         }
       }
@@ -8574,7 +8183,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "删除钉板"
+            "value": "删除收藏板"
           }
         }
       }
@@ -8655,22 +8264,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "开启登录时启动"
-          }
-        }
-      }
-    },
-    "action.enable_local_mcp_server_access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Enable local MCP server access"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "启用本地 MCP 服务器访问"
           }
         }
       }
@@ -9278,7 +8871,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将所选项钉到"
+            "value": "将所选项固定到"
           }
         }
       }
@@ -9294,7 +8887,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "固定到钉板"
+            "value": "固定到收藏板"
           }
         }
       }
@@ -9374,7 +8967,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从钉板移除"
+            "value": "从收藏板移除"
           }
         }
       }
@@ -9523,22 +9116,6 @@
         }
       }
     },
-    "action.revoke_mcp_access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revoke MCP Access"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销 MCP 访问"
-          }
-        }
-      }
-    },
     "action.save": {
       "localizations": {
         "en": {
@@ -9662,7 +9239,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "分享钉板"
+            "value": "分享收藏板"
           }
         }
       }
@@ -9902,7 +9479,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同步智能钉板"
+            "value": "同步智能收藏板"
           }
         }
       }
@@ -9982,7 +9559,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从当前钉板取消固定"
+            "value": "从当前收藏板取消固定"
           }
         }
       }
@@ -10019,22 +9596,6 @@
         }
       }
     },
-    "dialog.clear_mcp_audit_log": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear MCP Audit Log?"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除 MCP 审计日志？"
-          }
-        }
-      }
-    },
     "dialog.clear_unpinned_history": {
       "localizations": {
         "en": {
@@ -10062,23 +9623,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "删除钉板？"
-          }
-        }
-      }
-    },
-    "dialog.revoke_mcp_access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revoke MCP Access?"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销 MCP 访问？"
+            "value": "删除收藏板？"
           }
         }
       }
@@ -10127,6 +9672,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "%d 个字符"
+          }
+        }
+      }
+    },
+    "format.cloud_sync_blocked_until": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CloudKit sync needs: %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CloudKit 同步需要先完成：%@。"
           }
         }
       }
@@ -10382,7 +9943,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板 %@"
+            "value": "收藏板 %@"
           }
         }
       }
@@ -10398,7 +9959,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板颜色 %@"
+            "value": "收藏板颜色 %@"
           }
         }
       }
@@ -10771,6 +10332,54 @@
         }
       }
     },
+    "label.agent_connection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Connection (MCP)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 连接（MCP）"
+          }
+        }
+      }
+    },
+    "label.agent_connection_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Connection"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 连接"
+          }
+        }
+      }
+    },
+    "label.all": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
     "label.allowed": {
       "localizations": {
         "en": {
@@ -11055,38 +10664,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "从下到上"
-          }
-        }
-      }
-    },
-    "label.bundle_identifier": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle Identifier"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle ID"
-          }
-        }
-      }
-    },
-    "label.bundle_path": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle Path"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bundle 路径"
           }
         }
       }
@@ -11523,6 +11100,22 @@
         }
       }
     },
+    "label.cloudkit_container_identifier": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CloudKit container identifier"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CloudKit 容器标识符"
+          }
+        }
+      }
+    },
     "label.code": {
       "localizations": {
         "en": {
@@ -11934,7 +11527,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "编辑钉板"
+            "value": "编辑收藏板"
           }
         }
       }
@@ -11987,6 +11580,38 @@
         }
       }
     },
+    "label.encrypted_sync_ready": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted sync ready"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加密同步已就绪"
+          }
+        }
+      }
+    },
+    "label.end_to_end_encryption_key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End-to-end encryption key hierarchy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "端到端加密密钥层级"
+          }
+        }
+      }
+    },
     "label.estimated_history_size": {
       "localizations": {
         "en": {
@@ -12035,34 +11660,18 @@
         }
       }
     },
-    "label.executable_path": {
+    "label.explicit_cloudkit_sync_opt_in": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Executable Path"
+            "value": "Explicit CloudKit sync opt-in"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可执行文件路径"
-          }
-        }
-      }
-    },
-    "label.expected_app_path": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Expected App Path"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "预期应用路径"
+            "value": "明确开启 CloudKit 同步"
           }
         }
       }
@@ -12579,38 +12188,6 @@
         }
       }
     },
-    "label.last_mcp_access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last MCP Access"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上次 MCP 访问"
-          }
-        }
-      }
-    },
-    "label.last_mcp_access_time": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last MCP Access Time"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上次 MCP 访问时间"
-          }
-        }
-      }
-    },
     "label.last_sync": {
       "localizations": {
         "en": {
@@ -12787,6 +12364,38 @@
         }
       }
     },
+    "label.local_only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local Only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅本地"
+          }
+        }
+      }
+    },
+    "label.local_only.dd2a3056": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅本地"
+          }
+        }
+      }
+    },
     "label.localization": {
       "localizations": {
         "en": {
@@ -12911,54 +12520,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "MCP"
-          }
-        }
-      }
-    },
-    "label.mcp_access_status": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP Access Status"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 访问状态"
-          }
-        }
-      }
-    },
-    "label.mcp_is_currently_off": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is currently off"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 当前已关闭"
-          }
-        }
-      }
-    },
-    "label.mcp_is_currently_on": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is currently on"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 当前已开启"
           }
         }
       }
@@ -13118,7 +12679,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新建钉板"
+            "value": "新建收藏板"
           }
         }
       }
@@ -13230,7 +12791,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有可用的钉板"
+            "value": "没有可用的收藏板"
           }
         }
       }
@@ -13411,6 +12972,22 @@
         }
       }
     },
+    "label.panel_style": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panel Style"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "面板样式"
+          }
+        }
+      }
+    },
     "label.participants": {
       "localizations": {
         "en": {
@@ -13534,7 +13111,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板"
+            "value": "收藏板"
           }
         }
       }
@@ -13550,7 +13127,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉板"
+            "value": "收藏板"
           }
         }
       }
@@ -13566,7 +13143,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钉住历史大小"
+            "value": "已固定历史大小"
           }
         }
       }
@@ -13683,22 +13260,6 @@
         }
       }
     },
-    "label.preflight": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preflight"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "预检"
-          }
-        }
-      }
-    },
     "label.preview": {
       "localizations": {
         "en": {
@@ -13759,22 +13320,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "受保护界面"
-          }
-        }
-      }
-    },
-    "label.quality_bar": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quality Bar"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "质量栏"
           }
         }
       }
@@ -14227,6 +13772,22 @@
         }
       }
     },
+    "label.setup_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup required"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要设置"
+          }
+        }
+      }
+    },
     "label.shared_content": {
       "localizations": {
         "en": {
@@ -14254,7 +13815,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "共享钉板"
+            "value": "共享收藏板"
           }
         }
       }
@@ -14339,34 +13900,34 @@
         }
       }
     },
-    "label.signing_channel": {
+    "label.side_panel": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Signing Channel"
+            "value": "Side Panel"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "签名渠道"
+            "value": "侧边面板"
           }
         }
       }
     },
-    "label.signing_identity": {
+    "label.signed_app_with_cloudkit_capability": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Signing Identity"
+            "value": "Signed app with CloudKit capability"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "签名身份"
+            "value": "已签名且具备 CloudKit 能力的应用"
           }
         }
       }
@@ -14495,22 +14056,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "来源 Bundle ID"
-          }
-        }
-      }
-    },
-    "label.stable_launch_path": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stable Launch Path"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "稳定启动路径"
           }
         }
       }
@@ -14691,22 +14236,6 @@
         }
       }
     },
-    "label.team_plan": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Team Plan"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "团队套餐"
-          }
-        }
-      }
-    },
     "label.template": {
       "localizations": {
         "en": {
@@ -14751,6 +14280,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "标题"
+          }
+        }
+      }
+    },
+    "label.today": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
           }
         }
       }
@@ -14830,7 +14375,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未钉住历史大小"
+            "value": "未固定历史大小"
           }
         }
       }
@@ -14927,6 +14472,86 @@
           "stringUnit": {
             "state": "translated",
             "value": "旁白"
+          }
+        }
+      }
+    },
+    "message.agent_connection_is_ready": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local Agent access is on."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地 Agent 访问已开启。"
+          }
+        }
+      }
+    },
+    "message.agent_connection_runs_on_this_mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is on, Agents you connect through MCP can read and organize PasteBuddy history on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开后，你通过 MCP 连接的 Agent 可以读取和整理这台 Mac 上的 PasteBuddy 历史。"
+          }
+        }
+      }
+    },
+    "message.agent_connection_step_1": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1. Turn on Agent Connection."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1. 打开 Agent 连接。"
+          }
+        }
+      }
+    },
+    "message.agent_connection_step_2": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2. Use this command to get the Codex MCP config:"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2. 用这条命令生成 Codex MCP 配置："
+          }
+        }
+      }
+    },
+    "message.agent_connection_step_3": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3. Add the config to Codex, then reload MCP servers."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3. 把配置加到 Codex，然后重新加载 MCP 服务器。"
           }
         }
       }
@@ -15032,13 +14657,29 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Clipboard payloads, screenshots, OCR metadata, thumbnails, privacy rules, pinboards, and search metadata stay in the local encrypted snapshot unless the user explicitly enables sync, sharing, or MCP."
+            "value": "Clipboard data stays on this Mac unless you turn on sync, sharing, or MCP."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "除非用户明确启用同步、共享或 MCP，否则剪贴板内容、屏幕截图、OCR 元数据、缩略图、隐私规则、钉板和搜索元数据都会保留在本地加密快照中。"
+            "value": "剪贴板数据会留在这台 Mac，除非你打开同步、共享或 MCP。"
+          }
+        }
+      }
+    },
+    "message.cloudkit_sync_is_ready_to_use_encrypted": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CloudKit sync is ready to use encrypted records."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CloudKit 同步已准备好使用加密记录。"
           }
         }
       }
@@ -15048,29 +14689,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "CloudKit sync uses the user's private iCloud account and requires the encrypted remote-record boundary; it must not downgrade to plaintext."
+            "value": "CloudKit sync uses your private iCloud account and encrypted records."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "CloudKit 同步使用用户的私有 iCloud 账户，并要求加密的远程记录边界；不得降级为明文。"
-          }
-        }
-      }
-    },
-    "message.cloudkit_upload_code_must_be_wired_only": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit upload code must be wired only after the signed app has an iCloud container entitlement and an end-to-end key hierarchy. Plaintext fallback is not supported."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "只有在已签名应用具备 iCloud 容器权限和端到端密钥层级后，才能接入 CloudKit 上传代码。不支持纯文本回退。"
+            "value": "CloudKit 同步使用你的私有 iCloud 账户和加密记录。"
           }
         }
       }
@@ -15086,7 +14711,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请先配置 CloudKit 同步并开启共享钉板，然后再分享。"
+            "value": "请先配置 CloudKit 同步并开启共享收藏板，然后再分享。"
           }
         }
       }
@@ -15198,7 +14823,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将剪贴板项目拖到这里即可钉住。"
+            "value": "将剪贴板项目拖到这里即可固定。"
           }
         }
       }
@@ -15224,13 +14849,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards with AES-GCM. The local encryption key is stored separately in Keychain."
+            "value": "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 AES-GCM 加密剪贴板历史记录、OCR 元数据、缩略图和钉板。本地加密密钥单独存储在 Keychain 中。"
+            "value": "加密剪贴板历史、OCR 元数据、缩略图和收藏板。本地密钥保存在 Keychain 中。"
           }
         }
       }
@@ -15246,7 +14871,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "项目会保留在剪贴板历史中，只移除此钉板集合。"
+            "value": "项目会保留在剪贴板历史中，只移除此收藏板集合。"
           }
         }
       }
@@ -15267,50 +14892,18 @@
         }
       }
     },
-    "message.mcp_access_is_off_by_default_enabling": {
+    "message.local_only_cloudkit_sync_is_disabled": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "MCP access is off by default. Enabling it requires local user opt-in plus per-tool permissions."
+            "value": "Local only: CloudKit sync is disabled."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MCP 访问默认关闭。启用它需要本地用户选择加入，以及针对每个工具的权限。"
-          }
-        }
-      }
-    },
-    "message.mcp_is_enabled_locally_over_stdio_and": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is enabled locally over stdio and still requires per-tool opt-in; search is summary-only and payload retrieval is a separate audited tool."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 通过 stdio 在本地启用，且仍需对每个工具分别选择加入；搜索仅提供摘要，内容检索则是一个单独接受审计的工具。"
-          }
-        }
-      }
-    },
-    "message.mcp_is_local_only_and_disabled_by": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP is local-only and disabled by default. Search results omit clipboard payloads; Retrieve Clipboard Item is a separate opt-in tool for payload access."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MCP 仅限本地使用，且默认禁用。搜索结果不包含剪贴板载荷；Retrieve Clipboard Item 是一个单独的按需启用工具，用于访问载荷。"
+            "value": "仅本地：CloudKit 同步已关闭。"
           }
         }
       }
@@ -15582,7 +15175,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从历史和钉板中移除此剪贴板项目。可使用撤销删除恢复。"
+            "value": "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。"
           }
         }
       }
@@ -15678,7 +15271,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "共享钉板已加密并准备就绪。"
+            "value": "共享收藏板已加密并准备就绪。"
           }
         }
       }
@@ -15699,34 +15292,34 @@
         }
       }
     },
-    "message.storekit_2_purchase_and_restore_adapters_are": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "StoreKit 2 purchase and restore adapters are available in core; this SwiftPM debug UI still uses local plan simulation until a signed App Store target supplies production product IDs."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "核心中已提供 StoreKit 2 购买和恢复适配器；此 SwiftPM 调试 UI 仍使用本地方案模拟，直到已签名的 App Store 目标提供生产环境产品 ID。"
-          }
-        }
-      }
-    },
     "message.stores_pastebuddy_history_in_the_user_s": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Stores PasteBuddy history in the user's local Application Support folder without app-managed AES-GCM. This avoids Keychain prompts in unsigned debug builds."
+            "value": "Stores PasteBuddy history in the local Application Support folder."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将 PasteBuddy 历史记录存储在用户本地的“Application Support”文件夹中，不使用应用管理的 AES-GCM。这样可避免在未签名的调试构建中出现 Keychain 提示。"
+            "value": "将 PasteBuddy 历史存储在本地 Application Support 文件夹。"
+          }
+        }
+      }
+    },
+    "message.swift_run_pastebuddymcp_print_client_config_codex": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "swift run PasteBuddyMCP --print-client-config codex"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令：swift run PasteBuddyMCP --print-client-config codex"
           }
         }
       }
@@ -15736,13 +15329,29 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sync is local-only. Clipboard history and pinboards do not leave this device unless sync or sharing is explicitly enabled."
+            "value": "Sync is local-only."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同步仅限本地。除非明确启用同步或共享，否则剪贴板历史和钉板不会离开此设备。"
+            "value": "同步仅限本地。"
+          }
+        }
+      }
+    },
+    "message.sync_is_off_clipboard_data_stays_on": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync is off. Clipboard data stays on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步已关闭。剪贴板数据会留在这台 Mac 上。"
           }
         }
       }
@@ -15758,39 +15367,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "相同的本地隐私边界适用于历史记录、钉板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
-          }
-        }
-      }
-    },
-    "message.this_disables_local_mcp_access_and_clears": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This disables local MCP access and clears enabled MCP tools until you turn them on again."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这会停用本地 MCP 访问，并清除已启用的 MCP 工具，直到你再次开启。"
-          }
-        }
-      }
-    },
-    "message.this_permanently_clears_the_local_mcp_access": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This permanently clears the local MCP access log."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这会永久清除本地 MCP 访问日志。"
+            "value": "相同的本地隐私边界适用于历史记录、收藏板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
           }
         }
       }
@@ -15827,34 +15404,18 @@
         }
       }
     },
-    "message.tool_selections_are_saved_and_take_effect": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tool selections are saved and take effect when MCP access is on."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "工具选择会保存，并在 MCP 访问开启后生效。"
-          }
-        }
-      }
-    },
     "message.touch_id_protects_access_to_the_history": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Touch ID protects access to the history UI without tying normal app launch to a Keychain password prompt. Encrypted mode is optional; when enabled, PasteBuddy stores the local encryption key separately in Keychain and never stores the key beside encrypted clipboard data."
+            "value": "Touch ID locks the history view. Encrypted mode keeps the local key in Keychain."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Touch ID 可保护对历史记录界面的访问，而不会让正常启动应用时绑定到 Keychain 密码提示。加密模式是可选的；启用后，PasteBuddy 会将本地加密密钥单独存储在 Keychain 中，绝不会将密钥与加密的剪贴板数据存放在一起。"
+            "value": "Touch ID 会锁定历史记录视图。加密模式会把本地密钥保存在 Keychain 中。"
           }
         }
       }
@@ -16222,7 +15783,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "操作扩展可将受支持的所选内容直接保存到加密历史或首选钉板。"
+            "value": "操作扩展可将受支持的所选内容直接保存到加密历史或首选收藏板。"
           }
         }
       }
@@ -16318,7 +15879,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "原生移动端浏览器会针对竖屏、横屏、台前调度、分屏浏览、侧拉，以及拖放到钉板使用自适应分栏布局。"
+            "value": "原生移动端浏览器会针对竖屏、横屏、台前调度、分屏浏览、侧拉，以及拖放到收藏板使用自适应分栏布局。"
           }
         }
       }
@@ -16478,7 +16039,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选中的文本、URL、图片和文件可保存到加密历史或指定钉板。%@"
+            "value": "选中的文本、URL、图片和文件可保存到加密历史或指定收藏板。%@"
           }
         }
       }
@@ -17471,6 +17032,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "已启用"
+          }
+        }
+      }
+    },
+    "state.off": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭"
           }
         }
       }

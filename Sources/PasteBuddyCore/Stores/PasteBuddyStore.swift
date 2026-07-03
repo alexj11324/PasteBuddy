@@ -1588,6 +1588,9 @@ public final class PasteBuddyStore {
 
     public func setMCPServerEnabled(_ isEnabled: Bool) {
         snapshot.mcp.isServerEnabled = isEnabled
+        if isEnabled {
+            snapshot.mcp.enabledTools = MCPToolName.defaultEnabledTools
+        }
         save()
     }
 

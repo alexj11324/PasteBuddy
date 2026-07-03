@@ -145,8 +145,8 @@ public enum MCPClientConfigurationGuideBuilder {
     private static func setupNotes(for target: MCPClientConfigurationTarget, modeNote: String) -> [String] {
         var notes = [
             modeNote,
-            "PasteBuddy MCP access is disabled by default; enable the local server and individual tools in PasteBuddy Settings.",
-            "Search tools return summary metadata only. Enable Retrieve Clipboard Item separately before any client can read item payloads."
+            "PasteBuddy MCP access is disabled by default; turn on Agent Connection in PasteBuddy Settings before connecting.",
+            "PasteBuddy Settings only shows the connection switch. Tool details stay in the MCP client for the connected Agent."
         ]
 
         switch target {

@@ -10,10 +10,6 @@ struct SettingsView: View {
     @State private var newCaptureRuleContentType: ClipboardContentType?
     @State private var destructiveConfirmation: SettingsDestructiveAction?
 
-    private var runtimeIdentity: PasteBuddyRuntimeIdentity {
-        PasteBuddyRuntimeIdentityService.current
-    }
-
     var body: some View {
         TabView {
             Form {
@@ -516,113 +512,6 @@ struct SettingsView: View {
                 Text(personalOverview.billingSafetyStatement)
                     .foregroundStyle(.secondary)
 
-                Text("message.storekit_2_purchase_and_restore_adapters_are")
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("label.team_plan") {
-                TextField(
-                    "Team Name",
-                    text: Binding(
-                        get: { teamPlan.teamName },
-                        set: { newValue in configureTeamPlan { $0.teamName = newValue } }
-                    )
-                )
-
-                TextField(
-                    "Admin Email",
-                    text: Binding(
-                        get: { teamPlan.adminEmailAddress ?? "" },
-                        set: { newValue in configureTeamPlan { $0.adminEmailAddress = newValue } }
-                    )
-                )
-
-                Stepper(
-                    value: Binding(
-                        get: { teamPlan.seatCount },
-                        set: { newValue in configureTeamPlan { $0.seatCount = newValue } }
-                    ),
-                    in: 1...500,
-                    step: 1
-                ) {
-                    Text(localized("format.seats", teamPlan.seatCount))
-                }
-
-                Stepper(
-                    value: Binding(
-                        get: { teamPlan.assignedSeatCount },
-                        set: { newValue in configureTeamPlan { $0.assignedSeatCount = newValue } }
-                    ),
-                    in: 0...max(teamPlan.seatCount, 1),
-                    step: 1
-                ) {
-                    Text(localized("format.assigned", teamPlan.assignedSeatCount))
-                }
-
-                Stepper(
-                    value: Binding(
-                        get: { teamPlan.pricePerSeatCents },
-                        set: { newValue in configureTeamPlan { $0.pricePerSeatCents = newValue } }
-                    ),
-                    in: 0...50_000,
-                    step: 100
-                ) {
-                    Text(localized("format.per_seat", formatCents(teamPlan.pricePerSeatCents, currencyCode: teamPlan.billingCurrencyCode)))
-                }
-
-                Toggle(
-                    "Single Invoice",
-                    isOn: Binding(
-                        get: { teamPlan.singleInvoiceEnabled },
-                        set: { newValue in configureTeamPlan { $0.singleInvoiceEnabled = newValue } }
-                    )
-                )
-
-                Toggle(
-                    "Managed Distribution",
-                    isOn: Binding(
-                        get: { teamPlan.managedDistributionEnabled },
-                        set: { newValue in configureTeamPlan { $0.managedDistributionEnabled = newValue } }
-                    )
-                )
-
-                LabeledContent("label.monthly_invoice") {
-                    Text(formatCents(teamPlan.monthlyInvoiceCents, currencyCode: teamPlan.billingCurrencyCode))
-                }
-
-                LabeledContent("label.available_seats") {
-                    Text("\(teamPlan.availableSeatCount)")
-                }
-
-                Divider()
-
-                Text(teamPlan.overview.purchasePositioning)
-                    .foregroundStyle(.secondary)
-
-                Text(teamPlan.overview.primaryValueStatement)
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("label.seat_state") {
-                    Text(teamPlan.overview.seatSummary)
-                }
-
-                LabeledContent("label.admin") {
-                    Text(teamPlan.overview.adminSummary)
-                }
-
-                LabeledContent("label.billing") {
-                    Text(teamPlan.overview.billingSummary)
-                }
-
-                LabeledContent("label.distribution") {
-                    Text(teamPlan.overview.distributionSummary)
-                }
-
-                ForEach(teamPlan.overview.valuePropositions) { value in
-                    Label(value.title, systemImage: value.systemImageName)
-                    Text(value.detail)
-                        .foregroundStyle(.secondary)
-                }
             }
             }
             .formStyle(.grouped)
@@ -678,77 +567,51 @@ struct SettingsView: View {
             }
 
             Form {
-            Section("label.mcp") {
+            Section("label.agent_connection") {
                 Toggle(
-                    "action.enable_local_mcp_server_access",
+                    "action.allow_local_agent_connection",
                     isOn: Binding(
                         get: { store.snapshot.mcp.isServerEnabled },
                         set: { store.setMCPServerEnabled($0) }
                     )
                 )
 
-                LabeledContent("label.mcp_access_status") {
+                LabeledContent("label.agent_connection_status") {
                     Label(
-                        store.snapshot.mcp.isServerEnabled ? "label.mcp_is_currently_on" : "label.mcp_is_currently_off",
+                        store.snapshot.mcp.isServerEnabled ? "label.allowed" : "state.off",
                         systemImage: store.snapshot.mcp.isServerEnabled ? "checkmark.circle.fill" : "pause.circle"
                     )
                     .foregroundStyle(store.snapshot.mcp.isServerEnabled ? .green : .secondary)
                 }
 
-                ForEach(MCPToolName.allCases) { tool in
-                    Toggle(
-                        tool.displayName,
-                        isOn: Binding(
-                            get: { store.snapshot.mcp.enabledTools.contains(tool) },
-                            set: { store.setMCPTool(tool, enabled: $0) }
-                        )
-                    )
-                }
-
-                Text("message.tool_selections_are_saved_and_take_effect")
+                Text("message.agent_connection_runs_on_this_mac")
                     .foregroundStyle(.secondary)
 
-                Button("action.revoke_mcp_access", role: .destructive) {
-                    destructiveConfirmation = .revokeMCPAccess
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("message.agent_connection_step_1")
+                    Text("message.agent_connection_step_2")
+                    Text("message.swift_run_pastebuddymcp_print_client_config_codex")
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                    Text("message.agent_connection_step_3")
                 }
-                .disabled(!store.snapshot.mcp.isServerEnabled && store.snapshot.mcp.enabledTools.isEmpty)
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-                if let revokedAt = store.snapshot.mcp.lastAccessRevokedAt {
-                    Text(localized("format.last_revoked_at", revokedAt.formatted(date: .abbreviated, time: .shortened)))
+                if store.snapshot.mcp.isServerEnabled {
+                    Text("message.agent_connection_is_ready")
                         .foregroundStyle(.secondary)
                 }
-
-                if let latestAccess = store.snapshot.mcp.accessLog.first {
-                    LabeledContent("label.last_mcp_access") {
-                        Text("\(latestAccess.tool.displayName) - \(latestAccess.outcome.displayName)")
-                    }
-                    LabeledContent("label.last_mcp_access_time") {
-                        Text(latestAccess.accessedAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                }
-
-                Button("action.clear_mcp_audit_log", role: .destructive) {
-                    destructiveConfirmation = .clearMCPAuditLog
-                }
-                .disabled(store.snapshot.mcp.accessLog.isEmpty)
-
-                Text("message.mcp_is_local_only_and_disabled_by")
-                    .foregroundStyle(.secondary)
             }
 
             Section("action.sync_sharing") {
                 LabeledContent("label.mode") {
-                    Text(store.snapshot.sync.provider.displayName)
+                    Text(localized(store.snapshot.sync.provider.displayName))
                 }
 
                 LabeledContent("label.readiness") {
-                    Text(store.syncReadiness.displayName)
+                    Text(localized(store.syncReadiness.displayName))
                         .foregroundStyle(syncStatusColor)
-                }
-
-                LabeledContent("label.preflight") {
-                    Text(store.cloudSyncPreflightReport.summary)
-                        .foregroundStyle(syncPreflightSummaryColor)
                 }
 
                 if let lastSyncAt = store.snapshot.sync.lastSyncAt {
@@ -771,7 +634,7 @@ struct SettingsView: View {
                 }
 
                 Toggle(
-                    "Shared Pinboards",
+                    "label.shared_pinboards",
                     isOn: Binding(
                         get: { store.snapshot.sync.isSharedPinboardsEnabled },
                         set: { store.setSharedPinboardsEnabled($0) }
@@ -785,7 +648,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text(store.syncReadiness.detail)
+                Text(syncReadinessDetail)
                     .foregroundStyle(.secondary)
 
                 if let statusMessage = store.snapshot.sync.lastSyncStatusMessage {
@@ -793,27 +656,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(store.cloudSyncPreflightReport.findings) { finding in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(finding.severity.displayName)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(preflightSeverityColor(finding.severity))
-                            Text(finding.title)
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        Text(finding.detail)
-                            .foregroundStyle(.secondary)
-                        Text(finding.recoveryAction)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(finding.severity.displayName): \(finding.title)")
-                    .accessibilityValue("\(finding.detail) \(finding.recoveryAction)")
-                }
-
-                Text("message.cloudkit_upload_code_must_be_wired_only")
-                    .foregroundStyle(.secondary)
             }
 
             Section("label.direct_paste") {
@@ -824,35 +666,6 @@ struct SettingsView: View {
 
                 Button("action.request_accessibility_access") {
                     AccessibilityPermissionService.requestTrustPrompt()
-                }
-
-                LabeledContent("label.stable_launch_path") {
-                    Text(runtimeIdentity.isRunningFromStablePath ? "label.matched" : "label.not_matched")
-                        .foregroundStyle(runtimeIdentity.isRunningFromStablePath ? .green : .orange)
-                }
-
-                LabeledContent("label.bundle_identifier") {
-                    diagnosticText(runtimeIdentity.bundleIdentifier)
-                }
-
-                LabeledContent("label.bundle_path") {
-                    diagnosticText(runtimeIdentity.bundlePath)
-                }
-
-                LabeledContent("label.executable_path") {
-                    diagnosticText(runtimeIdentity.executablePath)
-                }
-
-                LabeledContent("label.expected_app_path") {
-                    diagnosticText(runtimeIdentity.stableAppPath)
-                }
-
-                LabeledContent("label.signing_channel") {
-                    diagnosticText(runtimeIdentity.signingChannel)
-                }
-
-                LabeledContent("label.signing_identity") {
-                    diagnosticText(runtimeIdentity.codeSigningIdentity)
                 }
 
                 if let result = store.lastDirectPasteResult {
@@ -872,47 +685,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("label.quality_bar") {
-                Text(store.accessibilityLocalizationQualityReport.summary)
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("label.supported_locales") {
-                    Text(store.accessibilityLocalizationQualityReport.supportedLocaleIdentifiers.joined(separator: ", "))
-                }
-
-                ForEach(store.accessibilityLocalizationQualityReport.findings) { finding in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Label(finding.area.displayName, systemImage: finding.area.systemImageName)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text(finding.status.displayName)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(qualityStatusColor(finding.status))
-                        }
-
-                        Text(finding.title)
-                            .font(.caption.weight(.semibold))
-                        Text(finding.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(finding.coveredSurfaces.joined(separator: ", "))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(finding.area.displayName): \(finding.title)")
-                    .accessibilityValue("\(finding.status.displayName). \(finding.detail)")
-                }
-
-                LabeledContent("label.localization") {
-                    Text(store.accessibilityLocalizationQualityReport.localizationReadyStatement)
-                }
-
-                LabeledContent("label.manual_release_audit") {
-                    Text(store.accessibilityLocalizationQualityReport.releaseAuditStatement)
-                }
-            }
             }
             .formStyle(.grouped)
             .tabItem {
@@ -953,22 +725,12 @@ struct SettingsView: View {
         )
     }
 
-    private func diagnosticText(_ value: String) -> some View {
-        Text(value)
-            .font(.caption.monospaced())
-            .textSelection(.enabled)
-    }
-
     private func performDestructiveAction(_ action: SettingsDestructiveAction) {
         switch action {
         case .clearUnpinnedHistory:
             store.clearUnpinnedHistory()
         case .clearAllHistory:
             store.clearAllHistoryIncludingPinnedItems()
-        case .revokeMCPAccess:
-            store.revokeMCPAccess()
-        case .clearMCPAuditLog:
-            store.clearMCPAccessLog()
         }
     }
 
@@ -1003,20 +765,15 @@ struct SettingsView: View {
         }
     }
 
-    private var syncPreflightSummaryColor: Color {
-        if store.cloudSyncPreflightReport.hasBlockers {
-            return .orange
-        }
-        if store.cloudSyncPreflightReport.findings.contains(where: { $0.severity == .warning }) {
-            return .orange
-        }
-        return store.syncReadiness == .ready ? .green : .secondary
-    }
-
-    private func preflightSeverityColor(_ severity: CloudSyncDiagnosticSeverity) -> Color {
-        switch severity {
-        case .info: .secondary
-        case .warning, .blocker: .orange
+    private var syncReadinessDetail: String {
+        switch store.syncReadiness {
+        case .blocked(let requirements):
+            localized(
+                "format.cloud_sync_blocked_until",
+                requirements.map { localized($0.displayName) }.joined(separator: ", ")
+            )
+        case .localOnly, .ready:
+            localized(store.syncReadiness.detail)
         }
     }
 
@@ -1028,15 +785,6 @@ struct SettingsView: View {
             .orange
         case .inactive, .expired, .revoked:
             .secondary
-        }
-    }
-
-    private func qualityStatusColor(_ status: AccessibilityQualityStatus) -> Color {
-        switch status {
-        case .implemented:
-            .green
-        case .manualAuditRequired:
-            .orange
         }
     }
 
@@ -1058,10 +806,6 @@ struct SettingsView: View {
 
     private var personalOverview: PersonalEntitlementOverview {
         store.snapshot.entitlement.personalOverview()
-    }
-
-    private var teamPlan: TeamPlanConfiguration {
-        store.snapshot.entitlement.team ?? TeamPlanConfiguration()
     }
 
     private func personalPlanSystemImage(for plan: ProductAccessPlan) -> String {
@@ -1101,34 +845,11 @@ struct SettingsView: View {
         )
     }
 
-    private func configureTeamPlan(_ update: (inout TeamPlanConfiguration) -> Void) {
-        var team = teamPlan
-        update(&team)
-        store.configureTeamPlan(
-            teamName: team.teamName,
-            seatCount: team.seatCount,
-            assignedSeatCount: team.assignedSeatCount,
-            pricePerSeatCents: team.pricePerSeatCents,
-            billingCurrencyCode: team.billingCurrencyCode,
-            singleInvoiceEnabled: team.singleInvoiceEnabled,
-            managedDistributionEnabled: team.managedDistributionEnabled,
-            adminEmailAddress: team.adminEmailAddress
-        )
-    }
-
-    private func formatCents(_ cents: Int, currencyCode: String) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currencyCode
-        return formatter.string(from: NSNumber(value: Double(cents) / 100)) ?? "\(currencyCode) \(Double(cents) / 100)"
-    }
 }
 
 private enum SettingsDestructiveAction {
     case clearUnpinnedHistory
     case clearAllHistory
-    case revokeMCPAccess
-    case clearMCPAuditLog
 
     var title: String {
         switch self {
@@ -1136,10 +857,6 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("dialog.clear_unpinned_history", comment: "")
         case .clearAllHistory:
             NSLocalizedString("dialog.clear_all_history", comment: "")
-        case .revokeMCPAccess:
-            NSLocalizedString("dialog.revoke_mcp_access", comment: "")
-        case .clearMCPAuditLog:
-            NSLocalizedString("dialog.clear_mcp_audit_log", comment: "")
         }
     }
 
@@ -1149,10 +866,6 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("message.this_removes_every_unpinned_clipboard_item_from", comment: "")
         case .clearAllHistory:
             NSLocalizedString("message.this_removes_all_local_clipboard_history_including", comment: "")
-        case .revokeMCPAccess:
-            NSLocalizedString("message.this_disables_local_mcp_access_and_clears", comment: "")
-        case .clearMCPAuditLog:
-            NSLocalizedString("message.this_permanently_clears_the_local_mcp_access", comment: "")
         }
     }
 
@@ -1162,10 +875,6 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("action.clear_unpinned_history", comment: "")
         case .clearAllHistory:
             NSLocalizedString("action.clear_all_history", comment: "")
-        case .revokeMCPAccess:
-            NSLocalizedString("action.revoke_mcp_access", comment: "")
-        case .clearMCPAuditLog:
-            NSLocalizedString("action.clear_mcp_audit_log", comment: "")
         }
     }
 }
