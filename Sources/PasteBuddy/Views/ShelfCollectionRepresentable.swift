@@ -12,6 +12,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
     var contentRevision: Int
     var previewedID: UUID?
     var onPreviewDismiss: () -> Void
+    var previewPreferredEdge: NSRectEdge
     var previewContent: ((Item) -> AnyView)?
     var isSelectable: (Item) -> Bool
     var content: (Item, Bool) -> Content
@@ -29,6 +30,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         contentRevision: Int = 0,
         previewedID: UUID? = nil,
         onPreviewDismiss: @escaping () -> Void = {},
+        previewPreferredEdge: NSRectEdge = .minX,
         previewContent: ((Item) -> AnyView)? = nil,
         isSelectable: @escaping (Item) -> Bool = { _ in true },
         @ViewBuilder content: @escaping (Item, Bool) -> Content,
@@ -45,6 +47,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         self.contentRevision = contentRevision
         self.previewedID = previewedID
         self.onPreviewDismiss = onPreviewDismiss
+        self.previewPreferredEdge = previewPreferredEdge
         self.previewContent = previewContent
         self.isSelectable = isSelectable
         self.content = content
@@ -368,7 +371,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             if popover.isShown {
                 popover.positioningRect = anchorRect
             } else if clipView.window != nil {
-                popover.show(relativeTo: anchorRect, of: clipView, preferredEdge: .minX)
+                popover.show(relativeTo: anchorRect, of: clipView, preferredEdge: parent.previewPreferredEdge)
             }
         }
 

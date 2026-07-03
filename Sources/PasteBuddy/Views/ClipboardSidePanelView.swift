@@ -6,6 +6,7 @@ private enum ClipboardSidePanelMetrics {
     static let renderLimit = 100
     static let rowHeight: CGFloat = 82
     static let thumbnailSize: CGFloat = 42
+    static let previewMaxWidth: CGFloat = 360
 }
 
 private struct ClipboardSidePanelQueryState: Equatable {
@@ -267,12 +268,14 @@ struct ClipboardSidePanelView: View {
                     onPreviewDismiss: {
                         interaction.dismissPreview()
                     },
+                    previewPreferredEdge: .minX,
                     previewContent: { item in
                         AnyView(
                             ShelfExpandedPreview(
                                 item: item,
                                 imageDataProvider: store.imageData,
                                 tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                                maxWidth: ClipboardSidePanelMetrics.previewMaxWidth,
                                 onDismiss: {
                                     interaction.dismissPreview()
                                 },

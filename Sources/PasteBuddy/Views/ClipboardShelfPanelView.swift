@@ -524,6 +524,27 @@ struct ClipboardShelfPanelView: View {
             itemSize: CGSize(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight),
             interitemSpacing: 20,
             contentRevision: store.dataRevision &+ store.queryRevision &+ shelfOverflowCount &+ relativeDateMinuteBucket,
+            previewedID: shelfInteraction.previewedID,
+            onPreviewDismiss: {
+                shelfInteraction.dismissPreview()
+            },
+            previewPreferredEdge: .maxY,
+            previewContent: { displayItem in
+                guard case .clipboard(let item) = displayItem else {
+                    return AnyView(EmptyView())
+                }
+                return AnyView(
+                    ShelfExpandedPreview(
+                        item: item,
+                        imageDataProvider: store.imageData,
+                        tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                        onDismiss: {
+                            shelfInteraction.dismissPreview()
+                        },
+                        onMove: moveSelection
+                    )
+                )
+            },
             isSelectable: { displayItem in
                 if case .clipboard = displayItem {
                     return true
@@ -552,19 +573,6 @@ struct ClipboardShelfPanelView: View {
             pasteboardWriter(for: displayItem)
         }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
-        .popover(isPresented: isShelfPreviewPresented, arrowEdge: .bottom) {
-            if let item = previewedShelfItem {
-                ShelfExpandedPreview(
-                    item: item,
-                    imageDataProvider: store.imageData,
-                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                    onDismiss: {
-                        shelfInteraction.dismissPreview()
-                    },
-                    onMove: moveSelection
-                )
-            }
-        }
     }
 
     @ViewBuilder
@@ -763,21 +771,6 @@ struct ClipboardShelfPanelView: View {
             return shelfInteraction.primarySelectedID.flatMap { id in renderedShelfItems.first { $0.id == id } }.map { [$0] } ?? []
         }
         return renderedShelfItems.filter { ids.contains($0.id) }
-    }
-
-    private var previewedShelfItem: ClipboardItem? {
-        guard let previewedID = shelfInteraction.previewedID else { return nil }
-        return renderedShelfItems.first { $0.id == previewedID }
-    }
-
-    private var isShelfPreviewPresented: Binding<Bool> {
-        Binding {
-            previewedShelfItem != nil
-        } set: { isPresented in
-            if !isPresented {
-                shelfInteraction.dismissPreview()
-            }
-        }
     }
 
     private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
@@ -1224,6 +1217,7 @@ struct ShelfExpandedPreview: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
+    var maxWidth: CGFloat = 560
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
 
@@ -1296,8 +1290,9 @@ struct ShelfExpandedPreview: View {
     }
 
     private var previewFrameWidth: CGFloat {
-        guard let imagePreviewDisplaySize else { return 560 }
-        return max(220, min(560, imagePreviewDisplaySize.width + 28))
+        let widthLimit = max(220, min(maxWidth, 560))
+        guard let imagePreviewDisplaySize else { return widthLimit }
+        return max(220, min(widthLimit, imagePreviewDisplaySize.width + 28))
     }
 
     private var imagePreviewDisplaySize: CGSize? {
