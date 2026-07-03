@@ -11572,6 +11572,22 @@
         }
       }
     },
+    "label.free": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "免费"
+          }
+        }
+      }
+    },
     "label.full_access": {
       "localizations": {
         "en": {
@@ -14016,6 +14032,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "支持的语言"
+          }
+        }
+      }
+    },
+    "label.team": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Team"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "团队"
           }
         }
       }

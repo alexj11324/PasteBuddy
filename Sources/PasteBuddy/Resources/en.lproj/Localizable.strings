@@ -243,6 +243,7 @@
 "label.file_extension" = "File Extension";
 "label.files" = "Files";
 "label.filters" = "Filters";
+"label.free" = "Free";
 "label.full_access" = "Full Access";
 "label.full_screen_preview" = "Full Screen Preview";
 "label.general" = "General";
@@ -396,6 +397,7 @@
 "label.storage_retention" = "Storage & Retention";
 "label.storage_security" = "Storage Security";
 "label.supported_locales" = "Supported Locales";
+"label.team" = "Team";
 "label.team_name" = "Team Name";
 "label.template" = "Template";
 "label.text" = "Text";

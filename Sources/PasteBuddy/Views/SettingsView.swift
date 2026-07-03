@@ -9,10 +9,89 @@ struct SettingsView: View {
     @State private var newCaptureRuleCondition: CaptureRuleCondition = .containsText
     @State private var newCaptureRuleContentType: ClipboardContentType?
     @State private var destructiveConfirmation: SettingsDestructiveAction?
+    @State private var selectedSettingsSection: SettingsSidebarSection? = .general
 
     var body: some View {
-        TabView {
-            Form {
+        settingsSplitView
+            .frame(minWidth: 860, idealWidth: 1040, minHeight: 640, idealHeight: 760)
+            .onAppear {
+                applyRequestedSettingsDestination()
+            }
+            .onChange(of: store.requestedSettingsDestination?.rawValue) { _, _ in
+                applyRequestedSettingsDestination()
+            }
+            .confirmationDialog(
+                destructiveConfirmation?.title ?? NSLocalizedString("label.confirm_action", comment: ""),
+                isPresented: isShowingDestructiveConfirmation,
+                titleVisibility: .visible
+            ) {
+                if let destructiveConfirmation {
+                    Button(destructiveConfirmation.confirmationButtonTitle, role: .destructive) {
+                        performDestructiveAction(destructiveConfirmation)
+                        self.destructiveConfirmation = nil
+                    }
+                }
+                Button("action.cancel", role: .cancel) {
+                    destructiveConfirmation = nil
+                }
+            } message: {
+                if let destructiveConfirmation {
+                    Text(destructiveConfirmation.message)
+                }
+            }
+    }
+
+    private var settingsSplitView: some View {
+        NavigationSplitView {
+            List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
+                Label {
+                    Text(section.titleKey)
+                } icon: {
+                    Image(systemName: section.systemImageName)
+                }
+                .tag(section)
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(.regularMaterial)
+            .navigationTitle("label.settings")
+        } detail: {
+            selectedSettingsDetail
+                .navigationTitle(effectiveSettingsSection.titleKey)
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder
+    private var selectedSettingsDetail: some View {
+        switch effectiveSettingsSection {
+        case .general:
+            generalSettingsForm
+        case .storage:
+            storageSettingsForm
+        case .plans:
+            plansSettingsForm
+        case .shortcuts:
+            shortcutsSettingsForm
+        case .integrations:
+            integrationsSettingsForm
+        }
+    }
+
+    private var effectiveSettingsSection: SettingsSidebarSection {
+        selectedSettingsSection ?? .general
+    }
+
+    private func applyRequestedSettingsDestination() {
+        guard let destination = store.requestedSettingsDestination else {
+            selectedSettingsSection = selectedSettingsSection ?? .general
+            return
+        }
+        selectedSettingsSection = SettingsSidebarSection(destination)
+    }
+
+    private var generalSettingsForm: some View {
+        Form {
             if let destination = store.requestedSettingsDestination {
                 Section("label.settings_entry_point") {
                     Label(localizedSettingsTitle(destination), systemImage: destination.systemImageName)
@@ -272,10 +351,10 @@ struct SettingsView: View {
             }
             }
             .formStyle(.grouped)
-            .tabItem {
-                Label("label.general", systemImage: "gearshape")
-            }
+            .scenePadding()
+    }
 
+    private var storageSettingsForm: some View {
             Form {
             Section("label.storage_security") {
                 LabeledContent("label.storage_mode") {
@@ -403,39 +482,15 @@ struct SettingsView: View {
             }
             }
             .formStyle(.grouped)
-            .tabItem {
-                Label("label.storage", systemImage: "externaldrive")
-            }
+            .scenePadding()
+    }
 
+    private var plansSettingsForm: some View {
             Form {
             Section("label.plan") {
                 LabeledContent("label.current_plan") {
-                    Text(personalOverview.planName)
+                    Text(localizedPlanName(for: store.snapshot.entitlement.plan))
                 }
-
-                LabeledContent("label.status") {
-                    Text(personalOverview.statusName)
-                        .foregroundStyle(entitlementStatusColor)
-                }
-
-                LabeledContent("label.access") {
-                    Text(personalOverview.accessState)
-                        .foregroundStyle(store.hasFullProductAccess ? .green : .secondary)
-                }
-
-                LabeledContent("label.trial") {
-                    Text(personalOverview.trialState.displayName)
-                }
-
-                Text(personalOverview.trialSummary)
-                    .foregroundStyle(.secondary)
-
-                Text(personalOverview.trialOutcomeStatement)
-                    .foregroundStyle(.secondary)
-
-                Label("label.device_unlock", systemImage: "macbook.and.iphone")
-                Text(personalOverview.crossDeviceStatement)
-                    .foregroundStyle(.secondary)
 
                 if let trialEndsAt = store.snapshot.entitlement.trialEndsAt {
                     LabeledContent("label.trial_ends") {
@@ -478,39 +533,19 @@ struct SettingsView: View {
                     }
                 }
 
-                LabeledContent("action.restore") {
-                    Text(personalOverview.restoreSummary)
-                }
-
-                Text(personalOverview.restoreActionStatement)
-                    .foregroundStyle(.secondary)
-
                 Button("action.restore_purchases") {
                     let now = Date()
                     store.markRestorePurchasesStarted(at: now)
-                    store.markRestorePurchasesFailed("StoreKit restore requires a signed App Store build.", at: now)
+                    store.markRestorePurchasesFailed("Restore purchases is not available in this build.", at: now)
                 }
-
-                Divider()
-
-                ForEach(personalOverview.purchaseOptions) { option in
-                    Label(option.title, systemImage: personalPlanSystemImage(for: option.plan))
-                    Text(option.detail)
-                        .foregroundStyle(.secondary)
-                    Text(option.unlockSummary)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text(personalOverview.billingSafetyStatement)
-                    .foregroundStyle(.secondary)
 
             }
             }
             .formStyle(.grouped)
-            .tabItem {
-                Label("label.plans", systemImage: "creditcard")
-            }
+            .scenePadding()
+    }
 
+    private var shortcutsSettingsForm: some View {
             Form {
             Section("label.shortcuts") {
                 Toggle(
@@ -554,10 +589,10 @@ struct SettingsView: View {
             }
             }
             .formStyle(.grouped)
-            .tabItem {
-                Label("label.shortcuts", systemImage: "keyboard")
-            }
+            .scenePadding()
+    }
 
+    private var integrationsSettingsForm: some View {
             Form {
             Section("label.agent_connection") {
                 Toggle(
@@ -679,31 +714,7 @@ struct SettingsView: View {
 
             }
             .formStyle(.grouped)
-            .tabItem {
-                Label("label.integrations", systemImage: "point.3.connected.trianglepath.dotted")
-            }
-        }
-        .scenePadding()
-        .frame(minWidth: 620, idealWidth: 700, minHeight: 760, idealHeight: 840)
-        .confirmationDialog(
-            destructiveConfirmation?.title ?? NSLocalizedString("label.confirm_action", comment: ""),
-            isPresented: isShowingDestructiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            if let destructiveConfirmation {
-                Button(destructiveConfirmation.confirmationButtonTitle, role: .destructive) {
-                    performDestructiveAction(destructiveConfirmation)
-                    self.destructiveConfirmation = nil
-                }
-            }
-            Button("action.cancel", role: .cancel) {
-                destructiveConfirmation = nil
-            }
-        } message: {
-            if let destructiveConfirmation {
-                Text(destructiveConfirmation.message)
-            }
-        }
+            .scenePadding()
     }
 
     private var isShowingDestructiveConfirmation: Binding<Bool> {
@@ -769,17 +780,6 @@ struct SettingsView: View {
         }
     }
 
-    private var entitlementStatusColor: Color {
-        switch store.snapshot.entitlement.status {
-        case .active, .trialing:
-            .green
-        case .billingRetry, .canceled:
-            .orange
-        case .inactive, .expired, .revoked:
-            .secondary
-        }
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
@@ -800,18 +800,22 @@ struct SettingsView: View {
         store.snapshot.entitlement.personalOverview()
     }
 
-    private func personalPlanSystemImage(for plan: ProductAccessPlan) -> String {
+    private func localizedPlanName(for plan: ProductAccessPlan) -> String {
         switch plan {
+        case .free:
+            localized("label.free")
+        case .trial:
+            localized("label.trial")
         case .monthly:
-            "calendar"
+            localized("label.monthly")
         case .annual:
-            "calendar.badge.clock"
+            localized("label.annual")
         case .lifetime:
-            "infinity"
+            localized("label.lifetime")
         case .family:
-            "person.2"
-        case .free, .trial, .team:
-            "checkmark.seal"
+            localized("label.family")
+        case .team:
+            localized("label.team")
         }
     }
 
@@ -837,6 +841,59 @@ struct SettingsView: View {
         )
     }
 
+}
+
+private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashable {
+    case general
+    case storage
+    case plans
+    case shortcuts
+    case integrations
+
+    init(_ destination: MacSettingsDestination) {
+        switch destination {
+        case .general, .privacy:
+            self = .general
+        case .storage:
+            self = .storage
+        case .shortcuts:
+            self = .shortcuts
+        case .sync:
+            self = .integrations
+        }
+    }
+
+    var id: String { rawValue }
+
+    var titleKey: LocalizedStringKey {
+        switch self {
+        case .general:
+            "label.general"
+        case .storage:
+            "label.storage"
+        case .plans:
+            "label.plans"
+        case .shortcuts:
+            "label.shortcuts"
+        case .integrations:
+            "label.integrations"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .general:
+            "gearshape"
+        case .storage:
+            "externaldrive"
+        case .plans:
+            "creditcard"
+        case .shortcuts:
+            "keyboard"
+        case .integrations:
+            "point.3.connected.trianglepath.dotted"
+        }
+    }
 }
 
 private enum SettingsDestructiveAction {

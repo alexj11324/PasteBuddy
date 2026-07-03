@@ -243,6 +243,7 @@
 "label.file_extension" = "文件扩展名";
 "label.files" = "文件";
 "label.filters" = "过滤器";
+"label.free" = "免费";
 "label.full_access" = "完全访问";
 "label.full_screen_preview" = "全屏预览";
 "label.general" = "通用";
@@ -396,6 +397,7 @@
 "label.storage_retention" = "存储与保留";
 "label.storage_security" = "存储安全";
 "label.supported_locales" = "支持的语言";
+"label.team" = "团队";
 "label.team_name" = "团队名称";
 "label.template" = "模板";
 "label.text" = "文本";

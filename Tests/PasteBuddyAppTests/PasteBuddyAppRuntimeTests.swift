@@ -460,6 +460,54 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains(#"git fetch "$REMOTE" "$BRANCH" --tags"#))
     }
 
+    func testBuildAndRunRestrictsSigningLookupToConfiguredKeychain() throws {
+        let source = try sourceFileContents("script/build_and_run.sh")
+
+        XCTAssertTrue(source.contains("PASTEBUDDY_CODESIGN_KEYCHAIN"))
+        XCTAssertTrue(source.contains("security default-keychain -d user"))
+        XCTAssertTrue(source.contains("security find-identity -v -p codesigning \"$CODESIGN_KEYCHAIN\""))
+        XCTAssertTrue(source.contains("codesign_args+=(--keychain \"$CODESIGN_KEYCHAIN\")"))
+        XCTAssertFalse(source.contains("security find-identity -v -p codesigning 2>/dev/null"))
+        XCTAssertFalse(source.contains("unlock-keychain"))
+        XCTAssertFalse(source.contains("set-key-partition-list"))
+    }
+
+    func testSettingsUsesSidebarSplitViewInsteadOfToolbarTabs() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        XCTAssertTrue(source.contains("NavigationSplitView"))
+        XCTAssertTrue(source.contains("List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection)"))
+        XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
+        XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
+        XCTAssertTrue(source.contains(".background(.regularMaterial)"))
+        XCTAssertTrue(source.contains("case .sync:"))
+        XCTAssertTrue(source.contains("self = .integrations"))
+        XCTAssertFalse(source.contains("TabView {"))
+        XCTAssertFalse(source.contains(".tabItem"))
+    }
+
+    func testPlansSettingsDoesNotExposeInternalPurchaseCopy() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let plansStart = try XCTUnwrap(source.range(of: "private var plansSettingsForm"))
+        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutsSettingsForm"))
+        let plansSource = String(source[plansStart.lowerBound..<shortcutsStart.lowerBound])
+
+        XCTAssertTrue(plansSource.contains("action.restore_purchases"))
+        XCTAssertFalse(plansSource.contains("statusName"))
+        XCTAssertFalse(plansSource.contains("accessState"))
+        XCTAssertFalse(plansSource.contains("trialState.displayName"))
+        XCTAssertFalse(plansSource.contains("trialSummary"))
+        XCTAssertFalse(plansSource.contains("trialOutcomeStatement"))
+        XCTAssertFalse(plansSource.contains("crossDeviceStatement"))
+        XCTAssertFalse(plansSource.contains("label.device_unlock"))
+        XCTAssertFalse(plansSource.contains("restoreActionStatement"))
+        XCTAssertFalse(plansSource.contains("purchaseOptions"))
+        XCTAssertFalse(plansSource.contains("billingSafetyStatement"))
+        XCTAssertFalse(plansSource.contains("StoreKit restore"))
+        XCTAssertFalse(plansSource.contains("option.detail"))
+        XCTAssertFalse(plansSource.contains("option.unlockSummary"))
+    }
+
     func testPanelHotKeyMatcherRequiresCommandShiftV() {
         XCTAssertTrue(
             PasteBuddyPanelHotKeyMatcher.matches(
