@@ -926,7 +926,7 @@ struct ClipboardShelfPanelView: View {
             )
         }
         pasteboardItem.setString(PasteboardWriter.plainText(for: item), forType: .string)
-        if let value = item.payload.urlString {
+        if let value = item.payload.presentationURLString {
             pasteboardItem.setString(value, forType: .URL)
         }
         if let value = item.payload.allFileURLStrings.first {
@@ -1212,12 +1212,12 @@ private struct ClipboardShelfCard: View {
 }
 
 struct ShelfExpandedPreview: View {
-    private static let maxImagePreviewSize = CGSize(width: 532, height: 340)
+    private static let textPreviewHeight: CGFloat = 420
 
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
-    var maxWidth: CGFloat = 560
+    var maxWidth: CGFloat = 640
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
 
@@ -1226,7 +1226,7 @@ struct ShelfExpandedPreview: View {
             previewContent
         }
         .padding(14)
-        .frame(width: previewFrameWidth, alignment: .leading)
+        .frame(width: previewFrameWidth, height: previewFrameHeight, alignment: .topLeading)
         .background(.regularMaterial)
         .background {
             ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove)
@@ -1271,28 +1271,44 @@ struct ShelfExpandedPreview: View {
                     tint: tint,
                     displaySize: imagePreviewDisplaySize
                 )
+                .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
-                    .frame(height: 300)
+                    .frame(height: Self.textPreviewHeight)
             }
         case .text:
             if item.contentType == .text {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
-                    .frame(height: 300)
+                    .frame(height: Self.textPreviewHeight)
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
-                    .frame(height: 300)
+                    .frame(height: Self.textPreviewHeight)
             }
         case .url, .file, .mixed:
             previewText(ClipboardPlainTextRenderer.plainText(for: item))
-                .frame(height: 300)
+                .frame(height: Self.textPreviewHeight)
         }
     }
 
     private var previewFrameWidth: CGFloat {
-        let widthLimit = max(220, min(maxWidth, 560))
+        let widthLimit = previewWidthLimit
         guard let imagePreviewDisplaySize else { return widthLimit }
-        return max(220, min(widthLimit, imagePreviewDisplaySize.width + 28))
+        return max(320, min(widthLimit, imagePreviewDisplaySize.width + 28))
+    }
+
+    private var previewFrameHeight: CGFloat {
+        if let imagePreviewDisplaySize {
+            return imagePreviewDisplaySize.height + 28
+        }
+        return Self.textPreviewHeight + 28
+    }
+
+    private var previewWidthLimit: CGFloat {
+        max(320, min(maxWidth, 640))
+    }
+
+    private var imagePreviewBounds: CGSize {
+        CGSize(width: max(1, previewWidthLimit - 28), height: 420)
     }
 
     private var imagePreviewDisplaySize: CGSize? {
@@ -1303,7 +1319,7 @@ struct ShelfExpandedPreview: View {
         }
         return ClipboardImageCache.fittedDisplaySize(
             for: imageSize,
-            within: Self.maxImagePreviewSize
+            within: imagePreviewBounds
         )
     }
 
@@ -1405,7 +1421,6 @@ private struct ShelfExpandedImagePreview: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxHeight: 340)
             } else {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(tint.opacity(0.10))
@@ -1450,7 +1465,7 @@ private struct ShelfExpandedImagePreview: View {
     }
 
     private var resolvedDisplaySize: CGSize {
-        displaySize ?? CGSize(width: 532, height: 340)
+        displaySize ?? CGSize(width: 612, height: 420)
     }
 
     private var analysisID: String {

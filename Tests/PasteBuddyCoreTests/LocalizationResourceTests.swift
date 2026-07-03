@@ -278,7 +278,6 @@ final class LocalizationResourceTests: XCTestCase {
             "label.capture_active.d7a4a72f",
             "label.capture_paused.04ddfd1a",
             "label.capture_paused_temporarily",
-            "message.new_clipboard_content_is_evaluated_by_local",
             "message.automatic_clipboard_capture_is_stopped_until_you",
             "message.automatic_clipboard_capture_is_stopped_until_the"
         ]

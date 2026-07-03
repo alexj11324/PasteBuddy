@@ -669,19 +669,24 @@ private extension NSRect {
 @MainActor
 final class PasteBuddyPanelHotKeyController {
     private let onToggle: @MainActor () -> Void
+    private let onShelfMode: @MainActor () -> Void
     private var registration: PasteBuddyCarbonHotKeyRegistration?
     private var eventTap: PasteBuddyPanelHotKeyEventTap?
     private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
     private var shortcutRecordingObserver: NSObjectProtocol?
     private var isShortcutRecordingActive = false
 
-    init(onToggle: @escaping @MainActor () -> Void) {
+    init(
+        onToggle: @escaping @MainActor () -> Void,
+        onShelfMode: @escaping @MainActor () -> Void
+    ) {
         self.onToggle = onToggle
-        let handler: @MainActor (PasteBuddyPanelHotKeySource) -> Void = { [weak self] source in
-            self?.triggerToggle(source: source)
+        self.onShelfMode = onShelfMode
+        let handler: @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void = { [weak self] action, source in
+            self?.trigger(action: action, source: source)
         }
-        eventTap = PasteBuddyPanelHotKeyEventTap(onToggle: { handler(.eventTap) })
-        registration = PasteBuddyCarbonHotKeyRegistration(onToggle: { handler(.carbon) })
+        eventTap = PasteBuddyPanelHotKeyEventTap(onAction: { action in handler(action, .eventTap) })
+        registration = PasteBuddyCarbonHotKeyRegistration(onAction: { action in handler(action, .carbon) })
         shortcutRecordingObserver = NotificationCenter.default.addObserver(
             forName: .pasteBuddyShortcutRecordingDidChange,
             object: nil,
@@ -694,13 +699,18 @@ final class PasteBuddyPanelHotKeyController {
         }
     }
 
-    private func triggerToggle(source: PasteBuddyPanelHotKeySource) {
+    private func trigger(action: PasteBuddyPanelHotKeyAction, source: PasteBuddyPanelHotKeySource) {
         guard !isShortcutRecordingActive else {
             PasteBuddyDiagnostics.record(.hotKey, "ignoredDuringShortcutRecording", detail: "source=\(source.rawValue)")
             return
         }
-        guard triggerGate.shouldTrigger(source: source) else { return }
-        onToggle()
+        guard triggerGate.shouldTrigger(action: action, source: source) else { return }
+        switch action {
+        case .showHide:
+            onToggle()
+        case .shelfMode:
+            onShelfMode()
+        }
     }
 
     private func setShortcutRecordingActive(_ isRecording: Bool) {
@@ -711,39 +721,53 @@ final class PasteBuddyPanelHotKeyController {
     }
 }
 
+enum PasteBuddyPanelHotKeyAction: String, Sendable {
+    case showHide
+    case shelfMode
+}
+
 enum PasteBuddyPanelHotKeySource: String, Sendable {
     case carbon
     case eventTap
 }
 
 struct PasteBuddyPanelHotKeyTriggerGate {
-    private var lastTriggerDate: Date?
+    private var lastTriggerDateByAction: [PasteBuddyPanelHotKeyAction: Date] = [:]
     var duplicateInterval: TimeInterval = 0.25
 
     mutating func shouldTrigger(source: PasteBuddyPanelHotKeySource, now: Date = Date()) -> Bool {
-        if let lastTriggerDate, now.timeIntervalSince(lastTriggerDate) < duplicateInterval {
+        shouldTrigger(action: .showHide, source: source, now: now)
+    }
+
+    mutating func shouldTrigger(
+        action: PasteBuddyPanelHotKeyAction,
+        source: PasteBuddyPanelHotKeySource,
+        now: Date = Date()
+    ) -> Bool {
+        if let lastTriggerDate = lastTriggerDateByAction[action],
+           now.timeIntervalSince(lastTriggerDate) < duplicateInterval {
             PasteBuddyDiagnostics.record(.hotKey, "ignoredDuplicate", detail: "source=\(source.rawValue)")
             return false
         }
-        lastTriggerDate = now
+        lastTriggerDateByAction[action] = now
         PasteBuddyDiagnostics.record(.hotKey, "pressed", detail: "source=\(source.rawValue)")
         return true
     }
 }
 
 private final class PasteBuddyCarbonHotKeyRegistration {
-    private let onToggle: @MainActor () -> Void
-    private var hotKeyRef: EventHotKeyRef?
+    private let onAction: @MainActor (PasteBuddyPanelHotKeyAction) -> Void
+    private var hotKeyRefs: [UInt32: EventHotKeyRef] = [:]
     private var eventHandler: EventHandlerRef?
 
-    init(onToggle: @escaping @MainActor () -> Void) {
-        self.onToggle = onToggle
+    init(onAction: @escaping @MainActor (PasteBuddyPanelHotKeyAction) -> Void) {
+        self.onAction = onAction
         installEventHandler()
-        registerShowHideHotKey()
+        registerHotKeys()
     }
 
     deinit {
-        unregisterShowHideHotKey()
+        unregisterHotKeys()
         if let eventHandler {
             RemoveEventHandler(eventHandler)
         }
@@ -751,9 +775,9 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 
     func setEnabled(_ isEnabled: Bool) {
         if isEnabled {
-            registerShowHideHotKey()
+            registerHotKeys()
         } else {
-            unregisterShowHideHotKey()
+            unregisterHotKeys()
         }
     }
 
@@ -779,14 +803,14 @@ private final class PasteBuddyCarbonHotKeyRegistration {
                 )
                 guard status == noErr,
                       hotKeyID.signature == pasteBuddyHotKeySignature,
-                      hotKeyID.id == pasteBuddyShowHideHotKeyID else {
+                      let action = PasteBuddyCarbonHotKeyRegistration.action(for: hotKeyID.id) else {
                     return noErr
                 }
 
                 let registration = Unmanaged<PasteBuddyCarbonHotKeyRegistration>
                     .fromOpaque(userData)
                     .takeUnretainedValue()
-                registration.handlePressedHotKey()
+                registration.handlePressedHotKey(action)
                 return noErr
             },
             1,
@@ -801,45 +825,61 @@ private final class PasteBuddyCarbonHotKeyRegistration {
         }
     }
 
-    private func registerShowHideHotKey() {
-        unregisterShowHideHotKey()
-        let hotKeyID = EventHotKeyID(signature: pasteBuddyHotKeySignature, id: pasteBuddyShowHideHotKeyID)
+    private func registerHotKeys() {
+        unregisterHotKeys()
+        registerHotKey(id: pasteBuddyShowHideHotKeyID, keyCode: UInt32(kVK_ANSI_V))
+        registerHotKey(id: pasteBuddyShelfModeHotKeyID, keyCode: UInt32(kVK_ANSI_B))
+    }
+
+    private func registerHotKey(id: UInt32, keyCode: UInt32) {
+        let hotKeyID = EventHotKeyID(signature: pasteBuddyHotKeySignature, id: id)
+        var hotKeyRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
-            UInt32(kVK_ANSI_V),
+            keyCode,
             UInt32(cmdKey | shiftKey),
             hotKeyID,
             GetApplicationEventTarget(),
             0,
             &hotKeyRef
         )
-        PasteBuddyDiagnostics.record(.hotKey, "carbonRegistered", detail: "status=\(status)")
-        guard status == noErr else {
-            hotKeyRef = nil
-            return
+        PasteBuddyDiagnostics.record(.hotKey, "carbonRegistered", detail: "id=\(id) status=\(status)")
+        if status == noErr, let hotKeyRef {
+            hotKeyRefs[id] = hotKeyRef
         }
     }
 
-    private func unregisterShowHideHotKey() {
-        if let hotKeyRef {
+    private func unregisterHotKeys() {
+        for hotKeyRef in hotKeyRefs.values {
             UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
+        }
+        hotKeyRefs.removeAll()
+    }
+
+    private func handlePressedHotKey(_ action: PasteBuddyPanelHotKeyAction) {
+        Task { @MainActor [onAction] in
+            onAction(action)
         }
     }
 
-    private func handlePressedHotKey() {
-        Task { @MainActor [onToggle] in
-            onToggle()
+    private static func action(for hotKeyID: UInt32) -> PasteBuddyPanelHotKeyAction? {
+        switch hotKeyID {
+        case pasteBuddyShowHideHotKeyID:
+            return .showHide
+        case pasteBuddyShelfModeHotKeyID:
+            return .shelfMode
+        default:
+            return nil
         }
     }
 }
 
 final class PasteBuddyPanelHotKeyEventTap {
-    private let onToggle: @MainActor () -> Void
+    private let onAction: @MainActor (PasteBuddyPanelHotKeyAction) -> Void
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    init(onToggle: @escaping @MainActor () -> Void) {
-        self.onToggle = onToggle
+    init(onAction: @escaping @MainActor (PasteBuddyPanelHotKeyAction) -> Void) {
+        self.onAction = onAction
         installEventTap()
     }
 
@@ -903,13 +943,13 @@ final class PasteBuddyPanelHotKeyEventTap {
         }
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        guard PasteBuddyPanelHotKeyMatcher.matches(keyCode: keyCode, flags: event.flags) else {
+        guard let action = PasteBuddyPanelHotKeyMatcher.action(keyCode: keyCode, flags: event.flags) else {
             return Unmanaged.passUnretained(event)
         }
 
-        PasteBuddyDiagnostics.record(.hotKey, "eventTapMatched", detail: "keyCode=\(keyCode)")
-        Task { @MainActor [onToggle] in
-            onToggle()
+        PasteBuddyDiagnostics.record(.hotKey, "eventTapMatched", detail: "keyCode=\(keyCode) action=\(action.rawValue)")
+        Task { @MainActor [onAction] in
+            onAction(action)
         }
         return nil
     }
@@ -917,17 +957,27 @@ final class PasteBuddyPanelHotKeyEventTap {
 
 enum PasteBuddyPanelHotKeyMatcher {
     static func matches(keyCode: Int64, flags: CGEventFlags) -> Bool {
-        guard keyCode == Int64(kVK_ANSI_V),
-              flags.contains(.maskCommand),
+        action(keyCode: keyCode, flags: flags) == .showHide
+    }
+
+    static func action(keyCode: Int64, flags: CGEventFlags) -> PasteBuddyPanelHotKeyAction? {
+        guard flags.contains(.maskCommand),
               flags.contains(.maskShift),
               !flags.contains(.maskAlternate),
-              !flags.contains(.maskControl)
-        else {
-            return false
+              !flags.contains(.maskControl) else {
+            return nil
         }
-        return true
+        switch keyCode {
+        case Int64(kVK_ANSI_V):
+            return .showHide
+        case Int64(kVK_ANSI_B):
+            return .shelfMode
+        default:
+            return nil
+        }
     }
 }
 
 private let pasteBuddyHotKeySignature: OSType = 0x50425348
 private let pasteBuddyShowHideHotKeyID: UInt32 = 1
+private let pasteBuddyShelfModeHotKeyID: UInt32 = 2

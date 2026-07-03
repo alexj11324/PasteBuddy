@@ -282,12 +282,13 @@ public final class AutomationActionService {
                 payload: ClipboardPayload(text: value)
             )
         case .url:
+            let webURLString = ClipboardPayload.normalizedWebURLString(trimmedValue) ?? trimmedValue
             candidate = ClipboardItem(
                 sourceAppName: "PasteBuddy Shortcuts",
                 deviceName: PasteBuddyStore.defaultDeviceName,
                 contentType: .url,
-                title: trimmedTitle?.isEmpty == false ? trimmedTitle! : trimmedValue,
-                payload: ClipboardPayload(urlString: trimmedValue)
+                title: trimmedTitle?.isEmpty == false ? trimmedTitle! : webURLString,
+                payload: ClipboardPayload(urlString: webURLString)
             )
         case .fileURL:
             candidate = ClipboardItem(

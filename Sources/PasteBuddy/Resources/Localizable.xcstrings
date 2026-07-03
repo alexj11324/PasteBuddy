@@ -15124,22 +15124,6 @@
         }
       }
     },
-    "message.new_clipboard_content_is_evaluated_by_local": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New clipboard content is evaluated by local privacy rules before it enters local history."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新的剪贴板内容会先经过本地隐私规则检查，然后才进入本地历史。"
-          }
-        }
-      }
-    },
     "message.new_copies_will_appear_here": {
       "localizations": {
         "en": {

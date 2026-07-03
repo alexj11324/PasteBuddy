@@ -103,16 +103,16 @@ public final class ClipboardMonitor {
         let deviceName = Host.current().localizedName ?? "This Mac"
         let pasteboardURLs = Self.urls(from: pasteboard)
         var urlStrings = pasteboardURLs
-            .filter { !$0.isFileURL }
-            .map(\.absoluteString)
+            .compactMap { url in
+                url.isFileURL ? nil : ClipboardPayload.normalizedWebURLString(url.absoluteString)
+            }
         var fileURLStrings = pasteboardURLs
             .filter(\.isFileURL)
             .map(\.absoluteString)
 
         if let explicitURLString = pasteboard.string(forType: .URL),
-           let explicitURL = URL(string: explicitURLString),
-           !explicitURL.isFileURL {
-            urlStrings.append(explicitURL.absoluteString)
+           let webURLString = ClipboardPayload.normalizedWebURLString(explicitURLString) {
+            urlStrings.append(webURLString)
         }
         if let explicitFileURLString = pasteboard.string(forType: .fileURL),
            let explicitFileURL = URL(string: explicitFileURLString) {
@@ -138,10 +138,8 @@ public final class ClipboardMonitor {
         )
         if text == nil, urlStrings.isEmpty, fileURLStrings.isEmpty,
            let rawText,
-           let url = URL(string: rawText),
-           url.scheme != nil,
-           url.host() != nil {
-            urlStrings = [url.absoluteString]
+           let webURLString = ClipboardPayload.normalizedWebURLString(rawText) {
+            urlStrings = [webURLString]
         }
 
         let imageData: Data?
@@ -265,16 +263,16 @@ public final class ClipboardMonitor {
     ) -> ClipboardItem? {
         let deviceName = Host.current().localizedName ?? "This Mac"
         var urlStrings = snapshot.urls
-            .filter { !$0.isFileURL }
-            .map(\.absoluteString)
+            .compactMap { url in
+                url.isFileURL ? nil : ClipboardPayload.normalizedWebURLString(url.absoluteString)
+            }
         var fileURLStrings = snapshot.urls
             .filter(\.isFileURL)
             .map(\.absoluteString)
 
         if let explicitURLString = snapshot.explicitURLString,
-           let explicitURL = URL(string: explicitURLString),
-           !explicitURL.isFileURL {
-            urlStrings.append(explicitURL.absoluteString)
+           let webURLString = ClipboardPayload.normalizedWebURLString(explicitURLString) {
+            urlStrings.append(webURLString)
         }
         if let explicitFileURLString = snapshot.explicitFileURLString,
            let explicitFileURL = URL(string: explicitFileURLString) {
@@ -300,10 +298,8 @@ public final class ClipboardMonitor {
         )
         if text == nil, urlStrings.isEmpty, fileURLStrings.isEmpty,
            let rawText,
-           let url = URL(string: rawText),
-           url.scheme != nil,
-           url.host() != nil {
-            urlStrings = [url.absoluteString]
+           let webURLString = ClipboardPayload.normalizedWebURLString(rawText) {
+            urlStrings = [webURLString]
         }
 
         let imageData: Data?

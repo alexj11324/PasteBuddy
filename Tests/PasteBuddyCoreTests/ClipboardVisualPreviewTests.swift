@@ -129,6 +129,22 @@ final class ClipboardVisualPreviewTests: XCTestCase {
         XCTAssertEqual(item.openableURL?.absoluteString, "https://github.com/hypooo/app-store-price")
     }
 
+    func testNonWebURLPayloadDoesNotPresentAsLink() {
+        let item = ClipboardItem(
+            sourceAppName: "Paste",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "UCFP:6526f502-200a-44ef-a5ed-2238",
+            payload: ClipboardPayload(urlString: "UCFP:6526f502-200a-44ef-a5ed-2238")
+        )
+
+        XCTAssertEqual(item.presentationContentType, .text)
+        XCTAssertTrue(item.payload.allURLStrings.isEmpty)
+        XCTAssertFalse(item.effectiveContentTypes.contains(.url))
+        XCTAssertNil(item.openableURL)
+        XCTAssertEqual(item.visualPreview.badgeText, "Text")
+    }
+
     func testStandaloneWWWTextPresentsAsNormalizedLinkPreview() {
         let item = ClipboardItem(
             sourceAppName: "Brave Browser",

@@ -445,7 +445,9 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
     }
 
     public var explicitURLStrings: [String] {
-        [urlString].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+        [urlString].compactMap { value in
+            value.flatMap(Self.normalizedWebURLString)
+        }
     }
 
     public var presentationURLString: String? {
@@ -502,27 +504,38 @@ public struct ClipboardPayload: Codable, Equatable, Sendable {
         return result
     }
 
+    public static func normalizedWebURLString(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lowercased = trimmed.lowercased()
+        let candidate: String
+        if lowercased.hasPrefix("http://") || lowercased.hasPrefix("https://") {
+            candidate = trimmed
+        } else if lowercased.hasPrefix("www.") {
+            candidate = "https://\(trimmed)"
+        } else {
+            return nil
+        }
+
+        guard let components = URLComponents(string: candidate),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              host.contains("."),
+              let url = components.url else {
+            return nil
+        }
+        return url.absoluteString
+    }
+
     private static func detectedURLStrings(in value: String) -> [String] {
         value
             .split(whereSeparator: \.isWhitespace)
             .compactMap { rawToken -> String? in
                 let token = rawToken.trimmingCharacters(in: CharacterSet(charactersIn: "<>()[]{}\"'"))
                     .trimmingCharacters(in: .punctuationCharacters)
-                guard token.contains(".") else { return nil }
-                let candidate: String
-                if token.hasPrefix("http://") || token.hasPrefix("https://") {
-                    candidate = token
-                } else if token.hasPrefix("www.") {
-                    candidate = "https://\(token)"
-                } else {
-                    return nil
-                }
-                guard let url = URL(string: candidate),
-                      let host = url.host(percentEncoded: false),
-                      host.contains(".") else {
-                    return nil
-                }
-                return candidate
+                return Self.normalizedWebURLString(token)
             }
     }
 
@@ -865,6 +878,9 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
            contentType == .url || contentType == .text {
             return .url
         }
+        if contentType == .url {
+            return .text
+        }
         guard contentType == .mixed else { return contentType }
         if payload.hasImageAsset {
             return .image
@@ -899,7 +915,15 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 systemImageName: "text.alignleft"
             )
         case .url:
-            return linkVisualPreview
+            if presentationContentType == .url {
+                return linkVisualPreview
+            }
+            return ClipboardVisualPreview(
+                headline: searchDocument.previewHeadline.nilIfEmpty ?? title,
+                body: searchDocument.previewBody.nilIfEmpty ?? payload.primaryText,
+                badgeText: ClipboardContentType.text.displayName,
+                systemImageName: "text.alignleft"
+            )
         case .file:
             let fileNames = payload.allFileURLStrings.map { value in
                 URL(string: value)?.lastPathComponent.nilIfEmpty ?? value
@@ -938,7 +962,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                     systemImageName: "text.alignleft"
                 )
             case .url:
-                let urlString = payload.urlString ?? title
+                let urlString = payload.presentationURLString ?? title
                 let host = URL(string: urlString)?.host?.nilIfEmpty
                 return ClipboardVisualPreview(
                     headline: host ?? title,
@@ -1006,11 +1030,11 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         }
         return switch contentType {
         case .url:
-            payload.urlString.flatMap { URL(string: $0) }
+            payload.presentationURLString.flatMap { URL(string: $0) }
         case .file:
             payload.allFileURLStrings.first.flatMap { URL(string: $0) }
         case .mixed:
-            payload.urlString.flatMap { URL(string: $0) }
+            payload.presentationURLString.flatMap { URL(string: $0) }
                 ?? payload.allFileURLStrings.first.flatMap { URL(string: $0) }
         case .text, .image:
             nil
@@ -1029,10 +1053,14 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
-        var types: Set<ClipboardContentType> = [contentType]
+        var types: Set<ClipboardContentType> = []
+        if contentType != .url || payload.presentationURLString != nil {
+            types.insert(contentType)
+        }
         if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            || payload.hasRTFAsset {
+            || payload.hasRTFAsset
+            || (contentType == .url && payload.presentationURLString == nil) {
             types.insert(.text)
         }
         if payload.presentationURLString != nil {
@@ -3152,34 +3180,12 @@ public enum PrivacyCaptureStatus: Equatable, Sendable {
     case pausedIndefinitely
     case pausedUntil(Date)
 
-    public var displayName: String {
-        switch self {
-        case .active:
-            "Capture active"
-        case .pausedIndefinitely:
-            "Capture paused"
-        case .pausedUntil:
-            "Capture paused temporarily"
-        }
-    }
-
     public var isPaused: Bool {
         switch self {
         case .active:
             false
         case .pausedIndefinitely, .pausedUntil:
             true
-        }
-    }
-
-    public var detail: String {
-        switch self {
-        case .active:
-            "New clipboard content is evaluated by local privacy rules before it enters local history."
-        case .pausedIndefinitely:
-            "Automatic clipboard capture is stopped until you resume it."
-        case .pausedUntil:
-            "Automatic clipboard capture is stopped until the selected resume time."
         }
     }
 }
@@ -3435,10 +3441,6 @@ public enum MacSettingsDestination: String, CaseIterable, Codable, Identifiable,
         }
     }
 
-    public var menuTitle: String {
-        "\(displayName) Settings"
-    }
-
     public var systemImageName: String {
         switch self {
         case .general:
@@ -3458,23 +3460,11 @@ public enum MacSettingsDestination: String, CaseIterable, Codable, Identifiable,
 public struct MacMenuBarStatus: Equatable, Sendable {
     public var title: String
     public var systemImageName: String
-    public var captureStatusLine: String
-    public var captureDetail: String
-    public var captureActionTitle: String
-    public var launchAtLoginStatusLine: String
-    public var settingsDestinations: [MacSettingsDestination]
 
     public init(snapshot: PasteBuddySnapshot, now: Date = Date()) {
         let privacyReport = snapshot.privacyPostureReport(now: now)
         title = privacyReport.captureStatus.isPaused ? "PasteBuddy Paused" : "PasteBuddy Active"
         systemImageName = privacyReport.captureStatus.isPaused ? "pause.circle.fill" : "doc.on.clipboard"
-        captureStatusLine = privacyReport.captureStatus.displayName
-        captureDetail = privacyReport.captureStatus.detail
-        captureActionTitle = privacyReport.captureStatus.isPaused ? "Resume Capture" : "Pause Capture"
-        launchAtLoginStatusLine = snapshot.general.launchAtLoginEnabled
-            ? "Launch at Login: On"
-            : "Launch at Login: Off"
-        settingsDestinations = MacSettingsDestination.allCases
     }
 }
 

@@ -465,7 +465,6 @@
 "message.launch_at_login_is_unavailable_in_this" = "此构建版本不支持登录时启动";
 "message.local_only_cloudkit_sync_is_disabled" = "仅本地：CloudKit 同步已关闭。";
 "message.multiple_selected_items_paste_as_plain_text" = "多个选中项目会按此可见顺序以纯文本粘贴，以保持混合内容结果可预测。";
-"message.new_clipboard_content_is_evaluated_by_local" = "新的剪贴板内容会先经过本地隐私规则检查，然后才进入本地历史。";
 "message.new_copies_will_appear_here" = "新的复制内容会显示在这里。";
 "message.no_chinese_or_english_text_was_recognized" = "未识别到中文或英文文本。";
 "message.no_external_app_is_available_to_exclude" = "没有可排除的外部应用。";

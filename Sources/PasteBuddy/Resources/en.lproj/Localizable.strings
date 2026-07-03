@@ -465,7 +465,6 @@
 "message.launch_at_login_is_unavailable_in_this" = "Launch at login is unavailable in this build";
 "message.local_only_cloudkit_sync_is_disabled" = "Local only: CloudKit sync is disabled.";
 "message.multiple_selected_items_paste_as_plain_text" = "Multiple selected items paste as plain text in this visible order, keeping mixed content predictable.";
-"message.new_clipboard_content_is_evaluated_by_local" = "New clipboard content is evaluated by local privacy rules before it enters local history.";
 "message.new_copies_will_appear_here" = "New copies will appear here.";
 "message.no_chinese_or_english_text_was_recognized" = "No Chinese or English text was recognized.";
 "message.no_external_app_is_available_to_exclude" = "No external app is available to exclude.";

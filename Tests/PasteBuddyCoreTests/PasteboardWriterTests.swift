@@ -121,6 +121,28 @@ final class PasteboardWriterTests: XCTestCase {
         )
     }
 
+    func testClipboardMonitorDoesNotCapturePrivatePasteboardURLAsLink() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyPrivateURL-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let token = "UCFP:6526f502-200a-44ef-a5ed-2238"
+
+        pasteboard.clearContents()
+        pasteboard.setString(token, forType: .URL)
+        pasteboard.setString(token, forType: .string)
+
+        let item = try XCTUnwrap(ClipboardMonitor.makeItem(
+            from: pasteboard,
+            sourceApp: "Paste",
+            sourceBundleIdentifier: "com.example.Paste",
+            privacy: PrivacyConfiguration(blockLikelySensitiveText: false)
+        ))
+
+        XCTAssertEqual(item.contentType, ClipboardContentType.text)
+        XCTAssertEqual(item.presentationContentType, ClipboardContentType.text)
+        XCTAssertNil(item.payload.urlString)
+        XCTAssertNil(item.openableURL)
+    }
+
     func testMobilePasteboardWriterIsUnavailableOutsideUIKit() {
         let item = ClipboardItem(
             sourceAppName: "Notes",

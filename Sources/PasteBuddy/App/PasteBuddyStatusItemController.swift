@@ -55,18 +55,23 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
         _ title: String,
         systemImageName: String? = nil,
         enabled: Bool = true,
+        keyEquivalent: String = "",
+        keyEquivalentModifierMask: NSEvent.ModifierFlags? = nil,
         action: @escaping () -> Void
     ) -> NSMenuItem {
         let itemAction = PasteBuddyStatusMenuItemAction(action)
         let item = NSMenuItem(
             title: title,
             action: #selector(PasteBuddyStatusMenuItemAction.invoke),
-            keyEquivalent: ""
+            keyEquivalent: keyEquivalent
         )
         item.target = itemAction
         item.representedObject = itemAction
         item.isEnabled = enabled
         item.image = image(named: systemImageName, description: title)
+        if let keyEquivalentModifierMask {
+            item.keyEquivalentModifierMask = keyEquivalentModifierMask
+        }
         return item
     }
 

@@ -518,6 +518,13 @@ final class PasteBuddyStoreTests: XCTestCase {
             title: "Research Link",
             payload: ClipboardPayload(urlString: "https://example.com/research")
         ))
+        let privatePasteboardToken = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Paste",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "UCFP:6526f502-200a-44ef-a5ed-2238",
+            payload: ClipboardPayload(urlString: "UCFP:6526f502-200a-44ef-a5ed-2238")
+        ))
 
         XCTAssertFalse(SmartPinboardCategory.links.matches(note))
         XCTAssertTrue(SmartPinboardCategory.text.matches(pastedURL))
@@ -527,6 +534,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(SmartPinboardCategory.text.matches(copiedURLMixed))
         XCTAssertTrue(SmartPinboardCategory.links.matches(copiedURLMixed))
         XCTAssertTrue(SmartPinboardCategory.links.matches(explicitLink))
+        XCTAssertTrue(SmartPinboardCategory.text.matches(privatePasteboardToken))
+        XCTAssertFalse(SmartPinboardCategory.links.matches(privatePasteboardToken))
 
         store.contentTypeFilter = .url
 
@@ -973,7 +982,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.snapshot.general.launchAtLoginEnabled)
     }
 
-    func testMacMenuBarStatusReflectsCaptureLaunchAndSettingsDestinations() throws {
+    func testMacMenuBarStatusReflectsCapturePauseState() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -982,21 +991,12 @@ final class PasteBuddyStoreTests: XCTestCase {
 
         XCTAssertEqual(status.title, "PasteBuddy Active")
         XCTAssertEqual(status.systemImageName, "doc.on.clipboard")
-        XCTAssertEqual(status.captureStatusLine, "Capture active")
-        XCTAssertEqual(status.captureActionTitle, "Pause Capture")
-        XCTAssertEqual(status.launchAtLoginStatusLine, "Launch at Login: Off")
-        XCTAssertEqual(status.settingsDestinations, MacSettingsDestination.allCases)
 
-        store.setLaunchAtLoginEnabled(true, applySystemRegistration: false)
         store.pauseCaptureIndefinitely()
         status = store.macMenuBarStatus
 
         XCTAssertEqual(status.title, "PasteBuddy Paused")
         XCTAssertEqual(status.systemImageName, "pause.circle.fill")
-        XCTAssertEqual(status.captureStatusLine, "Capture paused")
-        XCTAssertEqual(status.captureActionTitle, "Resume Capture")
-        XCTAssertEqual(status.launchAtLoginStatusLine, "Launch at Login: On")
-        XCTAssertTrue(status.captureDetail.contains("until you resume"))
 
         store.requestSettingsDestination(.privacy)
         XCTAssertEqual(store.requestedSettingsDestination, .privacy)

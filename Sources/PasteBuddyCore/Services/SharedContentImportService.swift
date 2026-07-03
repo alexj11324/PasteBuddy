@@ -106,14 +106,15 @@ public final class SharedContentImportService {
             return item
         }
 
-        if let urlString = input.urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !urlString.isEmpty {
+        if let urlString = input.urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let webURLString = ClipboardPayload.normalizedWebURLString(urlString) {
             let item = ClipboardItem(
                 sourceAppName: input.source.displayName,
                 sourceBundleIdentifier: input.sourceBundleIdentifier,
                 deviceName: input.deviceName,
                 contentType: .url,
-                title: title(from: input.title, fallback: urlString),
-                payload: ClipboardPayload(urlString: urlString)
+                title: title(from: input.title, fallback: webURLString),
+                payload: ClipboardPayload(urlString: webURLString)
             )
             try validate(item, privacy: privacy, sourceBundleIdentifier: input.sourceBundleIdentifier)
             return item

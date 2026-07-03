@@ -252,7 +252,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(previewSource.contains("Button(\"action.save_text\")"))
     }
 
-    func testSidePanelPreviewPopoverIsAnchoredToSelectedRow() throws {
+    func testPreviewPresentationUsesNativeCollectionPopoverForShelfAndSidePanel() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
         let collectionSource = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
@@ -275,13 +275,25 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertTrue(sideSource.contains("previewedID: interaction.previewedID"))
         XCTAssertTrue(sideSource.contains("previewPreferredEdge: .minX"))
+        XCTAssertTrue(sideSource.contains("previewAvoidsContainingWindowOverlap: true"))
         XCTAssertTrue(sideSource.contains("maxWidth: ClipboardSidePanelMetrics.previewMaxWidth"))
         XCTAssertTrue(sideSource.contains("previewContent: { item in"))
+        XCTAssertFalse(sideSource.contains("private var previewedSideItem: ClipboardItem?"))
+        XCTAssertFalse(sideSource.contains("private func sidePreview(_ item: ClipboardItem) -> some View"))
+        XCTAssertFalse(sideSource.contains("if let item = previewedSideItem"))
         XCTAssertTrue(collectionSource.contains("private let popover = NSPopover()"))
-        XCTAssertTrue(collectionSource.contains("popover.show(relativeTo: anchorRect, of: clipView, preferredEdge: parent.previewPreferredEdge)"))
+        XCTAssertTrue(collectionSource.contains("popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)"))
+        XCTAssertTrue(collectionSource.contains("var previewAvoidsContainingWindowOverlap: Bool"))
+        XCTAssertTrue(collectionSource.contains("windowEdgePreviewAnchor(for: id, desiredContentSize: desiredContentSize, in: clipView)"))
+        XCTAssertTrue(collectionSource.contains("PopoverPlacementPolicy.decision("))
+        XCTAssertTrue(collectionSource.contains("containingWindowFrame: window.frame"))
+        XCTAssertTrue(collectionSource.contains("let window = clipView.window"))
         XCTAssertTrue(collectionSource.contains("NSRect(x: clipView.bounds.minX"))
         XCTAssertTrue(collectionSource.contains("layoutAttributesForItem(at: indexPath)?.frame"))
         XCTAssertTrue(collectionSource.contains("collectionView.convert(anchorFrame, to: clipView)"))
+        XCTAssertFalse(collectionSource.contains("ShelfExternalPreviewPanel"))
+        XCTAssertFalse(collectionSource.contains("ShelfExternalPreviewArrow"))
+        XCTAssertFalse(collectionSource.contains("NSPanel"))
         XCTAssertFalse(sideSource.contains(".popover(isPresented: previewPresentationBinding"))
         XCTAssertFalse(sideSource.contains("private func previewPresentationBinding"))
         XCTAssertFalse(sideSource.contains(".popover(isPresented: isPreviewPresented, arrowEdge: .trailing)"))
@@ -319,8 +331,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(imagePreviewSource.contains("imageView.addSubview(overlayView)"))
         XCTAssertTrue(imagePreviewSource.contains("NSImage(data: imageData)"))
         XCTAssertTrue(source.contains("private var previewFrameWidth: CGFloat"))
-        XCTAssertTrue(source.contains("var maxWidth: CGFloat = 560"))
-        XCTAssertTrue(source.contains("let widthLimit = max(220, min(maxWidth, 560))"))
+        XCTAssertTrue(source.contains("private static let textPreviewHeight: CGFloat = 420"))
+        XCTAssertTrue(source.contains(".frame(width: previewFrameWidth, height: previewFrameHeight, alignment: .topLeading)"))
+        XCTAssertTrue(source.contains(".background(.regularMaterial)"))
+        XCTAssertTrue(source.contains("var maxWidth: CGFloat = 640"))
+        XCTAssertTrue(source.contains("max(320, min(maxWidth, 640))"))
+        XCTAssertTrue(source.contains("private var imagePreviewBounds: CGSize"))
+        XCTAssertTrue(source.contains("CGSize(width: max(1, previewWidthLimit - 28), height: 420)"))
+        XCTAssertTrue(source.contains(".frame(height: Self.textPreviewHeight)"))
+        XCTAssertTrue(source.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        XCTAssertTrue(source.contains("imagePreviewDisplaySize.height + 28"))
+        XCTAssertFalse(source.contains("private static let previewContentHeight"))
         XCTAssertTrue(source.contains("private var imagePreviewDisplaySize: CGSize?"))
         XCTAssertFalse(expandedPreviewSource.contains("private var isImageAssetPreview: Bool"))
         XCTAssertFalse(expandedPreviewSource.contains("if !isImageAssetPreview"))
@@ -412,6 +433,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(statusItemSource.contains("func menuNeedsUpdate(_ menu: NSMenu)"))
         XCTAssertTrue(statusItemSource.contains("menu.removeAllItems()"))
         XCTAssertTrue(statusItemSource.contains("menu.addItem(item)"))
+        XCTAssertTrue(statusItemSource.contains("keyEquivalentModifierMask"))
         XCTAssertFalse(statusItemSource.contains("statusItem.popUpMenu(menu)"))
     }
 
@@ -444,23 +466,39 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
-    func testStatusItemMenuExposesShelfPlacementModeChooser() throws {
+    func testStatusItemMenuKeepsPanelModeSettingsLoginAndPasteStackActions() throws {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
         let menuEnd = try XCTUnwrap(appSource.range(of: "private func toggleClipboardShelf()"))
         let menuSource = String(appSource[menuStart.lowerBound..<menuEnd.lowerBound])
 
-        XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardShelfPlacement")"#))
-        XCTAssertTrue(appSource.contains("shelfPanelController?.placement = shelfPlacement"))
-        XCTAssertTrue(menuSource.contains("label.shelf_position"))
-        XCTAssertTrue(menuSource.contains("label.shelf_at_top"))
-        XCTAssertTrue(menuSource.contains("label.shelf_at_bottom"))
-        XCTAssertTrue(menuSource.contains("shelfPlacementMenu"))
-        XCTAssertTrue(menuSource.contains("shelfPlacement = .top"))
-        XCTAssertTrue(menuSource.contains("shelfPlacement = .bottom"))
+        XCTAssertTrue(menuSource.contains("action.disable_launch_at_login"))
+        XCTAssertTrue(menuSource.contains("action.enable_launch_at_login"))
+        XCTAssertTrue(menuSource.contains("label.panel_style"))
+        XCTAssertTrue(menuSource.contains("ClipboardPanelDisplayMode.allCases"))
+        XCTAssertTrue(menuSource.contains("panelDisplayMode = mode"))
+        XCTAssertTrue(menuSource.contains("keyEquivalent: mode == .shelf ? \"b\" : \"\""))
+        XCTAssertTrue(menuSource.contains("keyEquivalentModifierMask: mode == .shelf ? [.command, .shift] : nil"))
+        XCTAssertTrue(menuSource.contains("action.open_settings"))
+        XCTAssertTrue(menuSource.contains("keyEquivalent: \",\""))
+        XCTAssertTrue(menuSource.contains("keyEquivalentModifierMask: .command"))
+        XCTAssertTrue(menuSource.contains("action.start_paste_stack"))
+        XCTAssertTrue(menuSource.contains("action.stop_paste_stack"))
+        XCTAssertTrue(menuSource.contains("action.paste_next_stack_item"))
+        XCTAssertFalse(menuSource.contains("disabledMenuItem"))
+        XCTAssertFalse(menuSource.contains("captureStatusLine"))
+        XCTAssertFalse(menuSource.contains("captureDetail"))
+        XCTAssertFalse(menuSource.contains("launchAtLoginStatusLine"))
+        XCTAssertFalse(menuSource.contains("action.show_hide_panel"))
+        XCTAssertFalse(menuSource.contains("label.shelf_position"))
+        XCTAssertFalse(menuSource.contains("action.pause_capture"))
+        XCTAssertFalse(menuSource.contains("action.pause_capture_for_15_minutes"))
+        XCTAssertFalse(menuSource.contains("action.pause_capture_for_1_hour"))
+        XCTAssertFalse(menuSource.contains("recentItems"))
+        XCTAssertFalse(menuSource.contains("menuBarTitle"))
     }
 
-    func testStatusItemMenuExposesClipboardPanelDisplayModeChooser() throws {
+    func testStatusItemMenuExposesPanelStyleButNotShelfPlacementChooser() throws {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
         let menuStart = try XCTUnwrap(appSource.range(of: "private func makeStatusItemMenu()"))
@@ -470,11 +508,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardPanelDisplayMode")"#))
         XCTAssertTrue(appSource.contains("ClipboardPanelDisplayMode.sidePanel.rawValue"))
         XCTAssertTrue(appSource.contains("shelfPanelController?.displayMode = panelDisplayMode"))
+        XCTAssertTrue(appSource.contains(#"@AppStorage("clipboardShelfPlacement")"#))
+        XCTAssertTrue(appSource.contains("shelfPanelController?.placement = shelfPlacement"))
         XCTAssertTrue(controllerSource.contains("case sidePanel"))
         XCTAssertTrue(controllerSource.contains("label.side_panel"))
         XCTAssertTrue(menuSource.contains("label.panel_style"))
         XCTAssertTrue(menuSource.contains("ClipboardPanelDisplayMode.allCases"))
         XCTAssertTrue(menuSource.contains("panelDisplayMode = mode"))
+        XCTAssertTrue(menuSource.contains("keyEquivalent: mode == .shelf ? \"b\" : \"\""))
+        XCTAssertTrue(menuSource.contains("keyEquivalentModifierMask: mode == .shelf ? [.command, .shift] : nil"))
+        XCTAssertFalse(menuSource.contains("label.shelf_position"))
+        XCTAssertFalse(menuSource.contains("shelfPlacementMenu"))
     }
 
     func testStatusItemLeftClickRunsPrimaryActionAndKeepsMenuOnSecondaryClick() throws {
@@ -640,12 +684,26 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(plansSource.contains("option.unlockSummary"))
     }
 
-    func testPanelHotKeyMatcherRequiresCommandShiftV() {
+    func testPanelHotKeyMatcherSeparatesShowHideAndShelfModeActions() {
         XCTAssertTrue(
             PasteBuddyPanelHotKeyMatcher.matches(
                 keyCode: Int64(kVK_ANSI_V),
                 flags: [.maskCommand, .maskShift]
             )
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_V),
+                flags: [.maskCommand, .maskShift]
+            ),
+            .showHide
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_B),
+                flags: [.maskCommand, .maskShift]
+            ),
+            .shelfMode
         )
 
         XCTAssertFalse(
@@ -657,6 +715,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(
             PasteBuddyPanelHotKeyMatcher.matches(
                 keyCode: Int64(kVK_ANSI_V),
+                flags: [.maskCommand]
+            )
+        )
+        XCTAssertNil(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_B),
                 flags: [.maskCommand]
             )
         )
@@ -769,6 +833,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".focusEffectDisabled()"))
         XCTAssertTrue(source.contains("ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal"))
         XCTAssertTrue(source.contains("dismissBeforePaste: !isPinned"))
+        XCTAssertTrue(source.contains("@Environment(\\.openSettings)"))
+        XCTAssertTrue(source.contains("store.clearRequestedSettingsDestination()"))
+        XCTAssertTrue(source.contains("onDismissImmediately()"))
+        XCTAssertTrue(source.contains("openSettings()"))
+        XCTAssertTrue(source.contains("NSApp.activate(ignoringOtherApps: true)"))
+        XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: \"gearshape\")"))
+        XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
+        XCTAssertFalse(source.contains("store.undoLastDeletion()"))
         XCTAssertTrue(source.contains("label.all"))
         XCTAssertTrue(source.contains("label.today"))
         XCTAssertFalse(source.contains("label.filters"))
@@ -850,13 +922,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(gate.shouldTrigger(source: .eventTap, now: now))
         XCTAssertFalse(gate.shouldTrigger(source: .carbon, now: now.addingTimeInterval(0.10)))
         XCTAssertTrue(gate.shouldTrigger(source: .carbon, now: now.addingTimeInterval(0.30)))
+        XCTAssertTrue(gate.shouldTrigger(action: .shelfMode, source: .eventTap, now: now.addingTimeInterval(0.35)))
+        XCTAssertFalse(gate.shouldTrigger(action: .shelfMode, source: .carbon, now: now.addingTimeInterval(0.45)))
 
         XCTAssertEqual(
             events.map { "\($0.category.rawValue).\($0.name):\($0.detail ?? "")" },
             [
                 "hotKey.pressed:source=eventTap",
                 "hotKey.ignoredDuplicate:source=carbon",
-                "hotKey.pressed:source=carbon"
+                "hotKey.pressed:source=carbon",
+                "hotKey.pressed:source=eventTap",
+                "hotKey.ignoredDuplicate:source=carbon"
             ]
         )
     }

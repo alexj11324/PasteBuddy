@@ -13,6 +13,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
     var previewedID: UUID?
     var onPreviewDismiss: () -> Void
     var previewPreferredEdge: NSRectEdge
+    var previewAvoidsContainingWindowOverlap: Bool
     var previewContent: ((Item) -> AnyView)?
     var isSelectable: (Item) -> Bool
     var content: (Item, Bool) -> Content
@@ -31,6 +32,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         previewedID: UUID? = nil,
         onPreviewDismiss: @escaping () -> Void = {},
         previewPreferredEdge: NSRectEdge = .minX,
+        previewAvoidsContainingWindowOverlap: Bool = false,
         previewContent: ((Item) -> AnyView)? = nil,
         isSelectable: @escaping (Item) -> Bool = { _ in true },
         @ViewBuilder content: @escaping (Item, Bool) -> Content,
@@ -48,6 +50,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         self.previewedID = previewedID
         self.onPreviewDismiss = onPreviewDismiss
         self.previewPreferredEdge = previewPreferredEdge
+        self.previewAvoidsContainingWindowOverlap = previewAvoidsContainingWindowOverlap
         self.previewContent = previewContent
         self.isSelectable = isSelectable
         self.content = content
@@ -156,6 +159,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         private var previousContentRevision: Int?
         private var previousPrimarySelectedID: UUID?
         private let popover = NSPopover()
+        private weak var currentPopoverAnchorView: NSView?
         private var indexByID: [UUID: Int] = [:]
 
         init(_ parent: ShelfCollectionRepresentable) {
@@ -361,17 +365,28 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                 return
             }
             let clipView = scrollView.contentView
-            let anchorRect = previewAnchorRect(for: id, in: clipView)
             let content = previewContent(item)
-            if let hosting = popover.contentViewController as? NSHostingController<AnyView> {
-                hosting.rootView = content
+            let hostingController: NSHostingController<AnyView>
+            if let existingController = popover.contentViewController as? NSHostingController<AnyView> {
+                existingController.rootView = content
+                hostingController = existingController
             } else {
-                popover.contentViewController = NSHostingController(rootView: content)
+                hostingController = NSHostingController(rootView: content)
+                popover.contentViewController = hostingController
             }
+            let desiredContentSize = fittingPopoverContentSize(from: hostingController.view)
+            let anchor = previewAnchor(for: id, desiredContentSize: desiredContentSize, in: clipView)
+            popover.contentSize = anchor.contentSize
             if popover.isShown {
-                popover.positioningRect = anchorRect
-            } else if clipView.window != nil {
-                popover.show(relativeTo: anchorRect, of: clipView, preferredEdge: parent.previewPreferredEdge)
+                if currentPopoverAnchorView === anchor.view {
+                    popover.positioningRect = anchor.rect
+                } else {
+                    popover.close()
+                    currentPopoverAnchorView = nil
+                    showPopover(anchor)
+                }
+            } else {
+                showPopover(anchor)
             }
         }
 
@@ -391,16 +406,48 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                   let scrollView else {
                 return
             }
-            popover.positioningRect = previewAnchorRect(for: previewedID, in: scrollView.contentView)
+            let desiredContentSize = popover.contentSize.width > 1 && popover.contentSize.height > 1
+                ? popover.contentSize
+                : popover.contentViewController.map { fittingPopoverContentSize(from: $0.view) } ?? .zero
+            let anchor = previewAnchor(for: previewedID, desiredContentSize: desiredContentSize, in: scrollView.contentView)
+            guard currentPopoverAnchorView === anchor.view else {
+                popover.close()
+                currentPopoverAnchorView = nil
+                showPopover(anchor)
+                return
+            }
+            popover.positioningRect = anchor.rect
+        }
+
+        private struct PreviewPopoverAnchor {
+            let rect: NSRect
+            let view: NSView
+            let preferredEdge: NSRectEdge
+            let contentSize: NSSize
+        }
+
+        private func showPopover(_ anchor: PreviewPopoverAnchor) {
+            guard anchor.view.window != nil else { return }
+            popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)
+            currentPopoverAnchorView = anchor.view
         }
 
         // The anchor must always name a spot inside the viewport: NSPopover keeps
         // pointing at a clamped edge rect while the previewed row is scrolled
         // offscreen instead of drifting over the panel or closing.
-        private func previewAnchorRect(for id: UUID, in clipView: NSClipView) -> NSRect {
+        private func previewAnchor(for id: UUID, desiredContentSize: NSSize, in clipView: NSClipView) -> PreviewPopoverAnchor {
+            if parent.previewAvoidsContainingWindowOverlap,
+               let windowAnchor = windowEdgePreviewAnchor(for: id, desiredContentSize: desiredContentSize, in: clipView) {
+                return windowAnchor
+            }
             guard let collectionView,
                   let itemFrame = itemFrameInCollectionCoordinates(for: id) else {
-                return fallbackAnchorRect(in: clipView)
+                return PreviewPopoverAnchor(
+                    rect: fallbackAnchorRect(in: clipView),
+                    view: clipView,
+                    preferredEdge: parent.previewPreferredEdge,
+                    contentSize: desiredContentSize
+                )
             }
             let visibleRect = collectionView.visibleRect
             var anchorFrame = itemFrame.intersection(visibleRect)
@@ -414,7 +461,94 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                     height: height
                 )
             }
-            return collectionView.convert(anchorFrame, to: clipView)
+            return PreviewPopoverAnchor(
+                rect: collectionView.convert(anchorFrame, to: clipView),
+                view: clipView,
+                preferredEdge: parent.previewPreferredEdge,
+                contentSize: desiredContentSize
+            )
+        }
+
+        private func windowEdgePreviewAnchor(for id: UUID, desiredContentSize: NSSize, in clipView: NSClipView) -> PreviewPopoverAnchor? {
+            guard let collectionView,
+                  let window = clipView.window,
+                  let contentView = window.contentView,
+                  let itemFrame = itemFrameInCollectionCoordinates(for: id) else {
+                return nil
+            }
+            let decision = PopoverPlacementPolicy.decision(
+                preferredEdge: parent.previewPreferredEdge,
+                desiredContentSize: desiredContentSize,
+                containingWindowFrame: window.frame,
+                screenFrame: window.screen?.visibleFrame ?? window.frame
+            )
+            let itemFrameInContentView = collectionView.convert(itemFrame, to: contentView)
+            let anchorRect = windowEdgeAnchorRect(
+                for: decision.edge,
+                itemFrame: itemFrameInContentView,
+                in: contentView.bounds
+            )
+            return PreviewPopoverAnchor(
+                rect: anchorRect,
+                view: contentView,
+                preferredEdge: decision.edge,
+                contentSize: decision.maximumContentSize
+            )
+        }
+
+        private func windowEdgeAnchorRect(for edge: NSRectEdge, itemFrame: NSRect, in bounds: NSRect) -> NSRect {
+            let anchorSize: CGFloat = 1
+            let halfAnchor = anchorSize / 2
+            switch edge {
+            case .minX:
+                return NSRect(
+                    x: bounds.minX,
+                    y: clamped(itemFrame.midY, lower: bounds.minY + halfAnchor, upper: bounds.maxY - halfAnchor) - halfAnchor,
+                    width: anchorSize,
+                    height: anchorSize
+                )
+            case .maxX:
+                return NSRect(
+                    x: bounds.maxX - anchorSize,
+                    y: clamped(itemFrame.midY, lower: bounds.minY + halfAnchor, upper: bounds.maxY - halfAnchor) - halfAnchor,
+                    width: anchorSize,
+                    height: anchorSize
+                )
+            case .minY:
+                return NSRect(
+                    x: clamped(itemFrame.midX, lower: bounds.minX + halfAnchor, upper: bounds.maxX - halfAnchor) - halfAnchor,
+                    y: bounds.minY,
+                    width: anchorSize,
+                    height: anchorSize
+                )
+            case .maxY:
+                return NSRect(
+                    x: clamped(itemFrame.midX, lower: bounds.minX + halfAnchor, upper: bounds.maxX - halfAnchor) - halfAnchor,
+                    y: bounds.maxY - anchorSize,
+                    width: anchorSize,
+                    height: anchorSize
+                )
+            @unknown default:
+                return NSRect(x: bounds.minX, y: bounds.midY, width: anchorSize, height: anchorSize)
+            }
+        }
+
+        private func fittingPopoverContentSize(from view: NSView) -> NSSize {
+            view.layoutSubtreeIfNeeded()
+            let fittingSize = view.fittingSize
+            guard fittingSize.width.isFinite,
+                  fittingSize.height.isFinite,
+                  fittingSize.width > 1,
+                  fittingSize.height > 1 else {
+                return popover.contentSize
+            }
+            return fittingSize
+        }
+
+        private func clamped(_ value: CGFloat, lower: CGFloat, upper: CGFloat) -> CGFloat {
+            let resolvedLower = min(lower, upper)
+            let resolvedUpper = max(lower, upper)
+            return min(max(value, resolvedLower), resolvedUpper)
         }
 
         private func fallbackAnchorRect(in clipView: NSClipView) -> NSRect {

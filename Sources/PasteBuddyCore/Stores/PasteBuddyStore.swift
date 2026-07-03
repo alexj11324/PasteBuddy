@@ -2476,7 +2476,8 @@ public final class PasteBuddyStore {
 
     private func databaseFilteredItems(pinboardID: UUID?) -> [ClipboardItem]? {
         guard let clipboardRepository,
-              repositorySyncedDataRevision == dataRevision else {
+              repositorySyncedDataRevision == dataRevision,
+              contentTypeFilter == nil else {
             return nil
         }
         let filters = resolvedSearchFilters()

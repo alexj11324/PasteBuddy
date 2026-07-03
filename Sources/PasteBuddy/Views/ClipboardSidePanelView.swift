@@ -6,7 +6,7 @@ private enum ClipboardSidePanelMetrics {
     static let renderLimit = 100
     static let rowHeight: CGFloat = 82
     static let thumbnailSize: CGFloat = 42
-    static let previewMaxWidth: CGFloat = 360
+    static let previewMaxWidth: CGFloat = 640
 }
 
 private struct ClipboardSidePanelQueryState: Equatable {
@@ -22,6 +22,7 @@ private struct ClipboardSidePanelQueryState: Equatable {
 }
 
 struct ClipboardSidePanelView: View {
+    @Environment(\.openSettings) private var openSettings
     @Bindable var store: PasteBuddyStore
     @Binding var isPinned: Bool
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
@@ -62,6 +63,7 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
+            interaction.dismissPreview()
             selectionSyncTask?.cancel()
             selectionSyncTask = nil
         }
@@ -109,27 +111,18 @@ struct ClipboardSidePanelView: View {
                 searchControl
                     .layoutPriority(1)
 
-                Menu {
-                    Button {
-                        store.toggleCapturePaused()
-                    } label: {
-                        Label(
-                            localized(store.isCapturePaused ? "action.resume_capture" : "action.pause_capture"),
-                            systemImage: store.isCapturePaused ? "play.fill" : "pause.fill"
-                        )
-                    }
-                    Button {
-                        store.undoLastDeletion()
-                    } label: {
-                        Label("action.undo_delete", systemImage: "arrow.uturn.backward")
-                    }
-                    .disabled(!store.canUndoDelete)
+                Button {
+                    store.clearRequestedSettingsDestination()
+                    onDismissImmediately()
+                    openSettings()
+                    NSApp.activate(ignoringOtherApps: true)
                 } label: {
                     ShelfToolbarCircleIcon(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
                 .labelStyle(.iconOnly)
-                .help(localized("label.more_actions"))
+                .help(localized("action.open_settings"))
+                .accessibilityLabel(localized("action.open_settings"))
             }
 
             quickFilterStrip
@@ -269,6 +262,7 @@ struct ClipboardSidePanelView: View {
                         interaction.dismissPreview()
                     },
                     previewPreferredEdge: .minX,
+                    previewAvoidsContainingWindowOverlap: true,
                     previewContent: { item in
                         AnyView(
                             ShelfExpandedPreview(
@@ -282,34 +276,37 @@ struct ClipboardSidePanelView: View {
                                 onMove: moveSelection
                             )
                         )
+                    },
+                    content: { item, isSelected in
+                        ClipboardSidePanelListRow(
+                            item: item,
+                            imageDataProvider: store.imageData,
+                            isSelected: isSelected,
+                            onPaste: { format in
+                                pasteItem(item, format: format)
+                            },
+                            onCopy: { format in
+                                copyItem(item, format: format)
+                            },
+                            onPin: { pinboardID in
+                                store.pinItem(item.id, to: pinboardID)
+                            },
+                            onDelete: {
+                                store.removeItem(item.id)
+                            },
+                            pinboards: store.userPinboards
+                        )
+                        .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
+                    },
+                    onSelect: { id, modifiers in
+                        guard let item = renderedItems.first(where: { $0.id == id }) else { return }
+                        selectItem(item, modifiers: modifiers)
+                    },
+                    onDoubleClick: { id in
+                        guard let item = renderedItems.first(where: { $0.id == id }) else { return }
+                        pasteItem(item, format: store.defaultPasteFormat)
                     }
-                ) { item, isSelected in
-                    ClipboardSidePanelListRow(
-                        item: item,
-                        imageDataProvider: store.imageData,
-                        isSelected: isSelected,
-                        onPaste: { format in
-                            pasteItem(item, format: format)
-                        },
-                        onCopy: { format in
-                            copyItem(item, format: format)
-                        },
-                        onPin: { pinboardID in
-                            store.pinItem(item.id, to: pinboardID)
-                        },
-                        onDelete: {
-                            store.removeItem(item.id)
-                        },
-                        pinboards: store.userPinboards
-                    )
-                    .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
-                } onSelect: { id, modifiers in
-                    guard let item = renderedItems.first(where: { $0.id == id }) else { return }
-                    selectItem(item, modifiers: modifiers)
-                } onDoubleClick: { id in
-                    guard let item = renderedItems.first(where: { $0.id == id }) else { return }
-                    pasteItem(item, format: store.defaultPasteFormat)
-                }
+                )
             }
 
             if overflowCount > 0 {
