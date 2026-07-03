@@ -255,6 +255,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testSidePanelPreviewPopoverIsAnchoredToSelectedRow() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let collectionSource = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
 
         let shelfCardStart = try XCTUnwrap(shelfSource.range(of: "private struct ClipboardShelfCard: View"))
         let shelfPreviewStart = try XCTUnwrap(shelfSource.range(of: "struct ShelfExpandedPreview"))
@@ -269,12 +270,29 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(shelfCardSource.contains(".popover("))
         XCTAssertFalse(shelfCardSource.contains("@Binding var isPreviewPresented"))
 
-        XCTAssertTrue(sideSource.contains(".popover(isPresented: previewPresentationBinding(for: item.id), arrowEdge: .trailing)"))
-        XCTAssertTrue(sideSource.contains("private func previewPresentationBinding(for itemID: UUID) -> Binding<Bool>"))
+        XCTAssertTrue(sideSource.contains("previewedID: interaction.previewedID"))
+        XCTAssertTrue(sideSource.contains("previewContent: { item in"))
+        XCTAssertTrue(collectionSource.contains("private let popover = NSPopover()"))
+        XCTAssertTrue(collectionSource.contains("popover.show(relativeTo: anchorRect, of: clipView, preferredEdge: .minX)"))
+        XCTAssertTrue(collectionSource.contains("NSRect(x: clipView.bounds.minX"))
+        XCTAssertTrue(collectionSource.contains("layoutAttributesForItem(at: indexPath)?.frame"))
+        XCTAssertTrue(collectionSource.contains("collectionView.convert(anchorFrame, to: clipView)"))
+        XCTAssertFalse(sideSource.contains(".popover(isPresented: previewPresentationBinding"))
+        XCTAssertFalse(sideSource.contains("private func previewPresentationBinding"))
         XCTAssertFalse(sideSource.contains(".popover(isPresented: isPreviewPresented, arrowEdge: .trailing)"))
         XCTAssertFalse(sideSource.contains("private var previewedItem: ClipboardItem?"))
         XCTAssertFalse(sideRowSource.contains(".popover("))
         XCTAssertFalse(sideRowSource.contains("@Binding var isPreviewPresented"))
+    }
+
+    func testSidePanelPreviewFollowsSelectionWithoutDeferredHandoff() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertTrue(source.contains("selectSingleItem(items[nextIndex].id, keepsPreviewOpen: interaction.previewedID != nil)"))
+        XCTAssertTrue(source.contains("interaction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)"))
+        XCTAssertFalse(source.contains("pendingPreviewSelectionID"))
+        XCTAssertFalse(source.contains("previewScrollTargetID"))
+        XCTAssertFalse(source.contains("cancelPreviewFollow"))
     }
 
     func testShelfExpandedImagePreviewUsesAppleLiveTextInsteadOfOCRTextBox() throws {
@@ -794,9 +812,22 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
 
         XCTAssertTrue(source.contains("scrollPrimarySelectionIntoView(in: collectionView)"))
-        XCTAssertTrue(source.contains("collectionView.scrollToItems("))
-        XCTAssertTrue(source.contains("? .nearestVerticalEdge"))
-        XCTAssertTrue(source.contains(": .nearestHorizontalEdge"))
+        XCTAssertTrue(source.contains("primarySelectedID != previousPrimarySelectedID"))
+        XCTAssertTrue(source.contains("ShelfCollectionScrollMath.origin("))
+        XCTAssertTrue(source.contains("clipView.scroll(to: origin)"))
+        XCTAssertTrue(source.contains("scrollView.reflectScrolledClipView(clipView)"))
+        XCTAssertFalse(source.contains("collectionView.scrollToItems("))
+    }
+
+    func testShelfCollectionKeepsPreviewPopoverAnchoredWhileScrolling() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
+
+        XCTAssertTrue(source.contains("func handleBoundsChanged()"))
+        XCTAssertTrue(source.contains("reanchorPopoverIfNeeded()"))
+        XCTAssertTrue(source.contains("itemFrame.intersection(visibleRect)"))
+        XCTAssertTrue(source.contains("boundsChangedHandler?()"))
+        XCTAssertFalse(source.contains("scrollTargetID"))
+        XCTAssertFalse(source.contains("RunLoop.main.perform"))
     }
 
     func testPanelHotKeyTriggerGateRecordsSourceAndDeduplicates() {

@@ -262,7 +262,24 @@ struct ClipboardSidePanelView: View {
                     itemSize: CGSize(width: 324, height: ClipboardSidePanelMetrics.rowHeight),
                     interitemSpacing: 10,
                     scrollDirection: .vertical,
-                    contentRevision: store.dataRevision &+ store.queryRevision &+ overflowCount
+                    contentRevision: store.dataRevision &+ store.queryRevision &+ overflowCount,
+                    previewedID: interaction.previewedID,
+                    onPreviewDismiss: {
+                        interaction.dismissPreview()
+                    },
+                    previewContent: { item in
+                        AnyView(
+                            ShelfExpandedPreview(
+                                item: item,
+                                imageDataProvider: store.imageData,
+                                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                                onDismiss: {
+                                    interaction.dismissPreview()
+                                },
+                                onMove: moveSelection
+                            )
+                        )
+                    }
                 ) { item, isSelected in
                     ClipboardSidePanelListRow(
                         item: item,
@@ -283,17 +300,6 @@ struct ClipboardSidePanelView: View {
                         pinboards: store.userPinboards
                     )
                     .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
-                    .popover(isPresented: previewPresentationBinding(for: item.id), arrowEdge: .trailing) {
-                        ShelfExpandedPreview(
-                            item: item,
-                            imageDataProvider: store.imageData,
-                            tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                            onDismiss: {
-                                interaction.dismissPreview()
-                            },
-                            onMove: moveSelection
-                        )
-                    }
                 } onSelect: { id, modifiers in
                     guard let item = renderedItems.first(where: { $0.id == id }) else { return }
                     selectItem(item, modifiers: modifiers)
@@ -566,15 +572,6 @@ struct ClipboardSidePanelView: View {
         )
     }
 
-    private func previewPresentationBinding(for itemID: UUID) -> Binding<Bool> {
-        Binding {
-            interaction.previewedID == itemID
-        } set: { isPresented in
-            if !isPresented, interaction.previewedID == itemID {
-                interaction.dismissPreview()
-            }
-        }
-    }
 }
 
 private struct ClipboardSidePanelFilterChip: View {

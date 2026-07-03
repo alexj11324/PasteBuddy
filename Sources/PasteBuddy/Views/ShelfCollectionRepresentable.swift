@@ -10,6 +10,9 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
     var interitemSpacing: CGFloat
     var scrollDirection: NSCollectionView.ScrollDirection
     var contentRevision: Int
+    var previewedID: UUID?
+    var onPreviewDismiss: () -> Void
+    var previewContent: ((Item) -> AnyView)?
     var isSelectable: (Item) -> Bool
     var content: (Item, Bool) -> Content
     var onSelect: (UUID, NSEvent.ModifierFlags) -> Void
@@ -24,6 +27,9 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         interitemSpacing: CGFloat,
         scrollDirection: NSCollectionView.ScrollDirection = .horizontal,
         contentRevision: Int = 0,
+        previewedID: UUID? = nil,
+        onPreviewDismiss: @escaping () -> Void = {},
+        previewContent: ((Item) -> AnyView)? = nil,
         isSelectable: @escaping (Item) -> Bool = { _ in true },
         @ViewBuilder content: @escaping (Item, Bool) -> Content,
         onSelect: @escaping (UUID, NSEvent.ModifierFlags) -> Void,
@@ -37,6 +43,9 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         self.interitemSpacing = interitemSpacing
         self.scrollDirection = scrollDirection
         self.contentRevision = contentRevision
+        self.previewedID = previewedID
+        self.onPreviewDismiss = onPreviewDismiss
+        self.previewContent = previewContent
         self.isSelectable = isSelectable
         self.content = content
         self.onSelect = onSelect
@@ -98,7 +107,11 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         scrollView.usesPredominantAxisScrolling = scrollDirection == .vertical
 
         context.coordinator.collectionView = collectionView
+        context.coordinator.scrollView = scrollView
         context.coordinator.parent = self
+        scrollView.boundsChangedHandler = { [weak coordinator = context.coordinator] in
+            coordinator?.handleBoundsChanged()
+        }
         context.coordinator.syncData()
         return scrollView
     }
@@ -129,18 +142,25 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
     }
 
     @MainActor
-    final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
+    final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout, NSPopoverDelegate {
         var parent: ShelfCollectionRepresentable
         weak var collectionView: NSCollectionView?
+        weak var scrollView: NSScrollView?
 
         private var lastMouseDownSelectionID: UUID?
         private var previousItemIDs: [UUID] = []
         private var previousSelectedIDs: Set<UUID> = []
         private var previousContentRevision: Int?
+        private var previousPrimarySelectedID: UUID?
+        private let popover = NSPopover()
         private var indexByID: [UUID: Int] = [:]
 
         init(_ parent: ShelfCollectionRepresentable) {
             self.parent = parent
+            popover.behavior = .applicationDefined
+            popover.animates = false
+            super.init()
+            popover.delegate = self
         }
 
         func syncData() {
@@ -155,6 +175,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                 previousItemIDs = itemIDs
                 previousContentRevision = parent.contentRevision
                 applySelection(to: collectionView, selectedIDs: selectedIDs)
+                syncPreviewPopover(in: collectionView)
                 previousSelectedIDs = selectedIDs
                 return
             }
@@ -168,6 +189,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             }
 
             applySelection(to: collectionView, selectedIDs: selectedIDs)
+            syncPreviewPopover(in: collectionView)
             previousSelectedIDs = selectedIDs
         }
 
@@ -291,17 +313,122 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             scrollPrimarySelectionIntoView(in: collectionView)
         }
 
+        // Only scrolls when the primary selection actually moved: the working
+        // clip-view scroll would otherwise yank the viewport back to the selected
+        // row on every unrelated data refresh while the user is browsing.
         private func scrollPrimarySelectionIntoView(in collectionView: NSCollectionView) {
-            guard let primarySelectedID = parent.primarySelectedID,
-                  let index = indexByID[primarySelectedID] else { return }
+            let primarySelectedID = parent.primarySelectedID
+            defer { previousPrimarySelectedID = primarySelectedID }
+            guard let primarySelectedID,
+                  primarySelectedID != previousPrimarySelectedID else { return }
+            collectionView.layoutSubtreeIfNeeded()
+            scrollItemIntoView(primarySelectedID, in: collectionView)
+        }
 
-            let scrollPosition: NSCollectionView.ScrollPosition = parent.scrollDirection == .vertical
-                ? .nearestVerticalEdge
-                : .nearestHorizontalEdge
-            collectionView.scrollToItems(
-                at: [IndexPath(item: index, section: 0)],
-                scrollPosition: scrollPosition
-            )
+        private func scrollItemIntoView(_ id: UUID, in collectionView: NSCollectionView) {
+            guard let scrollView,
+                  let itemFrame = itemFrameInCollectionCoordinates(for: id) else { return }
+            let clipView = scrollView.contentView
+            guard let origin = ShelfCollectionScrollMath.origin(
+                toReveal: itemFrame,
+                visibleRect: clipView.documentVisibleRect,
+                documentSize: collectionView.bounds.size,
+                direction: parent.scrollDirection
+            ) else { return }
+            clipView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(clipView)
+        }
+
+        private func syncPreviewPopover(in collectionView: NSCollectionView) {
+            guard let previewedID = parent.previewedID,
+                  parent.previewContent != nil else {
+                if popover.isShown {
+                    popover.close()
+                }
+                return
+            }
+            collectionView.layoutSubtreeIfNeeded()
+            showOrMovePopover(for: previewedID)
+        }
+
+        private func showOrMovePopover(for id: UUID) {
+            guard let scrollView,
+                  let item = item(withID: id),
+                  let previewContent = parent.previewContent else {
+                return
+            }
+            let clipView = scrollView.contentView
+            let anchorRect = previewAnchorRect(for: id, in: clipView)
+            let content = previewContent(item)
+            if let hosting = popover.contentViewController as? NSHostingController<AnyView> {
+                hosting.rootView = content
+            } else {
+                popover.contentViewController = NSHostingController(rootView: content)
+            }
+            if popover.isShown {
+                popover.positioningRect = anchorRect
+            } else if clipView.window != nil {
+                popover.show(relativeTo: anchorRect, of: clipView, preferredEdge: .minX)
+            }
+        }
+
+        func popoverDidClose(_ notification: Notification) {
+            if parent.previewedID != nil {
+                parent.onPreviewDismiss()
+            }
+        }
+
+        func handleBoundsChanged() {
+            reanchorPopoverIfNeeded()
+        }
+
+        private func reanchorPopoverIfNeeded() {
+            guard popover.isShown,
+                  let previewedID = parent.previewedID,
+                  let scrollView else {
+                return
+            }
+            popover.positioningRect = previewAnchorRect(for: previewedID, in: scrollView.contentView)
+        }
+
+        // The anchor must always name a spot inside the viewport: NSPopover keeps
+        // pointing at a clamped edge rect while the previewed row is scrolled
+        // offscreen instead of drifting over the panel or closing.
+        private func previewAnchorRect(for id: UUID, in clipView: NSClipView) -> NSRect {
+            guard let collectionView,
+                  let itemFrame = itemFrameInCollectionCoordinates(for: id) else {
+                return fallbackAnchorRect(in: clipView)
+            }
+            let visibleRect = collectionView.visibleRect
+            var anchorFrame = itemFrame.intersection(visibleRect)
+            if anchorFrame.isEmpty {
+                let width = min(itemFrame.width, max(1, visibleRect.width))
+                let height = min(itemFrame.height, max(1, visibleRect.height))
+                anchorFrame = NSRect(
+                    x: min(max(itemFrame.minX, visibleRect.minX), visibleRect.maxX - width),
+                    y: min(max(itemFrame.minY, visibleRect.minY), visibleRect.maxY - height),
+                    width: width,
+                    height: height
+                )
+            }
+            return collectionView.convert(anchorFrame, to: clipView)
+        }
+
+        private func fallbackAnchorRect(in clipView: NSClipView) -> NSRect {
+            NSRect(x: clipView.bounds.minX, y: clipView.bounds.midY, width: 1, height: 1)
+        }
+
+        private func itemFrameInCollectionCoordinates(for id: UUID) -> NSRect? {
+            guard let collectionView,
+                  let indexPath = indexPath(for: id) else {
+                return nil
+            }
+            return collectionView.layoutAttributesForItem(at: indexPath)?.frame
+        }
+
+        private func indexPath(for id: UUID) -> IndexPath? {
+            guard let index = indexByID[id] else { return nil }
+            return IndexPath(item: index, section: 0)
         }
 
         private func setCollectionSelection(_ selection: Set<IndexPath>, in collectionView: NSCollectionView) {
@@ -392,8 +519,39 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
     }
 }
 
+// NSCollectionView.scrollToItems(at:scrollPosition:) with the nearest-edge
+// positions is unreliable for offscreen rows in this scroll-view configuration,
+// so selection-follow scrolling computes the clip origin directly instead.
+enum ShelfCollectionScrollMath {
+    static func origin(
+        toReveal itemFrame: NSRect,
+        visibleRect: NSRect,
+        documentSize: NSSize,
+        direction: NSCollectionView.ScrollDirection
+    ) -> NSPoint? {
+        var origin = visibleRect.origin
+        if direction == .vertical {
+            if itemFrame.minY < visibleRect.minY {
+                origin.y = itemFrame.minY
+            } else if itemFrame.maxY > visibleRect.maxY {
+                origin.y = itemFrame.maxY - visibleRect.height
+            }
+            origin.y = min(max(0, origin.y), max(0, documentSize.height - visibleRect.height))
+        } else {
+            if itemFrame.minX < visibleRect.minX {
+                origin.x = itemFrame.minX
+            } else if itemFrame.maxX > visibleRect.maxX {
+                origin.x = itemFrame.maxX - visibleRect.width
+            }
+            origin.x = min(max(0, origin.x), max(0, documentSize.width - visibleRect.width))
+        }
+        return origin == visibleRect.origin ? nil : origin
+    }
+}
+
 private final class ShelfCollectionScrollView: NSScrollView {
     var scrollDirection: NSCollectionView.ScrollDirection = .horizontal
+    var boundsChangedHandler: (() -> Void)?
 
     override var horizontalScroller: NSScroller? {
         get { nil }
@@ -438,6 +596,7 @@ private final class ShelfCollectionScrollView: NSScrollView {
     override func reflectScrolledClipView(_ clipView: NSClipView) {
         super.reflectScrolledClipView(clipView)
         hideScrollers()
+        boundsChangedHandler?()
     }
 
     override func tile() {
