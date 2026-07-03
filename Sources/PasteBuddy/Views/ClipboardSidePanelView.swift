@@ -22,9 +22,9 @@ private struct ClipboardSidePanelQueryState: Equatable {
 
 struct ClipboardSidePanelView: View {
     @Bindable var store: PasteBuddyStore
+    @Binding var isPinned: Bool
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
-    let reloadClipboardHistory: @MainActor () async -> Void
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
@@ -36,6 +36,7 @@ struct ClipboardSidePanelView: View {
     @State private var interaction = ShelfInteractionModel()
     @State private var selectionSyncTask: Task<Void, Never>?
     @State private var isShowingNewTextItem = false
+    @State private var isPinnedVisual = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +53,7 @@ struct ClipboardSidePanelView: View {
         .background(Color.clear)
         .onAppear {
             sideScope = store.selectedScope
+            isPinnedVisual = isPinned
             refreshSideItems()
             Task { @MainActor in
                 await Task.yield()
@@ -91,21 +93,22 @@ struct ClipboardSidePanelView: View {
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                ShelfToolbarCircleIcon(systemName: "pin")
-                    .rotationEffect(.degrees(45))
-                    .help(localized("action.pin"))
+                Button {
+                    isPinnedVisual.toggle()
+                    isPinned = isPinnedVisual
+                } label: {
+                    ShelfToolbarCircleIcon(systemName: isPinnedVisual ? "pin.fill" : "pin")
+                        .rotationEffect(.degrees(45))
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .help(localized("action.pin"))
+                .accessibilityLabel(localized("action.pin"))
 
                 searchControl
                     .layoutPriority(1)
 
                 Menu {
-                    filtersMenu
-                    Divider()
-                    Button {
-                        reloadHistory()
-                    } label: {
-                        Label("action.reload_clipboard_history", systemImage: "arrow.clockwise")
-                    }
                     Button {
                         store.toggleCapturePaused()
                     } label: {
@@ -277,22 +280,6 @@ struct ClipboardSidePanelView: View {
                         onDelete: {
                             store.removeItem(item.id)
                         },
-                        onSaveText: { text in
-                            store.updateTextItem(item.id, to: text)
-                        },
-                        isPreviewPresented: Binding(
-                            get: { interaction.previewedID == item.id },
-                            set: { isPresented in
-                                if isPresented {
-                                    previewItem(item)
-                                } else {
-                                    interaction.dismissPreview(for: item.id)
-                                }
-                            }
-                        ),
-                        onDismissPreview: {
-                            interaction.dismissPreview(for: item.id)
-                        },
                         pinboards: store.userPinboards
                     )
                     .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
@@ -313,70 +300,28 @@ struct ClipboardSidePanelView: View {
             }
         }
         .padding(.vertical, 10)
+        .popover(isPresented: isPreviewPresented, arrowEdge: .trailing) {
+            if let item = previewedItem {
+                ShelfExpandedPreview(
+                    item: item,
+                    imageDataProvider: store.imageData,
+                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                    onDismiss: {
+                        interaction.dismissPreview()
+                    },
+                    onMove: moveSelection
+                )
+            }
+        }
     }
 
     private var footer: some View {
-        HStack {
-            Label("", systemImage: "list.bullet.clipboard")
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(.secondary)
-                .labelStyle(.iconOnly)
-
-            Spacer()
-
-            Text(localized("format.items", sideItems.count))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Button(action: onDismiss) {
-                Image(systemName: "line.3.horizontal.circle")
-                    .font(.system(size: 17, weight: .regular))
-            }
-            .buttonStyle(.plain)
+        Text(localized("format.items", sideItems.count))
+            .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.secondary)
-            .help(localized("action.hide_clipboard_shelf"))
-        }
-        .frame(height: 32)
-        .padding(.horizontal, 4)
-    }
-
-    @ViewBuilder
-    private var filtersMenu: some View {
-        Menu("label.filters") {
-            Picker("label.type", selection: $store.contentTypeFilter) {
-                Text("label.any_type").tag(nil as ClipboardContentType?)
-                ForEach(ClipboardContentType.allCases) { type in
-                    Text(localized(type.displayName)).tag(Optional(type))
-                }
-            }
-
-            Picker("label.app", selection: $store.sourceAppFilter) {
-                Text("label.any_app").tag(nil as String?)
-                ForEach(store.availableSourceApps, id: \.self) { appName in
-                    Text(appName).tag(Optional(appName))
-                }
-            }
-
-            Picker("label.device", selection: $store.deviceFilter) {
-                Text("label.any_device").tag(nil as String?)
-                ForEach(store.availableDevices, id: \.self) { deviceName in
-                    Text(deviceName).tag(Optional(deviceName))
-                }
-            }
-
-            Picker("label.date", selection: $store.dateFilter) {
-                ForEach(ClipboardDateFilter.allCases) { filter in
-                    Text(localized(filter.displayName)).tag(filter)
-                }
-            }
-
-            Button("action.clear_filters") {
-                store.clearFilters()
-            }
-            .disabled(!store.hasActiveFilters)
-        }
+            .frame(maxWidth: .infinity)
+            .frame(height: 32)
+            .padding(.horizontal, 4)
     }
 
     private var queryState: ClipboardSidePanelQueryState {
@@ -454,9 +399,9 @@ struct ClipboardSidePanelView: View {
         isListFocused = true
     }
 
-    private func selectSingleItem(_ id: UUID?) {
+    private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
         PasteBuddyMotion.performInstantSelection {
-            interaction.selectSingle(id)
+            interaction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
         scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
     }
@@ -478,7 +423,7 @@ struct ClipboardSidePanelView: View {
         let currentID = interaction.primarySelectedID ?? interaction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
-        selectSingleItem(items[nextIndex].id)
+        selectSingleItem(items[nextIndex].id, keepsPreviewOpen: interaction.previewedID != nil)
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
@@ -567,13 +512,6 @@ struct ClipboardSidePanelView: View {
         }
     }
 
-    private func reloadHistory() {
-        Task { @MainActor in
-            await reloadClipboardHistory()
-            refreshSideItems()
-        }
-    }
-
     private func handleExitCommand() {
         if isSearchFocused {
             if !store.searchQuery.isEmpty {
@@ -582,6 +520,10 @@ struct ClipboardSidePanelView: View {
             }
             isSearchFocused = false
             isListFocused = true
+            return
+        }
+        if interaction.previewedID != nil {
+            interaction.dismissPreview()
             return
         }
         onDismiss()
@@ -622,6 +564,21 @@ struct ClipboardSidePanelView: View {
             locale: Locale.current,
             arguments: arguments
         )
+    }
+
+    private var previewedItem: ClipboardItem? {
+        guard let previewedID = interaction.previewedID else { return nil }
+        return renderedItems.first { $0.id == previewedID }
+    }
+
+    private var isPreviewPresented: Binding<Bool> {
+        Binding {
+            previewedItem != nil
+        } set: { isPresented in
+            if !isPresented {
+                interaction.dismissPreview()
+            }
+        }
     }
 }
 
@@ -664,9 +621,6 @@ private struct ClipboardSidePanelListRow: View {
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
     let onDelete: () -> Void
-    let onSaveText: (String) -> Void
-    @Binding var isPreviewPresented: Bool
-    let onDismissPreview: () -> Void
     let pinboards: [Pinboard]
 
     var body: some View {
@@ -727,16 +681,8 @@ private struct ClipboardSidePanelListRow: View {
                 onDelete()
             }
         }
-        .popover(isPresented: $isPreviewPresented, arrowEdge: .trailing) {
-            ShelfExpandedPreview(
-                item: item,
-                imageDataProvider: imageDataProvider,
-                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                onSaveText: onSaveText,
-                onDismiss: onDismissPreview
-            )
-        }
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("clipboard-side-panel-row-\(item.id.uuidString)")
         .accessibilityLabel(item.title)
         .accessibilityValue(NSLocalizedString(isSelected ? "state.selected" : "label.not_selected", comment: ""))
     }
@@ -775,6 +721,11 @@ private struct ClipboardSidePanelImagePreview: View {
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
 
     var body: some View {
+        let previewSize = ClipboardImageCache.fittedDisplaySize(
+            for: ClipboardImageCache.imageSize(for: item),
+            within: CGSize(width: 72, height: 54)
+        )
+
         ClipboardImageThumbnailView(
             item: item,
             imageDataProvider: imageDataProvider,
@@ -782,7 +733,7 @@ private struct ClipboardSidePanelImagePreview: View {
             contentMode: .fit,
             placeholderIconSize: 18
         )
-        .frame(width: 72, height: 54)
+        .frame(width: previewSize.width, height: previewSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)

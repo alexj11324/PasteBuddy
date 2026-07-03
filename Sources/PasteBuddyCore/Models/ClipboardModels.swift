@@ -1682,13 +1682,13 @@ public struct TeamPlanOverview: Codable, Equatable, Sendable {
             TeamPlanValueProposition(
                 id: "shared-pinboards",
                 title: "Shared pinboards",
-                detail: "Collect team ideas, links, files, screenshots, and reusable snippets in encrypted shared boards.",
+                detail: "Collect team ideas, links, files, screenshots, and reusable snippets in shared boards.",
                 systemImageName: "pin.2"
             ),
             TeamPlanValueProposition(
                 id: "stay-in-sync",
                 title: "Stay in sync",
-                detail: "Keep shared clipboard collections aligned across team devices when encrypted sync and sharing are configured.",
+            detail: "Keep shared clipboard collections aligned across team devices when CloudKit sync and sharing are configured.",
                 systemImageName: "arrow.triangle.2.circlepath"
             ),
             TeamPlanValueProposition(
@@ -1858,11 +1858,11 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
     ) -> String {
         switch state {
         case .active, .endingSoon:
-            return "When the trial ends, PasteBuddy keeps local data encrypted and returns paid-only features to limited mode unless monthly, annual, lifetime, or family access is active."
+            return "When the trial ends, PasteBuddy keeps local data and returns paid-only features to limited mode unless monthly, annual, lifetime, or family access is active."
         case .canceled:
             return "Canceled trials stop granting full access; users can still activate monthly, annual, lifetime, or family access later."
         case .ended:
-            return "Ended trials do not delete local encrypted clipboard data; they only stop granting paid access."
+            return "Ended trials do not delete local clipboard data; they only stop granting paid access."
         case .converted:
             return "The active \(entitlement.plan.displayName) entitlement replaces trial access while StoreKit reports it as valid."
         case .notStarted:
@@ -2245,14 +2245,12 @@ public enum SyncProvider: String, CaseIterable, Codable, Identifiable, Sendable 
 public enum SyncRequirement: String, CaseIterable, Codable, Equatable, Sendable {
     case explicitCloudSyncOptIn
     case cloudKitContainerIdentifier
-    case endToEndKeyHierarchy
     case cloudKitCapability
 
     public var displayName: String {
         switch self {
         case .explicitCloudSyncOptIn: "Explicit CloudKit sync opt-in"
         case .cloudKitContainerIdentifier: "CloudKit container identifier"
-        case .endToEndKeyHierarchy: "End-to-end encryption key hierarchy"
         case .cloudKitCapability: "Signed app with CloudKit capability"
         }
     }
@@ -2271,7 +2269,7 @@ public enum SyncReadiness: Equatable, Sendable {
         switch self {
         case .localOnly: "Local only"
         case .blocked: "Setup required"
-        case .ready: "Encrypted sync ready"
+        case .ready: "CloudKit sync ready"
         }
     }
 
@@ -2282,7 +2280,7 @@ public enum SyncReadiness: Equatable, Sendable {
         case .blocked(let requirements):
             "Cloud sync is blocked until: \(requirements.map(\.displayName).joined(separator: ", "))."
         case .ready:
-            "CloudKit sync is ready to use encrypted records."
+            "CloudKit sync is ready to use private iCloud records."
         }
     }
 }
@@ -2350,9 +2348,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
         }
         let warnings = findings.filter { $0.severity == .warning }.count
         if warnings > 0 {
-            return "Encrypted CloudKit sync is ready with \(warnings) warning\(warnings == 1 ? "" : "s")."
+            return "CloudKit sync is ready with \(warnings) warning\(warnings == 1 ? "" : "s")."
         }
-        return "Encrypted CloudKit sync is ready."
+        return "CloudKit sync is ready."
     }
 
     private static func makeFindings(
@@ -2368,7 +2366,7 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 severity: .info,
                 title: "CloudKit sync is off",
                 detail: "Clipboard history, OCR metadata, images, files, and pinboards remain on this device.",
-                recoveryAction: "Enable CloudKit sync only when the user explicitly wants encrypted cross-device access."
+                recoveryAction: "Enable CloudKit sync only when the user explicitly wants cross-device iCloud access."
             ))
         case .blocked(let requirements):
             findings.append(contentsOf: requirements.map(finding(for:)))
@@ -2376,9 +2374,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
             findings.append(CloudSyncDiagnosticFinding(
                 id: "cloud-sync-ready",
                 severity: .info,
-                title: "Encrypted CloudKit sync can run",
-                detail: "Readiness gates are satisfied and plaintext fallback remains disabled.",
-                recoveryAction: "Upload and download only encrypted CloudKit records."
+                title: "CloudKit sync can run",
+                detail: "Readiness gates are satisfied for the user's private iCloud database.",
+                recoveryAction: "Upload and download private CloudKit snapshot records."
             ))
         }
 
@@ -2386,9 +2384,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
             findings.append(CloudSyncDiagnosticFinding(
                 id: "shared-pinboards-blocked",
                 severity: .blocker,
-                title: "Shared pinboards need ready encrypted sync",
-                detail: "Invitation packages and shared pinboard metadata must not be sent before CloudKit and the key hierarchy are ready.",
-                recoveryAction: "Finish CloudKit container, signing, and key hierarchy setup before enabling shared pinboards."
+                title: "Shared pinboards need ready CloudKit sync",
+                detail: "Invitation packages and shared pinboard metadata must not be sent before CloudKit is ready.",
+                recoveryAction: "Finish CloudKit container and signing setup before enabling shared pinboards."
             ))
         }
 
@@ -2397,7 +2395,7 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 id: "last-sync-conflicts",
                 severity: .warning,
                 title: "Last sync reported merge conflicts",
-                detail: "\(configuration.lastSyncConflictCount) encrypted item or pinboard conflict\(configuration.lastSyncConflictCount == 1 ? " was" : "s were") resolved by timestamp.",
+                detail: "\(configuration.lastSyncConflictCount) item or pinboard conflict\(configuration.lastSyncConflictCount == 1 ? " was" : "s were") resolved by timestamp.",
                 recoveryAction: "Review recently changed history items and pinboards before uploading another package."
             ))
         }
@@ -2406,19 +2404,9 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
             findings.append(CloudSyncDiagnosticFinding(
                 id: "first-sync-pending",
                 severity: .warning,
-                title: "First encrypted sync has not completed",
+                title: "First CloudKit sync has not completed",
                 detail: "The configuration is ready, but this device has not recorded a successful upload or import yet.",
-                recoveryAction: "Run the first encrypted upload/download after signed CloudKit account access is available."
-            ))
-        }
-
-        if !configuration.allowsPlaintextFallback {
-            findings.append(CloudSyncDiagnosticFinding(
-                id: "plaintext-fallback-disabled",
-                severity: .info,
-                title: "Plaintext fallback is disabled",
-                detail: "Cloud sync and sharing must use encrypted packages rather than silently downgrading.",
-                recoveryAction: "Keep this invariant in place for local, synced, and shared clipboard data."
+                recoveryAction: "Run the first upload/download after signed CloudKit account access is available."
             ))
         }
 
@@ -2433,7 +2421,7 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 severity: .blocker,
                 title: "Explicit CloudKit opt-in missing",
                 detail: "Cloud sync must remain local-only until the user enables it.",
-                recoveryAction: "Enable CloudKit sync from Settings after explaining that only encrypted records are uploaded."
+                recoveryAction: "Enable CloudKit sync from Settings after explaining that records are stored in the user's private iCloud database."
             )
         case .cloudKitContainerIdentifier:
             CloudSyncDiagnosticFinding(
@@ -2442,14 +2430,6 @@ public struct CloudSyncPreflightReport: Equatable, Sendable {
                 title: "CloudKit container identifier missing",
                 detail: "The app cannot address the user's private iCloud database without a configured container.",
                 recoveryAction: "Configure the signed app target with the PasteBuddy iCloud container identifier."
-            )
-        case .endToEndKeyHierarchy:
-            CloudSyncDiagnosticFinding(
-                id: "missing-end-to-end-key-hierarchy",
-                severity: .blocker,
-                title: "End-to-end key hierarchy missing",
-                detail: "Encrypted sync packages require a positive key hierarchy version.",
-                recoveryAction: "Provision or migrate the local key hierarchy before creating CloudKit packages."
             )
         case .cloudKitCapability:
             CloudSyncDiagnosticFinding(
@@ -2541,9 +2521,6 @@ public struct SyncConfiguration: Codable, Equatable, Sendable {
         }
         if cloudKitContainerIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             missing.append(.cloudKitContainerIdentifier)
-        }
-        if keyHierarchyVersion ?? 0 < 1 {
-            missing.append(.endToEndKeyHierarchy)
         }
         if !isCloudKitCapabilityConfigured {
             missing.append(.cloudKitCapability)
@@ -3032,7 +3009,7 @@ public enum SnapshotStorageMode: String, CaseIterable, Codable, Identifiable, Se
         case .standard:
             "Standard Local Storage"
         case .encrypted:
-            "Encrypted Local Storage"
+            "Legacy Protected Storage"
         }
     }
 
@@ -3041,7 +3018,7 @@ public enum SnapshotStorageMode: String, CaseIterable, Codable, Identifiable, Se
         case .standard:
             "Stores PasteBuddy history in the local Application Support folder."
         case .encrypted:
-            "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain."
+            "Legacy protected store support is kept only so older data can be migrated back to standard local storage."
         }
     }
 
@@ -3185,7 +3162,7 @@ public enum PrivacyCaptureStatus: Equatable, Sendable {
     public var detail: String {
         switch self {
         case .active:
-            "New clipboard content is evaluated by local privacy rules before it enters encrypted history."
+            "New clipboard content is evaluated by local privacy rules before it enters local history."
         case .pausedIndefinitely:
             "Automatic clipboard capture is stopped until you resume it."
         case .pausedUntil:
@@ -3265,7 +3242,7 @@ public struct PrivacyPostureReport: Equatable, Sendable {
             : "MCP Agent connection is off. Local Agents cannot connect to PasteBuddy."
 
         if snapshot.sync.provider == .cloudKit {
-            syncBoundaryStatement = "CloudKit sync uses your private iCloud account and encrypted records."
+            syncBoundaryStatement = "CloudKit sync uses your private iCloud account."
         } else {
             syncBoundaryStatement = "Sync is local-only."
         }

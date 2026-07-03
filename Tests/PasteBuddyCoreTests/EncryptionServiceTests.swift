@@ -18,11 +18,11 @@ final class EncryptionServiceTests: XCTestCase {
         return directory.appendingPathComponent(filename)
     }
 
-    func testEncryptionCoverageAuditCoversEverySensitiveSurfaceWithoutPlaintextFallback() {
+    func testEncryptionCoverageAuditMarksCloudSyncPackagesOutsideEncryptedCoverage() {
         let report = EncryptionCoverageAudit.current
 
         XCTAssertEqual(report.uncoveredSurfaces, [])
-        XCTAssertEqual(report.plaintextFallbackSurfaces, [])
+        XCTAssertEqual(report.plaintextFallbackSurfaces, [.syncPackages])
         XCTAssertTrue(report.items.contains { $0.surface == .ocrMetadata })
         XCTAssertTrue(report.items.contains { $0.surface == .syncPackages })
         XCTAssertTrue(report.items.contains { $0.surface == .entitlementMetadata })
@@ -202,7 +202,7 @@ final class EncryptionServiceTests: XCTestCase {
 
         XCTAssertThrowsError(try store.load()) { error in
             let message = error.localizedDescription
-            XCTAssertTrue(message.contains("Could not read the encrypted PasteBuddy store"))
+            XCTAssertTrue(message.contains("Could not read the PasteBuddy store"))
             XCTAssertFalse(message.contains("payroll token"))
         }
     }
@@ -307,14 +307,7 @@ final class EncryptionServiceTests: XCTestCase {
     }
 
     func testCloudSyncPackageRejectsBlockedSyncConfiguration() throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
-        let builder = CloudSyncPackageBuilder(encryptor: service)
+        let builder = CloudSyncPackageBuilder()
         let snapshot = PasteBuddySnapshot(items: [
             ClipboardItem(
                 sourceAppName: "Unit Test",
@@ -330,15 +323,8 @@ final class EncryptionServiceTests: XCTestCase {
         }
     }
 
-    func testCloudSyncPackageContainsEncryptedPayloadOnly() throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
-        let builder = CloudSyncPackageBuilder(encryptor: service)
+    func testCloudSyncPackageContainsSnapshotPayload() throws {
+        let builder = CloudSyncPackageBuilder()
         let secretItem = ClipboardItem(
             sourceAppName: "Preview",
             deviceName: "Test Mac",
@@ -362,7 +348,6 @@ final class EncryptionServiceTests: XCTestCase {
                 provider: .cloudKit,
                 isCloudSyncEnabled: true,
                 cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
-                keyHierarchyVersion: 1,
                 isCloudKitCapabilityConfigured: true
             )
         )
@@ -371,32 +356,19 @@ final class EncryptionServiceTests: XCTestCase {
         let encodedPackage = try JSONEncoder.pasteBuddy.encode(package)
         let packageString = String(decoding: encodedPackage, as: UTF8.self)
 
-        XCTAssertFalse(packageString.contains("Quarterly Screenshot Secret"))
-        XCTAssertFalse(packageString.contains("OCR private launch phrase"))
-        XCTAssertFalse(packageString.contains("Sensitive Board Name"))
+        XCTAssertTrue(packageString.contains("Quarterly Screenshot Secret"))
+        XCTAssertTrue(packageString.contains("OCR private launch phrase"))
+        XCTAssertTrue(packageString.contains("Sensitive Board Name"))
         XCTAssertEqual(package.containerIdentifier, "iCloud.com.example.PasteBuddy")
-        XCTAssertEqual(package.keyHierarchyVersion, 1)
 
-        let decrypted = try service.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
-        XCTAssertEqual(decrypted.items.first?.title, "Quarterly Screenshot Secret")
-        XCTAssertEqual(decrypted.items.first?.payload.ocrText, "OCR private launch phrase")
-        XCTAssertEqual(decrypted.pinboards.first?.name, "Sensitive Board Name")
+        XCTAssertEqual(package.snapshot.items.first?.title, "Quarterly Screenshot Secret")
+        XCTAssertEqual(package.snapshot.items.first?.payload.ocrText, "OCR private launch phrase")
+        XCTAssertEqual(package.snapshot.pinboards.first?.name, "Sensitive Board Name")
     }
 
-    func testCloudKitSyncServiceUploadsEncryptedRemoteRecordOnly() async throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
+    func testCloudKitSyncServiceUploadsSnapshotRemoteRecord() async throws {
         let transport = InMemoryCloudSyncRemoteTransport()
-        let syncService = CloudKitSyncService(
-            transport: transport,
-            builder: CloudSyncPackageBuilder(encryptor: service),
-            importer: CloudSyncPackageImporter(decryptor: service)
-        )
+        let syncService = CloudKitSyncService(transport: transport)
         let snapshot = PasteBuddySnapshot(
             items: [
                 ClipboardItem(
@@ -426,28 +398,16 @@ final class EncryptionServiceTests: XCTestCase {
 
         XCTAssertEqual(result.record.packageID, packageID)
         XCTAssertEqual(savedRecords.count, 1)
-        XCTAssertFalse(recordString.contains("Service Upload Secret"))
-        XCTAssertFalse(recordString.contains("OCR hidden remote phrase"))
+        XCTAssertTrue(recordString.contains("Service Upload Secret"))
+        XCTAssertTrue(recordString.contains("OCR hidden remote phrase"))
 
-        let decrypted = try service.decrypt(PasteBuddySnapshot.self, from: result.record.encryptedSnapshot)
-        XCTAssertEqual(decrypted.items.first?.title, "Service Upload Secret")
-        XCTAssertEqual(decrypted.items.first?.payload.ocrText, "OCR hidden remote phrase")
+        XCTAssertEqual(result.record.snapshot.items.first?.title, "Service Upload Secret")
+        XCTAssertEqual(result.record.snapshot.items.first?.payload.ocrText, "OCR hidden remote phrase")
     }
 
-    func testCloudKitSyncServiceDownloadsAndMergesLatestEncryptedRecord() async throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
+    func testCloudKitSyncServiceDownloadsAndMergesLatestSnapshotRecord() async throws {
         let transport = InMemoryCloudSyncRemoteTransport()
-        let syncService = CloudKitSyncService(
-            transport: transport,
-            builder: CloudSyncPackageBuilder(encryptor: service),
-            importer: CloudSyncPackageImporter(decryptor: service)
-        )
+        let syncService = CloudKitSyncService(transport: transport)
         let localItem = ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Local Mac",
@@ -483,19 +443,8 @@ final class EncryptionServiceTests: XCTestCase {
     }
 
     func testCloudKitSyncServiceRejectsBlockedReadinessBeforeRemoteSave() async throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
         let transport = InMemoryCloudSyncRemoteTransport()
-        let syncService = CloudKitSyncService(
-            transport: transport,
-            builder: CloudSyncPackageBuilder(encryptor: service),
-            importer: CloudSyncPackageImporter(decryptor: service)
-        )
+        let syncService = CloudKitSyncService(transport: transport)
         let snapshot = PasteBuddySnapshot(items: [
             ClipboardItem(
                 sourceAppName: "Notes",
@@ -517,20 +466,9 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertTrue(savedRecords.isEmpty)
     }
 
-    func testPrivateCloudKitSyncEncryptsRemoteRecordsAndMergesHistoryPinboardsWithRecoveryState() async throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
+    func testPrivateCloudKitSyncUploadsSnapshotRecordsAndMergesHistoryPinboardsWithRecoveryState() async throws {
         let transport = InMemoryCloudSyncRemoteTransport()
-        let syncService = CloudKitSyncService(
-            transport: transport,
-            builder: CloudSyncPackageBuilder(encryptor: service),
-            importer: CloudSyncPackageImporter(decryptor: service)
-        )
+        let syncService = CloudKitSyncService(transport: transport)
         let sync = readySyncConfiguration()
         let sharedItemID = UUID()
         let sharedPinboardID = UUID()
@@ -624,10 +562,9 @@ final class EncryptionServiceTests: XCTestCase {
         let recordString = String(decoding: encodedRecord, as: UTF8.self)
 
         XCTAssertEqual(savedRecord.containerIdentifier, "iCloud.com.example.PasteBuddy")
-        XCTAssertEqual(savedRecord.keyHierarchyVersion, 1)
-        XCTAssertFalse(recordString.contains("Remote Fresh Item"))
-        XCTAssertFalse(recordString.contains("newer remote value"))
-        XCTAssertFalse(recordString.contains("Remote Research Board"))
+        XCTAssertTrue(recordString.contains("Remote Fresh Item"))
+        XCTAssertTrue(recordString.contains("newer remote value"))
+        XCTAssertTrue(recordString.contains("Remote Research Board"))
 
         let maybeDownload = try await syncService.downloadLatest(
             into: localSnapshot,
@@ -648,17 +585,10 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(download.report.conflicts.count, 2)
         XCTAssertEqual(download.snapshot.sync.lastImportedPackageID, upload.record.packageID)
         XCTAssertEqual(download.snapshot.sync.lastSyncConflictCount, 2)
-        XCTAssertTrue(download.snapshot.sync.lastSyncStatusMessage?.contains("Imported encrypted package") == true)
+        XCTAssertTrue(download.snapshot.sync.lastSyncStatusMessage?.contains("Imported CloudKit package") == true)
     }
 
-    func testCloudSyncImportMergesEncryptedHistoryAndPinboardsWithoutOverwritingLocalPrivacy() throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
+    func testCloudSyncImportMergesHistoryAndPinboardsWithoutOverwritingLocalPrivacy() throws {
         let localItem = ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Local Mac",
@@ -691,10 +621,10 @@ final class EncryptionServiceTests: XCTestCase {
             privacy: PrivacyConfiguration(captureText: true),
             sync: sync
         )
-        let package = try CloudSyncPackageBuilder(encryptor: service)
+        let package = try CloudSyncPackageBuilder()
             .makeUploadPackage(from: remoteSnapshot)
 
-        let result = try CloudSyncPackageImporter(decryptor: service)
+        let result = try CloudSyncPackageImporter()
             .importPackage(package, into: localSnapshot)
 
         XCTAssertEqual(Set(result.snapshot.items.map(\.id)), Set([localItem.id, remoteItem.id]))
@@ -706,13 +636,6 @@ final class EncryptionServiceTests: XCTestCase {
     }
 
     func testCloudSyncImportKeepsNewerLocalConflictAndRejectsWrongContainer() throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
         let itemID = UUID()
         let older = Date(timeIntervalSince1970: 1_000)
         let newer = Date(timeIntervalSince1970: 2_000)
@@ -739,10 +662,10 @@ final class EncryptionServiceTests: XCTestCase {
         let sync = readySyncConfiguration()
         let localSnapshot = PasteBuddySnapshot(items: [localItem], sync: sync)
         let remoteSnapshot = PasteBuddySnapshot(items: [remoteItem], sync: sync)
-        let package = try CloudSyncPackageBuilder(encryptor: service)
+        let package = try CloudSyncPackageBuilder()
             .makeUploadPackage(from: remoteSnapshot)
 
-        let result = try CloudSyncPackageImporter(decryptor: service)
+        let result = try CloudSyncPackageImporter()
             .importPackage(package, into: localSnapshot)
 
         XCTAssertEqual(result.snapshot.items.first?.title, "Local Wins")
@@ -753,21 +676,14 @@ final class EncryptionServiceTests: XCTestCase {
         wrongContainerPackage.containerIdentifier = "iCloud.com.example.Other"
 
         XCTAssertThrowsError(
-            try CloudSyncPackageImporter(decryptor: service).importPackage(wrongContainerPackage, into: localSnapshot)
+            try CloudSyncPackageImporter().importPackage(wrongContainerPackage, into: localSnapshot)
         ) { error in
             XCTAssertTrue(error.localizedDescription.contains("configured for iCloud.com.example.PasteBuddy"))
         }
     }
 
     #if canImport(CloudKit)
-    func testCloudKitRecordContainsEncryptedPayloadOnly() throws {
-        let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "test-key"
-        )
-        defer { try? service.deleteKeyForTesting() }
-
+    func testCloudKitRecordContainsSnapshotPayload() throws {
         let snapshot = PasteBuddySnapshot(
             items: [
                 ClipboardItem(
@@ -782,40 +698,35 @@ final class EncryptionServiceTests: XCTestCase {
                 provider: .cloudKit,
                 isCloudSyncEnabled: true,
                 cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
-                keyHierarchyVersion: 1,
                 isCloudKitCapabilityConfigured: true
             )
         )
-        let package = try CloudSyncPackageBuilder(encryptor: service)
+        let package = try CloudSyncPackageBuilder()
             .makeUploadPackage(from: snapshot)
         let record = try CloudKitRecordFactory().makeRecord(from: package)
 
-        XCTAssertEqual(record.recordType, CloudKitRecordFactory.encryptedSnapshotRecordType)
-        XCTAssertEqual(record[CloudKitRecordFactory.keyIDField] as? String, "test-key")
+        XCTAssertEqual(record.recordType, CloudKitRecordFactory.snapshotRecordType)
         XCTAssertEqual(
             record[CloudKitRecordFactory.containerIdentifierField] as? String,
             "iCloud.com.example.PasteBuddy"
         )
 
-        let envelopeData = try XCTUnwrap(record[CloudKitRecordFactory.encryptedSnapshotField] as? Data)
-        let envelopeString = String(decoding: envelopeData, as: UTF8.self)
+        let snapshotData = try XCTUnwrap(record[CloudKitRecordFactory.snapshotField] as? Data)
+        let snapshotString = String(decoding: snapshotData, as: UTF8.self)
 
-        XCTAssertFalse(envelopeString.contains("CloudKit Record Secret"))
-        XCTAssertFalse(envelopeString.contains("record payload must stay encrypted"))
+        XCTAssertTrue(snapshotString.contains("CloudKit Record Secret"))
+        XCTAssertTrue(snapshotString.contains("record payload must stay encrypted"))
 
-        let envelope = try JSONDecoder.pasteBuddy.decode(EncryptedEnvelope.self, from: envelopeData)
-        let decrypted = try service.decrypt(PasteBuddySnapshot.self, from: envelope)
+        let decodedSnapshot = try JSONDecoder.pasteBuddy.decode(PasteBuddySnapshot.self, from: snapshotData)
         let remoteRecord = try CloudKitRecordFactory().makeRemoteRecord(from: record)
         let roundTrippedPackage = remoteRecord.makePackage()
 
-        XCTAssertEqual(decrypted.items.first?.title, "CloudKit Record Secret")
-        XCTAssertEqual(decrypted.items.first?.payload.text, "record payload must stay encrypted")
+        XCTAssertEqual(decodedSnapshot.items.first?.title, "CloudKit Record Secret")
+        XCTAssertEqual(decodedSnapshot.items.first?.payload.text, "record payload must stay encrypted")
         XCTAssertEqual(remoteRecord.packageID, package.id)
         XCTAssertEqual(roundTrippedPackage.containerIdentifier, "iCloud.com.example.PasteBuddy")
-        XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.version, package.encryptedSnapshot.version)
-        XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.algorithm, package.encryptedSnapshot.algorithm)
-        XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.keyID, package.encryptedSnapshot.keyID)
-        XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.sealedData, package.encryptedSnapshot.sealedData)
+        XCTAssertEqual(roundTrippedPackage.snapshot.items.first?.title, package.snapshot.items.first?.title)
+        XCTAssertEqual(roundTrippedPackage.snapshot.items.first?.payload.text, package.snapshot.items.first?.payload.text)
     }
     #endif
 }
@@ -844,7 +755,6 @@ private func readySyncConfiguration() -> SyncConfiguration {
         isCloudSyncEnabled: true,
         isSharedPinboardsEnabled: true,
         cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
-        keyHierarchyVersion: 1,
         isCloudKitCapabilityConfigured: true
     )
 }

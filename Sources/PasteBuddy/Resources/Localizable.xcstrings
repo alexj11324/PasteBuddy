@@ -1480,23 +1480,6 @@
       },
       "comment": "Legacy alias for label.cloudkit_container_identifier. Prefer the semantic key in code."
     },
-    "CloudKit sync is ready to use encrypted records.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit sync is ready to use encrypted records."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit 同步已准备好使用加密记录。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.cloudkit_sync_is_ready_to_use_encrypted. Prefer the semantic key in code."
-    },
     "Code": {
       "localizations": {
         "en": {
@@ -1938,23 +1921,6 @@
         }
       },
       "comment": "Legacy alias for label.custom_capture_rules. Prefer the semantic key in code."
-    },
-    "Custom rules run locally before capture and are stored inside the encrypted snapshot.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Custom rules run locally before capture and are stored inside the encrypted snapshot."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自定义规则会在捕获前于本地运行，并存储在加密快照中。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.custom_rules_run_locally_before_capture_and. Prefer the semantic key in code."
     },
     "Date": {
       "localizations": {
@@ -2431,74 +2397,6 @@
         }
       },
       "comment": "Legacy alias for state.enabled. Prefer the semantic key in code."
-    },
-    "Encrypt clipboard history at rest": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypt clipboard history at rest"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密本地剪贴板历史"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.encrypt_clipboard_history_at_rest. Prefer the semantic key in code."
-    },
-    "Encrypted Local Storage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypted Local Storage"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密本地存储"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.encrypted_local_storage. Prefer the semantic key in code."
-    },
-    "Encrypted sync ready": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypted sync ready"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密同步已就绪"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.encrypted_sync_ready. Prefer the semantic key in code."
-    },
-    "End-to-end encryption key hierarchy": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "End-to-end encryption key hierarchy"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "端到端加密密钥层级"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.end_to_end_encryption_key. Prefer the semantic key in code."
     },
     "Estimated History Size": {
       "localizations": {
@@ -3910,23 +3808,6 @@
         }
       },
       "comment": "Legacy alias for label.new_text_item. Prefer the semantic key in code."
-    },
-    "New clipboard content is evaluated by local privacy rules before it enters encrypted history.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New clipboard content is evaluated by local privacy rules before it enters encrypted history."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新的剪贴板内容会先经过本地隐私规则检查，然后才进入加密历史。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.new_clipboard_content_is_evaluated_by_local. Prefer the semantic key in code."
     },
     "New copies will appear here.": {
       "localizations": {
@@ -6240,23 +6121,6 @@
       },
       "comment": "Legacy alias for message.saves_edits_back_to_clipboard_history. Prefer the semantic key in code."
     },
-    "Saving shared content to encrypted history...": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saving shared content to encrypted history..."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在将共享内容保存到加密历史记录..."
-          }
-        }
-      },
-      "comment": "Legacy alias for message.saving_shared_content_to_encrypted_history. Prefer the semantic key in code."
-    },
     "Search": {
       "localizations": {
         "en": {
@@ -6646,7 +6510,7 @@
           }
         }
       },
-      "comment": "Legacy alias for message.shared_pinboards_are_encrypted_and_ready. Prefer the semantic key in code."
+      "comment": "Legacy alias for message.shared_pinboards_are_encrypted_and_ready.a7f639bb. Prefer the semantic key in code."
     },
     "Shelf Position": {
       "localizations": {
@@ -11548,70 +11412,6 @@
         }
       }
     },
-    "label.encrypt_clipboard_history_at_rest": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypt clipboard history at rest"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密本地剪贴板历史"
-          }
-        }
-      }
-    },
-    "label.encrypted_local_storage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypted Local Storage"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密本地存储"
-          }
-        }
-      }
-    },
-    "label.encrypted_sync_ready": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypted sync ready"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密同步已就绪"
-          }
-        }
-      }
-    },
-    "label.end_to_end_encryption_key": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "End-to-end encryption key hierarchy"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "端到端加密密钥层级"
-          }
-        }
-      }
-    },
     "label.estimated_history_size": {
       "localizations": {
         "en": {
@@ -14668,38 +14468,6 @@
         }
       }
     },
-    "message.cloudkit_sync_is_ready_to_use_encrypted": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit sync is ready to use encrypted records."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit 同步已准备好使用加密记录。"
-          }
-        }
-      }
-    },
-    "message.cloudkit_sync_uses_the_user_s_private": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit sync uses your private iCloud account and encrypted records."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CloudKit 同步使用你的私有 iCloud 账户和加密记录。"
-          }
-        }
-      }
-    },
     "message.configure_cloudkit_sync_and_turn_on_shared": {
       "localizations": {
         "en": {
@@ -14753,13 +14521,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Custom rules run locally before capture and are stored inside the encrypted snapshot."
+            "value": "Custom rules run locally before capture and are stored with local history settings."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自定义规则会在捕获前于本地运行，并存储在加密快照中。"
+            "value": "自定义规则会在捕获前于本地运行，并随本地历史设置保存。"
           }
         }
       }
@@ -14929,13 +14697,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "New clipboard content is evaluated by local privacy rules before it enters encrypted history."
+            "value": "New clipboard content is evaluated by local privacy rules before it enters local history."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新的剪贴板内容会先经过本地隐私规则检查，然后才进入加密历史。"
+            "value": "新的剪贴板内容会先经过本地隐私规则检查，然后才进入本地历史。"
           }
         }
       }
@@ -15217,13 +14985,45 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Saving shared content to encrypted history..."
+            "value": "Saving shared content to history..."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在将共享内容保存到加密历史记录..."
+            "value": "正在将共享内容保存到历史记录..."
+          }
+        }
+      }
+    },
+    "message.saving_shared_content_to_encrypted_history.e34427f5": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving shared content to history..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在将共享内容保存到历史记录..."
+          }
+        }
+      }
+    },
+    "message.saving_shared_content_to_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving shared content to history..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在将共享内容保存到历史记录..."
           }
         }
       }
@@ -15265,6 +15065,22 @@
         "en": {
           "stringUnit": {
             "state": "translated",
+            "value": "Shared pinboards are ready."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共享收藏板已准备就绪。"
+          }
+        }
+      }
+    },
+    "message.shared_pinboards_are_encrypted_and_ready.a7f639bb": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
             "value": "Shared pinboards are encrypted and ready."
           }
         },
@@ -15272,6 +15088,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "共享收藏板已加密并准备就绪。"
+          }
+        }
+      }
+    },
+    "message.shared_pinboards_are_ready": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shared pinboards are ready."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共享收藏板已准备就绪。"
           }
         }
       }
@@ -15425,13 +15257,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use EncryptedSnapshotStore.appGroupStore(groupIdentifier:) from the signed app and extension targets."
+            "value": "Use the shared App Group store from the signed app and extension targets."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在已签名 App 和扩展 target 中使用 EncryptedSnapshotStore.appGroupStore(groupIdentifier:)。"
+            "value": "在已签名 App 和扩展 target 中使用共享的 App Group 存储。"
           }
         }
       }
@@ -15537,13 +15369,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enable Full Access only after explaining that the keyboard reads PasteBuddy's encrypted shared history."
+            "value": "Enable Full Access only after explaining that the keyboard reads PasteBuddy's shared history."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "只有在说明键盘会读取 PasteBuddy 的加密共享历史后，才启用完全访问。"
+            "value": "只有在说明键盘会读取 PasteBuddy 的共享历史后，才启用完全访问。"
           }
         }
       }
@@ -15729,13 +15561,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "iOS and iPadOS do not permit dependable continuous background clipboard monitoring. PasteBuddy should browse synced or manually imported encrypted history, read the pasteboard only after foreground permission, and rely on Share or Action extensions for manual imports."
+            "value": "iOS and iPadOS do not permit dependable continuous background clipboard monitoring. PasteBuddy should browse synced or manually imported history, read the pasteboard only after foreground permission, and rely on Share or Action extensions for manual imports."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "iOS 和 iPadOS 不允许可靠的连续后台剪贴板监控。PasteBuddy 应浏览已同步或手动导入的加密历史，仅在前台获得权限后读取剪贴板，并依靠分享或操作扩展进行手动导入。"
+            "value": "iOS 和 iPadOS 不允许可靠的连续后台剪贴板监控。PasteBuddy 应浏览已同步或手动导入的历史，仅在前台获得权限后读取剪贴板，并依靠分享或操作扩展进行手动导入。"
           }
         }
       }
@@ -15777,13 +15609,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The action extension can save supported selections directly into encrypted history or the preferred pinboard."
+            "value": "The action extension can save supported selections directly into history or the preferred pinboard."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "操作扩展可将受支持的所选内容直接保存到加密历史或首选收藏板。"
+            "value": "操作扩展可将受支持的所选内容直接保存到历史或首选收藏板。"
           }
         }
       }
@@ -15809,13 +15641,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enabled mobile extensions must use the shared encrypted App Group store rather than plaintext handoff files."
+            "value": "Enabled mobile extensions must use the shared App Group store rather than plaintext handoff files."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已启用的移动端扩展必须使用共享的加密 App Group 存储，而不是明文交接文件。"
+            "value": "已启用的移动端扩展必须使用共享的 App Group 存储，而不是明文交接文件。"
           }
         }
       }
@@ -15841,13 +15673,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Encrypted App Group store"
+            "value": "App Group store"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "加密 App Group 存储"
+            "value": "App Group 存储"
           }
         }
       }
@@ -15921,13 +15753,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Without Full Access, the keyboard should stay in limited mode and avoid claiming it can read synced encrypted history. %@"
+            "value": "Without Full Access, the keyboard should stay in limited mode and avoid claiming it can read synced history. %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有完全访问权限时，键盘应保持受限模式，并避免声称可以读取已同步的加密历史。%@"
+            "value": "没有完全访问权限时，键盘应保持受限模式，并避免声称可以读取已同步的历史。%@"
           }
         }
       }
@@ -16033,13 +15865,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Selected text, URLs, images, and files can be saved into encrypted history or a selected pinboard. %@"
+            "value": "Selected text, URLs, images, and files can be saved into history or a selected pinboard. %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选中的文本、URL、图片和文件可保存到加密历史或指定收藏板。%@"
+            "value": "选中的文本、URL、图片和文件可保存到历史或指定收藏板。%@"
           }
         }
       }
@@ -16273,13 +16105,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Full Access lets the keyboard read PasteBuddy's encrypted shared App Group history and insert selected text. Clipboard data stays on the user's device or private iCloud account unless the user explicitly enables sync or sharing."
+            "value": "Full Access lets the keyboard read PasteBuddy's shared App Group history and insert selected text. Clipboard data stays on the user's device or private iCloud account unless the user explicitly enables sync or sharing."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "完全访问权限允许键盘读取 PasteBuddy 加密的共享 App Group 历史并插入所选文本。除非用户明确启用同步或分享，剪贴板数据会保留在用户设备或私人 iCloud 账户中。"
+            "value": "完全访问权限允许键盘读取 PasteBuddy 共享的 App Group 历史并插入所选文本。除非用户明确启用同步或分享，剪贴板数据会保留在用户设备或私人 iCloud 账户中。"
           }
         }
       }
@@ -16513,13 +16345,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enable only when the user wants the keyboard extension to read synced encrypted history."
+            "value": "Enable only when the user wants the keyboard extension to read synced history."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "仅在用户希望键盘扩展读取已同步的加密历史时启用。"
+            "value": "仅在用户希望键盘扩展读取已同步的历史时启用。"
           }
         }
       }
@@ -16705,13 +16537,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manual workflows remain available: browsing synced encrypted history, keyboard access, Share extension imports, and Action extension imports continue when automatic pasteboard capture is not allowed."
+            "value": "Manual workflows remain available: browsing synced history, keyboard access, Share extension imports, and Action extension imports continue when automatic pasteboard capture is not allowed."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手动流程仍然可用：即使不允许自动剪贴板捕获，也可以继续浏览已同步的加密历史、使用键盘访问，以及通过分享扩展和操作扩展导入。"
+            "value": "手动流程仍然可用：即使不允许自动剪贴板捕获，也可以继续浏览已同步的历史、使用键盘访问，以及通过分享扩展和操作扩展导入。"
           }
         }
       }

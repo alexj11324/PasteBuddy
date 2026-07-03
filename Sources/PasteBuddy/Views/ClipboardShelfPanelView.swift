@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import PasteBuddyCore
 import QuartzCore
 import SwiftUI
@@ -551,6 +552,19 @@ struct ClipboardShelfPanelView: View {
             pasteboardWriter(for: displayItem)
         }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
+        .popover(isPresented: isShelfPreviewPresented, arrowEdge: .bottom) {
+            if let item = previewedShelfItem {
+                ShelfExpandedPreview(
+                    item: item,
+                    imageDataProvider: store.imageData,
+                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                    onDismiss: {
+                        shelfInteraction.dismissPreview()
+                    },
+                    onMove: moveSelection
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -598,22 +612,6 @@ struct ClipboardShelfPanelView: View {
                     },
                     onDelete: {
                         store.removeItem(item.id)
-                    },
-                    onSaveText: { text in
-                        store.updateTextItem(item.id, to: text)
-                    },
-                    isPreviewPresented: Binding(
-                        get: { shelfInteraction.previewedID == item.id },
-                        set: { isPresented in
-                            if isPresented {
-                                previewItem(item)
-                            } else {
-                                shelfInteraction.dismissPreview(for: item.id)
-                            }
-                        }
-                    ),
-                    onDismissPreview: {
-                        shelfInteraction.dismissPreview(for: item.id)
                     }
                 )
                 .transaction { transaction in
@@ -666,7 +664,7 @@ struct ClipboardShelfPanelView: View {
         let currentID = shelfInteraction.primarySelectedID ?? shelfInteraction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
-        selectSingleItem(items[nextIndex].id)
+        selectSingleItem(items[nextIndex].id, keepsPreviewOpen: shelfInteraction.previewedID != nil)
     }
 
     private func setScope(_ scope: PasteScope) {
@@ -767,9 +765,24 @@ struct ClipboardShelfPanelView: View {
         return renderedShelfItems.filter { ids.contains($0.id) }
     }
 
-    private func selectSingleItem(_ id: UUID?) {
+    private var previewedShelfItem: ClipboardItem? {
+        guard let previewedID = shelfInteraction.previewedID else { return nil }
+        return renderedShelfItems.first { $0.id == previewedID }
+    }
+
+    private var isShelfPreviewPresented: Binding<Bool> {
+        Binding {
+            previewedShelfItem != nil
+        } set: { isPresented in
+            if !isPresented {
+                shelfInteraction.dismissPreview()
+            }
+        }
+    }
+
+    private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
         PasteBuddyMotion.performInstantSelection {
-            shelfInteraction.selectSingle(id)
+            shelfInteraction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
         scheduleStoreSelectionSync(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs)
     }
@@ -1145,9 +1158,6 @@ private struct ClipboardShelfCard: View {
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
     let onDelete: () -> Void
-    let onSaveText: (String) -> Void
-    @Binding var isPreviewPresented: Bool
-    let onDismissPreview: () -> Void
 
     var body: some View {
         ClipboardShelfCardVisual(
@@ -1158,18 +1168,9 @@ private struct ClipboardShelfCard: View {
             .equatable()
             .overlay {
                 ClipboardShelfCardSelectionRing(item: item, isSelected: isSelected)
-            }
+        }
         .contextMenu {
             contextMenuContent
-        }
-        .popover(isPresented: $isPreviewPresented, arrowEdge: .bottom) {
-            ShelfExpandedPreview(
-                item: item,
-                imageDataProvider: imageDataProvider,
-                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                onSaveText: onSaveText,
-                onDismiss: onDismissPreview
-            )
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
@@ -1218,63 +1219,88 @@ private struct ClipboardShelfCard: View {
 }
 
 struct ShelfExpandedPreview: View {
+    private static let maxImagePreviewSize = CGSize(width: 532, height: 340)
+
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
-    let onSaveText: (String) -> Void
     let onDismiss: () -> Void
-    @State private var isTextEditorFocused = false
+    let onMove: (MoveCommandDirection) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 8) {
-                Button {
-                    onDismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
+            if !isImageAssetPreview {
+                HStack(alignment: .center, spacing: 8) {
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help(localized("label.close_preview"))
+
+                    Label(localized(item.presentationContentType.displayName), systemImage: item.presentationContentType.systemImageName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    SourceApplicationIconBadge(item: item, size: 24)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help(localized("label.close_preview"))
-
-                Label(localized(item.presentationContentType.displayName), systemImage: item.presentationContentType.systemImageName)
-                    .font(.headline)
-                    .lineLimit(1)
-
-                Spacer(minLength: 12)
-
-                SourceApplicationIconBadge(item: item, size: 24)
             }
 
             previewContent
 
-            HStack(spacing: 10) {
-                Text(footnote)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let url = item.openableURL {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Label("action.open", systemImage: "arrow.up.right.square")
+            if !isImageAssetPreview {
+                HStack(spacing: 10) {
+                    Text(footnote)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let url = item.openableURL {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Label("action.open", systemImage: "arrow.up.right.square")
+                        }
+                        .buttonStyle(.borderless)
                     }
-                    .buttonStyle(.borderless)
                 }
             }
         }
         .padding(14)
-        .frame(width: 560, alignment: .leading)
+        .frame(width: previewFrameWidth, alignment: .leading)
         .background(.regularMaterial)
+        .background {
+            ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove)
+                .frame(width: 0, height: 0)
+        }
+        .onMoveCommand(perform: onMove)
         .onExitCommand(perform: onDismiss)
         .onKeyPress(phases: .down) { keyPress in
-            guard keyPress.key == .space, keyPress.modifiers.isEmpty, !isTextEditorFocused else {
+            guard keyPress.modifiers.isEmpty else {
                 return .ignored
             }
-            onDismiss()
+
+            switch keyPress.key {
+            case .space:
+                onDismiss()
+            case .upArrow:
+                onMove(.up)
+            case .downArrow:
+                onMove(.down)
+            case .leftArrow:
+                onMove(.left)
+            case .rightArrow:
+                onMove(.right)
+            default:
+                return .ignored
+            }
             return .handled
         }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clipboard-expanded-preview-\(item.id.uuidString)")
         .accessibilityLabel(localized("label.preview"))
     }
 
@@ -1283,20 +1309,20 @@ struct ShelfExpandedPreview: View {
         switch item.presentationContentType {
         case .image:
             if item.payload.hasImageAsset {
-                ShelfExpandedImagePreview(item: item, imageDataProvider: imageDataProvider, tint: tint)
+                ShelfExpandedImagePreview(
+                    item: item,
+                    imageDataProvider: imageDataProvider,
+                    tint: tint,
+                    displaySize: imagePreviewDisplaySize
+                )
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
                     .frame(height: 300)
             }
         case .text:
             if item.contentType == .text {
-                ShelfEditableTextPreview(
-                    text: item.payload.text ?? "",
-                    tint: tint,
-                    isTextEditorFocused: $isTextEditorFocused,
-                    onSaveText: onSaveText
-                )
-                .frame(height: 300)
+                previewText(ClipboardPlainTextRenderer.plainText(for: item))
+                    .frame(height: 300)
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
                     .frame(height: 300)
@@ -1305,6 +1331,27 @@ struct ShelfExpandedPreview: View {
             previewText(ClipboardPlainTextRenderer.plainText(for: item))
                 .frame(height: 300)
         }
+    }
+
+    private var previewFrameWidth: CGFloat {
+        guard let imagePreviewDisplaySize else { return 560 }
+        return max(220, min(560, imagePreviewDisplaySize.width + 28))
+    }
+
+    private var imagePreviewDisplaySize: CGSize? {
+        guard item.presentationContentType == .image,
+              item.payload.hasImageAsset,
+              let imageSize = ClipboardImageCache.imageSize(for: item) else {
+            return nil
+        }
+        return ClipboardImageCache.fittedDisplaySize(
+            for: imageSize,
+            within: Self.maxImagePreviewSize
+        )
+    }
+
+    private var isImageAssetPreview: Bool {
+        item.presentationContentType == .image && item.payload.hasImageAsset
     }
 
     private func previewText(_ text: String) -> some View {
@@ -1326,9 +1373,6 @@ struct ShelfExpandedPreview: View {
     private var footnote: String {
         switch item.presentationContentType {
         case .image:
-            if let imageSize = ClipboardImageCache.imageSize(for: item) {
-                return "\(Int(imageSize.width)) x \(Int(imageSize.height))"
-            }
             return localized(item.ocrState.displayName)
         case .file:
             let count = item.payload.allFileURLStrings.count
@@ -1358,66 +1402,61 @@ struct ShelfExpandedPreview: View {
     }
 }
 
-private struct ShelfEditableTextPreview: View {
-    let text: String
-    let tint: Color
-    @Binding var isTextEditorFocused: Bool
-    let onSaveText: (String) -> Void
-    @State private var draftText: String
-    @State private var savedText: String
-    @FocusState private var editorFocused: Bool
+private struct ShelfPreviewKeyboardHandler: NSViewRepresentable {
+    let onDismiss: () -> Void
+    let onMove: (MoveCommandDirection) -> Void
 
-    init(
-        text: String,
-        tint: Color,
-        isTextEditorFocused: Binding<Bool>,
-        onSaveText: @escaping (String) -> Void
-    ) {
-        self.text = text
-        self.tint = tint
-        self._isTextEditorFocused = isTextEditorFocused
-        self.onSaveText = onSaveText
-        self._draftText = State(initialValue: text)
-        self._savedText = State(initialValue: text)
+    func makeNSView(context: Context) -> KeyCatcherView {
+        let view = KeyCatcherView()
+        view.onKeyDown = handleKeyDown
+        return view
     }
 
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            TextEditor(text: $draftText)
-                .font(.system(size: 16, design: .monospaced))
-                .lineSpacing(4)
-                .focused($editorFocused)
-                .accessibilityLabel(localized("label.clipboard_text_body"))
-                .accessibilityHint(localized("message.edit_the_saved_text_then_choose_save"))
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(tint.opacity(editorFocused ? 0.52 : 0.28), lineWidth: editorFocused ? 1.5 : 1)
-                }
+    func updateNSView(_ nsView: KeyCatcherView, context: Context) {
+        nsView.onKeyDown = handleKeyDown
+    }
 
-            Button("action.save_text") {
-                onSaveText(draftText)
-                savedText = draftText
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else {
+            return false
+        }
+
+        switch Int(event.keyCode) {
+        case kVK_Space:
+            onDismiss()
+        case kVK_UpArrow:
+            onMove(.up)
+        case kVK_DownArrow:
+            onMove(.down)
+        case kVK_LeftArrow:
+            onMove(.left)
+        case kVK_RightArrow:
+            onMove(.right)
+        default:
+            return false
+        }
+        return true
+    }
+
+    final class KeyCatcherView: NSView {
+        var onKeyDown: ((NSEvent) -> Bool)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.window?.makeFirstResponder(self)
             }
-            .keyboardShortcut("s", modifiers: .command)
-            .disabled(draftText == savedText)
-            .accessibilityHint(localized("message.saves_edits_back_to_clipboard_history"))
         }
-        .onAppear {
-            editorFocused = true
-        }
-        .onChange(of: text) {
-            draftText = text
-            savedText = text
-        }
-        .onChange(of: editorFocused) {
-            isTextEditorFocused = editorFocused
-        }
-    }
 
-    private func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
+        override func keyDown(with event: NSEvent) {
+            if onKeyDown?(event) == true {
+                return
+            }
+            super.keyDown(with: event)
+        }
     }
 }
 
@@ -1425,6 +1464,7 @@ private struct ShelfExpandedImagePreview: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
+    let displaySize: CGSize?
     @State private var liveTextImage: NSImage?
     @State private var fallbackImage: NSImage?
     @State private var loadedImageData: Data?
@@ -1453,8 +1493,7 @@ private struct ShelfExpandedImagePreview: View {
                     .foregroundStyle(tint)
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 340)
+        .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -1497,6 +1536,10 @@ private struct ShelfExpandedImagePreview: View {
 
     private var maxPixelSize: Int {
         1_600
+    }
+
+    private var resolvedDisplaySize: CGSize {
+        displaySize ?? CGSize(width: 532, height: 340)
     }
 
     private var analysisID: String {
@@ -1945,14 +1988,13 @@ struct ClipboardImageThumbnailView: View {
 
     var body: some View {
         ZStack {
-            Rectangle()
-                .fill(tint.opacity(0.10))
-
             if let image = thumbnail ?? ClipboardImageCache.cachedThumbnail(for: item, imageData: loadedImageData) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else {
+                Rectangle()
+                    .fill(tint.opacity(0.10))
                 Image(systemName: item.presentationContentType.systemImageName)
                     .font(.system(size: placeholderIconSize, weight: .semibold))
                     .foregroundStyle(tint)

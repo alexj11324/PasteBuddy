@@ -35,7 +35,7 @@ public enum EncryptedDataSurface: String, CaseIterable, Codable, Identifiable, S
         case .sharedPinboardInvitations: "Shared pinboard invitations"
         case .entitlementMetadata: "Entitlement metadata"
         case .mcpAccessAudit: "MCP access audit"
-        case .encryptionKeyMaterial: "Encryption key material"
+        case .encryptionKeyMaterial: "Legacy protection key material"
         }
     }
 }
@@ -77,63 +77,64 @@ public enum EncryptionCoverageAudit {
     public static let current = EncryptionCoverageReport(items: [
         EncryptionCoverageItem(
             surface: .clipboardText,
-            protection: "AES-GCM encrypted snapshot envelope; key material in this-device-only Keychain."
+            protection: "Stored in the local PasteBuddy snapshot and never uploaded unless the user turns on sync."
         ),
         EncryptionCoverageItem(
             surface: .clipboardURLs,
-            protection: "AES-GCM encrypted snapshot envelope; no plaintext search index."
+            protection: "Stored in the local PasteBuddy snapshot with no separate plaintext search index."
         ),
         EncryptionCoverageItem(
             surface: .fileReferences,
-            protection: "Encrypted snapshot metadata; external file bytes are never copied without an explicit future blob vault."
+            protection: "Stored as local snapshot metadata; external file bytes are never copied without an explicit future blob vault."
         ),
         EncryptionCoverageItem(
             surface: .imageAndScreenshotBytes,
-            protection: "Image data is stored inside the AES-GCM encrypted snapshot envelope."
+            protection: "Image data is stored in the local PasteBuddy snapshot."
         ),
         EncryptionCoverageItem(
             surface: .ocrMetadata,
-            protection: "Apple Vision OCR text is saved as encrypted item metadata after local recognition."
+            protection: "Apple Vision OCR text is saved as local item metadata after local recognition."
         ),
         EncryptionCoverageItem(
             surface: .thumbnails,
-            protection: "No plaintext thumbnail cache exists; generated thumbnail data must remain in the encrypted envelope."
+            protection: "No separate plaintext thumbnail cache exists; generated thumbnail data remains in the local snapshot."
         ),
         EncryptionCoverageItem(
             surface: .pinboards,
-            protection: "Pinboard names, colors, order, item membership, and sharing state live inside the encrypted snapshot."
+            protection: "Pinboard names, colors, order, item membership, and sharing state live inside the local snapshot."
         ),
         EncryptionCoverageItem(
             surface: .itemOrganizationMetadata,
-            protection: "User titles, item labels, and reusable content categories are encrypted with the item snapshot and searchable only after local decryption."
+            protection: "User titles, item labels, and reusable content categories stay in the local item snapshot."
         ),
         EncryptionCoverageItem(
             surface: .privacySettings,
-            protection: "Custom capture rules, capture toggles, pause state, and excluded apps are encrypted with the snapshot."
+            protection: "Custom capture rules, capture toggles, pause state, and excluded apps stay in the local snapshot."
         ),
         EncryptionCoverageItem(
             surface: .syncPackages,
-            protection: "Cloud sync package builder only emits encrypted snapshot envelopes and rejects blocked sync states."
+            protection: "Cloud sync package builder emits private CloudKit snapshot records and rejects blocked sync states.",
+            plaintextFallbackAllowed: true
         ),
         EncryptionCoverageItem(
             surface: .sharedPinboardMetadata,
-            protection: "Participants, permissions, and share-link hashes are encrypted; raw link tokens are not persisted."
+            protection: "Participants, permissions, and share-link hashes stay local; raw link tokens are not persisted."
         ),
         EncryptionCoverageItem(
             surface: .sharedPinboardInvitations,
-            protection: "Pending invitation packages and inbox status are encrypted with the snapshot; invitation packages contain wrapped board keys, not unwrapped board keys or private key material."
+            protection: "Pending invitation packages and inbox status stay in the local snapshot; invitation packages contain wrapped board keys, not unwrapped board keys or private key material."
         ),
         EncryptionCoverageItem(
             surface: .entitlementMetadata,
-            protection: "Trial, purchase, restore, and team seat state are encrypted with the snapshot; no payment secrets are stored."
+            protection: "Trial, purchase, restore, and team seat state stay in the local snapshot; no payment secrets are stored."
         ),
         EncryptionCoverageItem(
             surface: .mcpAccessAudit,
-            protection: "MCP access metadata is stored in the encrypted snapshot and omits search queries, clipboard payloads, OCR text, and image bytes."
+            protection: "MCP access metadata stays in the local snapshot and omits search queries, clipboard payloads, OCR text, and image bytes."
         ),
         EncryptionCoverageItem(
             surface: .encryptionKeyMaterial,
-            protection: "AES-GCM key material can be wrapped by a Secure Enclave private key; the wrapped key and encrypted snapshot are stored separately."
+            protection: "Legacy key material support remains only for reading older protected stores during migration."
         )
     ])
 }

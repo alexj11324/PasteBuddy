@@ -29,7 +29,7 @@ public struct MobilePinboardSharingView: View {
                             Text(store.syncReadiness.displayName)
                                 .foregroundStyle(store.canManageSharedPinboards ? .green : .orange)
                         }
-                        Text(store.canManageSharedPinboards ? "message.shared_pinboards_are_encrypted_and_ready" : "message.configure_cloudkit_sync_and_turn_on_shared")
+                        Text(store.canManageSharedPinboards ? "message.shared_pinboards_are_ready" : "message.configure_cloudkit_sync_and_turn_on_shared")
                             .foregroundStyle(.secondary)
                         if let error = store.lastErrorMessage {
                             Text(error)

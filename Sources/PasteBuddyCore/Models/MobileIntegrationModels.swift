@@ -74,7 +74,7 @@ public struct MobileBrowsingCapabilities: Equatable, Sendable {
         supportsContextMenus: Bool = true,
         supportsPinboardDragAndDrop: Bool = true,
         iPadMultitaskingModes: [MobileIPadMultitaskingMode] = MobileIPadMultitaskingMode.allCases,
-        backgroundClipboardLimitation: String = PasteBuddyLocalization.string("mobile.background_clipboard_limitation", defaultValue: "iOS and iPadOS do not permit dependable continuous background clipboard monitoring. PasteBuddy should browse synced or manually imported encrypted history, read the pasteboard only after foreground permission, and rely on Share or Action extensions for manual imports.")
+        backgroundClipboardLimitation: String = PasteBuddyLocalization.string("mobile.background_clipboard_limitation", defaultValue: "iOS and iPadOS do not permit dependable continuous background clipboard monitoring. PasteBuddy should browse synced or manually imported history, read the pasteboard only after foreground permission, and rely on Share or Action extensions for manual imports.")
     ) {
         self.canBrowseHistory = canBrowseHistory
         self.canBrowsePinboards = canBrowsePinboards
@@ -110,7 +110,7 @@ public struct MobileKeyboardExtensionCapabilities: Equatable, Sendable {
         supportsDragAndDrop: Bool = true,
         supportsLongPressActions: Bool = true,
         iPadLayoutModes: [MobileIPadMultitaskingMode] = [.stageManager, .splitView, .slideOver, .dragAndDrop],
-        fullAccessPrivacyExplanation: String = PasteBuddyLocalization.string("mobile.keyboard.full_access_privacy_explanation", defaultValue: "Full Access lets the keyboard read PasteBuddy's encrypted shared App Group history and insert selected text. Clipboard data stays on the user's device or private iCloud account unless the user explicitly enables sync or sharing.")
+        fullAccessPrivacyExplanation: String = PasteBuddyLocalization.string("mobile.keyboard.full_access_privacy_explanation", defaultValue: "Full Access lets the keyboard read PasteBuddy's shared App Group history and insert selected text. Clipboard data stays on the user's device or private iCloud account unless the user explicitly enables sync or sharing.")
     ) {
         self.supportsGlobeSwitcherActivation = supportsGlobeSwitcherActivation
         self.canBrowseHistory = canBrowseHistory
@@ -304,7 +304,7 @@ public struct MobilePastePermissionGuidance: Equatable, Sendable {
         self.canUseManualWorkflows = true
         self.manualWorkflowMessage = localized(
             "mobile.paste_permission.manual_workflows_remain_available",
-            defaultValue: "Manual workflows remain available: browsing synced encrypted history, keyboard access, Share extension imports, and Action extension imports continue when automatic pasteboard capture is not allowed."
+            defaultValue: "Manual workflows remain available: browsing synced history, keyboard access, Share extension imports, and Action extension imports continue when automatic pasteboard capture is not allowed."
         )
         self.darkPatternGuardrail = localized(
             "mobile.paste_permission.dark_pattern_guardrail",
@@ -587,7 +587,7 @@ public struct MobileIntegrationGuidanceReport: Equatable, Sendable {
             title: localized("mobile.card.keyboard_full_access_needed.title", defaultValue: "Keyboard Full Access is needed"),
             detail: localizedFormat(
                 "mobile.card.keyboard_full_access_needed.detail",
-                defaultValue: "Without Full Access, the keyboard should stay in limited mode and avoid claiming it can read synced encrypted history. %@",
+                defaultValue: "Without Full Access, the keyboard should stay in limited mode and avoid claiming it can read synced history. %@",
                 configuration.keyboardCapabilities.fullAccessPrivacyExplanation
             ),
             isComplete: false,
@@ -598,7 +598,7 @@ public struct MobileIntegrationGuidanceReport: Equatable, Sendable {
                     title: localized("mobile.guidance_action.open_keyboard_settings", defaultValue: "Open Keyboard Settings"),
                     detail: localized(
                         "mobile.action.open_keyboard_settings.detail",
-                        defaultValue: "Enable Full Access only after explaining that the keyboard reads PasteBuddy's encrypted shared history."
+                        defaultValue: "Enable Full Access only after explaining that the keyboard reads PasteBuddy's shared history."
                     ),
                     isPrimary: true
                 )
@@ -617,7 +617,7 @@ public struct MobileIntegrationGuidanceReport: Equatable, Sendable {
             detail: configuration.isShareExtensionEnabled
                 ? localizedFormat(
                     "mobile.card.share_extension_enabled.detail",
-                    defaultValue: "Selected text, URLs, images, and files can be saved into encrypted history or a selected pinboard. %@",
+                    defaultValue: "Selected text, URLs, images, and files can be saved into history or a selected pinboard. %@",
                     configuration.shareActionCapabilities.favoriteReorderGuidance
                 )
                 : localizedFormat(
@@ -647,7 +647,7 @@ public struct MobileIntegrationGuidanceReport: Equatable, Sendable {
                 ? localized("mobile.card.action_extension_enabled.title", defaultValue: "Action extension is enabled")
                 : localized("mobile.card.action_extension_available.title", defaultValue: "Action extension is available"),
             detail: configuration.isActionExtensionEnabled
-                ? localized("mobile.card.action_extension_enabled.detail", defaultValue: "The action extension can save supported selections directly into encrypted history or the preferred pinboard.")
+                ? localized("mobile.card.action_extension_enabled.detail", defaultValue: "The action extension can save supported selections directly into history or the preferred pinboard.")
                 : localized("mobile.card.action_extension_available.detail", defaultValue: "Enable the action extension for one-tap Copy to PasteBuddy actions in compatible apps."),
             isComplete: configuration.isActionExtensionEnabled,
             actions: configuration.isActionExtensionEnabled ? [] : [
@@ -667,12 +667,12 @@ public struct MobileIntegrationGuidanceReport: Equatable, Sendable {
             || configuration.isShareExtensionEnabled
             || configuration.isActionExtensionEnabled
         return MobileGuidanceCard(
-            id: "encrypted-app-group-store",
+            id: "app-group-store",
             surface: .iPhoneApp,
             severity: needsAppGroup ? .actionRequired : .optional,
-            title: localized("mobile.card.app_group.title", defaultValue: "Encrypted App Group store"),
+            title: localized("mobile.card.app_group.title", defaultValue: "App Group store"),
             detail: needsAppGroup
-                ? localized("mobile.card.app_group.needs.detail", defaultValue: "Enabled mobile extensions must use the shared encrypted App Group store rather than plaintext handoff files.")
+                ? localized("mobile.card.app_group.needs.detail", defaultValue: "Enabled mobile extensions must use the shared App Group store rather than plaintext handoff files.")
                 : localized("mobile.card.app_group.optional.detail", defaultValue: "App Group setup is only required when the signed app embeds keyboard, share, or action extensions."),
             isComplete: !needsAppGroup,
             actions: [
@@ -682,7 +682,7 @@ public struct MobileIntegrationGuidanceReport: Equatable, Sendable {
                     title: localized("mobile.guidance_action.configure_app_group", defaultValue: "Configure App Group"),
                     detail: localized(
                         "mobile.action.configure_app_group.detail",
-                        defaultValue: "Use EncryptedSnapshotStore.appGroupStore(groupIdentifier:) from the signed app and extension targets."
+                        defaultValue: "Use the shared App Group store from the signed app and extension targets."
                     ),
                     isPrimary: needsAppGroup
                 )
@@ -763,7 +763,7 @@ public struct MobileIntegrationConfiguration: Codable, Equatable, Sendable {
                 title: localized("mobile.onboarding.keyboard_full_access.title", defaultValue: "Keyboard Full Access"),
                 detail: localized(
                     "mobile.onboarding.keyboard_full_access.detail",
-                    defaultValue: "Enable only when the user wants the keyboard extension to read synced encrypted history."
+                    defaultValue: "Enable only when the user wants the keyboard extension to read synced history."
                 ),
                 isComplete: !isKeyboardExtensionEnabled || hasKeyboardFullAccess
             ),

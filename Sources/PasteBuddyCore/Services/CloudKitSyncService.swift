@@ -9,26 +9,23 @@ public struct CloudSyncRemoteRecord: Codable, Equatable, Sendable {
     public var packageID: UUID
     public var createdAt: Date
     public var containerIdentifier: String
-    public var keyHierarchyVersion: Int
     public var schemaVersion: Int
-    public var encryptedSnapshot: EncryptedEnvelope
+    public var snapshot: PasteBuddySnapshot
 
     public init(
         recordName: String,
         packageID: UUID,
         createdAt: Date,
         containerIdentifier: String,
-        keyHierarchyVersion: Int,
         schemaVersion: Int,
-        encryptedSnapshot: EncryptedEnvelope
+        snapshot: PasteBuddySnapshot
     ) {
         self.recordName = recordName
         self.packageID = packageID
         self.createdAt = createdAt
         self.containerIdentifier = containerIdentifier
-        self.keyHierarchyVersion = keyHierarchyVersion
         self.schemaVersion = schemaVersion
-        self.encryptedSnapshot = encryptedSnapshot
+        self.snapshot = snapshot
     }
 
     public init(package: CloudSyncUploadPackage) {
@@ -37,9 +34,8 @@ public struct CloudSyncRemoteRecord: Codable, Equatable, Sendable {
             packageID: package.id,
             createdAt: package.createdAt,
             containerIdentifier: package.containerIdentifier,
-            keyHierarchyVersion: package.keyHierarchyVersion,
             schemaVersion: package.schemaVersion,
-            encryptedSnapshot: package.encryptedSnapshot
+            snapshot: package.snapshot
         )
     }
 
@@ -48,9 +44,8 @@ public struct CloudSyncRemoteRecord: Codable, Equatable, Sendable {
             id: packageID,
             createdAt: createdAt,
             containerIdentifier: containerIdentifier,
-            keyHierarchyVersion: keyHierarchyVersion,
             schemaVersion: schemaVersion,
-            encryptedSnapshot: encryptedSnapshot
+            snapshot: snapshot
         )
     }
 }
@@ -178,7 +173,7 @@ public final class CloudKitRemoteRecordTransport: CloudSyncRemoteRecordTransport
 
     public func fetchLatest(limit: Int = 1) async throws -> [CloudSyncRemoteRecord] {
         let query = CKQuery(
-            recordType: CloudKitRecordFactory.encryptedSnapshotRecordType,
+            recordType: CloudKitRecordFactory.snapshotRecordType,
             predicate: NSPredicate(value: true)
         )
         query.sortDescriptors = [

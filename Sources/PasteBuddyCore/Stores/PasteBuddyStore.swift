@@ -163,12 +163,8 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
-            if let loadedStorageMode = diskStore.lastLoadedStorageMode {
-                snapshot.security.storageMode = loadedStorageMode
-                diskStore.storageMode = loadedStorageMode
-            } else {
-                diskStore.storageMode = snapshot.security.storageMode
-            }
+            snapshot.security.storageMode = .standard
+            diskStore.storageMode = .standard
             if snapshot.security.requiresBiometricUnlock {
                 lockHistory()
             } else {
@@ -196,12 +192,8 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
-            if let loadedStorageMode = result.loadedStorageMode {
-                snapshot.security.storageMode = loadedStorageMode
-                diskStore.storageMode = loadedStorageMode
-            } else {
-                diskStore.storageMode = snapshot.security.storageMode
-            }
+            snapshot.security.storageMode = .standard
+            diskStore.storageMode = .standard
             if snapshot.security.requiresBiometricUnlock {
                 lockHistory()
             } else {
@@ -1698,23 +1690,20 @@ public final class PasteBuddyStore {
 
     public func configureCloudKitSync(
         containerIdentifier: String,
-        keyHierarchyVersion: Int = 1,
+        keyHierarchyVersion: Int? = nil,
         capabilityConfigured: Bool = false
     ) {
+        _ = keyHierarchyVersion
         let trimmedContainer = containerIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContainer.isEmpty else {
             lastErrorMessage = "CloudKit sync requires a container identifier."
-            return
-        }
-        guard keyHierarchyVersion > 0 else {
-            lastErrorMessage = "CloudKit sync requires an end-to-end encryption key hierarchy."
             return
         }
 
         snapshot.sync.provider = .cloudKit
         snapshot.sync.isCloudSyncEnabled = true
         snapshot.sync.cloudKitContainerIdentifier = trimmedContainer
-        snapshot.sync.keyHierarchyVersion = keyHierarchyVersion
+        snapshot.sync.keyHierarchyVersion = nil
         snapshot.sync.isCloudKitCapabilityConfigured = capabilityConfigured
         if snapshot.sync.readiness.canAttemptCloudSync {
             lastErrorMessage = nil
@@ -1741,7 +1730,7 @@ public final class PasteBuddyStore {
         }
         guard snapshot.sync.readiness.canAttemptCloudSync else {
             snapshot.sync.isSharedPinboardsEnabled = false
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync and end-to-end encryption."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync."
             save()
             return
         }
@@ -1771,7 +1760,7 @@ public final class PasteBuddyStore {
         do {
             let result = try await service.upload(snapshot)
             snapshot.sync.lastSyncAt = result.package.createdAt
-            snapshot.sync.lastSyncStatusMessage = "Encrypted CloudKit sync uploaded."
+            snapshot.sync.lastSyncStatusMessage = "CloudKit sync uploaded."
             lastErrorMessage = nil
             save()
             return result
@@ -1787,7 +1776,7 @@ public final class PasteBuddyStore {
     ) async -> CloudSyncDownloadResult? {
         do {
             guard let result = try await service.downloadLatest(into: snapshot) else {
-                snapshot.sync.lastSyncStatusMessage = "No encrypted CloudKit records found."
+                snapshot.sync.lastSyncStatusMessage = "No CloudKit records found."
                 lastErrorMessage = nil
                 save()
                 return nil
@@ -1806,7 +1795,7 @@ public final class PasteBuddyStore {
     public func markCloudSyncCompleted(at date: Date = Date()) {
         guard snapshot.sync.readiness.canAttemptCloudSync else { return }
         snapshot.sync.lastSyncAt = date
-        snapshot.sync.lastSyncStatusMessage = "Encrypted CloudKit sync completed."
+        snapshot.sync.lastSyncStatusMessage = "CloudKit sync completed."
         save()
     }
 
@@ -1819,7 +1808,7 @@ public final class PasteBuddyStore {
         linkToken: String? = nil
     ) -> String? {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return nil
         }
         guard let index = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return nil }
@@ -1848,7 +1837,7 @@ public final class PasteBuddyStore {
         keyExchangeService: PinboardShareKeyExchangeService = PinboardShareKeyExchangeService()
     ) -> PinboardKeyExchangeState? {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return nil
         }
         guard let index = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return nil }
@@ -1888,7 +1877,7 @@ public final class PasteBuddyStore {
         permission: PinboardSharePermission = .readOnly
     ) -> PinboardParticipant? {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return nil
         }
         guard let index = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return nil }
@@ -1921,7 +1910,7 @@ public final class PasteBuddyStore {
         keyExchangeService: PinboardShareKeyExchangeService = PinboardShareKeyExchangeService()
     ) -> PinboardParticipant? {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return nil
         }
         guard let index = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return nil }
@@ -2050,7 +2039,7 @@ public final class PasteBuddyStore {
         receivedAt: Date = Date()
     ) -> [PinboardInvitationInboxEntry] {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return []
         }
         guard !packages.isEmpty else { return [] }
@@ -2179,7 +2168,7 @@ public final class PasteBuddyStore {
         permission: PinboardSharePermission
     ) {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return
         }
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }),
@@ -2195,7 +2184,7 @@ public final class PasteBuddyStore {
 
     public func removeParticipant(pinboardID: UUID, participantID: UUID) {
         guard canManageSharedPinboards else {
-            lastErrorMessage = "Shared pinboards require configured CloudKit sync, end-to-end encryption, and explicit sharing opt-in."
+            lastErrorMessage = "Shared pinboards require configured CloudKit sync and explicit sharing opt-in."
             return
         }
         guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }) else { return }

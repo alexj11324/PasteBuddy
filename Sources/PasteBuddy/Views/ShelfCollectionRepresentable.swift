@@ -285,8 +285,23 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
         private func applySelection(to collectionView: NSCollectionView, selectedIDs: Set<UUID>) {
             let selectedIndexPaths = indexPaths(for: selectedIDs)
-            guard collectionView.selectionIndexPaths != selectedIndexPaths else { return }
-            setCollectionSelection(selectedIndexPaths, in: collectionView)
+            if collectionView.selectionIndexPaths != selectedIndexPaths {
+                setCollectionSelection(selectedIndexPaths, in: collectionView)
+            }
+            scrollPrimarySelectionIntoView(in: collectionView)
+        }
+
+        private func scrollPrimarySelectionIntoView(in collectionView: NSCollectionView) {
+            guard let primarySelectedID = parent.primarySelectedID,
+                  let index = indexByID[primarySelectedID] else { return }
+
+            let scrollPosition: NSCollectionView.ScrollPosition = parent.scrollDirection == .vertical
+                ? .nearestVerticalEdge
+                : .nearestHorizontalEdge
+            collectionView.scrollToItems(
+                at: [IndexPath(item: index, section: 0)],
+                scrollPosition: scrollPosition
+            )
         }
 
         private func setCollectionSelection(_ selection: Set<IndexPath>, in collectionView: NSCollectionView) {

@@ -92,6 +92,7 @@ final class ClipboardShelfPanelController {
     private var screenParametersObserver: NSObjectProtocol?
     private var ignoreOutsideClicksUntil: Date?
     private var isAnimatingPanelOut = false
+    private var isPinned = false
     private var panelAnimationGeneration = 0
 
     init(
@@ -259,11 +260,9 @@ final class ClipboardShelfPanelController {
             AnyView(
                 ClipboardSidePanelView(
                     store: store,
+                    isPinned: sidePanelPinnedBinding(),
                     directPasteItem: directPasteItem,
-                    directPasteItems: directPasteItems,
-                    reloadClipboardHistory: { [store] in
-                        await store.loadAsync()
-                    }
+                    directPasteItems: directPasteItems
                 ) { [weak self] in
                     self?.hide()
                 } onDismissImmediately: { [weak self] in
@@ -463,7 +462,7 @@ final class ClipboardShelfPanelController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.hideImmediately()
+                self?.hideIfAppLostFocus()
             }
         }
     }
@@ -502,6 +501,7 @@ final class ClipboardShelfPanelController {
 
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
+        guard !isPinned else { return }
         if shouldIgnoreDismissalAt(NSEvent.mouseLocation) {
             return
         }
@@ -522,7 +522,8 @@ final class ClipboardShelfPanelController {
             at: location,
             panelFrame: panel.frame,
             isShelfAuxiliaryWindowHit: shelfAuxiliaryWindowContains(location),
-            isIgnoredDismissalTargetHit: shouldIgnoreDismissalAt(location)
+            isIgnoredDismissalTargetHit: shouldIgnoreDismissalAt(location),
+            isPinned: isPinned
         ) {
             hide()
         }
@@ -551,10 +552,32 @@ final class ClipboardShelfPanelController {
         at location: CGPoint,
         panelFrame: CGRect,
         isShelfAuxiliaryWindowHit: Bool,
-        isIgnoredDismissalTargetHit: Bool
+        isIgnoredDismissalTargetHit: Bool,
+        isPinned: Bool = false
     ) -> Bool {
+        guard !isPinned else { return false }
         guard !isIgnoredDismissalTargetHit else { return false }
         return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
+    }
+
+    private func hideIfAppLostFocus() {
+        guard !isPinned else { return }
+        hideImmediately()
+    }
+
+    private func sidePanelPinnedBinding() -> Binding<Bool> {
+        Binding(
+            get: { [weak self] in self?.isPinned ?? false },
+            set: { [weak self] value in
+                self?.setPinned(value)
+            }
+        )
+    }
+
+    private func setPinned(_ value: Bool) {
+        guard isPinned != value else { return }
+        isPinned = value
+        PasteBuddyDiagnostics.record(.shelf, "pinChanged", detail: "pinned=\(value)")
     }
 
     private func shelfAuxiliaryWindowContains(_ location: CGPoint) -> Bool {

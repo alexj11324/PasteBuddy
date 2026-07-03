@@ -80,7 +80,7 @@ private final class PasteBuddyMCPServer {
             return [
                 "name": tool.rawValue,
                 "title": tool.displayName,
-                "description": "Search local encrypted PasteBuddy history and return metadata summaries without raw clipboard payloads.",
+                "description": "Search local PasteBuddy history and return metadata summaries without raw clipboard payloads.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -121,7 +121,7 @@ private final class PasteBuddyMCPServer {
             return [
                 "name": tool.rawValue,
                 "title": tool.displayName,
-                "description": "Create a local encrypted PasteBuddy pinboard.",
+                "description": "Create a local PasteBuddy pinboard.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [

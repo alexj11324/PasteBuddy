@@ -18,7 +18,7 @@ public struct MobileShareActionImportResult: Equatable, Sendable {
 
     public var statusMessage: String {
         let count = importedItems.count
-        let destination = targetPinboardID == nil ? "encrypted history" : "encrypted history and selected pinboard"
+        let destination = targetPinboardID == nil ? "history" : "history and selected pinboard"
         return "Saved \(count) item\(count == 1 ? "" : "s") to \(destination)."
     }
 }

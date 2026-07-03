@@ -79,7 +79,7 @@ final class ShareActionViewController: UIViewController {
     private func importSharedContent() async {
         retryButton.isHidden = true
         activityIndicator.startAnimating()
-        messageLabel.text = localized("message.saving_shared_content_to_encrypted_history")
+        messageLabel.text = localized("message.saving_shared_content_to_history")
 
         let providers = providersFromExtensionContext()
         guard !providers.isEmpty else {

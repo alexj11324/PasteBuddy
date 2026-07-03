@@ -34,7 +34,7 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
 
 struct PasteBuddyCreateTextItemIntent: AppIntent {
     static let title: LocalizedStringResource = "Create PasteBuddy Text Item"
-    static let description = IntentDescription("Create a local encrypted PasteBuddy text item.")
+    static let description = IntentDescription("Create a local PasteBuddy text item.")
 
     @Parameter(title: "Text")
     var text: String
@@ -113,7 +113,7 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
 
 struct PasteBuddyCreatePinboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Create PasteBuddy Pinboard"
-    static let description = IntentDescription("Create a local encrypted PasteBuddy pinboard.")
+    static let description = IntentDescription("Create a local PasteBuddy pinboard.")
 
     @Parameter(title: "Name")
     var name: String
@@ -139,7 +139,7 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
 
 struct PasteBuddyCreateContentItemIntent: AppIntent {
     static let title: LocalizedStringResource = "Create PasteBuddy Content Item"
-    static let description = IntentDescription("Create a local encrypted PasteBuddy text, URL, or file URL item and optionally save it to a pinboard.")
+    static let description = IntentDescription("Create a local PasteBuddy text, URL, or file URL item and optionally save it to a pinboard.")
 
     @Parameter(title: "Content Type")
     var contentKind: AutomationContentKind

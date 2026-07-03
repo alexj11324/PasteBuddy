@@ -66,13 +66,22 @@ final class ShelfInteractionModel {
         selectSingle(id)
     }
 
-    func selectSingle(_ id: UUID?) {
+    func selectSingle(_ id: UUID?, keepsPreviewOpen: Bool = false) {
         let ids = id.map { Set([$0]) } ?? []
-        guard primarySelectedID != id || selectedIDs != ids else { return }
+        guard primarySelectedID != id || selectedIDs != ids else {
+            if keepsPreviewOpen {
+                previewedID = id
+            }
+            return
+        }
         selectedIDs = ids
         primarySelectedID = id
         selectionAnchorID = id
-        clearPreviewUnlessSelected()
+        if keepsPreviewOpen {
+            previewedID = id
+        } else {
+            clearPreviewUnlessSelected()
+        }
     }
 
     func setSelectedIDs(_ ids: Set<UUID>, anchorID: UUID? = nil) {

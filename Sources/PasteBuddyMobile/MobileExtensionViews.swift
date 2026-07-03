@@ -84,8 +84,8 @@ public struct MobileShareImportView: View {
         do {
             _ = try SharedContentImportService().importContent(mutableInput, into: store)
             statusMessage = selectedPinboardID == nil
-                ? "Saved to encrypted history."
-                : "Saved to encrypted history and selected pinboard."
+                ? "Saved to history."
+                : "Saved to history and selected pinboard."
         } catch {
             statusMessage = error.localizedDescription
         }

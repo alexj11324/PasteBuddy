@@ -282,14 +282,6 @@ struct SettingsView: View {
                     Text(localized(store.snapshot.security.storageMode.displayName))
                 }
 
-                Toggle(
-                    "Encrypt clipboard history at rest",
-                    isOn: Binding(
-                        get: { store.snapshot.security.storageMode == .encrypted },
-                        set: { store.setHistoryEncryptionEnabled($0) }
-                    )
-                )
-
                 Text(localized(store.snapshot.security.storageMode.detail))
                     .foregroundStyle(.secondary)
 

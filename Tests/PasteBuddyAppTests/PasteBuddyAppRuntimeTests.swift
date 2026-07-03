@@ -119,6 +119,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(interaction.selectedIDs, [second.id])
     }
 
+    func testShelfPreviewCanFollowKeyboardSelectionWithoutDismissing() {
+        let first = makeShelfItem(title: "First")
+        let second = makeShelfItem(title: "Second")
+        let interaction = ShelfInteractionModel(items: [first, second])
+
+        XCTAssertTrue(interaction.presentPreview(for: first.id))
+        interaction.selectSingle(second.id, keepsPreviewOpen: true)
+
+        XCTAssertEqual(interaction.previewedID, second.id)
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+        XCTAssertEqual(interaction.selectedIDs, [second.id])
+    }
+
     func testShelfTreatsPopoverWindowsAsAuxiliaryPreviewWindows() {
         XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("NSPopoverWindow"))
         XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("_TtC7SwiftUI19PlatformPopoverHost"))
@@ -145,6 +158,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 panelFrame: shelfFrame,
                 isShelfAuxiliaryWindowHit: false,
                 isIgnoredDismissalTargetHit: false
+            )
+        )
+    }
+
+    func testPinnedSidePanelDoesNotDismissForOutsideClick() {
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldDismissForOutsideClick(
+                at: CGPoint(x: 800, y: 500),
+                panelFrame: CGRect(x: 0, y: 652, width: 1512, height: 330),
+                isShelfAuxiliaryWindowHit: false,
+                isIgnoredDismissalTargetHit: false,
+                isPinned: true
             )
         )
     }
@@ -187,24 +212,57 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testShelfExpandedTextPreviewIsEditableAndSaveable() throws {
+    func testShelfExpandedTextPreviewIsReadOnlyAndKeyboardNavigable() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let previewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
         let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
         let previewSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
 
-        XCTAssertTrue(previewSource.contains("TextEditor(text:"))
-        XCTAssertTrue(previewSource.contains("onSaveText(draftText)"))
-        XCTAssertTrue(previewSource.contains("Button(\"action.save_text\")"))
+        XCTAssertTrue(source.contains("import Carbon"))
+        XCTAssertTrue(source.contains("private struct ShelfPreviewKeyboardHandler"))
+        XCTAssertTrue(source.contains("window?.makeFirstResponder(self)"))
+        XCTAssertTrue(source.contains("case kVK_DownArrow:"))
+        XCTAssertTrue(previewSource.contains(".onMoveCommand(perform: onMove)"))
+        XCTAssertTrue(previewSource.contains("case .upArrow:"))
+        XCTAssertTrue(previewSource.contains("case .downArrow:"))
+        XCTAssertTrue(previewSource.contains("clipboard-expanded-preview-"))
+        XCTAssertTrue(previewSource.contains("previewText(ClipboardPlainTextRenderer.plainText(for: item))"))
+        XCTAssertFalse(previewSource.contains("TextEditor(text:"))
+        XCTAssertFalse(previewSource.contains("onSaveText"))
+        XCTAssertFalse(previewSource.contains("Button(\"action.save_text\")"))
+    }
+
+    func testPreviewPopoversAreOwnedByListsInsteadOfReusedCells() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        let shelfCardStart = try XCTUnwrap(shelfSource.range(of: "private struct ClipboardShelfCard: View"))
+        let shelfPreviewStart = try XCTUnwrap(shelfSource.range(of: "struct ShelfExpandedPreview"))
+        let shelfCardSource = String(shelfSource[shelfCardStart.lowerBound..<shelfPreviewStart.lowerBound])
+
+        let sideRowStart = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelListRow: View"))
+        let sidePreviewStart = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelContentPreview"))
+        let sideRowSource = String(sideSource[sideRowStart.lowerBound..<sidePreviewStart.lowerBound])
+
+        XCTAssertTrue(shelfSource.contains(".popover(isPresented: isShelfPreviewPresented, arrowEdge: .bottom)"))
+        XCTAssertTrue(shelfSource.contains("private var previewedShelfItem: ClipboardItem?"))
+        XCTAssertFalse(shelfCardSource.contains(".popover("))
+        XCTAssertFalse(shelfCardSource.contains("@Binding var isPreviewPresented"))
+
+        XCTAssertTrue(sideSource.contains(".popover(isPresented: isPreviewPresented, arrowEdge: .trailing)"))
+        XCTAssertTrue(sideSource.contains("private var previewedItem: ClipboardItem?"))
+        XCTAssertFalse(sideRowSource.contains(".popover("))
+        XCTAssertFalse(sideRowSource.contains("@Binding var isPreviewPresented"))
     }
 
     func testShelfExpandedImagePreviewUsesAppleLiveTextInsteadOfOCRTextBox() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let previewStart = try XCTUnwrap(source.range(of: "private var previewContent"))
-        let editableStart = try XCTUnwrap(source.range(of: "private struct ShelfEditableTextPreview"))
         let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
         let nextViewStart = try XCTUnwrap(source.range(of: "private struct ClipboardShelfCardVisual"))
-        let previewContentSource = String(source[previewStart.lowerBound..<editableStart.lowerBound])
+        let expandedPreviewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
+        let expandedPreviewSource = String(source[expandedPreviewStart.lowerBound..<imageStart.lowerBound])
+        let previewContentSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
         let imagePreviewSource = String(source[imageStart.lowerBound..<nextViewStart.lowerBound])
 
         XCTAssertTrue(source.contains("import VisionKit"))
@@ -215,16 +273,41 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(imagePreviewSource.contains("trackingImageView = imageView"))
         XCTAssertTrue(imagePreviewSource.contains("imageView.addSubview(overlayView)"))
         XCTAssertTrue(imagePreviewSource.contains("NSImage(data: imageData)"))
+        XCTAssertTrue(source.contains("private var previewFrameWidth: CGFloat"))
+        XCTAssertTrue(source.contains("private var imagePreviewDisplaySize: CGSize?"))
+        XCTAssertTrue(expandedPreviewSource.contains("private var isImageAssetPreview: Bool"))
+        XCTAssertTrue(expandedPreviewSource.contains("if !isImageAssetPreview"))
+        XCTAssertTrue(imagePreviewSource.contains("let displaySize: CGSize?"))
+        XCTAssertTrue(imagePreviewSource.contains(".frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)"))
+        XCTAssertTrue(source.contains("ClipboardImageCache.fittedDisplaySize("))
         XCTAssertFalse(source.contains("import QuickLookUI"))
         XCTAssertFalse(imagePreviewSource.contains("QLPreviewView"))
         XCTAssertFalse(imagePreviewSource.contains("ShelfQuickLookPreviewFileStore"))
         XCTAssertFalse(imagePreviewSource.contains("ShelfQuickLookPreviews"))
         XCTAssertFalse(imagePreviewSource.contains("data.write(to:"))
+        XCTAssertFalse(imagePreviewSource.contains(".frame(maxWidth: .infinity)"))
         XCTAssertFalse(previewContentSource.contains("if let text = item.payload.ocrText"))
         XCTAssertFalse(previewContentSource.contains("previewText(text)"))
+        XCTAssertFalse(expandedPreviewSource.contains("\\(Int(imageSize.width)) x \\(Int(imageSize.height))"))
         XCTAssertFalse(imagePreviewSource.contains("TextEditor(text:"))
         XCTAssertFalse(imagePreviewSource.contains("Button(\"action.save_text\")"))
         XCTAssertFalse(imagePreviewSource.contains("ocrText"))
+    }
+
+    func testImagePreviewDisplaySizePreservesAspectRatioWithinBounds() {
+        let portrait = ClipboardImageCache.fittedDisplaySize(
+            for: NSSize(width: 720, height: 1394),
+            within: CGSize(width: 72, height: 54)
+        )
+        XCTAssertEqual(portrait.height, 54, accuracy: 0.01)
+        XCTAssertLessThan(portrait.width, 30)
+
+        let landscape = ClipboardImageCache.fittedDisplaySize(
+            for: NSSize(width: 1394, height: 720),
+            within: CGSize(width: 72, height: 54)
+        )
+        XCTAssertEqual(landscape.width, 72, accuracy: 0.01)
+        XCTAssertLessThan(landscape.height, 38)
     }
 
     func testShelfLinkCardsDoNotFetchRemoteMetadataByDefault() throws {
@@ -361,6 +444,13 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(mcpSource.contains("message.tool_selections_are_saved_and_take_effect"))
     }
 
+    func testSettingsDoesNotExposeLocalHistoryEncryptionToggle() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        XCTAssertFalse(source.contains("Encrypt clipboard history at rest"))
+        XCTAssertFalse(source.contains("setHistoryEncryptionEnabled"))
+    }
+
     func testPushTestFlightFetchRefreshesRemoteTrackingBranchBeforeAheadCheck() throws {
         let source = try sourceFileContents("script/push_testflight.sh")
 
@@ -492,6 +582,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("ShelfInteractionModel"))
         XCTAssertTrue(source.contains("ShelfCollectionRepresentable"))
         XCTAssertTrue(source.contains("scrollDirection: .vertical"))
+        XCTAssertTrue(source.contains("clipboard-side-panel-row-"))
         XCTAssertTrue(source.contains("interaction.togglePreview"))
         XCTAssertTrue(source.contains("ShelfExpandedPreview"))
         XCTAssertTrue(source.contains("ClipboardImageThumbnailView"))
@@ -499,6 +590,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal"))
         XCTAssertTrue(source.contains("label.all"))
         XCTAssertTrue(source.contains("label.today"))
+        XCTAssertFalse(source.contains("label.filters"))
+        XCTAssertFalse(source.contains("action.reload_clipboard_history"))
+        XCTAssertTrue(source.contains("@Binding var isPinned: Bool"))
+        XCTAssertTrue(source.contains("@State private var isPinnedVisual = false"))
+        XCTAssertTrue(source.contains("isPinnedVisual = isPinned"))
+        XCTAssertTrue(source.contains("isPinnedVisual.toggle()"))
+        XCTAssertTrue(source.contains("isPinned = isPinnedVisual"))
+        XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: isPinnedVisual ? \"pin.fill\" : \"pin\")"))
+        XCTAssertTrue(source.contains("ClipboardImageCache.fittedDisplaySize("))
+        XCTAssertTrue(source.contains(".frame(width: previewSize.width, height: previewSize.height)"))
+        XCTAssertTrue(controllerSource.contains("isPinned: sidePanelPinnedBinding()"))
+        XCTAssertTrue(controllerSource.contains("private func sidePanelPinnedBinding() -> Binding<Bool>"))
+        XCTAssertFalse(source.contains(".frame(width: 72, height: 54)"))
         XCTAssertFalse(source.contains("square.grid.2x2"))
         XCTAssertFalse(source.contains("onTapGesture(count: 2)"))
         XCTAssertTrue(controllerSource.contains("ClipboardSidePanelView("))
@@ -528,6 +632,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("override var autohidesScrollers: Bool"))
         XCTAssertTrue(source.contains("hideScrollers()"))
         XCTAssertTrue(source.contains("horizontalScroller?.isHidden = true"))
+    }
+
+    func testShelfCollectionScrollsPrimarySelectionIntoView() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ShelfCollectionRepresentable.swift")
+
+        XCTAssertTrue(source.contains("scrollPrimarySelectionIntoView(in: collectionView)"))
+        XCTAssertTrue(source.contains("collectionView.scrollToItems("))
+        XCTAssertTrue(source.contains("? .nearestVerticalEdge"))
+        XCTAssertTrue(source.contains(": .nearestHorizontalEdge"))
     }
 
     func testPanelHotKeyTriggerGateRecordsSourceAndDeduplicates() {

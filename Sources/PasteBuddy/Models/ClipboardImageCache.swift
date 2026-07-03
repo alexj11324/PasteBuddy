@@ -68,6 +68,18 @@ enum ClipboardImageCache {
         return size
     }
 
+    static func fittedDisplaySize(for imageSize: NSSize?, within maxSize: CGSize) -> CGSize {
+        guard let imageSize,
+              imageSize.width > 0,
+              imageSize.height > 0,
+              maxSize.width > 0,
+              maxSize.height > 0 else {
+            return maxSize
+        }
+        let scale = min(maxSize.width / imageSize.width, maxSize.height / imageSize.height)
+        return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+    }
+
     static func genericAppIcon() -> NSImage {
         genericApplicationIcon
     }
