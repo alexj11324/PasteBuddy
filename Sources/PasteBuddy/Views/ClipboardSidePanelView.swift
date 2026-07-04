@@ -74,7 +74,7 @@ struct ClipboardSidePanelView: View {
         .onChange(of: store.searchQuery) {
             interaction.dismissPreview()
         }
-        .onMoveCommand(perform: moveSelection)
+        .onMoveCommand(perform: handleSidePanelMoveCommand)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
         .focusEffectDisabled()
@@ -454,6 +454,16 @@ struct ClipboardSidePanelView: View {
         }
     }
 
+    private func handleSidePanelMoveCommand(_ direction: MoveCommandDirection) {
+        moveSelection(direction)
+        Task { @MainActor in
+            await Task.yield()
+            if !isSearchFocused {
+                isListFocused = true
+            }
+        }
+    }
+
     private func selectOffset(_ offset: Int) {
         let items = renderedItems
         guard !items.isEmpty else { return }
@@ -469,6 +479,25 @@ struct ClipboardSidePanelView: View {
         if keyPress.key == .space, modifiers.isEmpty, !isSearchFocused {
             toggleSelectedItemPreview()
             return .handled
+        }
+
+        if modifiers.isEmpty, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow:
+                moveSelection(.up)
+                return .handled
+            case .downArrow:
+                moveSelection(.down)
+                return .handled
+            case .leftArrow:
+                moveSelection(.left)
+                return .handled
+            case .rightArrow:
+                moveSelection(.right)
+                return .handled
+            default:
+                break
+            }
         }
 
         if keyPress.key == .return {

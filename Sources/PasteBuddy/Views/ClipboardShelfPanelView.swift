@@ -136,7 +136,7 @@ struct ClipboardShelfPanelView: View {
         .onChange(of: store.searchQuery) {
             shelfInteraction.dismissPreview()
         }
-        .onMoveCommand(perform: moveSelection)
+        .onMoveCommand(perform: handleShelfMoveCommand)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
         .focusEffectDisabled()
@@ -698,6 +698,16 @@ struct ClipboardShelfPanelView: View {
         }
     }
 
+    private func handleShelfMoveCommand(_ direction: MoveCommandDirection) {
+        moveSelection(direction)
+        Task { @MainActor in
+            await Task.yield()
+            if !isSearchFocused {
+                isShelfFocused = true
+            }
+        }
+    }
+
     private func selectOffset(_ offset: Int) {
         let items = renderedShelfItems
         guard !items.isEmpty else { return }
@@ -862,6 +872,25 @@ struct ClipboardShelfPanelView: View {
         if keyPress.key == .space, modifiers.isEmpty, allowsPreview, !isSearchFocused {
             toggleSelectedItemPreview()
             return .handled
+        }
+
+        if modifiers.isEmpty, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow:
+                moveSelection(.up)
+                return .handled
+            case .downArrow:
+                moveSelection(.down)
+                return .handled
+            case .leftArrow:
+                moveSelection(.left)
+                return .handled
+            case .rightArrow:
+                moveSelection(.right)
+                return .handled
+            default:
+                break
+            }
         }
 
         if keyPress.key == .return {
@@ -1387,12 +1416,9 @@ struct ShelfExpandedPreview: View {
         .focusable(true)
         .focused($isPreviewFocused)
         .onAppear {
-            Task { @MainActor in
-                await Task.yield()
-                isPreviewFocused = true
-            }
+            requestPreviewFocus()
         }
-        .onMoveCommand(perform: onMove)
+        .onMoveCommand(perform: handlePreviewMoveCommand)
         .onExitCommand(perform: onDismiss)
         .onKeyPress(phases: .down, action: handlePreviewKeyPress)
         .accessibilityElement(children: .contain)
@@ -1471,10 +1497,22 @@ struct ShelfExpandedPreview: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(12)
         }
-        .onMoveCommand(perform: onMove)
+        .onMoveCommand(perform: handlePreviewMoveCommand)
         .onKeyPress(phases: .down, action: handlePreviewKeyPress)
         .scrollContentBackground(.hidden)
         .background(Color.clear)
+    }
+
+    private func requestPreviewFocus() {
+        Task { @MainActor in
+            await Task.yield()
+            isPreviewFocused = true
+        }
+    }
+
+    private func handlePreviewMoveCommand(_ direction: MoveCommandDirection) {
+        onMove(direction)
+        requestPreviewFocus()
     }
 
     private func handlePreviewKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
