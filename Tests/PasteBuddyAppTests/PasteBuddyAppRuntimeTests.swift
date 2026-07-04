@@ -306,7 +306,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("static func dismantleNSView"))
         XCTAssertTrue(collectionSource.contains("coordinator.closePreviewPopover()"))
         XCTAssertTrue(collectionSource.contains("parent.onPreviewDismiss()"))
-        XCTAssertFalse(collectionSource.contains("popover.animates = false"))
+        // Presentation keeps the native fade: show/close must re-enable
+        // animation, while positioning follow-moves must stay immediate so the
+        // preview does not lag the scroll direction.
+        XCTAssertTrue(collectionSource.contains("popover.animates = true"))
+        XCTAssertTrue(collectionSource.contains("private func movePopoverImmediately(to rect: NSRect)"))
+        XCTAssertTrue(collectionSource.contains("movePopoverImmediately(to: anchor.rect)"))
         XCTAssertTrue(collectionSource.contains("popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)"))
         XCTAssertTrue(collectionSource.contains("var previewAvoidsContainingWindowOverlap: Bool"))
         XCTAssertTrue(collectionSource.contains("windowEdgePreviewAnchor(for: id, desiredContentSize: desiredContentSize, in: clipView)"))

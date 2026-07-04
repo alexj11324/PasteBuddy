@@ -175,9 +175,19 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
         func closePreviewPopover() {
             if popover.isShown {
+                popover.animates = true
                 popover.close()
             }
             currentPopoverAnchorView = nil
+        }
+
+        // NSPopover animates positioningRect changes by default. During
+        // scroll-follow and selection-follow that animation trails the content
+        // and turns into visible lag whenever the direction reverses, so
+        // tracking moves must be immediate; only show/close keep the fade.
+        private func movePopoverImmediately(to rect: NSRect) {
+            popover.animates = false
+            popover.positioningRect = rect
         }
 
         func syncData() {
@@ -392,7 +402,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             popover.contentSize = anchor.contentSize
             if popover.isShown {
                 if currentPopoverAnchorView === anchor.view {
-                    popover.positioningRect = anchor.rect
+                    movePopoverImmediately(to: anchor.rect)
                 } else {
                     popover.close()
                     currentPopoverAnchorView = nil
@@ -429,7 +439,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
                 showPopover(anchor)
                 return
             }
-            popover.positioningRect = anchor.rect
+            movePopoverImmediately(to: anchor.rect)
         }
 
         private struct PreviewPopoverAnchor {
@@ -441,6 +451,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
 
         private func showPopover(_ anchor: PreviewPopoverAnchor) {
             guard anchor.view.window != nil else { return }
+            popover.animates = true
             popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)
             currentPopoverAnchorView = anchor.view
         }
