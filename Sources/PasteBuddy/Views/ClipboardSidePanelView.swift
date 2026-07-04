@@ -39,7 +39,6 @@ struct ClipboardSidePanelView: View {
     @State private var interaction = ShelfInteractionModel()
     @State private var selectionSyncTask: Task<Void, Never>?
     @State private var isShowingNewTextItem = false
-    @State private var isPinnedVisual = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +57,6 @@ struct ClipboardSidePanelView: View {
             store.searchQuery = ""
             store.clearFilters()
             sideScope = store.selectedScope
-            isPinnedVisual = isPinned
             refreshSideItems()
             Task { @MainActor in
                 await Task.yield()
@@ -72,6 +70,9 @@ struct ClipboardSidePanelView: View {
         }
         .onChange(of: queryState) {
             refreshSideItems()
+        }
+        .onChange(of: store.searchQuery) {
+            interaction.dismissPreview()
         }
         .onMoveCommand(perform: moveSelection)
         .onExitCommand(perform: handleExitCommand)
@@ -100,10 +101,9 @@ struct ClipboardSidePanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Button {
-                    isPinnedVisual.toggle()
-                    isPinned = isPinnedVisual
+                    isPinned.toggle()
                 } label: {
-                    ShelfToolbarCircleIcon(systemName: isPinnedVisual ? "pin.fill" : "pin")
+                    ShelfToolbarCircleIcon(systemName: isPinned ? "pin.fill" : "pin")
                         .rotationEffect(.degrees(45))
                 }
                 .buttonStyle(.plain)
@@ -584,7 +584,7 @@ struct ClipboardSidePanelView: View {
             if ids.count == 1 {
                 store.selectSingleItem(primaryID)
             } else {
-                store.setSelectedItemIDs(ids)
+                store.setSelectedItemIDs(ids, in: sideScope)
             }
         }
     }

@@ -137,6 +137,9 @@ struct ClipboardShelfPanelView: View {
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
         }
+        .onChange(of: store.searchQuery) {
+            shelfInteraction.dismissPreview()
+        }
         .onMoveCommand(perform: moveSelection)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
@@ -913,7 +916,7 @@ struct ClipboardShelfPanelView: View {
             if ids.count == 1 {
                 store.selectSingleItem(primaryID)
             } else {
-                store.setSelectedItemIDs(ids)
+                store.setSelectedItemIDs(ids, in: shelfScope)
             }
         }
     }

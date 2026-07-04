@@ -469,10 +469,12 @@ public final class PasteBuddyStore {
         return PasteOrderPreview(items: items)
     }
 
-    public func setSelectedItemIDs(_ ids: Set<UUID>) {
-        guard selectedItemIDs != ids else { return }
+    public func setSelectedItemIDs(_ ids: Set<UUID>, in scope: PasteScope? = nil) {
+        let items = scope.map { filteredItems(for: $0) } ?? mainListItemsSnapshot
+        let primaryID = items.first(where: { ids.contains($0.id) })?.id
+        guard selectedItemIDs != ids || selectedItemID != primaryID else { return }
         selectedItemIDs = ids
-        selectedItemID = mainListItemsSnapshot.first(where: { ids.contains($0.id) })?.id
+        selectedItemID = primaryID
     }
 
     public func selectSingleItem(_ id: UUID?) {
@@ -2488,8 +2490,7 @@ public final class PasteBuddyStore {
 
     private func databaseFilteredItems(pinboardID: UUID?) -> [ClipboardItem]? {
         guard let clipboardRepository,
-              repositorySyncedDataRevision == dataRevision,
-              contentTypeFilter == nil else {
+              repositorySyncedDataRevision == dataRevision else {
             return nil
         }
         let filters = resolvedSearchFilters()

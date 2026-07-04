@@ -359,8 +359,9 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         private func syncPreviewPopover(in collectionView: NSCollectionView) {
             guard let previewedID = parent.previewedID,
                   parent.previewContent != nil else {
-                if popover.isShown {
-                    popover.close()
+                closePreviewPopover()
+                if parent.previewedID != nil {
+                    parent.onPreviewDismiss()
                 }
                 return
             }
@@ -372,6 +373,8 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             guard let scrollView,
                   let item = item(withID: id),
                   let previewContent = parent.previewContent else {
+                closePreviewPopover()
+                parent.onPreviewDismiss()
                 return
             }
             let clipView = scrollView.contentView

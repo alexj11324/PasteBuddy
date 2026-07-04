@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 
 public struct MobileClipboardBrowserView: View {
     @Bindable private var store: PasteBuddyStore
-    @State private var selectedItem: ClipboardItem?
     @State private var sharingRoute: MobilePinboardSharingRoute?
     @State private var previewRoute: MobilePreviewRoute?
     @State private var isShowingTextEntry = false
@@ -53,7 +52,7 @@ public struct MobileClipboardBrowserView: View {
                         .draggable(MobilePinboardItemDragPayload(ids: [item.id]))
                         .contextMenu {
                             Button {
-                                previewRoute = MobilePreviewRoute(item: item)
+                                previewRoute = MobilePreviewRoute(id: item.id)
                             } label: {
                                 Label("label.preview", systemImage: "rectangle.expand.vertical")
                             }
@@ -161,7 +160,7 @@ public struct MobileClipboardBrowserView: View {
 
                     if let selectedItem {
                         Button {
-                            previewRoute = MobilePreviewRoute(item: selectedItem)
+                            previewRoute = MobilePreviewRoute(id: selectedItem.id)
                         } label: {
                             Label("label.full_screen_preview", systemImage: "rectangle.expand.vertical")
                         }
@@ -189,7 +188,7 @@ public struct MobileClipboardBrowserView: View {
         .sheet(isPresented: $isShowingTextEntry) {
             MobileTextEntryView(store: store)
         }
-        .mobilePreviewPresentation(previewRoute: $previewRoute)
+        .mobilePreviewPresentation(previewRoute: $previewRoute, itemProvider: clipboardItem)
     }
 
     private func pinboardLabel(_ pinboard: Pinboard) -> some View {
@@ -227,14 +226,23 @@ public struct MobileClipboardBrowserView: View {
 
     private var itemSelectionBinding: Binding<UUID?> {
         Binding(
-            get: { selectedItem?.id ?? store.selectedItemID },
+            get: { selectedItem?.id },
             set: { newID in
                 store.selectSingleItem(newID)
-                selectedItem = newID.flatMap { id in
-                    store.filteredItems.first(where: { $0.id == id })
-                }
             }
         )
+    }
+
+    private var selectedItem: ClipboardItem? {
+        store.selectedItemID.flatMap { id in
+            store.filteredItems.first { $0.id == id }
+        }
+    }
+
+    private func clipboardItem(for id: UUID) -> ClipboardItem? {
+        store.filteredItems.first { $0.id == id }
+            ?? store.pasteStackItems.first { $0.id == id }
+            ?? store.snapshot.items.first { $0.id == id }
     }
 }
 
@@ -243,9 +251,7 @@ private struct MobilePinboardSharingRoute: Identifiable {
 }
 
 private struct MobilePreviewRoute: Identifiable {
-    let item: ClipboardItem
-
-    var id: UUID { item.id }
+    let id: UUID
 }
 
 private struct MobileTextEntryView: View {
@@ -293,14 +299,27 @@ private struct MobileTextEntryView: View {
 
 private extension View {
     @ViewBuilder
-    func mobilePreviewPresentation(previewRoute: Binding<MobilePreviewRoute?>) -> some View {
+    func mobilePreviewPresentation(
+        previewRoute: Binding<MobilePreviewRoute?>,
+        itemProvider: @escaping (UUID) -> ClipboardItem?
+    ) -> some View {
         #if os(iOS)
         fullScreenCover(item: previewRoute) { route in
-            MobilePreviewNavigation(item: route.item, previewRoute: previewRoute)
+            if let item = itemProvider(route.id) {
+                MobilePreviewNavigation(item: item, previewRoute: previewRoute)
+            } else {
+                Color.clear
+                    .task { previewRoute.wrappedValue = nil }
+            }
         }
         #else
         sheet(item: previewRoute) { route in
-            MobilePreviewNavigation(item: route.item, previewRoute: previewRoute)
+            if let item = itemProvider(route.id) {
+                MobilePreviewNavigation(item: item, previewRoute: previewRoute)
+            } else {
+                Color.clear
+                    .task { previewRoute.wrappedValue = nil }
+            }
         }
         #endif
     }

@@ -1448,6 +1448,39 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.queryRevision, queryRevision)
     }
 
+    func testScopedSelectionResolvesPrimaryInExplicitScopeWithoutChangingSelectedScope() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let oldDate = Calendar.current.date(byAdding: .hour, value: -2, to: Date())!
+        let older = store.addCapturedItem(ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Older",
+            payload: ClipboardPayload(text: "older body")
+        ))
+        let newer = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Newer",
+            payload: ClipboardPayload(text: "newer body")
+        ))
+        let pinboard = Pinboard(name: "Panel", colorHex: "#4EA7FC", itemIDs: [older.id, newer.id])
+        store.snapshot.pinboards = [pinboard]
+        store.selectedScope = .history
+
+        store.setSelectedItemIDs([older.id, newer.id], in: .pinboard(pinboard.id))
+
+        XCTAssertEqual(store.selectedScope, .history)
+        XCTAssertEqual(store.selectedItemID, older.id)
+        XCTAssertEqual(store.selectedItemIDs, [older.id, newer.id])
+    }
+
     func testSelectedItemsFollowCurrentDisplayOrder() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
