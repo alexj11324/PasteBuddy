@@ -19,7 +19,6 @@ private enum ClipboardShelfMetrics {
     static let sourceAppSuggestionWidth: CGFloat = 168
     static let shelfVerticalPadding: CGFloat = 6
     static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
-    static let renderLimit = 200
 }
 
 enum ClipboardShelfGlass {
@@ -43,7 +42,6 @@ private enum ClipboardShelfDisplayItem: Identifiable {
     case launchAtLoginPrompt
     case empty(title: String, detail: String, systemImageName: String)
     case clipboard(ClipboardItem)
-    case overflow(shownCount: Int, remainingCount: Int)
 
     var id: UUID {
         switch self {
@@ -53,8 +51,6 @@ private enum ClipboardShelfDisplayItem: Identifiable {
             UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         case .clipboard(let item):
             item.id
-        case .overflow:
-            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         }
     }
 }
@@ -94,9 +90,7 @@ struct ClipboardShelfPanelView: View {
     @State private var isShowingNewTextItem = false
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
-    @State private var shelfOverflowCount = 0
     @State private var shelfInteraction = ShelfInteractionModel()
-    @State private var selectionSyncTask: Task<Void, Never>?
     @State private var isSearchRailPresented = false
     @State private var relativeDateReference = Date()
     @State private var shelfScope: PasteScope = .history
@@ -127,8 +121,6 @@ struct ClipboardShelfPanelView: View {
             }
         }
         .onDisappear {
-            selectionSyncTask?.cancel()
-            selectionSyncTask = nil
             isSearchRailPresented = false
         }
         .onChange(of: shelfQueryState) {
@@ -445,7 +437,7 @@ struct ClipboardShelfPanelView: View {
             }
             .padding(.vertical, 1)
         }
-        .scrollIndicators(.hidden)
+        .scrollIndicators(.never, axes: .horizontal)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.clipboard_collections"))
@@ -456,7 +448,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var renderedShelfItems: [ClipboardItem] {
-        Array(shelfItems.prefix(ClipboardShelfMetrics.renderLimit))
+        shelfItems
     }
 
     private var shelfDisplayItems: [ClipboardShelfDisplayItem] {
@@ -473,11 +465,7 @@ struct ClipboardShelfPanelView: View {
             ]
         }
 
-        var items = renderedShelfItems.map(ClipboardShelfDisplayItem.clipboard)
-        if shelfOverflowCount > 0 {
-            items.append(.overflow(shownCount: renderedShelfItems.count, remainingCount: shelfOverflowCount))
-        }
-        return items
+        return renderedShelfItems.map(ClipboardShelfDisplayItem.clipboard)
     }
 
     private var shelfQueryState: ClipboardShelfQueryState {
@@ -522,7 +510,7 @@ struct ClipboardShelfPanelView: View {
             }
             .padding(.horizontal, 2)
         }
-        .scrollIndicators(.hidden)
+        .scrollIndicators(.never, axes: .horizontal)
     }
 
     @ViewBuilder
@@ -614,7 +602,10 @@ struct ClipboardShelfPanelView: View {
             )
         } dragPayload: { displayItem in
             guard case .clipboard(let item) = displayItem else { return nil }
-            return PinboardItemDragPayload(ids: [item.id])
+            return PinboardItemDragPayload(
+                ids: [item.id],
+                plainText: PasteboardWriter.plainText(for: item)
+            )
         } onSelect: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
             selectItem(item)
@@ -679,15 +670,6 @@ struct ClipboardShelfPanelView: View {
                     transaction.animation = nil
                     transaction.disablesAnimations = true
                 }
-            case .overflow(let shownCount, let remainingCount):
-                VStack {
-                    Spacer(minLength: 0)
-                    ShelfOverflowStatusCard(
-                        shownCount: shownCount,
-                        remainingCount: remainingCount
-                    )
-                }
-                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
             }
         }
 
@@ -812,10 +794,6 @@ struct ClipboardShelfPanelView: View {
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.select(item.id)
         }
-        scheduleStoreSelectionSync(
-            primaryID: shelfInteraction.primarySelectedID,
-            ids: shelfInteraction.selectedIDs
-        )
         setSearchFocused(false)
     }
 
@@ -872,7 +850,6 @@ struct ClipboardShelfPanelView: View {
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
-        scheduleStoreSelectionSync(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs)
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
@@ -953,24 +930,6 @@ struct ClipboardShelfPanelView: View {
         return true
     }
 
-    private func scheduleStoreSelectionSync(primaryID: UUID?, ids: Set<UUID>) {
-        selectionSyncTask?.cancel()
-        let store = store
-        selectionSyncTask = Task { @MainActor in
-            do {
-                try await Task.sleep(nanoseconds: 45_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            if ids.count == 1 {
-                store.selectSingleItem(primaryID)
-            } else {
-                store.setSelectedItemIDs(ids, in: shelfScope)
-            }
-        }
-    }
-
     private func toggleSelectedItemPreview() {
         guard let item = selectedItemsInDisplayOrder.first else { return }
         setSearchFocused(false)
@@ -1010,28 +969,12 @@ struct ClipboardShelfPanelView: View {
     private func refreshShelfItems() {
         let items = store.filteredItems(for: shelfScope)
         shelfItems = items
-        shelfOverflowCount = max(0, items.count - ClipboardShelfMetrics.renderLimit)
 
-        let renderedItems = Array(items.prefix(ClipboardShelfMetrics.renderLimit))
         shelfInteraction.replaceItems(
-            renderedItems,
+            items,
             storeSelectedIDs: store.selectedItemIDs,
             storePrimarySelectedID: store.selectedItemID
         )
-
-        if !storeSelectionMatches(primaryID: shelfInteraction.primarySelectedID, ids: shelfInteraction.selectedIDs) {
-            scheduleStoreSelectionSync(
-                primaryID: shelfInteraction.primarySelectedID,
-                ids: shelfInteraction.selectedIDs
-            )
-        }
-    }
-
-    private func storeSelectionMatches(primaryID: UUID?, ids: Set<UUID>) -> Bool {
-        if ids.count == 1 {
-            return store.selectedItemIDs == ids && store.selectedItemID == primaryID
-        }
-        return store.selectedItemIDs == ids
     }
 
     private func runShelfMinuteTicker() async {
@@ -1101,44 +1044,6 @@ private struct LaunchAtLoginShelfCard: View {
             return "Unavailable"
         }
         return store.snapshot.general.launchAtLoginEnabled ? "Enabled" : "Enable"
-    }
-}
-
-private struct ShelfOverflowStatusCard: View {
-    let shownCount: Int
-    let remainingCount: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 28, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            Spacer(minLength: 0)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(localized("format.showing_first_items", shownCount))
-                    .font(.headline)
-                    .lineLimit(2)
-                Text(localized("format.refine_search_or_filters_to_see_more", remainingCount))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-        }
-        .padding(20)
-        .frame(width: 240, height: 230)
-        .pasteBuddyGlassSurface(cornerRadius: 18, interactive: true)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(localized("format.showing_first_clipboard_items_refine_search_or", shownCount, remainingCount))
-    }
-
-    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
-        String(
-            format: NSLocalizedString(key, comment: ""),
-            locale: Locale.current,
-            arguments: arguments
-        )
     }
 }
 
@@ -2051,21 +1956,37 @@ struct ClipboardImageThumbnailView: View {
                     .aspectRatio(contentMode: contentMode)
             } else {
                 Rectangle()
-                    .fill(tint.opacity(0.10))
+                    .fill(placeholderFill)
                 Image(systemName: item.presentationContentType.systemImageName)
                     .font(.system(size: placeholderIconSize, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(placeholderIconTint)
             }
         }
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item)) {
-            thumbnail = ClipboardImageCache.cachedThumbnail(for: item)
-            guard thumbnail == nil else { return }
+            if let cachedThumbnail = ClipboardImageCache.cachedThumbnail(for: item) {
+                thumbnail = cachedThumbnail
+                return
+            }
 
             let imageData = await imageDataProvider(item)
             let loadedThumbnail = await ClipboardImageCache.thumbnail(for: item, imageData: imageData)
             guard !Task.isCancelled else { return }
-            thumbnail = loadedThumbnail
+            if let loadedThumbnail {
+                thumbnail = loadedThumbnail
+            }
         }
+    }
+
+    private var placeholderFill: Color {
+        item.presentationContentType == .image
+            ? Color(nsColor: .controlBackgroundColor).opacity(0.42)
+            : tint.opacity(0.10)
+    }
+
+    private var placeholderIconTint: Color {
+        item.presentationContentType == .image
+            ? Color(nsColor: .secondaryLabelColor)
+            : tint
     }
 }
 

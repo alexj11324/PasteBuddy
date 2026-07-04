@@ -13,6 +13,7 @@ enum ClipboardShelfDirectPasteCoordinator {
             await Task.yield()
         } else {
             PasteBuddyDiagnostics.record(.directPaste, "dismissSkipped")
+            await Task.yield()
         }
         PasteBuddyDiagnostics.record(.directPaste, "operationStarted")
         let result = await operation()

@@ -4038,6 +4038,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.dataRevision, loadedDataRevision)
         XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
         XCTAssertEqual(store.filteredItems.count, 100)
+        XCTAssertEqual(store.filteredItemCount(for: .history), 125)
 
         store.selectedScope = .pinboard(pinboard.id)
 
@@ -4097,12 +4098,14 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.mainListItemsSnapshot.first?.title, "History Item 0")
         XCTAssertEqual(store.mainListItemsSnapshot.last?.title, "History Item 124")
         XCTAssertEqual(store.filteredItems.count, 100)
+        XCTAssertEqual(store.filteredItemCount(for: .history), 125)
 
         store.searchQuery = "history body"
 
         XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
         XCTAssertEqual(store.mainListItemsSnapshot.count, 125)
         XCTAssertEqual(store.filteredItems.count, 100)
+        XCTAssertEqual(store.filteredItemCount(for: .history), 125)
 
         let beyondRepositoryPageItem = items[124]
         XCTAssertFalse(store.filteredItems.contains(where: { $0.id == beyondRepositoryPageItem.id }))

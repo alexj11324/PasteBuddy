@@ -3,7 +3,6 @@ import PasteBuddyCore
 import SwiftUI
 
 private enum ClipboardSidePanelMetrics {
-    static let renderLimit = 100
     static let rowHeight: CGFloat = 82
     static let thumbnailSize: CGFloat = 42
     static let previewMaxWidth: CGFloat = 640
@@ -35,10 +34,10 @@ struct ClipboardSidePanelView: View {
     @FocusState private var isListFocused: Bool
     @State private var sideScope: PasteScope = .history
     @State private var sideItems: [ClipboardItem] = []
-    @State private var overflowCount = 0
+    @State private var sideItemTotalCount = 0
     @State private var interaction = ShelfInteractionModel()
-    @State private var selectionSyncTask: Task<Void, Never>?
     @State private var isShowingNewTextItem = false
+    @State private var pinnedState: Bool?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,8 +65,6 @@ struct ClipboardSidePanelView: View {
         }
         .onDisappear {
             interaction.dismissPreview()
-            selectionSyncTask?.cancel()
-            selectionSyncTask = nil
         }
         .onChange(of: queryState) {
             refreshSideItems()
@@ -122,9 +119,9 @@ struct ClipboardSidePanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Button {
-                    isPinned.toggle()
+                    setPinned(!effectivePinned)
                 } label: {
-                    ShelfToolbarCircleIcon(systemName: isPinned ? "pin.fill" : "pin")
+                    ShelfToolbarCircleIcon(systemName: effectivePinned ? "pin.fill" : "pin")
                         .rotationEffect(.degrees(45))
                 }
                 .buttonStyle(.plain)
@@ -208,46 +205,43 @@ struct ClipboardSidePanelView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ClipboardSidePanelFilterChip(
-                    title: localized("label.all"),
-                    systemImageName: nil,
-                    isSelected: sideScope == .history && !store.hasActiveFilters
+                    title: localized("label.clipboard"),
+                    systemImageName: "clock.arrow.circlepath",
+                    color: store.isCapturePaused ? .orange : .blue,
+                    isSelected: sideScope == .history
                 ) {
-                    sideScope = .history
-                    store.clearFilters()
-                    refreshSideItems()
+                    setSideScope(.history)
                 }
 
                 ClipboardSidePanelFilterChip(
-                    title: localized("label.file"),
-                    systemImageName: "doc",
-                    isSelected: store.contentTypeFilter == .file
+                    title: localized("action.paste_stack"),
+                    systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
+                    color: store.isPasteStackActive ? .green : .secondary,
+                    isSelected: sideScope == .pasteStack
                 ) {
-                    setContentTypeFilter(.file)
+                    setSideScope(.pasteStack)
                 }
 
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.today"),
-                    systemImageName: "calendar",
-                    isSelected: store.dateFilter == .today
-                ) {
-                    store.dateFilter = store.dateFilter == .today ? .any : .today
-                    refreshSideItems()
+                ForEach(SmartPinboardCategory.allCases) { category in
+                    ClipboardSidePanelFilterChip(
+                        title: localized(category.displayName),
+                        systemImageName: category.systemImageName,
+                        color: Color(hex: category.colorHex) ?? .accentColor,
+                        isSelected: isSmartCategorySelected(category)
+                    ) {
+                        selectSmartCategory(category)
+                    }
                 }
 
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.image"),
-                    systemImageName: "photo",
-                    isSelected: store.contentTypeFilter == .image
-                ) {
-                    setContentTypeFilter(.image)
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.link"),
-                    systemImageName: "link",
-                    isSelected: store.contentTypeFilter == .url
-                ) {
-                    setContentTypeFilter(.url)
+                ForEach(store.userPinboards) { pinboard in
+                    ClipboardSidePanelFilterChip(
+                        title: pinboard.name,
+                        systemImageName: "pin.fill",
+                        color: Color(hex: pinboard.colorHex) ?? .blue,
+                        isSelected: sideScope == .pinboard(pinboard.id)
+                    ) {
+                        setSideScope(.pinboard(pinboard.id))
+                    }
                 }
 
                 Menu {
@@ -258,8 +252,7 @@ struct ClipboardSidePanelView: View {
                     }
                     Button {
                         let pinboard = store.createPinboard()
-                        sideScope = .pinboard(pinboard.id)
-                        refreshSideItems()
+                        setSideScope(.pinboard(pinboard.id))
                     } label: {
                         Label("label.new_pinboard", systemImage: "plus.rectangle.on.folder")
                     }
@@ -275,7 +268,7 @@ struct ClipboardSidePanelView: View {
             }
             .padding(.vertical, 1)
         }
-        .scrollIndicators(.hidden)
+        .scrollIndicators(.never, axes: .horizontal)
     }
 
     private var itemList: some View {
@@ -337,6 +330,12 @@ struct ClipboardSidePanelView: View {
                             )
                         )
                     },
+                    dragPayload: { item in
+                        PinboardItemDragPayload(
+                            ids: [item.id],
+                            plainText: PasteboardWriter.plainText(for: item)
+                        )
+                    },
                     onSelect: { id in
                         guard let item = renderedItems.first(where: { $0.id == id }) else { return }
                         selectItem(item)
@@ -348,18 +347,12 @@ struct ClipboardSidePanelView: View {
                 )
             }
 
-            if overflowCount > 0 {
-                Label(localized("format.refine_search_or_filters_to_see_more", overflowCount), systemImage: "line.3.horizontal.decrease.circle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 6)
-            }
         }
         .padding(.vertical, 10)
     }
 
     private var footer: some View {
-        Text(localized("format.items", sideItems.count))
+        Text(localized("format.items", sideItemTotalCount))
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
@@ -382,7 +375,7 @@ struct ClipboardSidePanelView: View {
     }
 
     private var renderedItems: [ClipboardItem] {
-        Array(sideItems.prefix(ClipboardSidePanelMetrics.renderLimit))
+        sideItems
     }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -391,6 +384,15 @@ struct ClipboardSidePanelView: View {
             return interaction.primarySelectedID.flatMap { id in renderedItems.first { $0.id == id } }.map { [$0] } ?? []
         }
         return renderedItems.filter { ids.contains($0.id) }
+    }
+
+    private var effectivePinned: Bool {
+        pinnedState ?? isPinned
+    }
+
+    private func setPinned(_ value: Bool) {
+        pinnedState = value
+        isPinned = value
     }
 
     private var hasSearchText: Bool {
@@ -423,32 +425,41 @@ struct ClipboardSidePanelView: View {
         return localized("message.copy_text_links_screenshots_or_files_to")
     }
 
-    private func setContentTypeFilter(_ type: ClipboardContentType) {
-        store.contentTypeFilter = store.contentTypeFilter == type ? nil : type
-        refreshSideItems()
-    }
-
     private func refreshSideItems() {
         let items = store.filteredItems(for: sideScope)
         sideItems = items
-        overflowCount = max(0, items.count - ClipboardSidePanelMetrics.renderLimit)
-        let rendered = Array(items.prefix(ClipboardSidePanelMetrics.renderLimit))
+        sideItemTotalCount = store.filteredItemCount(for: sideScope)
         interaction.replaceItems(
-            rendered,
+            items,
             storeSelectedIDs: store.selectedItemIDs,
             storePrimarySelectedID: store.selectedItemID
         )
+    }
 
-        if !storeSelectionMatches(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs) {
-            scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
+    private func setSideScope(_ scope: PasteScope) {
+        if sideScope != scope {
+            interaction.dismissPreview()
+            sideScope = scope
         }
+        if store.hasActiveFilters {
+            store.clearFilters()
+        }
+    }
+
+    private func isSmartCategorySelected(_ category: SmartPinboardCategory) -> Bool {
+        guard let pinboard = store.smartPinboard(for: category) else { return false }
+        return sideScope == .pinboard(pinboard.id)
+    }
+
+    private func selectSmartCategory(_ category: SmartPinboardCategory) {
+        let pinboard = store.syncSmartPinboard(for: category)
+        setSideScope(.pinboard(pinboard.id))
     }
 
     private func selectItem(_ item: ClipboardItem) {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
         }
-        scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
         setSearchFocused(false)
     }
 
@@ -456,7 +467,6 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
-        scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
@@ -571,9 +581,10 @@ struct ClipboardSidePanelView: View {
     private func pasteSelected(format: PasteFormat) {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
+        let shouldDismissBeforePaste = !effectivePinned
         Task { @MainActor in
             let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
-                dismissBeforePaste: !isPinned,
+                dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
@@ -585,9 +596,10 @@ struct ClipboardSidePanelView: View {
 
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
+        let shouldDismissBeforePaste = !effectivePinned
         Task { @MainActor in
             let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
-                dismissBeforePaste: !isPinned,
+                dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItem = await store.hydratedItem(for: item)
@@ -620,31 +632,6 @@ struct ClipboardSidePanelView: View {
         onDismiss()
     }
 
-    private func scheduleStoreSelectionSync(primaryID: UUID?, ids: Set<UUID>) {
-        selectionSyncTask?.cancel()
-        let store = store
-        selectionSyncTask = Task { @MainActor in
-            do {
-                try await Task.sleep(nanoseconds: 45_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            if ids.count == 1 {
-                store.selectSingleItem(primaryID)
-            } else {
-                store.setSelectedItemIDs(ids, in: sideScope)
-            }
-        }
-    }
-
-    private func storeSelectionMatches(primaryID: UUID?, ids: Set<UUID>) -> Bool {
-        if ids.count == 1 {
-            return store.selectedItemIDs == ids && store.selectedItemID == primaryID
-        }
-        return store.selectedItemIDs == ids
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
@@ -661,28 +648,29 @@ struct ClipboardSidePanelView: View {
 
 private struct ClipboardSidePanelFilterChip: View {
     let title: String
-    let systemImageName: String?
+    let systemImageName: String
+    let color: Color
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let systemImageName {
-                    Image(systemName: systemImageName)
-                        .font(.system(size: 11, weight: .semibold))
-                }
+                Image(systemName: systemImageName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(color)
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.72))
+            .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
             .padding(.horizontal, 10)
             .frame(height: 30)
             .background {
                 Capsule()
-                    .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+                    .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
             }
+            .clipShape(Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

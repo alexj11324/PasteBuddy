@@ -329,6 +329,10 @@ public final class PasteBuddyStore {
         return makeFilteredItems(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
 
+    public func filteredItemCount(for scope: PasteScope) -> Int {
+        makeFilteredItemCount(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
+    }
+
     public var mainListItemsSnapshot: [ClipboardItem] {
         let cacheKey = mainListItemsCacheKey()
         if presentationCache.mainListItemsKey == cacheKey {
@@ -363,6 +367,36 @@ public final class PasteBuddyStore {
             let itemByID = cachedItemByID()
             scopedItems = pinboard.itemIDs.compactMap { itemByID[$0] }
             return filtered(scopedItems)
+        }
+    }
+
+    private func makeFilteredItemCount(scope: PasteScope, isHistoryAccessLocked: Bool) -> Int {
+        guard !isHistoryAccessLocked else { return 0 }
+        let filters = resolvedSearchFilters()
+        guard !filters.isImpossible else { return 0 }
+
+        func matches(_ item: ClipboardItem) -> Bool {
+            item.matches(filters.textQuery) && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
+        }
+
+        switch scope {
+        case .history:
+            return snapshot.items.reduce(0) { count, item in
+                count + (matches(item) ? 1 : 0)
+            }
+        case .pasteStack:
+            return pasteStackItemsInPasteOrder.reduce(0) { count, item in
+                count + (matches(item) ? 1 : 0)
+            }
+        case .pinboard(let id):
+            guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
+                return 0
+            }
+            let itemByID = cachedItemByID()
+            return pinboard.itemIDs.reduce(0) { count, itemID in
+                guard let item = itemByID[itemID] else { return count }
+                return count + (matches(item) ? 1 : 0)
+            }
         }
     }
 

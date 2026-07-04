@@ -91,14 +91,15 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
                 }
                 .padding(.horizontal, 4)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never, axes: .horizontal)
         case .vertical:
             ScrollView(.vertical) {
                 LazyVStack(spacing: spacing) {
                     collectionItems
                 }
+                .padding(.horizontal, 2)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never, axes: .vertical)
         }
     }
 
@@ -112,28 +113,18 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
     private func collectionItem(_ item: Item) -> some View {
         let itemID = item.id
         let selectable = isSelectable(item)
-        let itemContent = content(item, selectedIDs.contains(itemID) || primarySelectedID == itemID)
+        let itemView = content(item, selectedIDs.contains(itemID) || primarySelectedID == itemID)
             .frame(width: itemSize.width, height: itemSize.height)
             .contentShape(Rectangle())
-
-        let itemView = Group {
-            if selectable {
-                Button {
-                    onSelect(itemID)
-                } label: {
-                    itemContent
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded {
-                        onDoubleClick(itemID)
-                    }
-                )
-            } else {
-                itemContent
-            }
-        }
             .id(itemID)
+            .onTapGesture {
+                guard selectable else { return }
+                onSelect(itemID)
+            }
+            .onTapGesture(count: 2) {
+                guard selectable else { return }
+                onDoubleClick(itemID)
+            }
             .popover(
                 isPresented: presentedPreviewBinding(for: itemID),
                 attachmentAnchor: .rect(.bounds),
