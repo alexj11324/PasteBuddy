@@ -4,6 +4,12 @@ import PasteBuddyCore
 public enum MobileStoreFactory {
     public static let defaultAppGroupIdentifier = "group.com.alexjiang.PasteBuddy"
 
+    public static func appGroupDefaults(
+        appGroupIdentifier: String = defaultAppGroupIdentifier
+    ) -> UserDefaults {
+        UserDefaults(suiteName: appGroupIdentifier) ?? .standard
+    }
+
     @MainActor
     public static func makeStore(
         appGroupIdentifier: String = defaultAppGroupIdentifier,
@@ -18,5 +24,12 @@ public enum MobileStoreFactory {
             }
             return PasteBuddyStore()
         }
+    }
+
+    @MainActor
+    public static func makeIrohSyncService(
+        appGroupIdentifier: String = defaultAppGroupIdentifier
+    ) -> IrohClipboardSyncService {
+        IrohClipboardSyncService(defaults: appGroupDefaults(appGroupIdentifier: appGroupIdentifier))
     }
 }

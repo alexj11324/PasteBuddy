@@ -317,7 +317,6 @@
 "label.localization" = "Localization";
 "label.managed_distribution" = "Managed Distribution";
 "label.manual_audit_required" = "Manual Audit Required";
-"label.manual_history_entry" = "Manual History Entry";
 "label.manual_imports" = "Manual Imports";
 "label.manual_release_audit" = "Manual Release Audit";
 "label.matched" = "Matched";
@@ -332,8 +331,6 @@
 "label.more_actions" = "More actions";
 "label.name" = "Name";
 "label.new_pinboard" = "New Pinboard";
-"label.new_text" = "New Text";
-"label.new_text_item" = "New Text Item";
 "label.next" = "Next";
 "label.no_app_selected" = "No App Selected";
 "label.no_clipboard_items" = "No Clipboard Items";
@@ -481,6 +478,7 @@
 "message.no_chinese_or_english_text_was_recognized" = "No Chinese or English text was recognized.";
 "message.no_external_app_is_available_to_exclude" = "No external app is available to exclude.";
 "message.no_installed_apps_found" = "No installed apps were found.";
+"message.no_items_match_current_filters" = "No items match the current filters.";
 "message.no_matching_apps" = "No matching apps.";
 "message.opened_from_the_menu_bar_the_related" = "Opened from the menu bar. The related settings section is available below without starting a clipboard workflow.";
 "message.pastebuddy_could_not_create_this_item" = "PasteBuddy could not create this item.";
@@ -574,11 +572,20 @@
 "mobile.keyboard_paste.outcome.inserted_text" = "Inserted text";
 "mobile.keyboard_paste.outcome.insertion_failed" = "Insertion failed";
 "mobile.keyboard_paste.outcome.no_text_available" = "No text available";
+"mobile.keyboard_paste.status_copied_manual" = "Copied for manual paste.";
+"mobile.keyboard_paste.status_copied_plain_text" = "Copied plain text for manual paste.";
+"mobile.keyboard_paste.status_copy_unavailable" = "Copy is unavailable in this environment.";
 "mobile.keyboard_paste.status_empty_selection" = "Select a saved item before inserting from the keyboard.";
 "mobile.keyboard_paste.status_full_access_required" = "Keyboard Full Access is required.";
 "mobile.keyboard_paste.status_inserted_characters" = "Inserted %d character(s).";
 "mobile.keyboard_paste.status_insertion_failed" = "The host app did not accept inserted text.";
 "mobile.keyboard_paste.status_no_text_available" = "This item has no text representation the keyboard can insert.";
+"mobile.keyboard_paste.status_plain_text_copy_unavailable" = "Plain text copy is unavailable in this environment.";
+"mobile.keyboard_sync.configure_peer_in_app" = "Pair a Mac endpoint in the PasteBuddy app first.";
+"mobile.keyboard_sync.full_access_required" = "Enable Full Access before the keyboard can use network sync.";
+"mobile.keyboard_sync.no_clipboard_item" = "No current clipboard item is available.";
+"mobile.keyboard_sync.send_failed" = "Clipboard sync failed.";
+"mobile.keyboard_sync.sent_current_clipboard" = "Synced current clipboard.";
 "mobile.onboarding.allow_paste_from_other_apps.detail" = "Use iOS Settings to move PasteBuddy from Ask to Allow when automatic capture is desired.";
 "mobile.onboarding.allow_paste_from_other_apps.title" = "Allow Paste From Other Apps";
 "mobile.onboarding.keyboard_full_access.detail" = "Enable only when the user wants the keyboard extension to read synced history.";
@@ -622,6 +629,7 @@
 "state.binding" = "Binding";
 "state.connecting" = "Connecting";
 "state.enabled" = "Enabled";
+"state.idle" = "Idle";
 "state.off" = "Off";
 "state.optional" = "Optional";
 "state.ready" = "Ready";
@@ -908,7 +916,6 @@
 "Localization" = "Localization";
 "Managed Distribution" = "Managed Distribution";
 "Manual Audit Required" = "Manual Audit Required";
-"Manual History Entry" = "Manual History Entry";
 "Manual Imports" = "Manual Imports";
 "Manual Release Audit" = "Manual Release Audit";
 "Matched" = "Matched";
@@ -923,8 +930,6 @@
 "More actions" = "More actions";
 "Name" = "Name";
 "New Pinboard" = "New Pinboard";
-"New Text" = "New Text";
-"New Text Item" = "New Text Item";
 "Next" = "Next";
 "No Clipboard Items" = "No Clipboard Items";
 "No custom capture rules" = "No custom capture rules";

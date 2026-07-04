@@ -3503,23 +3503,6 @@
       },
       "comment": "Legacy alias for label.manual_audit_required. Prefer the semantic key in code."
     },
-    "Manual History Entry": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Manual History Entry"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "手动历史记录条目"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.manual_history_entry. Prefer the semantic key in code."
-    },
     "Manual Imports": {
       "localizations": {
         "en": {
@@ -3774,40 +3757,6 @@
         }
       },
       "comment": "Legacy alias for label.new_pinboard. Prefer the semantic key in code."
-    },
-    "New Text": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Text"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新建文本"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.new_text. Prefer the semantic key in code."
-    },
-    "New Text Item": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Text Item"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新建文本项"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.new_text_item. Prefer the semantic key in code."
     },
     "New copies will appear here.": {
       "localizations": {
@@ -12756,22 +12705,6 @@
         }
       }
     },
-    "label.manual_history_entry": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Manual History Entry"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "手动历史记录条目"
-          }
-        }
-      }
-    },
     "label.manual_imports": {
       "localizations": {
         "en": {
@@ -12992,38 +12925,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "新建收藏板"
-          }
-        }
-      }
-    },
-    "label.new_text": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Text"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新建文本"
-          }
-        }
-      }
-    },
-    "label.new_text_item": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Text Item"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新建文本项"
           }
         }
       }
@@ -15380,6 +15281,22 @@
         }
       }
     },
+    "message.no_items_match_current_filters": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No items match the current filters."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有符合当前过滤条件的项目。"
+          }
+        }
+      }
+    },
     "message.no_matching_apps": {
       "localizations": {
         "en": {
@@ -16868,6 +16785,54 @@
         }
       }
     },
+    "mobile.keyboard_paste.status_copied_manual": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied for manual paste."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制，可手动粘贴。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_paste.status_copied_plain_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied plain text for manual paste."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制纯文本，可手动粘贴。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_paste.status_copy_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy is unavailable in this environment."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前环境无法复制。"
+          }
+        }
+      }
+    },
     "mobile.keyboard_paste.status_empty_selection": {
       "localizations": {
         "en": {
@@ -16944,6 +16909,102 @@
           "stringUnit": {
             "state": "translated",
             "value": "此项目没有键盘可插入的文本表示。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_paste.status_plain_text_copy_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plain text copy is unavailable in this environment."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前环境无法复制纯文本。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_sync.configure_peer_in_app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pair a Mac endpoint in the PasteBuddy app first."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先在 PasteBuddy App 中配对 Mac endpoint。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_sync.full_access_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Full Access before the keyboard can use network sync."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用完全访问后，键盘才能使用网络同步。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_sync.no_clipboard_item": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No current clipboard item is available."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有可用的剪贴板项目。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_sync.send_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard sync failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板同步失败。"
+          }
+        }
+      }
+    },
+    "mobile.keyboard_sync.sent_current_clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synced current clipboard."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已同步当前剪贴板。"
           }
         }
       }
@@ -17632,6 +17693,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "已启用"
+          }
+        }
+      }
+    },
+    "state.idle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空闲"
           }
         }
       }

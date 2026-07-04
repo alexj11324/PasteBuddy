@@ -6,6 +6,7 @@ import UIKit
 @MainActor
 final class KeyboardViewController: UIInputViewController {
     private var store: PasteBuddyStore?
+    private var irohSync: IrohClipboardSyncService?
     private var hostingController: UIHostingController<MobileKeyboardHistoryView>?
 
     override func viewDidLoad() {
@@ -24,12 +25,31 @@ final class KeyboardViewController: UIInputViewController {
         resolvedStore.setKeyboardExtensionEnabled(true, fullAccess: hasFullAccess)
         store = resolvedStore
 
+        let syncService = MobileStoreFactory.makeIrohSyncService()
+        syncService.onItemReceived = { [resolvedStore] item in
+            _ = resolvedStore.addCapturedItem(item)
+        }
+        irohSync = syncService
+
         let pasteService = MobileKeyboardPasteService { [weak self] text in
             guard let self else { return false }
             textDocumentProxy.insertText(text)
             return true
         }
-        let rootView = MobileKeyboardHistoryView(store: resolvedStore, pasteService: pasteService)
+        let rootView = MobileKeyboardHistoryView(
+            store: resolvedStore,
+            pasteService: pasteService,
+            irohSync: syncService,
+            onDeleteBackward: { [weak self] in
+                self?.textDocumentProxy.deleteBackward()
+            },
+            onInsertReturn: { [weak self] in
+                self?.textDocumentProxy.insertText("\n")
+            },
+            onAdvanceToNextInputMode: { [weak self] in
+                self?.advanceToNextInputMode()
+            }
+        )
         let host = UIHostingController(rootView: rootView)
         addChild(host)
         view.addSubview(host.view)
@@ -43,9 +63,27 @@ final class KeyboardViewController: UIInputViewController {
         ])
         host.didMove(toParent: self)
         hostingController = host
+        startSyncIfAllowed()
     }
 
     private func refreshFullAccessState() {
         store?.setKeyboardExtensionEnabled(true, fullAccess: hasFullAccess)
+        startSyncIfAllowed()
+    }
+
+    private func startSyncIfAllowed() {
+        guard hasFullAccess, let irohSync else { return }
+        switch irohSync.connectionState {
+        case .connecting, .connected:
+            return
+        case .idle, .binding, .ready, .failed:
+            Task { @MainActor in
+                await irohSync.start()
+                guard !irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return
+                }
+                await irohSync.connectToPeer()
+            }
+        }
     }
 }
