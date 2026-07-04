@@ -70,6 +70,7 @@
 "action.pin" = "Pin";
 "action.pin_selected_to" = "Pin Selected To";
 "action.pin_to_pinboard" = "Pin to Pinboard";
+"action.quit_app" = "Quit PasteBuddy";
 "action.reload_clipboard_history" = "Reload clipboard history";
 "action.remove" = "Remove";
 "action.remove_clipboard_filter" = "Remove clipboard filter";

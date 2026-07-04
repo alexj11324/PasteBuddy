@@ -271,6 +271,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>PasteBuddySigningChannel</key>

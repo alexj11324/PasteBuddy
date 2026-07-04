@@ -17,6 +17,22 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let buildScript = try sourceFileContents("script/build_and_run.sh")
+        let launchStart = try XCTUnwrap(source.range(of: "func applicationDidFinishLaunching"))
+        let launchEnd = try XCTUnwrap(source.range(of: "func applicationShouldHandleReopen"))
+        let launchSource = String(source[launchStart.lowerBound..<launchEnd.lowerBound])
+        let settingsStart = try XCTUnwrap(source.range(of: "Settings {"))
+        let settingsEnd = try XCTUnwrap(source.range(of: "private func configureAppDelegate()"))
+        let settingsSource = String(source[settingsStart.lowerBound..<settingsEnd.lowerBound])
+
+        XCTAssertTrue(buildScript.contains("<key>LSUIElement</key>\n  <true/>"))
+        XCTAssertTrue(launchSource.contains("NSApp.setActivationPolicy(.accessory)"))
+        XCTAssertFalse(launchSource.contains("NSApp.setActivationPolicy(.regular)"))
+        XCTAssertFalse(settingsSource.contains("NSApp.setActivationPolicy(.regular)"))
+    }
+
     func testRuntimeLoadGateInvokesAsyncLoadOnlyOnce() async {
         let gate = PasteBuddyRuntimeLoadGate()
         var loadAsyncCallCount = 0
@@ -570,6 +586,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(menuSource.contains("action.start_paste_stack"))
         XCTAssertTrue(menuSource.contains("action.stop_paste_stack"))
         XCTAssertTrue(menuSource.contains("action.paste_next_stack_item"))
+        XCTAssertTrue(menuSource.contains("action.quit_app"))
+        XCTAssertTrue(menuSource.contains("keyEquivalent: \"q\""))
+        XCTAssertTrue(menuSource.contains("NSApp.terminate(nil)"))
         XCTAssertFalse(menuSource.contains("disabledMenuItem"))
         XCTAssertFalse(menuSource.contains("captureStatusLine"))
         XCTAssertFalse(menuSource.contains("captureDetail"))
@@ -923,6 +942,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("onDismissImmediately()"))
         XCTAssertTrue(source.contains("openSettings()"))
         XCTAssertTrue(source.contains("NSApp.activate(ignoringOtherApps: true)"))
+        XCTAssertFalse(source.contains("NSApp.setActivationPolicy(.regular)"))
         XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: \"gearshape\")"))
         XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))

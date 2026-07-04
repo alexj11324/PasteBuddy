@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didRequestRuntimeStart = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         PasteBuddyDiagnostics.recordAccessibilityTrust(
             .directPaste,
             "accessibilityTrustCheckedAtLaunch"
@@ -198,6 +198,16 @@ struct PasteBuddyApp: App {
                     )
                 }
             }
+        })
+
+        menu.addItem(.separator())
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.quit_app"),
+            systemImageName: "power",
+            keyEquivalent: "q",
+            keyEquivalentModifierMask: .command
+        ) {
+            NSApp.terminate(nil)
         })
         return menu
     }

@@ -8804,6 +8804,22 @@
         }
       }
     },
+    "action.quit_app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit PasteBuddy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出 PasteBuddy"
+          }
+        }
+      }
+    },
     "action.reload_clipboard_history": {
       "localizations": {
         "en": {
