@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import PasteBuddyCore
 import QuartzCore
 import SwiftUI
@@ -72,11 +71,6 @@ enum ClipboardPanelSearchInput {
         modifiers.subtracting([.shift, .capsLock]).isEmpty
     }
 
-    static func accepts(_ modifiers: NSEvent.ModifierFlags) -> Bool {
-        let deviceModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
-        return deviceModifiers.isEmpty || deviceModifiers.subtracting([.shift, .capsLock]).isEmpty
-    }
-
     static func accepts(_ characters: String) -> Bool {
         guard !characters.isEmpty else { return false }
         guard characters.rangeOfCharacter(from: .newlines) == nil else { return false }
@@ -145,6 +139,7 @@ struct ClipboardShelfPanelView: View {
         .onMoveCommand(perform: moveSelection)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
+        .focusEffectDisabled()
         .focused($isShelfFocused)
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
@@ -550,34 +545,17 @@ struct ClipboardShelfPanelView: View {
         let pinboards = store.userPinboards
         let defaultPasteFormat = store.defaultPasteFormat
 
-        return ShelfCollectionRepresentable(
+        return SwiftUIShelfCollection(
             items: shelfDisplayItems,
             selectedIDs: shelfInteraction.selectedIDs,
             primarySelectedID: shelfInteraction.primarySelectedID,
             itemSize: CGSize(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight),
-            interitemSpacing: 20,
-            contentRevision: store.dataRevision &+ store.queryRevision &+ shelfOverflowCount &+ relativeDateMinuteBucket,
+            spacing: 20,
+            direction: .horizontal,
             previewedID: shelfInteraction.previewedID,
-            onPreviewDismiss: {
-                shelfInteraction.dismissPreview()
-            },
-            previewPreferredEdge: .maxY,
-            previewContent: { displayItem in
-                guard case .clipboard(let item) = displayItem else {
-                    return AnyView(EmptyView())
-                }
-                return AnyView(
-                    ShelfExpandedPreview(
-                        item: item,
-                        imageDataProvider: store.imageData,
-                        tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                        onDismiss: {
-                            shelfInteraction.dismissPreview()
-                        },
-                        onMove: moveSelection,
-                        onTextInput: beginSearch
-                    )
-                )
+            previewArrowEdge: .bottom,
+            onPreviewDismiss: { id in
+                shelfInteraction.dismissPreview(for: id)
             },
             isSelectable: { displayItem in
                 if case .clipboard = displayItem {
@@ -597,14 +575,31 @@ struct ClipboardShelfPanelView: View {
                 height: ClipboardShelfMetrics.shelfHeight,
                 alignment: .bottom
             )
-        } onSelect: { id, modifiers in
+        } previewContent: { displayItem in
+            guard case .clipboard(let item) = displayItem else {
+                return AnyView(EmptyView())
+            }
+            return AnyView(
+                ShelfExpandedPreview(
+                    item: item,
+                    imageDataProvider: store.imageData,
+                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                    onDismiss: {
+                        shelfInteraction.dismissPreview()
+                    },
+                    onMove: moveSelection,
+                    onTextInput: beginSearch
+                )
+            )
+        } dragPayload: { displayItem in
+            guard case .clipboard(let item) = displayItem else { return nil }
+            return PinboardItemDragPayload(ids: [item.id])
+        } onSelect: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
-            selectItem(item, modifiers: modifiers)
+            selectItem(item)
         } onDoubleClick: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
             pasteItem(item, format: defaultPasteFormat)
-        } pasteboardWriter: { displayItem in
-            pasteboardWriter(for: displayItem)
         }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
     }
@@ -782,9 +777,9 @@ struct ClipboardShelfPanelView: View {
         refreshShelfItems()
     }
 
-    private func selectItem(_ item: ClipboardItem, modifiers: NSEvent.ModifierFlags) {
+    private func selectItem(_ item: ClipboardItem) {
         PasteBuddyMotion.performInstantSelection {
-            shelfInteraction.select(item.id, modifiers: modifiers)
+            shelfInteraction.select(item.id)
         }
         scheduleStoreSelectionSync(
             primaryID: shelfInteraction.primarySelectedID,
@@ -987,28 +982,6 @@ struct ClipboardShelfPanelView: View {
             return store.selectedItemIDs == ids && store.selectedItemID == primaryID
         }
         return store.selectedItemIDs == ids
-    }
-
-    private func pasteboardWriter(for displayItem: ClipboardShelfDisplayItem) -> NSPasteboardWriting? {
-        guard case .clipboard(let item) = displayItem else { return nil }
-        let pasteboardItem = NSPasteboardItem()
-        if let payloadData = try? JSONEncoder().encode(PinboardItemDragPayload(ids: [item.id])) {
-            pasteboardItem.setData(
-                payloadData,
-                forType: NSPasteboard.PasteboardType(UTType.pasteBuddyPinboardItemIDs.identifier)
-            )
-        }
-        pasteboardItem.setString(PasteboardWriter.plainText(for: item), forType: .string)
-        if let value = item.payload.presentationURLString {
-            pasteboardItem.setString(value, forType: .URL)
-        }
-        if let value = item.payload.allFileURLStrings.first {
-            pasteboardItem.setString(value, forType: .fileURL)
-        }
-        if let data = item.payload.imageData {
-            pasteboardItem.setData(data, forType: .png)
-        }
-        return pasteboardItem
     }
 
     private func runShelfMinuteTicker() async {
@@ -1394,6 +1367,8 @@ private struct ClipboardShelfCard: View {
 struct ShelfExpandedPreview: View {
     private static let textPreviewHeight: CGFloat = 420
 
+    @FocusState private var isPreviewFocused: Bool
+
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let tint: Color
@@ -1409,36 +1384,17 @@ struct ShelfExpandedPreview: View {
         .padding(14)
         .frame(width: previewFrameWidth, height: previewFrameHeight, alignment: .topLeading)
         .pasteBuddyGlassSurface(cornerRadius: 18, glassTintOpacity: 0, showsStroke: false)
-        .background {
-            ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)
-                .frame(width: 0, height: 0)
+        .focusable(true)
+        .focused($isPreviewFocused)
+        .onAppear {
+            Task { @MainActor in
+                await Task.yield()
+                isPreviewFocused = true
+            }
         }
         .onMoveCommand(perform: onMove)
         .onExitCommand(perform: onDismiss)
-        .onKeyPress(phases: .down) { keyPress in
-            switch keyPress.key {
-            case .space:
-                guard keyPress.modifiers.isEmpty else { return .ignored }
-                onDismiss()
-            case .upArrow:
-                guard keyPress.modifiers.isEmpty else { return .ignored }
-                onMove(.up)
-            case .downArrow:
-                guard keyPress.modifiers.isEmpty else { return .ignored }
-                onMove(.down)
-            case .leftArrow:
-                guard keyPress.modifiers.isEmpty else { return .ignored }
-                onMove(.left)
-            case .rightArrow:
-                guard keyPress.modifiers.isEmpty else { return .ignored }
-                onMove(.right)
-            default:
-                guard ClipboardPanelSearchInput.accepts(keyPress.modifiers), onTextInput(keyPress.characters) else {
-                    return .ignored
-                }
-            }
-            return .handled
-        }
+        .onKeyPress(phases: .down, action: handlePreviewKeyPress)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clipboard-expanded-preview-\(item.id.uuidString)")
         .accessibilityLabel(localized("label.preview"))
@@ -1512,108 +1468,42 @@ struct ShelfExpandedPreview: View {
             Text(text.isEmpty ? item.visualPreview.body : text)
                 .font(.system(size: 16, design: .monospaced))
                 .lineSpacing(4)
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(12)
         }
+        .onMoveCommand(perform: onMove)
+        .onKeyPress(phases: .down, action: handlePreviewKeyPress)
         .scrollContentBackground(.hidden)
         .background(Color.clear)
     }
 
-    private func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
-    }
-}
-
-private struct ShelfPreviewKeyboardHandler: NSViewRepresentable {
-    let onDismiss: () -> Void
-    let onMove: (MoveCommandDirection) -> Void
-    let onTextInput: (String) -> Bool
-
-    func makeNSView(context: Context) -> KeyCatcherView {
-        let view = KeyCatcherView()
-        view.onKeyDown = handleKeyDown
-        return view
-    }
-
-    func updateNSView(_ nsView: KeyCatcherView, context: Context) {
-        nsView.onKeyDown = handleKeyDown
-        nsView.startMonitoring()
-        nsView.focusSelf()
-    }
-
-    static func dismantleNSView(_ nsView: KeyCatcherView, coordinator: ()) {
-        nsView.stopMonitoring()
-    }
-
-    private func handleKeyDown(_ event: NSEvent) -> Bool {
-        guard ClipboardPanelSearchInput.accepts(event.modifierFlags) else { return false }
-
-        switch Int(event.keyCode) {
-        case kVK_Space:
+    private func handlePreviewKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        switch keyPress.key {
+        case .space:
+            guard keyPress.modifiers.isEmpty else { return .ignored }
             onDismiss()
-        case kVK_UpArrow:
+        case .upArrow:
+            guard keyPress.modifiers.isEmpty else { return .ignored }
             onMove(.up)
-        case kVK_DownArrow:
+        case .downArrow:
+            guard keyPress.modifiers.isEmpty else { return .ignored }
             onMove(.down)
-        case kVK_LeftArrow:
+        case .leftArrow:
+            guard keyPress.modifiers.isEmpty else { return .ignored }
             onMove(.left)
-        case kVK_RightArrow:
+        case .rightArrow:
+            guard keyPress.modifiers.isEmpty else { return .ignored }
             onMove(.right)
         default:
-            guard let characters = event.characters else { return false }
-            return onTextInput(characters)
+            guard ClipboardPanelSearchInput.accepts(keyPress.modifiers), onTextInput(keyPress.characters) else {
+                return .ignored
+            }
         }
-        return true
+        return .handled
     }
 
-    final class KeyCatcherView: NSView {
-        var onKeyDown: ((NSEvent) -> Bool)?
-        private var keyMonitor: Any?
-
-        override var acceptsFirstResponder: Bool { true }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if window == nil {
-                stopMonitoring()
-                return
-            }
-            startMonitoring()
-            focusSelf()
-        }
-
-        func focusSelf() {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.window?.makeFirstResponder(self)
-            }
-        }
-
-        func stopMonitoring() {
-            if let keyMonitor {
-                NSEvent.removeMonitor(keyMonitor)
-                self.keyMonitor = nil
-            }
-        }
-
-        func startMonitoring() {
-            guard window != nil else { return }
-            stopMonitoring()
-            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, event.window === self.window else {
-                    return event
-                }
-                return self.onKeyDown?(event) == true ? nil : event
-            }
-        }
-
-        override func keyDown(with event: NSEvent) {
-            if onKeyDown?(event) == true {
-                return
-            }
-            super.keyDown(with: event)
-        }
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
     }
 }
 

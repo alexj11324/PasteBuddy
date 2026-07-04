@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Observation
 import PasteBuddyCore
@@ -34,35 +33,7 @@ final class ShelfInteractionModel {
         reconcileSelectionAfterItemsChange()
     }
 
-    func select(_ id: UUID, modifiers: NSEvent.ModifierFlags) {
-        guard items.contains(where: { $0.id == id }) else { return }
-
-        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
-        if flags.contains(.shift),
-           let anchorID = selectionAnchorID ?? primarySelectedID,
-           let anchorIndex = itemIndex(for: anchorID),
-           let clickedIndex = itemIndex(for: id) {
-            let bounds = min(anchorIndex, clickedIndex)...max(anchorIndex, clickedIndex)
-            setSelectedIDs(Set(items[bounds].map(\.id)))
-            return
-        }
-
-        if flags.contains(.command) {
-            var ids = selectedIDs
-            if ids.contains(id) {
-                ids.remove(id)
-            } else {
-                ids.insert(id)
-            }
-            setSelectedIDs(ids, anchorID: id)
-            return
-        }
-
-        if selectedIDs.count > 1, selectedIDs.contains(id) {
-            selectionAnchorID = id
-            return
-        }
-
+    func select(_ id: UUID) {
         selectSingle(id)
     }
 
@@ -212,9 +183,5 @@ final class ShelfInteractionModel {
 
     private func firstItemID(in ids: Set<UUID>) -> UUID? {
         items.first { ids.contains($0.id) }?.id
-    }
-
-    private func itemIndex(for id: UUID) -> Int? {
-        items.firstIndex { $0.id == id }
     }
 }

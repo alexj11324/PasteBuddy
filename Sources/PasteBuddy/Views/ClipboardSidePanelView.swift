@@ -267,35 +267,19 @@ struct ClipboardSidePanelView: View {
                 )
                 .frame(maxWidth: .infinity, minHeight: 280)
             } else {
-                ShelfCollectionRepresentable(
+                SwiftUIShelfCollection(
                     items: renderedItems,
                     selectedIDs: interaction.selectedIDs,
                     primarySelectedID: interaction.primarySelectedID,
                     itemSize: CGSize(width: 324, height: ClipboardSidePanelMetrics.rowHeight),
-                    interitemSpacing: 10,
-                    scrollDirection: .vertical,
-                    contentRevision: store.dataRevision &+ store.queryRevision &+ overflowCount,
+                    spacing: 10,
+                    direction: .vertical,
                     previewedID: interaction.previewedID,
-                    onPreviewDismiss: {
-                        interaction.dismissPreview()
+                    previewArrowEdge: .trailing,
+                    onPreviewDismiss: { id in
+                        interaction.dismissPreview(for: id)
                     },
-                    previewPreferredEdge: .minX,
-                    previewAvoidsContainingWindowOverlap: true,
-                    previewContent: { item in
-                        AnyView(
-                            ShelfExpandedPreview(
-                                item: item,
-                                imageDataProvider: store.imageData,
-                                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
-                                maxWidth: ClipboardSidePanelMetrics.previewMaxWidth,
-                                onDismiss: {
-                                    interaction.dismissPreview()
-                                },
-                                onMove: moveSelection,
-                                onTextInput: beginSearch
-                            )
-                        )
-                    },
+                    isSelectable: { _ in true },
                     content: { item, isSelected in
                         ClipboardSidePanelListRow(
                             item: item,
@@ -317,9 +301,24 @@ struct ClipboardSidePanelView: View {
                         )
                         .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
                     },
-                    onSelect: { id, modifiers in
+                    previewContent: { item in
+                        AnyView(
+                            ShelfExpandedPreview(
+                                item: item,
+                                imageDataProvider: store.imageData,
+                                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                                maxWidth: ClipboardSidePanelMetrics.previewMaxWidth,
+                                onDismiss: {
+                                    interaction.dismissPreview()
+                                },
+                                onMove: moveSelection,
+                                onTextInput: beginSearch
+                            )
+                        )
+                    },
+                    onSelect: { id in
                         guard let item = renderedItems.first(where: { $0.id == id }) else { return }
-                        selectItem(item, modifiers: modifiers)
+                        selectItem(item)
                     },
                     onDoubleClick: { id in
                         guard let item = renderedItems.first(where: { $0.id == id }) else { return }
@@ -424,9 +423,9 @@ struct ClipboardSidePanelView: View {
         }
     }
 
-    private func selectItem(_ item: ClipboardItem, modifiers: NSEvent.ModifierFlags) {
+    private func selectItem(_ item: ClipboardItem) {
         PasteBuddyMotion.performInstantSelection {
-            interaction.select(item.id, modifiers: modifiers)
+            interaction.select(item.id)
         }
         scheduleStoreSelectionSync(primaryID: interaction.primarySelectedID, ids: interaction.selectedIDs)
         setSearchFocused(false)
