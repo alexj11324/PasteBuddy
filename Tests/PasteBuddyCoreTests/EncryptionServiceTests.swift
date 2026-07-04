@@ -682,6 +682,57 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(result.report.addedPinboards, 1)
     }
 
+    func testCloudSyncImportDeduplicatesItemsAlreadyDeliveredByPeerSync() throws {
+        let service = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "test-key"
+        )
+        defer { try? service.deleteKeyForTesting() }
+
+        let older = Date(timeIntervalSince1970: 1_000)
+        let newer = Date(timeIntervalSince1970: 2_000)
+        let localPeerItem = ClipboardItem(
+            id: UUID(),
+            createdAt: newer,
+            updatedAt: newer,
+            sourceAppName: "PasteBuddy Iroh",
+            deviceName: "Local iPhone",
+            contentType: .text,
+            title: "Synced via Iroh",
+            payload: ClipboardPayload(text: "same clipboard payload")
+        )
+        let remoteCloudItem = ClipboardItem(
+            id: UUID(),
+            createdAt: older,
+            updatedAt: older,
+            sourceAppName: "Notes",
+            deviceName: "Remote Mac",
+            contentType: .text,
+            title: "Synced via CloudKit",
+            payload: ClipboardPayload(text: "same clipboard payload")
+        )
+        let remotePinboard = Pinboard(
+            name: "Remote Pins",
+            colorHex: "#5E8CFF",
+            itemIDs: [remoteCloudItem.id]
+        )
+        let sync = readySyncConfiguration()
+        let localSnapshot = PasteBuddySnapshot(items: [localPeerItem], sync: sync)
+        let remoteSnapshot = PasteBuddySnapshot(items: [remoteCloudItem], pinboards: [remotePinboard], sync: sync)
+        let package = try CloudSyncPackageBuilder(encryptor: service)
+            .makeUploadPackage(from: remoteSnapshot)
+
+        let result = try CloudSyncPackageImporter(decryptor: service)
+            .importPackage(package, into: localSnapshot)
+
+        XCTAssertEqual(result.snapshot.items.map(\.id), [localPeerItem.id])
+        XCTAssertEqual(result.snapshot.pinboards.first(where: { $0.id == remotePinboard.id })?.itemIDs, [localPeerItem.id])
+        XCTAssertEqual(result.report.addedItems, 0)
+        XCTAssertEqual(result.report.keptLocalItems, 1)
+        XCTAssertEqual(result.report.addedPinboards, 1)
+    }
+
     func testCloudSyncImportKeepsNewerLocalConflictAndRejectsWrongContainer() throws {
         let service = EncryptionService(
             service: "com.pastebuddy.tests",
