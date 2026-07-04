@@ -2732,28 +2732,56 @@ struct SourceApplicationIconBadge: View {
 
 @MainActor
 enum SourceApplicationIconResolver {
-    private static let cache = NSCache<NSString, NSImage>()
+    // Wrapper so failed lookups are cached too: an unresolvable source app
+    // (uninstalled, synced from another device) must not re-run LaunchServices
+    // and filesystem probes on every render pass.
+    private final class CachedIconLookup {
+        let image: NSImage?
+
+        init(image: NSImage?) {
+            self.image = image
+        }
+    }
+
+    private static let cache = NSCache<NSString, CachedIconLookup>()
+    private static var appLaunchObserver: NSObjectProtocol?
 
     static func icon(for item: ClipboardItem) -> NSImage? {
-        if let bundleIdentifier = normalized(item.sourceBundleIdentifier) {
-            let cacheKey = "bundle:\(bundleIdentifier)" as NSString
-            if let cached = cache.object(forKey: cacheKey) {
-                return cached
-            }
-            if let image = icon(forBundleIdentifier: bundleIdentifier) {
-                cache.setObject(image, forKey: cacheKey)
-                return image
-            }
+        if let bundleIdentifier = normalized(item.sourceBundleIdentifier),
+           let image = cachedIcon(forKey: "bundle:\(bundleIdentifier)", lookup: {
+               icon(forBundleIdentifier: bundleIdentifier)
+           }) {
+            return image
         }
 
         guard let appName = normalized(item.sourceAppName) else { return nil }
-        let cacheKey = "name:\(appName.lowercased())" as NSString
+        return icon(forApplicationName: appName)
+    }
+
+    private static func cachedIcon(forKey key: String, lookup: () -> NSImage?) -> NSImage? {
+        installAppLaunchObserverIfNeeded()
+        let cacheKey = key as NSString
         if let cached = cache.object(forKey: cacheKey) {
-            return cached
+            return cached.image
         }
-        guard let image = icon(forApplicationName: appName) else { return nil }
-        cache.setObject(image, forKey: cacheKey)
+        let image = lookup()
+        cache.setObject(CachedIconLookup(image: image), forKey: cacheKey)
         return image
+    }
+
+    // A newly launched app can turn a previously failed lookup into a hit, so
+    // cached misses only stay valid until the running-application set grows.
+    private static func installAppLaunchObserverIfNeeded() {
+        guard appLaunchObserver == nil else { return }
+        appLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                cache.removeAllObjects()
+            }
+        }
     }
 
     static func hasKnownSource(for item: ClipboardItem) -> Bool {
@@ -2782,15 +2810,21 @@ enum SourceApplicationIconResolver {
     }
 
     static func icon(forApplicationName appName: String) -> NSImage? {
+        guard let appName = normalized(appName) else { return nil }
+        return cachedIcon(forKey: "name:\(appName.lowercased())", lookup: {
+            resolveIcon(forApplicationName: appName)
+        })
+    }
+
+    private static func resolveIcon(forApplicationName appName: String) -> NSImage? {
         if let image = runningApplicationIcon(appName: appName) {
             return image
         }
 
         let fileManager = FileManager.default
         let appFileName = appName.hasSuffix(".app") ? appName : "\(appName).app"
-        let searchDirectories = applicationSearchDirectories()
 
-        for directory in searchDirectories {
+        for directory in applicationSearchDirectories {
             let candidate = directory.appendingPathComponent(appFileName, isDirectory: true)
             if fileManager.fileExists(atPath: candidate.path) {
                 return icon(forApplicationURL: candidate)
@@ -2800,7 +2834,7 @@ enum SourceApplicationIconResolver {
         return nil
     }
 
-    private static func applicationSearchDirectories() -> [URL] {
+    private static let applicationSearchDirectories: [URL] = {
         let fileManager = FileManager.default
         let domains: [FileManager.SearchPathDomainMask] = [.userDomainMask, .localDomainMask, .systemDomainMask]
         var directories = domains.flatMap { fileManager.urls(for: .applicationDirectory, in: $0) }
@@ -2813,7 +2847,7 @@ enum SourceApplicationIconResolver {
             seen.insert(path)
             return true
         }
-    }
+    }()
 
     private static func icon(forApplicationURL url: URL) -> NSImage {
         icon(from: NSWorkspace.shared.icon(forFile: url.path))

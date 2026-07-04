@@ -241,7 +241,10 @@ public final class PasteBuddyStore {
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         let snapshotToSave = snapshot
-        let snapshotToPersist = snapshotForDiskPersistence(snapshotToSave)
+        let snapshotToPersist = await Self.externalizedSnapshotForDiskPersistence(
+            snapshotToSave,
+            hasRepositoryBacking: hasClipboardRepositoryBacking
+        )
         do {
             if let repositorySyncActor {
                 try await repositorySyncActor.synchronize(with: snapshotToSave)
@@ -257,7 +260,9 @@ public final class PasteBuddyStore {
 
     private func saveImmediately() {
         let snapshotToSave = snapshot
-        let snapshotToPersist = snapshotForDiskPersistence(snapshotToSave)
+        let snapshotToPersist = hasClipboardRepositoryBacking
+            ? Self.snapshotForDiskPersistence(snapshotToSave)
+            : snapshotToSave
         do {
             let didSyncRepository = syncClipboardRepositoryFromSnapshot()
             diskStore.storageMode = snapshotToSave.security.storageMode
@@ -269,7 +274,7 @@ public final class PasteBuddyStore {
 
     private func scheduleSave(delayNanoseconds: UInt64) {
         let snapshotToSave = snapshot
-        let snapshotToPersist = snapshotForDiskPersistence(snapshotToSave)
+        let hasRepositoryBacking = hasClipboardRepositoryBacking
         let dataRevisionToSync = dataRevision
         pendingSaveTask?.cancel()
         pendingSaveTask = Task { [persistenceActor, repositorySyncActor] in
@@ -282,6 +287,11 @@ public final class PasteBuddyStore {
             }
             guard !Task.isCancelled else { return }
             do {
+                let snapshotToPersist = await Self.externalizedSnapshotForDiskPersistence(
+                    snapshotToSave,
+                    hasRepositoryBacking: hasRepositoryBacking
+                )
+                guard !Task.isCancelled else { return }
                 if let repositorySyncActor {
                     try await repositorySyncActor.synchronize(with: snapshotToSave)
                 }
@@ -2435,19 +2445,44 @@ public final class PasteBuddyStore {
         PasteBuddyDedupeKey(contentType: item.contentType, hash: item.searchDocument.dedupeHash)
     }
 
-    private func snapshotForDiskPersistence(_ source: PasteBuddySnapshot) -> PasteBuddySnapshot {
-        guard repositorySyncActor != nil || clipboardRepository != nil else {
+    private var hasClipboardRepositoryBacking: Bool {
+        repositorySyncActor != nil || clipboardRepository != nil
+    }
+
+    // Asset externalization hashes every inline image/RTF payload; run it off the
+    // main actor so debounced saves never stall interaction.
+    nonisolated private static func externalizedSnapshotForDiskPersistence(
+        _ source: PasteBuddySnapshot,
+        hasRepositoryBacking: Bool
+    ) async -> PasteBuddySnapshot {
+        guard hasRepositoryBacking, hasInlineExternalizableAssets(source) else {
             return source
         }
+        return await Task.detached(priority: .utility) {
+            snapshotForDiskPersistence(source)
+        }.value
+    }
+
+    nonisolated private static func hasInlineExternalizableAssets(_ snapshot: PasteBuddySnapshot) -> Bool {
+        snapshot.items.contains { item in
+            item.payload.rtfData?.isEmpty == false || item.payload.imageData?.isEmpty == false
+        }
+    }
+
+    nonisolated private static func snapshotForDiskPersistence(_ source: PasteBuddySnapshot) -> PasteBuddySnapshot {
         var snapshot = source
         for index in snapshot.items.indices {
-            snapshot.items[index].payload = Self.externalizedPayload(snapshot.items[index].payload)
+            let payload = snapshot.items[index].payload
+            guard payload.rtfData?.isEmpty == false || payload.imageData?.isEmpty == false else {
+                continue
+            }
+            snapshot.items[index].payload = Self.externalizedPayload(payload)
             snapshot.items[index].refreshSearchDocument()
         }
         return snapshot
     }
 
-    private static func externalizedPayload(_ payload: ClipboardPayload) -> ClipboardPayload {
+    nonisolated private static func externalizedPayload(_ payload: ClipboardPayload) -> ClipboardPayload {
         var externalized = payload
         if let rtfData = payload.rtfData, !rtfData.isEmpty {
             externalized.rtfAssetID = sha256Hex(rtfData)
@@ -2469,7 +2504,7 @@ public final class PasteBuddyStore {
         }
     }
 
-    private static func sha256Hex(_ data: Data) -> String {
+    nonisolated private static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 

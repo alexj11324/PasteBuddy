@@ -29,11 +29,15 @@ public final class ClipboardMonitor {
 
     public func start() {
         guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollOnce()
             }
         }
+        // Polling only compares changeCount; exact firing times don't matter,
+        // so let the system coalesce wakeups.
+        timer.tolerance = 0.15
+        self.timer = timer
     }
 
     public func stop() {
@@ -72,7 +76,6 @@ public final class ClipboardMonitor {
 
             await MainActor.run {
                 let storedItem = self.store.addCapturedItem(item)
-                self.lastFingerprint = Self.fingerprint(for: item)
 
                 if item.contentType == .image,
                    self.store.snapshot.privacy.runLocalOCRAfterImageCapture,
@@ -188,12 +191,6 @@ public final class ClipboardMonitor {
             sourceBundleIdentifier: sourceBundleIdentifier
         )
         return decision.isAllowed ? item : nil
-    }
-
-    nonisolated private static func fingerprint(for item: ClipboardItem) -> String {
-        let data = Data(item.searchDocument.normalizedText.utf8) + (item.payload.imageData ?? Data())
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private struct PasteboardSnapshot: Sendable {

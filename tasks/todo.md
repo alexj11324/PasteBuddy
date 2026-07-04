@@ -1,35 +1,76 @@
-# 修复侧边栏 preview + 方向键联动（分支 codex/fix-preview-bottom-scroll）
+# 全 App 性能 / 交互响应 / 状态生命周期 / 一致性排查（分支 claude/great-euler-fe762f）
 
-## 症状
-1. 预览开启、列表滚到视口底部附近按 ↑/↓ → 预览消失，无法持续
-2. 列表 items 不跟随选中滚动
-3. ↑/↓ 完全失灵（codex 改动引入的回归）
-4. 预览与面板窗口重叠（codex 改动引入的回归）
+## 排查结论（按影响排序）
 
-## 根因
-- codex 未提交改动把文本预览换成 NSTextView 并劫持裸 ↑/↓ 为"滚动预览文本"，仅 ⌥/⌘+方向键才移动选中，且每次 update 抢 first responder → #3
-- "延迟选中"异步状态机（scrollTarget + RunLoop 双跳 + 2 次重试）失败后卡死，选中永不落地，正常 scroll-into-view 被 `scrollsPrimary` 抑制 → #1 #2
-- popover 异步 re-show 风暴 + positioningRect 可设到可视区外 → #1 #4
+### P0-1 保存管线阻塞主线程（性能，最大头）
+`PasteBuddyStore.scheduleSave` / `flushPendingSave` 在 MainActor 上同步执行
+`snapshotForDiskPersistence`：对**每个** item 调 `refreshSearchDocument()`（HTML 正则
+剥离 + 全文 folding + 双 SHA256），并对所有内存中 rtf/image 数据做 SHA256。
+每次捕获 / 改名 / 贴标签 / 删除都触发 save()。截图多的会话每次保存主线程卡几十至几百毫秒。
 
-## 计划
-- [x] 取证：diff、interaction model、panel controller、shelf 调用点
-- [x] 备份 codex 改动到 scratchpad/codex-attempt-backup.diff
-- [x] revert Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift 到 HEAD（恢复原键盘语义 + SwiftUI 文本预览）
-- [x] ClipboardSidePanelView.swift：删除延迟选中状态机，选中即时落地；保留 coordinator popover 接线
-- [x] ShelfCollectionRepresentable.swift：删除 scrollTarget 机器；applySelection 恢复无条件 scroll-into-view；popover 同步锚定 + 锚点 rect 钳制到可视区；滚动时 reanchor
-- [x] 更新 PasteBuddyAppRuntimeTests：删除状态机断言，改为固化新不变量
-- [x] swift build && swift test 全绿
-- [x] Review 章节
+修复：
+- `snapshotForDiskPersistence` 改为 `nonisolated static`，只处理仍带 inline
+  rtf/image 数据的 item（O(1) guard 跳过已外部化项）
+- `scheduleSave` / `flushPendingSave` 中经 `Task.detached(priority: .utility)` 后台计算
+- `saveImmediately`（无防抖的同步路径，测试用）保持同步语义
 
-## 第二轮（真机反馈：列表不跟随 + 预览钉在底部重叠）
-- 根因：`NSCollectionView.scrollToItems(.nearest*Edge)` 在本项目配置下从未生效过 —— 证据三角：HEAD 用它（用户原始投诉 #2）、codex 换居中+重试机（仍坏）、我恢复 HEAD（复现）。重叠是下游症状：选中走出视口后锚点钳制把 popover 钉在视口底缘。
-- 修复：绕开 scrollToItems，新增 ShelfCollectionScrollMath 纯几何函数直接算 clip origin，`clipView.scroll(to:)` 同步滚动；加 previousPrimarySelectedID 门控（滚动真正生效后必须门控，否则每次数据刷新都会把视口拽回选中行）；退化锚点从 1pt 细线改为贴边整行 rect。
-- 验证：swift build 通过；297 测试 0 失败（含 8 个 ScrollMath 真单元测试：上/下/部分可见/钳制/横向）。
+### P0-2 SourceApplicationIconResolver 负查询不缓存（性能，渲染热路径）
+来源 app 未安装（如 iOS 同步项 / 已卸载 app）时，每张卡片每次渲染都会：
+扫 runningApplications + LaunchServices 查询 + 8 个目录 fileExists（主线程磁盘 I/O）。
+`NativeSourceAppSuggestionRow` / `SourceApplicationIconImage` 走 `icon(forApplicationName:)`
+完全绕过缓存，每次敲键全量查。
+
+修复：
+- 未命中也写入缓存（sentinel），`didLaunchApplicationNotification` 时清空负缓存
+- 按名称查询也加缓存入口，供建议行 / 图标视图复用
+- `applicationSearchDirectories()` 缓存为 static
+
+### P1-3 ClipboardMonitor 微优化（能耗 + 每次捕获的主线程 SHA）
+- 轮询 Timer 无 tolerance → 加 0.15s，降功耗
+- 捕获完成后 `lastFingerprint = Self.fingerprint(for: item)`（全文 + 全图 SHA256，
+  在 MainActor.run 内）与 cheapFingerprint 格式永不匹配，纯浪费 → 删除。
+  不改变去重语义（store 层 dedupe 不受影响）
+
+### P2-4 面板 show/toggle 交互死区与重复重建（交互响应 + 一致性）
+- `show()` 在面板已可见时仍走完整路径：重置搜索/过滤/选中 + 换 presentationID
+  → 整棵 SwiftUI 树销毁重建。Cmd+Shift+B 重复按 = 无谓重置用户状态。
+  修复：已可见且非退场动画时仅重新定位 + makeKey
+- `toggle()` 在 120ms 退场动画期间按下 → hide() 静默 return → 快捷键无响应死区。
+  修复：退场动画中 toggle 改为重新 show()（generation 机制已保证旧动画回调作废）
+
+## 生命周期扫描结果（无需改动）
+- observer / NSEvent monitor 注册-移除配对完整（上个 commit 已修 panel 泄漏）
+- `PasteBuddyPanelHotKeyController.shortcutRecordingObserver` 无清理但对象为
+  app 生命周期，无实际泄漏；不为洁癖引入 deinit assumeIsolated 风险
+- `contentRevision` 求和方案理论有碰撞，但 itemIDs 变化必走 reloadData，实际不可达
+
+## Todo
+- [x] 排查：App/Controller/Store/Monitor/Views/Cache/Resolver 全量精读
+- [x] P0-1 保存管线后台化
+- [x] P0-2 图标解析负缓存
+- [x] P1-3 Monitor tolerance + 删除死指纹写入
+- [x] P2-4 show/toggle 修复
+- [x] swift build + swift test 全量验证
+- [x] Review 段落总结
 
 ## Review
-- 最终 diff：3 文件 +163/-24（codex 原稿为 4 文件 +578/-88），ClipboardShelfPanelView.swift 完整回退到 HEAD
-- 保留 codex 唯一正确的架构决策：popover 由 Coordinator 持有、锚定在不会被回收的 clipView 上（解决 row 复用杀 popover 的原始根因）
-- 新增不变量：预览锚点 rect 永远钳制在可视区内（previewAnchorRect），行滚出屏幕时 popover 钉在视口边缘不消失
-- 验证：swift build 通过；swift test 289 过 0 挂；4 个相关测试逐一确认通过；Sources 无状态机残留引用（grep = 0）
-- 待人工验证：真机打开侧边栏，开预览后按住 ↓ 连续导航到列表底部，确认预览持续跟随、列表滚动、无重叠
-- codex 原稿备份：scratchpad/codex-attempt-backup.diff（会话结束后清理）
+- 最终 diff：4 个源文件 +112/-43（Store / Monitor / PanelController / ShelfPanelView），
+  全部为行为保持的性能重构 + 2 个交互微修复，无 API 变化
+- 验证：swift build 零警告；swift test 307 过 0 挂（2 跳过为原有跳过项）
+- 语义等价性论证：
+  - 保存管线：`snapshotToSave` 在调度时按值捕获，外部化延迟到防抖后基于同一值计算，
+    结果一致；per-item guard 可跳过是因为"字段修改必伴随 refreshSearchDocument"
+    的不变式由所有上游写路径维护（rename/setLabels/updateOCR/addCaptured/load 均已核对）
+  - 外部化 dedupeHash 一致性：binaryHash(data:) = SHA256(data)，
+    binaryHash(assetID:) = assetID = sha256Hex(data)，两者字符串相同，
+    持久化前后去重身份不漂移（外部化是幂等的哈希保持变换）
+  - 图标负缓存：didLaunchApplicationNotification 全清缓存，保证"后启动的 app
+    图标可见"与原行为一致；唯一放宽是"安装但从不启动的 app"在缓存驱逐前显示
+    generic 图标（原每帧磁盘探测换来的边缘能力，权衡明确）
+  - Monitor 死指纹：cheapFingerprint 含 changeCount（每次必变）且与全量
+    fingerprint 格式不同，两者数学上永不相等 → 删除写入不改变任何捕获/去重行为
+- 未修但已记录：contentRevision 求和的理论碰撞（实际不可达）、
+  hotKeyController 观察者无 deinit（app 生命周期对象）、
+  面板每次打开的 presentationID 全量重建（近期 commit 的有意设计，不动）
+- 待人工验证（真机）：连按 Cmd+Shift+V 快速开关面板无死区；面板开着时按
+  Cmd+Shift+B 不再丢失搜索词；大量截图入历史后连续捕获无卡顿

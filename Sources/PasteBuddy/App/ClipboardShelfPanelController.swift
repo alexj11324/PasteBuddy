@@ -116,7 +116,9 @@ final class ClipboardShelfPanelController {
 
     func toggle() {
         PasteBuddyDiagnostics.record(.shelf, "toggleRequested", detail: "visible=\(isVisible)")
-        if isVisible {
+        // While the exit animation runs the panel is still technically visible;
+        // a toggle in that window must reopen instead of being swallowed.
+        if isVisible, !isAnimatingPanelOut {
             hide()
         } else {
             show()
@@ -125,6 +127,13 @@ final class ClipboardShelfPanelController {
 
     func show() {
         PasteBuddyDiagnostics.record(.shelf, "showRequested")
+        if let panel, panel.isVisible, !isAnimatingPanelOut {
+            // Already presented: keep the user's search/filter/selection state
+            // instead of tearing down the whole SwiftUI tree for a re-show.
+            positionVisiblePanel(panel)
+            panel.makeKey()
+            return
+        }
         let panel = panel ?? makePanel()
         self.panel = panel
         closeShelfAuxiliaryWindows()
