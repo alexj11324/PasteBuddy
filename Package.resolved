@@ -1,5 +1,5 @@
 {
-  "originHash" : "4aa55342ceada70b9ec6a6b92d418c80cf13b821e9495ae3997ab09073f9d81f",
+  "originHash" : "8f384c200e2caf390ed78d7b65acfed6f20e07d45fa7b645404ea7db1d5a9e24",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "9ed8c8457e00ff9c7aedb3bf213f20a2cfdf509e",
         "version" : "7.11.0"
+      }
+    },
+    {
+      "identity" : "iroh-ffi",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/n0-computer/iroh-ffi.git",
+      "state" : {
+        "revision" : "afcb46d9f583eca81a592eddeae531efe91f3bd1",
+        "version" : "1.0.0"
       }
     },
     {

@@ -59,6 +59,7 @@ struct PasteBuddyApp: App {
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
     @State private var statusItemController: PasteBuddyStatusItemController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
+    @State private var irohSync = IrohClipboardSyncService()
 
     init() {
         Self.printRuntimeDiagnosticsIfNeeded()
@@ -71,7 +72,7 @@ struct PasteBuddyApp: App {
     var body: some Scene {
         let _ = configureAppDelegate()
         Settings {
-            SettingsView(store: store)
+            SettingsView(store: store, irohSync: irohSync)
         }
     }
 
@@ -250,9 +251,20 @@ struct PasteBuddyApp: App {
             await store.loadAsync()
         }
         configureStatusItemIfNeeded()
+        irohSync.onItemReceived = { [store] item in
+            _ = store.addCapturedItem(item)
+        }
+        await irohSync.start()
 
         if monitor == nil {
-            let createdMonitor = ClipboardMonitor(store: store)
+            let createdMonitor = ClipboardMonitor(
+                store: store,
+                onItemCaptured: { [irohSync] item in
+                    Task { @MainActor in
+                        await irohSync.sendIfConnected(item)
+                    }
+                }
+            )
             createdMonitor.start()
             monitor = createdMonitor
         }

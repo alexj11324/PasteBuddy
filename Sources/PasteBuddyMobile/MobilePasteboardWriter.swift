@@ -7,6 +7,51 @@ import UIKit
 
 @MainActor
 public enum MobilePasteboardWriter {
+    public static func currentClipboardItem(deviceName: String = PasteBuddyStore.defaultDeviceName) -> ClipboardItem? {
+        #if canImport(UIKit)
+        if let url = UIPasteboard.general.url {
+            let urlString = url.absoluteString
+            return ClipboardItem(
+                sourceAppName: "iPhone Clipboard",
+                deviceName: deviceName,
+                contentType: .url,
+                title: urlString.singleLinePreview,
+                payload: ClipboardPayload(text: urlString, urlString: urlString)
+            )
+        }
+        if let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            if let urlString = ClipboardPayload.normalizedWebURLString(text) {
+                return ClipboardItem(
+                    sourceAppName: "iPhone Clipboard",
+                    deviceName: deviceName,
+                    contentType: .url,
+                    title: urlString.singleLinePreview,
+                    payload: ClipboardPayload(text: text, urlString: urlString)
+                )
+            }
+            return ClipboardItem(
+                sourceAppName: "iPhone Clipboard",
+                deviceName: deviceName,
+                contentType: .text,
+                title: text.singleLinePreview,
+                payload: ClipboardPayload(text: text)
+            )
+        }
+        if let image = UIPasteboard.general.image,
+           let imageData = image.pngData() {
+            return ClipboardItem(
+                sourceAppName: "iPhone Clipboard",
+                deviceName: deviceName,
+                contentType: .image,
+                title: PasteBuddyLocalization.string("label.image", defaultValue: "Image"),
+                payload: ClipboardPayload(imageData: imageData)
+            )
+        }
+        #endif
+        return nil
+    }
+
     @discardableResult
     public static func copy(_ item: ClipboardItem, format: PasteFormat = .original) -> Bool {
         #if canImport(UIKit)

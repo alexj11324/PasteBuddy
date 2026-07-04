@@ -9,6 +9,7 @@ public final class ClipboardMonitor {
     private let store: PasteBuddyStore
     private let pasteboard: NSPasteboard
     private let recognizeText: @Sendable (Data) async throws -> String
+    private let onItemCaptured: (@MainActor (ClipboardItem) -> Void)?
     private var timer: Timer?
     private var lastChangeCount: Int
     private var lastFingerprint: String?
@@ -18,13 +19,15 @@ public final class ClipboardMonitor {
         store: PasteBuddyStore,
         pasteboard: NSPasteboard = .general,
         ocrService: OCRService = OCRService(),
-        recognizeText: (@Sendable (Data) async throws -> String)? = nil
+        recognizeText: (@Sendable (Data) async throws -> String)? = nil,
+        onItemCaptured: (@MainActor (ClipboardItem) -> Void)? = nil
     ) {
         self.store = store
         self.pasteboard = pasteboard
         self.recognizeText = recognizeText ?? { imageData in
             try await ocrService.recognizeText(in: imageData)
         }
+        self.onItemCaptured = onItemCaptured
         self.lastChangeCount = pasteboard.changeCount
     }
 
@@ -73,6 +76,7 @@ public final class ClipboardMonitor {
 
             await MainActor.run {
                 let storedItem = self.store.addCapturedItem(item)
+                self.onItemCaptured?(storedItem)
                 self.lastFingerprint = Self.fingerprint(for: item)
 
                 if item.contentType == .image,

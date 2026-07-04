@@ -15,6 +15,7 @@
 "action.clear_stack" = "清空粘贴栈";
 "action.clear_unpinned_history" = "清除未固定历史";
 "action.close" = "关闭";
+"action.connect" = "连接";
 "action.copy" = "复制";
 "action.copy_as_plain_text" = "复制为纯文本";
 "action.copy_pastebuddy_item" = "复制 PasteBuddy 项目";
@@ -90,6 +91,8 @@
 "action.save_text" = "保存文本";
 "action.save_title" = "保存标题";
 "action.save_to_pastebuddy" = "保存到 PasteBuddy";
+"action.send_latest_clipboard_item" = "发送最新剪贴板项目";
+"action.send_selected_item" = "发送所选项目";
 "action.share_and_action_extensions" = "共享与操作扩展";
 "action.share_link_token" = "分享链接令牌";
 "action.share_pinboard" = "分享收藏板";
@@ -106,6 +109,7 @@
 "action.stop_collecting_paste_stack_items" = "停止收集粘贴栈项目";
 "action.stop_paste_stack" = "停止粘贴栈";
 "action.stop_sharing" = "停止分享";
+"action.sync_current_clipboard" = "同步当前剪贴板";
 "action.sync_sharing" = "同步与共享";
 "action.sync_smart_pinboards" = "同步智能收藏板";
 "action.toggle_launch_at_login" = "切换登录时启动";
@@ -140,6 +144,7 @@
 "format.chars" = "%d 个字符";
 "format.cloud_sync_blocked_until" = "CloudKit 同步需要先完成：%@。";
 "format.color" = "颜色 %@";
+"format.connected_to_peer" = "已连接到 %@";
 "format.excluded" = "已排除 %@。";
 "format.file" = "%d 个文件";
 "format.files" = "%d 个文件";
@@ -147,6 +152,7 @@
 "format.keep_normal_history_for_days" = "普通历史保留 %d 天";
 "format.keep_up_to_items" = "最多保留 %d 个项目";
 "format.labels" = "，标签：%@";
+"format.last_received_item" = "上次收到：%@";
 "format.last_revoked_at" = "上次撤销时间：%@。";
 "format.move_to" = "移动到 %@";
 "format.names_bundle_ids" = "%d 个名称，%d 个 Bundle ID";
@@ -174,6 +180,7 @@
 "label.access" = "访问权限";
 "label.access_mode" = "访问模式";
 "label.accessibility_access" = "辅助功能权限";
+"label.actions" = "操作";
 "label.activate_paste_stack" = "启用粘贴栈";
 "label.active_clipboard_filters" = "已启用的剪贴板过滤器";
 "label.active_rules" = "生效规则";
@@ -284,6 +291,7 @@
 "label.installed_apps" = "已安装应用";
 "label.integrations" = "集成";
 "label.invitation_only" = "仅邀请";
+"label.iroh_clipboard_sync" = "Iroh 剪贴板同步";
 "label.items" = "项目";
 "label.keep_history_forever" = "永久保留历史";
 "label.key" = "按键";
@@ -351,6 +359,7 @@
 "label.pastebuddy_menu_bar_item" = "PasteBuddy 菜单栏项目";
 "label.pastebuddy_paused" = "PasteBuddy 已暂停";
 "label.paused" = "已暂停";
+"label.peer_endpoint_id" = "对端 endpoint ID";
 "label.permission" = "权限";
 "label.pinboard" = "收藏板";
 "label.pinboards" = "收藏板";
@@ -427,6 +436,7 @@
 "label.team_name" = "团队名称";
 "label.template" = "模板";
 "label.text" = "文本";
+"label.this_device" = "本设备";
 "label.title" = "标题";
 "label.today" = "今天";
 "label.top_to_bottom" = "从上到下";
@@ -462,6 +472,7 @@
 "message.drop_clipboard_items_here_to_pin_them" = "将剪贴板项目拖到这里即可固定。";
 "message.edit_the_saved_text_then_choose_save" = "编辑保存的文本，然后选择保存文本。";
 "message.encrypts_clipboard_history_ocr_metadata_thumbnails_and" = "加密剪贴板历史、OCR 元数据、缩略图和收藏板。本地密钥保存在 Keychain 中。";
+"message.iroh_clipboard_sync_local_peer" = "使用 iroh 点对点传输。剪贴板内容只会发送给已连接的对端。";
 "message.items_stay_in_clipboard_history_only_this" = "项目会保留在剪贴板历史中，只移除此收藏板集合。";
 "message.launch_at_login_is_unavailable_in_this" = "此构建版本不支持登录时启动";
 "message.local_only_cloudkit_sync_is_disabled" = "仅本地：CloudKit 同步已关闭。";
@@ -608,9 +619,12 @@
 "mobile.surface.keyboard_extension" = "键盘扩展";
 "mobile.surface.share_extension" = "分享扩展";
 "state.available" = "可用";
+"state.binding" = "绑定中";
+"state.connecting" = "连接中";
 "state.enabled" = "已启用";
 "state.off" = "关闭";
 "state.optional" = "可选";
+"state.ready" = "就绪";
 "state.required" = "必需";
 "state.selected" = "已选择";
 

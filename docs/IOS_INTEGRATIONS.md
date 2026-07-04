@@ -6,7 +6,7 @@ extension, Share extension, and Action extension.
 
 ## Implemented In Shared Core
 
-- `PasteBuddyCore` declares iOS 17+ support and is verified against the iPhone
+- `PasteBuddyCore` declares iOS 17.5+ support and is verified against the iPhone
   Simulator SDK as a SwiftPM target.
 - `PasteBuddyMobile` provides reusable SwiftUI screens for native iPhone/iPad
   browsing, manual text item creation, keyboard-extension history access, and
@@ -120,11 +120,11 @@ compile for iOS Simulator without pulling in macOS-only AppKit pasteboard APIs:
 
 ```bash
 swift build --target PasteBuddyCore \
-  --triple arm64-apple-ios17.0-simulator \
+  --triple arm64-apple-ios17.5-simulator \
   --sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk
 
 swift build --target PasteBuddyMobile \
-  --triple arm64-apple-ios17.0-simulator \
+  --triple arm64-apple-ios17.5-simulator \
   --sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk
 ```
 

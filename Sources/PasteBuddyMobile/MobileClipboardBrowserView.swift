@@ -5,12 +5,14 @@ import UniformTypeIdentifiers
 
 public struct MobileClipboardBrowserView: View {
     @Bindable private var store: PasteBuddyStore
+    private let irohSync: IrohClipboardSyncService?
     @State private var sharingRoute: MobilePinboardSharingRoute?
     @State private var previewRoute: MobilePreviewRoute?
     @State private var isShowingTextEntry = false
 
-    public init(store: PasteBuddyStore) {
+    public init(store: PasteBuddyStore, irohSync: IrohClipboardSyncService? = nil) {
         self.store = store
+        self.irohSync = irohSync
     }
 
     public var body: some View {
@@ -30,6 +32,15 @@ public struct MobileClipboardBrowserView: View {
                 }
 
                 Section("label.setup") {
+                    if let irohSync {
+                        NavigationLink {
+                            MobileIrohClipboardSyncView(store: store, irohSync: irohSync)
+                                .navigationTitle("label.iroh_clipboard_sync")
+                        } label: {
+                            Label("label.iroh_clipboard_sync", systemImage: irohSync.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle")
+                        }
+                    }
+
                     NavigationLink {
                         MobileOnboardingGuidanceView(report: store.mobileGuidanceReport)
                             .navigationTitle("label.mobile_setup")
@@ -252,6 +263,74 @@ private struct MobilePinboardSharingRoute: Identifiable {
 
 private struct MobilePreviewRoute: Identifiable {
     let id: UUID
+}
+
+private struct MobileIrohClipboardSyncView: View {
+    @Bindable var store: PasteBuddyStore
+    @Bindable var irohSync: IrohClipboardSyncService
+
+    var body: some View {
+        Form {
+            Section("label.this_device") {
+                Text(irohSync.endpointId.isEmpty ? NSLocalizedString("state.binding", comment: "") : irohSync.endpointId)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+
+            Section("label.peer_endpoint_id") {
+                TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
+                    .font(.system(.caption, design: .monospaced))
+
+                Button("action.connect") {
+                    Task { await irohSync.connectToPeer() }
+                }
+                .disabled(irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            Section("label.actions") {
+                Button("action.sync_current_clipboard") {
+                    if let item = MobilePasteboardWriter.currentClipboardItem() {
+                        let storedItem = store.addCapturedItem(item)
+                        Task { await irohSync.send(storedItem) }
+                    }
+                }
+                .disabled(!irohSync.connectionState.isConnected)
+
+                if let selectedItem = store.selectedItem {
+                    Button("action.send_selected_item") {
+                        Task { await irohSync.send(selectedItem) }
+                    }
+                    .disabled(!irohSync.connectionState.isConnected)
+                }
+            }
+
+            Section("label.status") {
+                Text(statusText)
+                if let lastReceivedTitle = irohSync.lastReceivedTitle {
+                    Text(String(format: NSLocalizedString("format.last_received_item", comment: ""), lastReceivedTitle))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task { await irohSync.start() }
+    }
+
+    private var statusText: String {
+        switch irohSync.connectionState {
+        case .idle:
+            NSLocalizedString("state.off", comment: "")
+        case .binding:
+            NSLocalizedString("state.binding", comment: "")
+        case .ready:
+            NSLocalizedString("state.ready", comment: "")
+        case .connecting:
+            NSLocalizedString("state.connecting", comment: "")
+        case .connected(let peerShortId):
+            String(format: NSLocalizedString("format.connected_to_peer", comment: ""), peerShortId)
+        case .failed(let message):
+            message
+        }
+    }
 }
 
 private struct MobileTextEntryView: View {

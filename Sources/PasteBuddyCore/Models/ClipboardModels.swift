@@ -80,7 +80,21 @@ public enum SmartPinboardCategory: String, CaseIterable, Codable, Identifiable, 
     }
 
     public func matches(_ item: ClipboardItem) -> Bool {
-        item.presentationContentType == matchedContentType
+        if item.contentType == .mixed {
+            let hasImage = item.payload.hasImageAsset
+            let hasFile = !item.payload.allFileURLStrings.isEmpty
+            switch self {
+            case .images:
+                return hasImage
+            case .files:
+                return !hasImage && hasFile
+            case .links:
+                return !hasImage && !hasFile && item.presentationContentType == .url
+            case .text:
+                return !hasImage && !hasFile && item.presentationContentType == .text
+            }
+        }
+        return item.presentationContentType == matchedContentType
     }
 
     public static func category(forPinboardName name: String) -> SmartPinboardCategory? {

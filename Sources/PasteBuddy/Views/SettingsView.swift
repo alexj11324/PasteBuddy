@@ -5,6 +5,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var store: PasteBuddyStore
+    @Bindable var irohSync: IrohClipboardSyncService
     @State private var newCaptureRuleName = ""
     @State private var newCaptureRulePattern = ""
     @State private var newCaptureRuleCondition: CaptureRuleCondition = .containsText
@@ -643,6 +644,47 @@ struct SettingsView: View {
 
             }
 
+            Section("label.iroh_clipboard_sync") {
+                LabeledContent("label.status") {
+                    Text(irohStatusText)
+                        .foregroundStyle(irohStatusColor)
+                }
+
+                if !irohSync.endpointId.isEmpty {
+                    LabeledContent("label.this_device") {
+                        Text(irohSync.endpointId)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                    }
+                }
+
+                TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption.monospaced())
+
+                HStack {
+                    Button("action.connect") {
+                        Task { await irohSync.connectToPeer() }
+                    }
+                    .disabled(irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("action.send_latest_clipboard_item") {
+                        if let item = store.snapshot.items.first {
+                            Task { await irohSync.send(item) }
+                        }
+                    }
+                    .disabled(!irohSync.connectionState.isConnected || store.snapshot.items.isEmpty)
+                }
+
+                if let lastReceivedTitle = irohSync.lastReceivedTitle {
+                    Text(localized("format.last_received_item", lastReceivedTitle))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("message.iroh_clipboard_sync_local_peer")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("label.direct_paste") {
                 LabeledContent("label.accessibility_access") {
                     Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
@@ -704,6 +746,34 @@ struct SettingsView: View {
         case .localOnly: .secondary
         case .blocked: .orange
         case .ready: .green
+        }
+    }
+
+    private var irohStatusText: String {
+        switch irohSync.connectionState {
+        case .idle:
+            localized("state.off")
+        case .binding:
+            localized("state.binding")
+        case .ready:
+            localized("state.ready")
+        case .connecting:
+            localized("state.connecting")
+        case .connected(let peerShortId):
+            localized("format.connected_to_peer", peerShortId)
+        case .failed(let message):
+            message
+        }
+    }
+
+    private var irohStatusColor: Color {
+        switch irohSync.connectionState {
+        case .connected:
+            .green
+        case .failed:
+            .orange
+        default:
+            .secondary
         }
     }
 

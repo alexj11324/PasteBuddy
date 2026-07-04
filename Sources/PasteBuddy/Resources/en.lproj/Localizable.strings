@@ -15,6 +15,7 @@
 "action.clear_stack" = "Clear Stack";
 "action.clear_unpinned_history" = "Clear Unpinned History";
 "action.close" = "Close";
+"action.connect" = "Connect";
 "action.copy" = "Copy";
 "action.copy_as_plain_text" = "Copy as Plain Text";
 "action.copy_pastebuddy_item" = "Copy PasteBuddy Item";
@@ -90,6 +91,8 @@
 "action.save_text" = "Save Text";
 "action.save_title" = "Save Title";
 "action.save_to_pastebuddy" = "Save to PasteBuddy";
+"action.send_latest_clipboard_item" = "Send Latest Clipboard Item";
+"action.send_selected_item" = "Send Selected Item";
 "action.share_and_action_extensions" = "Share and Action Extensions";
 "action.share_link_token" = "Share link token";
 "action.share_pinboard" = "Share Pinboard";
@@ -106,6 +109,7 @@
 "action.stop_collecting_paste_stack_items" = "Stop collecting Paste Stack items";
 "action.stop_paste_stack" = "Stop Paste Stack";
 "action.stop_sharing" = "Stop Sharing";
+"action.sync_current_clipboard" = "Sync Current Clipboard";
 "action.sync_sharing" = "Sync & Sharing";
 "action.sync_smart_pinboards" = "Sync Smart Pinboards";
 "action.toggle_launch_at_login" = "Toggle launch at login";
@@ -140,6 +144,7 @@
 "format.chars" = "%d chars";
 "format.cloud_sync_blocked_until" = "CloudKit sync needs: %@.";
 "format.color" = "Color %@";
+"format.connected_to_peer" = "Connected to %@";
 "format.excluded" = "Excluded %@.";
 "format.file" = "%d file";
 "format.files" = "%d files";
@@ -147,6 +152,7 @@
 "format.keep_normal_history_for_days" = "Keep normal history for %d days";
 "format.keep_up_to_items" = "Keep up to %d items";
 "format.labels" = ", labels: %@";
+"format.last_received_item" = "Last received: %@";
 "format.last_revoked_at" = "Last revoked at %@.";
 "format.move_to" = "Move to %@";
 "format.names_bundle_ids" = "%d names, %d bundle IDs";
@@ -174,6 +180,7 @@
 "label.access" = "Access";
 "label.access_mode" = "Access Mode";
 "label.accessibility_access" = "Accessibility Access";
+"label.actions" = "Actions";
 "label.activate_paste_stack" = "Activate Paste Stack";
 "label.active_clipboard_filters" = "Active clipboard filters";
 "label.active_rules" = "Active Rules";
@@ -284,6 +291,7 @@
 "label.installed_apps" = "Installed Apps";
 "label.integrations" = "Integrations";
 "label.invitation_only" = "Invitation Only";
+"label.iroh_clipboard_sync" = "Iroh Clipboard Sync";
 "label.items" = "Items";
 "label.keep_history_forever" = "Keep history forever";
 "label.key" = "Key";
@@ -351,6 +359,7 @@
 "label.pastebuddy_menu_bar_item" = "PasteBuddy menu bar item";
 "label.pastebuddy_paused" = "PasteBuddy Paused";
 "label.paused" = "Paused";
+"label.peer_endpoint_id" = "Peer endpoint ID";
 "label.permission" = "Permission";
 "label.pinboard" = "Pinboard";
 "label.pinboards" = "Pinboards";
@@ -427,6 +436,7 @@
 "label.team_name" = "Team Name";
 "label.template" = "Template";
 "label.text" = "Text";
+"label.this_device" = "This Device";
 "label.title" = "Title";
 "label.today" = "Today";
 "label.top_to_bottom" = "Top to Bottom";
@@ -462,6 +472,7 @@
 "message.drop_clipboard_items_here_to_pin_them" = "Drop clipboard items here to pin them.";
 "message.edit_the_saved_text_then_choose_save" = "Edit the saved text, then choose Save Text.";
 "message.encrypts_clipboard_history_ocr_metadata_thumbnails_and" = "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain.";
+"message.iroh_clipboard_sync_local_peer" = "Uses iroh peer-to-peer transport. Clipboard payloads are sent only to the connected peer.";
 "message.items_stay_in_clipboard_history_only_this" = "Items stay in clipboard history. Only this pinboard collection is removed.";
 "message.launch_at_login_is_unavailable_in_this" = "Launch at login is unavailable in this build";
 "message.local_only_cloudkit_sync_is_disabled" = "Local only: CloudKit sync is disabled.";
@@ -608,9 +619,12 @@
 "mobile.surface.keyboard_extension" = "Keyboard Extension";
 "mobile.surface.share_extension" = "Share Extension";
 "state.available" = "Available";
+"state.binding" = "Binding";
+"state.connecting" = "Connecting";
 "state.enabled" = "Enabled";
 "state.off" = "Off";
 "state.optional" = "Optional";
+"state.ready" = "Ready";
 "state.required" = "Required";
 "state.selected" = "Selected";
 
