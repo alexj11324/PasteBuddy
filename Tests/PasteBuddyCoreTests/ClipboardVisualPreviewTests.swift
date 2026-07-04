@@ -109,6 +109,75 @@ final class ClipboardVisualPreviewTests: XCTestCase {
         XCTAssertEqual(preview.badgeText, "Link")
     }
 
+    func testLinkPreviewUsesCapturedImageThumbnailWhenAvailable() {
+        let item = ClipboardItem(
+            sourceAppName: "Messages",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "GitHub",
+            payload: ClipboardPayload(
+                urlString: "https://github.com/alexj11324/BDI_LLM_Formal_Ver",
+                imageData: Data([0x89, 0x50, 0x4E, 0x47])
+            )
+        )
+
+        XCTAssertTrue(item.visualPreview.prefersImageThumbnail)
+        XCTAssertEqual(item.visualPreview.headline, "GitHub")
+    }
+
+    func testMixedLinkWithSavedPreviewThumbnailStillPresentsAsLink() {
+        let item = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "GitHub",
+            payload: ClipboardPayload(
+                urlString: "https://github.com/alexj11324/BDI_LLM_Formal_Ver",
+                imageData: Data([0x89, 0x50, 0x4E, 0x47])
+            )
+        )
+
+        XCTAssertEqual(item.presentationContentType, .url)
+        XCTAssertEqual(item.effectiveContentTypes, [.url])
+        XCTAssertEqual(item.visualPreview.badgeText, "Link")
+        XCTAssertTrue(item.visualPreview.prefersImageThumbnail)
+    }
+
+    func testMixedLinkWithSavedPreviewThumbnailAndMetadataTextStillPresentsAsLink() {
+        let item = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Max For AI",
+            payload: ClipboardPayload(
+                text: "Best of luck Shawn, following you for a long time",
+                urlString: "https://x.com/MaxForAI/status/207310983095347",
+                imageData: Data([0x89, 0x50, 0x4E, 0x47])
+            )
+        )
+
+        XCTAssertEqual(item.presentationContentType, .url)
+        XCTAssertEqual(item.effectiveContentTypes, [.url])
+        XCTAssertEqual(item.visualPreview.badgeText, "Link")
+        XCTAssertTrue(item.visualPreview.prefersImageThumbnail)
+    }
+
+    func testURLDeduplicationIgnoresSavedPreviewThumbnail() {
+        let firstPayload = ClipboardPayload(
+            urlString: "https://github.com/alexj11324/BDI_LLM_Formal_Ver",
+            imageData: Data([0x01, 0x02])
+        )
+        let secondPayload = ClipboardPayload(
+            urlString: "https://github.com/alexj11324/BDI_LLM_Formal_Ver",
+            imageData: Data([0x03, 0x04])
+        )
+
+        XCTAssertEqual(
+            ClipboardItem.deduplicationHash(contentType: .url, payload: firstPayload),
+            ClipboardItem.deduplicationHash(contentType: .url, payload: secondPayload)
+        )
+    }
+
     func testWholeTextURLPresentsAsLinkPreview() {
         let item = ClipboardItem(
             sourceAppName: "Brave Browser",

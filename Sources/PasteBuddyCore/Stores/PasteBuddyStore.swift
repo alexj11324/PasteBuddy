@@ -59,6 +59,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
+    @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
 
     private static let defaultHistoryPageLimit = 100
     private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
@@ -906,6 +907,42 @@ public final class PasteBuddyStore {
         refreshExistingSmartPinboards()
         save()
     }
+
+    #if os(macOS)
+    public func enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem) async {
+        guard snapshot.privacy.captureImages,
+              item.presentationContentType == .url,
+              !item.payload.hasImageAsset,
+              let urlString = item.payload.presentationURLString,
+              !linkPreviewMetadataRequests.contains(item.id) else {
+            return
+        }
+
+        linkPreviewMetadataRequests.insert(item.id)
+        defer { linkPreviewMetadataRequests.remove(item.id) }
+
+        guard let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString),
+              metadata.title != nil || metadata.imageData != nil,
+              let index = snapshot.items.firstIndex(where: { $0.id == item.id }),
+              !snapshot.items[index].payload.hasImageAsset else {
+            return
+        }
+
+        if let title = metadata.title {
+            snapshot.items[index].title = title
+        }
+        if let imageData = metadata.imageData {
+            snapshot.items[index].payload.imageData = imageData
+            snapshot.items[index].payload.imageByteCount = imageData.count
+        }
+        snapshot.items[index].updatedAt = Date()
+        snapshot.items[index].refreshSearchDocument()
+        syncPasteStackItem(snapshot.items[index])
+        rebuildDedupeIndex()
+        refreshExistingSmartPinboards()
+        save()
+    }
+    #endif
 
     @discardableResult
     public func createPinboard(named name: String = "New Pinboard", colorHex: String = "#7C9A92") -> Pinboard {

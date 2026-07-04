@@ -10,7 +10,9 @@ private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
     static let cardHeight: CGFloat = 240
     static let cardHeaderHeight: CGFloat = 58
-    static let cardPreviewHeight: CGFloat = 126
+    static let cardPreviewHeight: CGFloat = cardHeight - cardHeaderHeight
+    static let linkMetadataFooterHeight: CGFloat = 58
+    static let linkMetadataImageHeight: CGFloat = cardPreviewHeight - linkMetadataFooterHeight
     static let cardCornerRadius: CGFloat = 17
     static let searchIdleWidth: CGFloat = 208
     static let searchFocusedWidth: CGFloat = 272
@@ -637,6 +639,9 @@ struct ClipboardShelfPanelView: View {
                 ClipboardShelfCard(
                     item: item,
                     imageDataProvider: store.imageData,
+                    linkMetadataProvider: { item in
+                        await store.enrichLinkPreviewMetadataIfNeeded(for: item)
+                    },
                     isSelected: isSelected,
                     relativeDateReference: relativeDateReference,
                     defaultPasteFormat: defaultPasteFormat,
@@ -1316,6 +1321,7 @@ private struct ShelfSelectedCountChip: View {
 private struct ClipboardShelfCard: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
     let relativeDateReference: Date
     let defaultPasteFormat: PasteFormat
@@ -1329,6 +1335,7 @@ private struct ClipboardShelfCard: View {
         ClipboardShelfCardVisual(
             item: item,
             imageDataProvider: imageDataProvider,
+            linkMetadataProvider: linkMetadataProvider,
             relativeDateReference: relativeDateReference
         )
             .equatable()
@@ -1821,16 +1828,19 @@ private final class ShelfLiveTextImagePreviewContainer: NSView {
 private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let relativeDateReference: Date
     private let renderSignature: ClipboardShelfCardRenderSignature
 
     init(
         item: ClipboardItem,
         imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?,
+        linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void,
         relativeDateReference: Date
     ) {
         self.item = item
         self.imageDataProvider = imageDataProvider
+        self.linkMetadataProvider = linkMetadataProvider
         self.relativeDateReference = relativeDateReference
         self.renderSignature = ClipboardShelfCardRenderSignature(
             item: item,
@@ -1866,7 +1876,6 @@ private struct ClipboardShelfCardVisual: View {
         VStack(spacing: 0) {
             header
             previewBody
-            footer
         }
         .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.cardHeight)
         .background {
@@ -1883,16 +1892,22 @@ private struct ClipboardShelfCardVisual: View {
     private var previewBody: some View {
         let preview = item.visualPreview
 
-        if preview.prefersImageThumbnail {
+        if item.presentationContentType == .url {
+            ShelfLinkPreviewCardBody(
+                item: item,
+                preview: preview,
+                imageDataProvider: imageDataProvider,
+                linkMetadataProvider: linkMetadataProvider,
+                tint: cardTint
+            )
+        } else if preview.prefersImageThumbnail {
             ShelfThumbnailView(item: item, imageDataProvider: imageDataProvider, tint: cardTint)
-        } else if item.presentationContentType == .url {
-            ShelfLinkPreviewCardBody(preview: preview, tint: cardTint)
         } else {
             VStack(alignment: .leading, spacing: 9) {
                 Text(preview.body)
                     .font(item.presentationContentType == .text ? .callout.monospaced() : .callout)
                     .foregroundStyle(.primary)
-                    .lineLimit(footerTitle == nil ? 4 : 3)
+                    .lineLimit(7)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(14)
@@ -1905,80 +1920,12 @@ private struct ClipboardShelfCardVisual: View {
         }
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: footerTitle == nil ? 0 : 4) {
-            if let footerTitle {
-                Text(footerTitle)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-            }
-            HStack {
-                Text(item.sourceAppName)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(footnote)
-            }
-            .font(.callout)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        .background {
-            Rectangle()
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
-        }
-        .background(.regularMaterial)
-    }
-
     private func relativeDate(relativeTo date: Date) -> String {
         Self.relativeFormatter.localizedString(for: item.createdAt, relativeTo: date)
     }
 
-    private var footerTitle: String? {
-        let headline = item.visualPreview.headline.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !headline.isEmpty else { return nil }
-
-        switch item.presentationContentType {
-        case .text:
-            return nil
-        case .url, .image, .file, .mixed:
-            return headline
-        }
-    }
-
-    private var footnote: String {
-        switch item.presentationContentType {
-        case .image:
-            if let imageSize = ClipboardImageCache.imageSize(for: item) {
-                return "\(Int(imageSize.width)) x \(Int(imageSize.height))"
-            }
-            return localized(item.ocrState.displayName)
-        case .file:
-            let count = item.payload.allFileURLStrings.count
-            return localized(count == 1 ? "format.file" : "format.files", count)
-        case .text, .url, .mixed:
-            return localized("format.chars", presentationCharacterCount)
-        }
-    }
-
-    private var presentationCharacterCount: Int {
-        item.payload.text?.count
-            ?? item.payload.urlString?.count
-            ?? item.payload.ocrText?.count
-            ?? item.searchDocument.normalizedText.count
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
-    }
-
-    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
-        String(
-            format: NSLocalizedString(key, comment: ""),
-            locale: Locale.current,
-            arguments: arguments
-        )
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
@@ -2016,20 +1963,12 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let sourceBundleIdentifier: String?
     let contentType: ClipboardContentType
     let title: String
-    let ocrState: OCRState
     let previewHeadline: String
     let previewBody: String
     let previewSearchHash: String
-    let textCount: Int?
-    let htmlCount: Int?
     let rtfAssetID: String?
-    let rtfByteCount: Int?
-    let urlString: String?
-    let fileURLString: String?
-    let fileURLStrings: [String]
     let imageAssetID: String?
     let imageByteCount: Int?
-    let ocrTextCount: Int?
     let relativeDateMinuteBucket: Int
 
     init(item: ClipboardItem, relativeDateReference: Date) {
@@ -2040,51 +1979,91 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         sourceBundleIdentifier = item.sourceBundleIdentifier
         contentType = item.contentType
         title = item.title
-        ocrState = item.ocrState
         previewHeadline = item.searchDocument.previewHeadline
         previewBody = item.searchDocument.previewBody
         previewSearchHash = item.searchDocument.searchHash
-        textCount = item.payload.text?.count
-        htmlCount = item.payload.htmlString?.count
         rtfAssetID = item.payload.rtfAssetID
-        rtfByteCount = item.payload.rtfData?.count ?? item.payload.rtfByteCount
-        urlString = item.payload.urlString
-        fileURLString = item.payload.fileURLString
-        fileURLStrings = item.payload.fileURLStrings
         imageAssetID = item.payload.imageAssetID
         imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
-        ocrTextCount = item.payload.ocrText?.count
         relativeDateMinuteBucket = Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
     }
 }
 
 private struct ShelfLinkPreviewCardBody: View {
+    let item: ClipboardItem
     let preview: ClipboardVisualPreview
+    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let tint: Color
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Rectangle()
-                .fill(tint.opacity(0.10))
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "link.circle.fill")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(tint)
-                Text(preview.headline)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                Text(preview.body)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        Group {
+            if preview.prefersImageThumbnail {
+                VStack(spacing: 0) {
+                    ClipboardImageThumbnailView(
+                        item: item,
+                        imageDataProvider: imageDataProvider,
+                        tint: tint,
+                        contentMode: .fit,
+                        placeholderIconSize: 30
+                    )
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .frame(height: ClipboardShelfMetrics.linkMetadataImageHeight)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    metadataFooter
+                        .frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight)
+                }
+                .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
+                .frame(maxWidth: .infinity)
+                .clipped()
+            } else {
+                ZStack(alignment: .bottomLeading) {
+                    Rectangle()
+                        .fill(tint.opacity(0.10))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image(systemName: "link.circle.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(tint)
+                        Text(preview.headline)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                        Text(preview.body)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+                .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
+                .frame(maxWidth: .infinity)
+                .clipped()
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
-        .frame(maxWidth: .infinity)
-        .clipped()
+        .task(id: item.id) {
+            guard !preview.prefersImageThumbnail else { return }
+            await linkMetadataProvider(item)
+        }
+    }
+
+    @MainActor
+    private var metadataFooter: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(preview.headline)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Text(preview.body)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.72))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.78))
     }
 }
 

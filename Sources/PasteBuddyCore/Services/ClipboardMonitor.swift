@@ -2,6 +2,7 @@
 import AppKit
 import CryptoKit
 import Foundation
+import LinkPresentation
 
 @MainActor
 public final class ClipboardMonitor {
@@ -245,7 +246,7 @@ public final class ClipboardMonitor {
         sourceBundleIdentifier: String?,
         privacy: PrivacyConfiguration
     ) async -> ClipboardItem? {
-        await Task.detached(priority: .userInitiated) {
+        let capturedItem = await Task.detached(priority: .userInitiated) {
             makeItemFromSnapshot(
                 snapshot,
                 sourceApp: sourceApp,
@@ -253,6 +254,25 @@ public final class ClipboardMonitor {
                 privacy: privacy
             )
         }.value
+        guard var item = capturedItem else { return nil }
+
+        guard item.contentType == .url,
+              privacy.captureImages,
+              !item.payload.hasImageAsset,
+              let urlString = item.payload.presentationURLString,
+              let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString) else {
+            return item
+        }
+
+        if let title = metadata.title {
+            item.title = title
+        }
+        if let imageData = metadata.imageData {
+            item.payload.imageData = imageData
+            item.payload.imageByteCount = imageData.count
+        }
+        item.refreshSearchDocument()
+        return item
     }
 
     nonisolated private static func makeItemFromSnapshot(
@@ -435,6 +455,49 @@ public final class ClipboardMonitor {
             .string
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty
+    }
+}
+
+public struct ClipboardLinkPreviewMetadata: Sendable {
+    public var title: String?
+    public var imageData: Data?
+
+    public init(title: String? = nil, imageData: Data? = nil) {
+        self.title = title
+        self.imageData = imageData
+    }
+}
+
+public enum ClipboardLinkMetadataFetcher {
+    @MainActor
+    public static func fetch(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            let metadata = try await LPMetadataProvider().startFetchingMetadata(for: url)
+            let imageData = await (metadata.imageProvider ?? metadata.iconProvider)?.pasteBuddyPNGData()
+            return ClipboardLinkPreviewMetadata(
+                title: nonEmpty(metadata.title),
+                imageData: imageData
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+}
+
+private extension NSItemProvider {
+    @MainActor
+    func pasteBuddyPNGData() async -> Data? {
+        await withCheckedContinuation { continuation in
+            loadObject(ofClass: NSImage.self) { object, _ in
+                continuation.resume(returning: (object as? NSImage)?.pasteBuddyPNGData())
+            }
+        }
     }
 }
 #endif

@@ -874,8 +874,14 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var presentationContentType: ClipboardContentType {
-        if payload.presentationURLString != nil,
-           contentType == .url || contentType == .text {
+        let hasPresentationURL = payload.presentationURLString != nil
+        let hasTextContent = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || payload.hasRTFAsset
+        let hasFileContent = !payload.allFileURLStrings.isEmpty
+        let hasLinkPreviewImage = hasPresentationURL && payload.hasImageAsset && !hasFileContent
+        if hasPresentationURL,
+           contentType == .url || contentType == .text || (contentType == .mixed && (hasLinkPreviewImage || !payload.hasImageAsset)) {
             return .url
         }
         if contentType == .url {
@@ -888,12 +894,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         if !payload.allFileURLStrings.isEmpty {
             return .file
         }
-        if payload.presentationURLString != nil {
-            return .url
-        }
-        if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            || payload.hasRTFAsset {
+        if hasTextContent {
             return .text
         }
         return .mixed
@@ -1054,22 +1055,27 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
         var types: Set<ClipboardContentType> = []
-        if contentType != .url || payload.presentationURLString != nil {
-            types.insert(contentType)
-        }
-        if payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasPresentationURL = payload.presentationURLString != nil
+        let hasTextContent = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.htmlString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || payload.hasRTFAsset
-            || (contentType == .url && payload.presentationURLString == nil) {
+        let hasFileContent = !payload.allFileURLStrings.isEmpty
+        let hasLinkPreviewImage = hasPresentationURL && payload.hasImageAsset && !hasFileContent
+        if hasLinkPreviewImage {
+            types.insert(.url)
+        } else if contentType != .url {
+            types.insert(contentType)
+        }
+        if (hasTextContent && !hasLinkPreviewImage) || (contentType == .url && payload.presentationURLString == nil) {
             types.insert(.text)
         }
-        if payload.presentationURLString != nil {
+        if hasPresentationURL && !hasLinkPreviewImage {
             types.insert(.url)
         }
         if !payload.allFileURLStrings.isEmpty {
             types.insert(.file)
         }
-        if payload.hasImageAsset {
+        if payload.hasImageAsset && !hasLinkPreviewImage {
             types.insert(.image)
         }
         return types
@@ -1078,12 +1084,22 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     private var linkVisualPreview: ClipboardVisualPreview {
         let urlString = payload.presentationURLString ?? payload.urlString ?? title
         let host = URL(string: urlString)?.host?.nilIfEmpty
+        let displayTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let headline = if payload.hasImageAsset,
+                          let displayTitle,
+                          displayTitle != host,
+                          displayTitle != urlString {
+            displayTitle
+        } else {
+            host ?? title
+        }
         return ClipboardVisualPreview(
-            headline: host ?? title,
+            headline: headline,
             body: urlString,
             detail: host == nil ? nil : "Link",
             badgeText: ClipboardContentType.url.displayName,
-            systemImageName: "link"
+            systemImageName: "link",
+            prefersImageThumbnail: payload.hasImageAsset
         )
     }
 
@@ -1199,7 +1215,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         for fileURLString in payload.allFileURLStrings {
             update(fileURLString)
         }
-        update(binaryHash(data: payload.imageData, assetID: payload.imageAssetID))
+        update(contentType == .url ? "" : binaryHash(data: payload.imageData, assetID: payload.imageAssetID))
 
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }

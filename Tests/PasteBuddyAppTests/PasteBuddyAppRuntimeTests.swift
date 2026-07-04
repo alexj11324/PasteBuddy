@@ -273,6 +273,21 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(previewSource.contains(".scrollContentBackground(.hidden)"))
     }
 
+    func testShelfCardsOmitBottomMetadataFooter() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let cardStart = try XCTUnwrap(source.range(of: "private struct ClipboardShelfCardVisual"))
+        let selectionRingStart = try XCTUnwrap(source.range(of: "private struct ClipboardShelfCardSelectionRing"))
+        let cardSource = String(source[cardStart.lowerBound..<selectionRingStart.lowerBound])
+
+        XCTAssertTrue(source.contains("static let cardPreviewHeight: CGFloat = cardHeight - cardHeaderHeight"))
+        XCTAssertFalse(cardSource.contains("footer"))
+        XCTAssertFalse(cardSource.contains("Text(item.sourceAppName)"))
+        XCTAssertFalse(cardSource.contains("Text(footnote)"))
+        XCTAssertFalse(cardSource.contains("footerTitle"))
+        XCTAssertFalse(cardSource.contains("item.ocrState.displayName"))
+        XCTAssertFalse(cardSource.contains("format.chars"))
+    }
+
     func testPreviewPresentationUsesNativeCollectionPopoverForShelfAndSidePanel() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
@@ -457,15 +472,44 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertLessThan(landscape.height, 38)
     }
 
-    func testShelfLinkCardsDoNotFetchRemoteMetadataByDefault() throws {
+    func testShelfLinkCardsUsePersistedMetadataPreviewWithoutViewFetch() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let monitorSource = try sourceFileContents("Sources/PasteBuddyCore/Services/ClipboardMonitor.swift")
+        let storeSource = try sourceFileContents("Sources/PasteBuddyCore/Stores/PasteBuddyStore.swift")
 
-        XCTAssertTrue(shelfSource.contains("ShelfLinkPreviewCardBody(preview: preview, tint: cardTint)"))
-        XCTAssertTrue(shelfSource.contains("Image(systemName: \"link.circle.fill\")"))
+        XCTAssertFalse(shelfSource.contains("import LinkPresentation"))
+        XCTAssertTrue(shelfSource.contains("if item.presentationContentType == .url {"))
+        XCTAssertTrue(shelfSource.contains("ShelfLinkPreviewCardBody("))
+        XCTAssertTrue(shelfSource.contains("item: item,"))
+        XCTAssertTrue(shelfSource.contains("imageDataProvider: imageDataProvider,"))
+        XCTAssertTrue(shelfSource.contains("linkMetadataProvider: linkMetadataProvider,"))
+        XCTAssertTrue(shelfSource.contains(".task(id: item.id)"))
+        XCTAssertTrue(shelfSource.contains("await linkMetadataProvider(item)"))
+        XCTAssertTrue(shelfSource.contains("} else if preview.prefersImageThumbnail {"))
+        XCTAssertTrue(shelfSource.contains("ShelfThumbnailView(item: item, imageDataProvider: imageDataProvider, tint: cardTint)"))
+        XCTAssertTrue(shelfSource.contains("contentMode: .fit"))
+        XCTAssertTrue(shelfSource.contains("static let linkMetadataImageHeight: CGFloat = cardPreviewHeight - linkMetadataFooterHeight"))
+        XCTAssertTrue(shelfSource.contains(".frame(height: ClipboardShelfMetrics.linkMetadataImageHeight)"))
+        XCTAssertTrue(shelfSource.contains(".frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight)"))
+        XCTAssertTrue(shelfSource.contains("private var metadataFooter: some View"))
+        XCTAssertTrue(shelfSource.contains("Text(preview.headline)"))
+        XCTAssertTrue(shelfSource.contains("Text(preview.body)"))
+        XCTAssertFalse(shelfSource.contains("LPMetadataProvider"))
+        XCTAssertFalse(shelfSource.contains("startFetchingMetadata"))
+        XCTAssertFalse(shelfSource.contains(".task(id: url?.absoluteString)"))
+
+        XCTAssertTrue(monitorSource.contains("import LinkPresentation"))
+        XCTAssertTrue(monitorSource.contains("public enum ClipboardLinkMetadataFetcher"))
+        XCTAssertTrue(monitorSource.contains("LPMetadataProvider().startFetchingMetadata(for: url)"))
+        XCTAssertTrue(monitorSource.contains("metadata.imageProvider ?? metadata.iconProvider"))
+        XCTAssertTrue(monitorSource.contains("item.payload.imageData = imageData"))
+        XCTAssertTrue(monitorSource.contains("item.payload.imageByteCount = imageData.count"))
+        XCTAssertTrue(storeSource.contains("linkPreviewMetadataRequests"))
+        XCTAssertTrue(storeSource.contains("enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem)"))
+        XCTAssertTrue(storeSource.contains("ClipboardLinkMetadataFetcher.fetch(for: urlString)"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.preview(for:"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.cachedPreview(for:"))
         XCTAssertFalse(sourceFileExists("Sources/PasteBuddy/Models/LinkPreviewCache.swift"))
-        XCTAssertFalse(shelfSource.contains("LPMetadataProvider"))
     }
 
     func testMobileShareUntitledFallbackResolvesLocalizationBeforeText() throws {
