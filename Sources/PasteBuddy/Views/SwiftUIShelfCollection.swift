@@ -24,6 +24,8 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
     var onDoubleClick: (UUID) -> Void
 
     @State private var lastScrolledPrimarySelectedID: UUID?
+    @State private var presentedPreviewID: UUID?
+    @State private var previewPresentationGeneration = 0
 
     init(
         items: [Item],
@@ -66,8 +68,15 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
                 .onChange(of: primarySelectedID) {
                     scrollPrimarySelectionIfNeeded(with: proxy)
                 }
+                .onChange(of: previewedID) {
+                    syncPresentedPreview()
+                }
+                .onChange(of: itemIDs) {
+                    syncPresentedPreview()
+                }
                 .onAppear {
                     lastScrolledPrimarySelectedID = primarySelectedID
+                    presentedPreviewID = validPreviewedID
                 }
         }
     }
@@ -103,20 +112,30 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
     private func collectionItem(_ item: Item) -> some View {
         let itemID = item.id
         let selectable = isSelectable(item)
-        let itemView = content(item, selectedIDs.contains(itemID) || primarySelectedID == itemID)
+        let itemContent = content(item, selectedIDs.contains(itemID) || primarySelectedID == itemID)
             .frame(width: itemSize.width, height: itemSize.height)
             .contentShape(Rectangle())
+
+        let itemView = Group {
+            if selectable {
+                Button {
+                    onSelect(itemID)
+                } label: {
+                    itemContent
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        onDoubleClick(itemID)
+                    }
+                )
+            } else {
+                itemContent
+            }
+        }
             .id(itemID)
-            .onTapGesture {
-                guard selectable else { return }
-                onSelect(itemID)
-            }
-            .onTapGesture(count: 2) {
-                guard selectable else { return }
-                onDoubleClick(itemID)
-            }
             .popover(
-                isPresented: previewBinding(for: itemID),
+                isPresented: presentedPreviewBinding(for: itemID),
                 attachmentAnchor: .rect(.bounds),
                 arrowEdge: previewArrowEdge
             ) {
@@ -130,13 +149,26 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         }
     }
 
-    private func previewBinding(for id: UUID) -> Binding<Bool> {
+    private var itemIDs: [UUID] {
+        items.map(\.id)
+    }
+
+    private var validPreviewedID: UUID? {
+        guard let previewedID,
+              items.contains(where: { $0.id == previewedID }) else {
+            return nil
+        }
+        return previewedID
+    }
+
+    private func presentedPreviewBinding(for id: UUID) -> Binding<Bool> {
         Binding(
             get: {
-                previewedID == id
+                presentedPreviewID == id
             },
             set: { isPresented in
-                if !isPresented, previewedID == id {
+                if !isPresented, presentedPreviewID == id {
+                    presentedPreviewID = nil
                     onPreviewDismiss(id)
                 }
             }
@@ -151,5 +183,26 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         }
         lastScrolledPrimarySelectedID = primarySelectedID
         proxy.scrollTo(primarySelectedID)
+    }
+
+    private func syncPresentedPreview() {
+        let targetID = validPreviewedID
+        guard presentedPreviewID != targetID else { return }
+
+        previewPresentationGeneration += 1
+        let generation = previewPresentationGeneration
+        if presentedPreviewID != nil, targetID != nil {
+            presentedPreviewID = nil
+            Task { @MainActor in
+                await Task.yield()
+                guard previewPresentationGeneration == generation,
+                      validPreviewedID == targetID else {
+                    return
+                }
+                presentedPreviewID = targetID
+            }
+        } else {
+            presentedPreviewID = targetID
+        }
     }
 }

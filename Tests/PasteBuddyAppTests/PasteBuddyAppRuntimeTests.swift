@@ -346,7 +346,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("LazyVStack(spacing: spacing)"))
         XCTAssertTrue(collectionSource.contains(".popover("))
         XCTAssertTrue(collectionSource.contains("attachmentAnchor: .rect(.bounds)"))
-        XCTAssertTrue(collectionSource.contains("previewBinding(for: itemID)"))
+        XCTAssertTrue(collectionSource.contains("isPresented: presentedPreviewBinding(for: itemID)"))
+        XCTAssertTrue(collectionSource.contains("@State private var presentedPreviewID"))
+        XCTAssertTrue(collectionSource.contains("private func syncPresentedPreview()"))
+        XCTAssertTrue(collectionSource.contains("await Task.yield()"))
         XCTAssertTrue(collectionSource.contains("onPreviewDismiss(id)"))
         XCTAssertTrue(collectionSource.contains("proxy.scrollTo(primarySelectedID)"))
         XCTAssertFalse(collectionSource.contains("anchor: .center"))
@@ -1083,13 +1086,39 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("collectionView.scrollToItems("))
     }
 
+    func testShelfAndSidePanelOwnNonPreviewKeyboardShortcuts() throws {
+        let collectionSource = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertTrue(collectionSource.contains("Button {"))
+        XCTAssertTrue(collectionSource.contains(".buttonStyle(.plain)"))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertTrue(collectionSource.contains("TapGesture(count: 2)"))
+        XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
+        XCTAssertFalse(collectionSource.contains(".onTapGesture(count: 2)"))
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow) { moveSelection(.left) }"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.rightArrow) { moveSelection(.right) }"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.upArrow) { moveSelection(.up) }"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.downArrow) { moveSelection(.down) }"))
+            XCTAssertTrue(source.contains(".keyboardShortcut(key, modifiers: [])"))
+        }
+        XCTAssertTrue(shelfSource.contains(".disabled(isSearchFocused || shelfInteraction.previewedID != nil)"))
+        XCTAssertTrue(sideSource.contains(".disabled(isSearchFocused || interaction.previewedID != nil)"))
+    }
+
     func testSwiftUIShelfCollectionUsesSwiftUIPopover() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
 
         XCTAssertTrue(source.contains(".popover("))
-        XCTAssertTrue(source.contains("previewBinding(for: itemID)"))
+        XCTAssertTrue(source.contains("isPresented: presentedPreviewBinding(for: itemID)"))
         XCTAssertTrue(source.contains("attachmentAnchor: .rect(.bounds)"))
         XCTAssertTrue(source.contains("arrowEdge: previewArrowEdge"))
+        XCTAssertTrue(source.contains("presentedPreviewID == id"))
+        XCTAssertTrue(source.contains("presentedPreviewID = nil"))
+        XCTAssertTrue(source.contains("await Task.yield()"))
         XCTAssertTrue(source.contains("onPreviewDismiss(id)"))
         XCTAssertFalse(source.contains("positioningRect"))
         XCTAssertFalse(source.contains("reanchorPopoverIfNeeded"))

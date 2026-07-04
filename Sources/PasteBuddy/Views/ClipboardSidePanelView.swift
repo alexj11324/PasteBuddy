@@ -53,6 +53,7 @@ struct ClipboardSidePanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
+        .background(sidePanelKeyboardShortcuts)
         .onAppear {
             store.searchQuery = ""
             store.clearFilters()
@@ -95,6 +96,26 @@ struct ClipboardSidePanelView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
+    }
+
+    private var sidePanelKeyboardShortcuts: some View {
+        Group {
+            keyboardShortcut(.leftArrow) { moveSelection(.left) }
+            keyboardShortcut(.rightArrow) { moveSelection(.right) }
+            keyboardShortcut(.upArrow) { moveSelection(.up) }
+            keyboardShortcut(.downArrow) { moveSelection(.down) }
+        }
+        .disabled(isSearchFocused || interaction.previewedID != nil)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+
+    private func keyboardShortcut(_ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Color.clear
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(key, modifiers: [])
     }
 
     private var toolbar: some View {
