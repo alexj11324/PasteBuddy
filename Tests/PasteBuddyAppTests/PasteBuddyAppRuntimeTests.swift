@@ -482,13 +482,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfCollectionChipsDoNotRenderItemCounts() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
-        let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
-        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
-        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
-        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
-        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let stripStart = try XCTUnwrap(source.range(of: "struct ClipboardCollectionStrip"))
+        let chipStart = try XCTUnwrap(source.range(of: "struct ShelfCollectionChip: View"))
+        let dropTargetStart = try XCTUnwrap(source.range(of: "struct ShelfCollectionChipDropTarget"))
+        let stripSource = String(source[stripStart.lowerBound..<chipStart.lowerBound])
+        let chipSource = String(source[chipStart.lowerBound..<dropTargetStart.lowerBound])
 
         XCTAssertFalse(stripSource.contains("count:"))
         XCTAssertFalse(chipSource.contains("let count"))
@@ -497,20 +496,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfCollectionChipsAcceptDraggedClipboardItems() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
-        let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
-        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
-        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
-        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
-        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let stripStart = try XCTUnwrap(source.range(of: "struct ClipboardCollectionStrip"))
+        let chipStart = try XCTUnwrap(source.range(of: "struct ShelfCollectionChip: View"))
+        let dropTargetStart = try XCTUnwrap(source.range(of: "struct ShelfCollectionChipDropTarget"))
+        let stripSource = String(source[stripStart.lowerBound..<chipStart.lowerBound])
+        let chipSource = String(source[chipStart.lowerBound..<dropTargetStart.lowerBound])
 
-        XCTAssertTrue(source.contains("private enum ShelfCollectionDropTarget"))
+        XCTAssertTrue(source.contains("enum ClipboardCollectionDropTarget"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
         XCTAssertTrue(chipSource.contains("ShelfCollectionChipDropTarget("))
-        XCTAssertTrue(source.contains("private struct ShelfCollectionChipDropTarget: NSViewRepresentable"))
+        XCTAssertTrue(source.contains("struct ShelfCollectionChipDropTarget: NSViewRepresentable"))
         XCTAssertTrue(source.contains("registerForDraggedTypes([Self.payloadPasteboardType])"))
         XCTAssertTrue(source.contains("override func performDragOperation(_ sender: NSDraggingInfo) -> Bool"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
@@ -518,11 +516,22 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
     }
 
+    func testBothPanelModesRenderTheSharedCollectionStrip() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertTrue(shelfSource.contains("ClipboardCollectionStrip(store: store, selectedScope: shelfScope)"))
+        XCTAssertTrue(sideSource.contains("ClipboardCollectionStrip(store: store, selectedScope: sideScope)"))
+        XCTAssertFalse(shelfSource.contains("struct ShelfCollectionChip"))
+        XCTAssertFalse(sideSource.contains("struct ShelfCollectionChip"))
+        XCTAssertFalse(sideSource.contains("store.contentTypeFilter =="))
+    }
+
     func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
-        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
-        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let chipStart = try XCTUnwrap(source.range(of: "struct ShelfCollectionChip: View"))
+        let dropTargetStart = try XCTUnwrap(source.range(of: "struct ShelfCollectionChipDropTarget"))
+        let chipSource = String(source[chipStart.lowerBound..<dropTargetStart.lowerBound])
 
         XCTAssertTrue(chipSource.contains(".clipShape(Capsule())"))
         XCTAssertFalse(chipSource.contains(".shadow("))
@@ -951,7 +960,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: \"gearshape\")"))
         XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))
-        XCTAssertTrue(source.contains("label.all"))
+        XCTAssertTrue(source.contains("ClipboardCollectionStrip("))
         XCTAssertTrue(source.contains("label.today"))
         XCTAssertFalse(source.contains("label.filters"))
         XCTAssertFalse(source.contains("action.reload_clipboard_history"))

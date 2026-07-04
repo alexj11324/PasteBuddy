@@ -183,78 +183,46 @@ struct ClipboardSidePanelView: View {
         }
     }
 
+    // Same collection strip as the shelf so scopes, smart categories, and
+    // user pinboards stay aligned between panel modes; the date shortcut is
+    // the side panel's only extra chip.
     private var quickFilterStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.all"),
-                    systemImageName: nil,
-                    isSelected: sideScope == .history && !store.hasActiveFilters
-                ) {
-                    sideScope = .history
-                    store.clearFilters()
-                    refreshSideItems()
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.file"),
-                    systemImageName: "doc",
-                    isSelected: store.contentTypeFilter == .file
-                ) {
-                    setContentTypeFilter(.file)
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.today"),
-                    systemImageName: "calendar",
-                    isSelected: store.dateFilter == .today
-                ) {
-                    store.dateFilter = store.dateFilter == .today ? .any : .today
-                    refreshSideItems()
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.image"),
-                    systemImageName: "photo",
-                    isSelected: store.contentTypeFilter == .image
-                ) {
-                    setContentTypeFilter(.image)
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.link"),
-                    systemImageName: "link",
-                    isSelected: store.contentTypeFilter == .url
-                ) {
-                    setContentTypeFilter(.url)
-                }
-
-                Menu {
-                    Button {
-                        isShowingNewTextItem = true
-                    } label: {
-                        Label("label.new_text_item", systemImage: "square.and.pencil")
-                    }
-                    Button {
-                        let pinboard = store.createPinboard()
-                        sideScope = .pinboard(pinboard.id)
-                        refreshSideItems()
-                    } label: {
-                        Label("label.new_pinboard", systemImage: "plus.rectangle.on.folder")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .labelStyle(.iconOnly)
-                .help(localized("action.add_item_or_pinboard"))
+        HStack(spacing: 8) {
+            ClipboardCollectionStrip(store: store, selectedScope: sideScope) { scope in
+                setScope(scope)
             }
-            .padding(.vertical, 1)
+
+            ClipboardSidePanelFilterChip(
+                title: localized("label.today"),
+                systemImageName: "calendar",
+                isSelected: store.dateFilter == .today
+            ) {
+                store.dateFilter = store.dateFilter == .today ? .any : .today
+                refreshSideItems()
+            }
+
+            Menu {
+                Button {
+                    isShowingNewTextItem = true
+                } label: {
+                    Label("label.new_text_item", systemImage: "square.and.pencil")
+                }
+                Button {
+                    let pinboard = store.createPinboard()
+                    setScope(.pinboard(pinboard.id))
+                } label: {
+                    Label("label.new_pinboard", systemImage: "plus.rectangle.on.folder")
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .help(localized("action.add_item_or_pinboard"))
         }
-        .scrollIndicators(.hidden)
     }
 
     private var itemList: some View {
@@ -403,9 +371,10 @@ struct ClipboardSidePanelView: View {
         return localized("message.copy_text_links_screenshots_or_files_to")
     }
 
-    private func setContentTypeFilter(_ type: ClipboardContentType) {
-        store.contentTypeFilter = store.contentTypeFilter == type ? nil : type
-        refreshSideItems()
+    private func setScope(_ scope: PasteScope) {
+        guard sideScope != scope else { return }
+        interaction.dismissPreview()
+        sideScope = scope
     }
 
     private func refreshSideItems() {
@@ -723,6 +692,8 @@ private struct ClipboardSidePanelContentPreview: View {
     var body: some View {
         if item.presentationContentType == .image, item.payload.hasImageAsset {
             ClipboardSidePanelImagePreview(item: item, imageDataProvider: imageDataProvider)
+        } else if item.presentationContentType == .url {
+            linkPreview
         } else {
             Text(primaryText)
                 .font(.system(size: 14, weight: .semibold))
@@ -730,6 +701,33 @@ private struct ClipboardSidePanelContentPreview: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // Mirrors the shelf link card: resolved host as the headline with the raw
+    // URL demoted to a secondary line, instead of a bare URL string.
+    private var linkPreview: some View {
+        let preview = item.visualPreview
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: "link")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(
+                        SourceApplicationIconResolver.themeColor(
+                            for: item,
+                            fallback: item.presentationContentType.shelfTint
+                        )
+                    )
+                Text(preview.headline)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            Text(preview.body)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var primaryText: String {
