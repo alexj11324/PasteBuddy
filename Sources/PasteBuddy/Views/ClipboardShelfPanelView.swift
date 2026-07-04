@@ -1166,11 +1166,14 @@ private struct ShelfCollectionChip: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .dropDestination(for: PinboardItemDragPayload.self) { payloads, _ in
-            onDropPayloads?(payloads) ?? false
-        } isTargeted: { isTargeted in
-            guard onDropPayloads != nil else { return }
-            isDropTargeted = isTargeted
+        .overlay {
+            if let onDropPayloads {
+                ShelfCollectionChipDropTarget(
+                    isTargeted: $isDropTargeted,
+                    onDropPayloads: onDropPayloads
+                )
+                .clipShape(Capsule())
+            }
         }
         .onHover { isHovered in
             withAnimation(reduceMotion ? nil : Self.hoverAnimation) {
@@ -1192,6 +1195,98 @@ private struct ShelfCollectionChip: View {
 
     private var helpText: String {
         title
+    }
+}
+
+private struct ShelfCollectionChipDropTarget: NSViewRepresentable {
+    @Binding var isTargeted: Bool
+    let onDropPayloads: ([PinboardItemDragPayload]) -> Bool
+
+    func makeNSView(context: Context) -> DropView {
+        let view = DropView()
+        view.onTargeted = { isTargeted in
+            self.isTargeted = isTargeted
+        }
+        view.onDropPayloads = onDropPayloads
+        return view
+    }
+
+    func updateNSView(_ nsView: DropView, context: Context) {
+        nsView.onTargeted = { isTargeted in
+            self.isTargeted = isTargeted
+        }
+        nsView.onDropPayloads = onDropPayloads
+    }
+
+    final class DropView: NSView {
+        var onTargeted: (Bool) -> Void = { _ in }
+        var onDropPayloads: ([PinboardItemDragPayload]) -> Bool = { _ in false }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            registerForDraggedTypes([Self.payloadPasteboardType])
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = window?.currentEvent ?? NSApp.currentEvent,
+                  event.type == .leftMouseDragged else {
+                return nil
+            }
+            return super.hitTest(point)
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            guard canAccept(sender) else { return [] }
+            onTargeted(true)
+            return .copy
+        }
+
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            canAccept(sender) ? .copy : []
+        }
+
+        override func draggingExited(_ sender: NSDraggingInfo?) {
+            onTargeted(false)
+        }
+
+        override func draggingEnded(_ sender: NSDraggingInfo) {
+            onTargeted(false)
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            let payloads = payloads(from: sender.draggingPasteboard)
+            guard !payloads.isEmpty else { return false }
+            onTargeted(false)
+            return onDropPayloads(payloads)
+        }
+
+        private func canAccept(_ sender: NSDraggingInfo) -> Bool {
+            !payloads(from: sender.draggingPasteboard).isEmpty
+        }
+
+        private func payloads(from pasteboard: NSPasteboard) -> [PinboardItemDragPayload] {
+            var payloads: [PinboardItemDragPayload] = []
+            for item in pasteboard.pasteboardItems ?? [] {
+                guard let data = item.data(forType: Self.payloadPasteboardType),
+                      let payload = try? JSONDecoder().decode(PinboardItemDragPayload.self, from: data) else {
+                    continue
+                }
+                payloads.append(payload)
+            }
+            if payloads.isEmpty,
+               let data = pasteboard.data(forType: Self.payloadPasteboardType),
+               let payload = try? JSONDecoder().decode(PinboardItemDragPayload.self, from: data) {
+                payloads.append(payload)
+            }
+            return payloads
+        }
+
+        private static let payloadPasteboardType = NSPasteboard.PasteboardType(UTType.pasteBuddyPinboardItemIDs.identifier)
     }
 }
 
