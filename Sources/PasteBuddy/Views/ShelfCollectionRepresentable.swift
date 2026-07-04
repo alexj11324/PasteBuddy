@@ -165,6 +165,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         private let popover = NSPopover()
         private weak var currentPopoverAnchorView: NSView?
         private var indexByID: [UUID: Int] = [:]
+        private var previewDisplayLink: CADisplayLink?
 
         init(_ parent: ShelfCollectionRepresentable) {
             self.parent = parent
@@ -174,6 +175,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         }
 
         func closePreviewPopover() {
+            stopPreviewDisplayLink()
             if popover.isShown {
                 popover.animates = true
                 popover.close()
@@ -187,7 +189,33 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
         // tracking moves must be immediate; only show/close keep the fade.
         private func movePopoverImmediately(to rect: NSRect) {
             popover.animates = false
+            guard popover.positioningRect != rect else { return }
             popover.positioningRect = rect
+        }
+
+        // Momentum scrolling does not deliver a bounds callback for every
+        // presented frame - especially across a direction reversal - so
+        // re-anchoring only from reflectScrolledClipView leaves the popover
+        // trailing the content. While the preview is up, realign it on every
+        // display refresh instead; the rect guard above makes idle ticks free.
+        private func startPreviewDisplayLink() {
+            guard previewDisplayLink == nil, let scrollView else { return }
+            let link = scrollView.displayLink(target: self, selector: #selector(previewDisplayLinkDidFire))
+            link.add(to: .main, forMode: .common)
+            previewDisplayLink = link
+        }
+
+        private func stopPreviewDisplayLink() {
+            previewDisplayLink?.invalidate()
+            previewDisplayLink = nil
+        }
+
+        @objc private func previewDisplayLinkDidFire() {
+            guard popover.isShown else {
+                stopPreviewDisplayLink()
+                return
+            }
+            reanchorPopoverIfNeeded()
         }
 
         func syncData() {
@@ -454,6 +482,7 @@ struct ShelfCollectionRepresentable<Item: Identifiable, Content: View>: NSViewRe
             popover.animates = true
             popover.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.preferredEdge)
             currentPopoverAnchorView = anchor.view
+            startPreviewDisplayLink()
         }
 
         // The anchor must always name a spot inside the viewport: NSPopover keeps
@@ -792,6 +821,14 @@ private final class ShelfCollectionView: NSCollectionView {
     var mouseDownSelectionHandler: ((NSCollectionView, IndexPath, NSEvent) -> Void)?
     var doubleClickHandler: ((NSCollectionView, IndexPath) -> Void)?
     var isSelectableIndexPath: ((IndexPath) -> Bool)?
+
+    // Keep scrolling on the synchronous main-thread path so the bounds the
+    // preview popover is anchored against always match what is on screen;
+    // async (responsive) scrolling lets the presented offset run ahead of the
+    // main-thread callbacks that drive the popover.
+    override class var isCompatibleWithResponsiveScrolling: Bool {
+        false
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
