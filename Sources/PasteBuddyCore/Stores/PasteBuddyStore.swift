@@ -2329,6 +2329,18 @@ public final class PasteBuddyStore {
         return item
     }
 
+    @discardableResult
+    public func addItemsToPasteStack(_ itemIDs: [UUID]) -> Bool {
+        var seenItemIDs = Set<UUID>()
+        var didAddItem = false
+        for itemID in itemIDs where seenItemIDs.insert(itemID).inserted {
+            guard let item = snapshot.items.first(where: { $0.id == itemID }) else { continue }
+            appendToPasteStack(item)
+            didAddItem = true
+        }
+        return didAddItem
+    }
+
     private func appendToPasteStack(_ item: ClipboardItem) {
         pasteStackItems.removeAll { $0.id == item.id }
         pasteStackItems.append(item)

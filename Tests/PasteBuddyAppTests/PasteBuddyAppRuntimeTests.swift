@@ -471,6 +471,25 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(chipSource.contains("private var helpText: String"))
     }
 
+    func testShelfCollectionChipsAcceptDraggedClipboardItems() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
+        let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
+        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
+        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
+        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
+        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+
+        XCTAssertTrue(source.contains("private enum ShelfCollectionDropTarget"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
+        XCTAssertTrue(chipSource.contains(".dropDestination(for: PinboardItemDragPayload.self)"))
+        XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
+        XCTAssertTrue(source.contains("store.addItemsToPasteStack(ids)"))
+        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+    }
+
     func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))

@@ -58,6 +58,13 @@ private enum ClipboardShelfDisplayItem: Identifiable {
     }
 }
 
+private enum ShelfCollectionDropTarget {
+    case history
+    case pasteStack
+    case smartCategory(SmartPinboardCategory)
+    case pinboard(UUID)
+}
+
 enum ClipboardPanelSearchInput {
     static func accepts(_ modifiers: SwiftUI.EventModifiers) -> Bool {
         modifiers.subtracting([.shift, .capsLock]).isEmpty
@@ -375,7 +382,8 @@ struct ClipboardShelfPanelView: View {
                     title: localized("label.clipboard"),
                     systemImageName: "clock.arrow.circlepath",
                     color: store.isCapturePaused ? .orange : .blue,
-                    isSelected: shelfScope == .history
+                    isSelected: shelfScope == .history,
+                    onDropPayloads: { dropItems($0, into: .history) }
                 ) {
                     setScope(.history)
                 }
@@ -384,7 +392,8 @@ struct ClipboardShelfPanelView: View {
                     title: localized("action.paste_stack"),
                     systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
                     color: store.isPasteStackActive ? .green : .secondary,
-                    isSelected: shelfScope == .pasteStack
+                    isSelected: shelfScope == .pasteStack,
+                    onDropPayloads: { dropItems($0, into: .pasteStack) }
                 ) {
                     setScope(.pasteStack)
                 }
@@ -394,7 +403,8 @@ struct ClipboardShelfPanelView: View {
                         title: localized(category.displayName),
                         systemImageName: category.systemImageName,
                         color: Color(hex: category.colorHex) ?? .accentColor,
-                        isSelected: isSmartCategorySelected(category)
+                        isSelected: isSmartCategorySelected(category),
+                        onDropPayloads: { dropItems($0, into: .smartCategory(category)) }
                     ) {
                         selectSmartCategory(category)
                     }
@@ -405,7 +415,8 @@ struct ClipboardShelfPanelView: View {
                         title: pinboard.name,
                         systemImageName: "pin.fill",
                         color: Color(hex: pinboard.colorHex) ?? .blue,
-                        isSelected: shelfScope == .pinboard(pinboard.id)
+                        isSelected: shelfScope == .pinboard(pinboard.id),
+                        onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }
                     ) {
                         setScope(.pinboard(pinboard.id))
                     }
@@ -714,6 +725,38 @@ struct ClipboardShelfPanelView: View {
         if let firstPinboardID = pinboards.first?.id {
             setScope(.pinboard(firstPinboardID))
         }
+    }
+
+    private func dropItems(_ payloads: [PinboardItemDragPayload], into target: ShelfCollectionDropTarget) -> Bool {
+        let ids = droppedItemIDs(from: payloads)
+        guard !ids.isEmpty else { return false }
+
+        switch target {
+        case .history:
+            setScope(.history)
+            return true
+        case .pasteStack:
+            guard store.addItemsToPasteStack(ids) else { return false }
+            setScope(.pasteStack)
+            return true
+        case .smartCategory(let category):
+            guard ids.contains(where: { id in
+                store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true
+            }) else {
+                return false
+            }
+            selectSmartCategory(category)
+            return true
+        case .pinboard(let pinboardID):
+            store.pinItems(ids, to: pinboardID)
+            setScope(.pinboard(pinboardID))
+            return true
+        }
+    }
+
+    private func droppedItemIDs(from payloads: [PinboardItemDragPayload]) -> [UUID] {
+        var seen = Set<UUID>()
+        return payloads.flatMap(\.ids).filter { seen.insert($0).inserted }
     }
 
     private func clearFilter(_ descriptor: ClipboardFilterDescriptor) {
@@ -1076,20 +1119,24 @@ private struct ShelfCollectionChip: View {
     let systemImageName: String
     let color: Color
     let isSelected: Bool
+    var onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
     let action: () -> Void
     @State private var isHovered = false
+    @State private var isDropTargeted = false
 
     init(
         title: String,
         systemImageName: String,
         color: Color,
         isSelected: Bool,
+        onDropPayloads: (([PinboardItemDragPayload]) -> Bool)? = nil,
         action: @escaping () -> Void
     ) {
         self.title = title
         self.systemImageName = systemImageName
         self.color = color
         self.isSelected = isSelected
+        self.onDropPayloads = onDropPayloads
         self.action = action
     }
 
@@ -1109,9 +1156,9 @@ private struct ShelfCollectionChip: View {
             .padding(.vertical, 8)
             .frame(height: 38)
             .background {
-                if isSelected || isHovered {
+                if isSelected || isHovered || isDropTargeted {
                     Capsule()
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected ? 0.86 : 0.64))
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected || isDropTargeted ? 0.86 : 0.64))
                         .background(.regularMaterial, in: Capsule())
                 }
             }
@@ -1119,6 +1166,12 @@ private struct ShelfCollectionChip: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .dropDestination(for: PinboardItemDragPayload.self) { payloads, _ in
+            onDropPayloads?(payloads) ?? false
+        } isTargeted: { isTargeted in
+            guard onDropPayloads != nil else { return }
+            isDropTargeted = isTargeted
+        }
         .onHover { isHovered in
             withAnimation(reduceMotion ? nil : Self.hoverAnimation) {
                 self.isHovered = isHovered
