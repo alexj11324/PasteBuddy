@@ -3459,6 +3459,304 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.items.map(\.id), [second.id, first.id])
     }
 
+    func testJustRecopiedItemSurvivesRetentionPrune() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.snapshot.storage.retentionDays = 30
+        let old = Date().addingTimeInterval(-31 * 24 * 3600)
+        store.snapshot.items = [ClipboardItem(
+            createdAt: old,
+            updatedAt: old,
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Old Note",
+            payload: ClipboardPayload(text: "keep me around")
+        )]
+
+        let bumped = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Old Note",
+            payload: ClipboardPayload(text: "keep me around")
+        ))
+
+        XCTAssertTrue(
+            store.snapshot.items.contains { $0.id == bumped.id },
+            "An item copied seconds ago must not be retention-pruned"
+        )
+    }
+
+    func testSyncedItemRespectsLocalPrivacyPreferences() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.snapshot.privacy.captureText = false
+
+        let stored = store.addSyncedItem(ClipboardItem(
+            sourceAppName: "Peer iPhone",
+            deviceName: "Peer iPhone",
+            contentType: .text,
+            title: "Password from phone",
+            payload: ClipboardPayload(text: "hunter2-super-secret")
+        ))
+
+        XCTAssertNil(stored)
+        XCTAssertTrue(
+            store.snapshot.items.isEmpty,
+            "A text item must not enter history while text capture is disabled"
+        )
+    }
+
+    #if os(macOS)
+    func testEnrichLinkPreviewMetadataNotifiesForwarderWithUpgradedItem() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let thumbnail = Data([0xAA, 0xBB, 0xCC, 0xDD])
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
+            ClipboardLinkPreviewMetadata(title: "Example Domain", imageData: thumbnail)
+        }
+        defer { ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil }
+
+        var forwarded: [ClipboardItem] = []
+        store.onLinkPreviewMetadataEnriched = { item in
+            forwarded.append(item)
+        }
+
+        let bare = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "example.com",
+            payload: ClipboardPayload(urlString: "https://example.com/launch")
+        ))
+        XCTAssertFalse(bare.payload.hasImageAsset)
+
+        await store.enrichLinkPreviewMetadataIfNeeded(for: bare)
+
+        let enriched = try XCTUnwrap(store.snapshot.items.first { $0.id == bare.id })
+        XCTAssertEqual(enriched.title, "Example Domain")
+        XCTAssertEqual(enriched.payload.imageData, thumbnail)
+        XCTAssertEqual(forwarded.map(\.id), [bare.id])
+        XCTAssertEqual(forwarded.first?.payload.imageData, thumbnail,
+                       "Forwarded item must carry the thumbnail so peers can merge it")
+    }
+
+    func testEnrichLinkPreviewMetadataDoesNotForwardTitleOnlyUpgrade() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
+            ClipboardLinkPreviewMetadata(title: "Only Title", imageData: nil)
+        }
+        defer { ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil }
+
+        var forwardedCount = 0
+        store.onLinkPreviewMetadataEnriched = { _ in
+            forwardedCount += 1
+        }
+
+        let bare = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "example.com",
+            payload: ClipboardPayload(urlString: "https://example.com/title-only")
+        ))
+
+        await store.enrichLinkPreviewMetadataIfNeeded(for: bare)
+
+        let enriched = try XCTUnwrap(store.snapshot.items.first { $0.id == bare.id })
+        XCTAssertEqual(enriched.title, "Only Title")
+        XCTAssertEqual(forwardedCount, 0, "Title-only enrichment should stay local until peers can merge it safely")
+    }
+    #endif
+
+    func testDedupeMergesRicherLinkPreviewFromPeerResend() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let bare = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "example.com",
+            payload: ClipboardPayload(urlString: "https://example.com/launch")
+        ))
+
+        // A sync peer re-sends the same link once it fetched preview metadata;
+        // the item arrives with its own UUID, so only dedupe can reconcile it.
+        let thumbnail = Data([0x01, 0x02, 0x03])
+        var enrichedPayload = ClipboardPayload(urlString: "https://example.com/launch")
+        enrichedPayload.imageData = thumbnail
+        enrichedPayload.imageByteCount = thumbnail.count
+        let merged = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Peer iPhone",
+            contentType: .url,
+            title: "Example Domain",
+            payload: enrichedPayload
+        ))
+
+        XCTAssertEqual(store.snapshot.items.count, 1)
+        XCTAssertEqual(merged.id, bare.id, "Richer duplicate must merge into the existing item")
+        XCTAssertEqual(merged.title, "Example Domain")
+        XCTAssertEqual(merged.payload.imageData, thumbnail)
+    }
+
+    func testDedupeKeepsExistingThumbnailWhenBareDuplicateArrives() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let thumbnail = Data([0x0A, 0x0B])
+        var enrichedPayload = ClipboardPayload(urlString: "https://example.com/launch")
+        enrichedPayload.imageData = thumbnail
+        enrichedPayload.imageByteCount = thumbnail.count
+        let enriched = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Example Domain",
+            payload: enrichedPayload
+        ))
+
+        let bumped = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "example.com",
+            payload: ClipboardPayload(urlString: "https://example.com/launch")
+        ))
+
+        XCTAssertEqual(store.snapshot.items.count, 1)
+        XCTAssertEqual(bumped.id, enriched.id)
+        XCTAssertEqual(bumped.payload.imageData, thumbnail, "A barer re-copy must never clear existing metadata")
+        XCTAssertEqual(bumped.title, "Example Domain")
+    }
+
+    func testFlushPersistsExternalizedAssetsToDiskWhenRepositoryEnabled() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+
+        let imageBytes = Data((0 ..< 4_096).map { UInt8($0 % 251) })
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Screenshot",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Big Screenshot",
+            payload: ClipboardPayload(imageData: imageBytes)
+        ))
+
+        await store.flushPendingSave()
+
+        let persisted = try harness.snapshotStore.load()
+        let persistedPayload = try XCTUnwrap(persisted.items.first?.payload)
+        XCTAssertNil(persistedPayload.imageData, "Disk snapshot must externalize image bytes into the repository")
+        XCTAssertNotNil(persistedPayload.imageAssetID)
+        XCTAssertEqual(persistedPayload.imageByteCount, imageBytes.count)
+
+        // The in-memory item keeps its bytes so the UI never re-hydrates for recents.
+        XCTAssertEqual(store.snapshot.items.first?.payload.imageData, imageBytes)
+    }
+
+    func testFilteredItemsNormalizeSearchQueryForDiacriticsAndCase() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let cafe = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Café Rendez-vous",
+            payload: ClipboardPayload(text: "Café Rendez-vous at noon")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Grocery run",
+            payload: ClipboardPayload(text: "buy oat milk")
+        ))
+
+        store.searchQuery = "  CAFE rendez  "
+
+        XCTAssertEqual(store.filteredItems.map(\.id), [cafe.id])
+        XCTAssertEqual(store.filteredItemCount(for: .history), 1)
+    }
+
+    func testRepositoryBackedSearchMatchesInMemoryResultsBeforeAndAfterFlush() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        let cafe = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Café Rendez-vous ✅",
+            payload: ClipboardPayload(text: "Café launch checklist ✅")
+        ))
+        let resume = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Résumé Rocket 🚀",
+            payload: ClipboardPayload(text: "Résumé rocket follow-up 🚀")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Plain Grocery",
+            payload: ClipboardPayload(text: "buy oat milk")
+        ))
+
+        let expectedIDsByQuery = [
+            ("  CAFE launch  ", [cafe.id]),
+            ("resume rocket", [resume.id]),
+            ("🚀", [resume.id])
+        ]
+
+        XCTAssertNil(store.repositorySyncedDataRevision)
+        for (query, expectedIDs) in expectedIDsByQuery {
+            store.searchQuery = query
+            XCTAssertEqual(store.filteredItems.map(\.id), expectedIDs)
+        }
+
+        await store.flushPendingSave()
+
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        for (query, expectedIDs) in expectedIDsByQuery {
+            store.searchQuery = query
+            XCTAssertEqual(store.filteredItems.map(\.id), expectedIDs)
+            XCTAssertEqual(store.filteredItemCount(for: .history), expectedIDs.count)
+        }
+    }
+
     func testSearchDocumentRefreshKeepsDedupeIndexCurrentAfterTextEditAndOCR() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

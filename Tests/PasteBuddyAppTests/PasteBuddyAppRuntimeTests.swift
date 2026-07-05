@@ -562,11 +562,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(monitorSource.contains("public enum ClipboardLinkMetadataFetcher"))
         XCTAssertTrue(monitorSource.contains("LPMetadataProvider().startFetchingMetadata(for: url)"))
         XCTAssertTrue(monitorSource.contains("metadata.imageProvider ?? metadata.iconProvider"))
-        XCTAssertTrue(monitorSource.contains("item.payload.imageData = imageData"))
-        XCTAssertTrue(monitorSource.contains("item.payload.imageByteCount = imageData.count"))
+        // Capture must never block on the network: the monitor only kicks off the
+        // store's idempotent enrichment after the item is already persisted.
+        XCTAssertFalse(monitorSource.contains("await ClipboardLinkMetadataFetcher.fetch"))
+        XCTAssertTrue(monitorSource.contains("enrichLinkPreviewMetadataIfNeeded(for: storedItem)"))
         XCTAssertTrue(storeSource.contains("linkPreviewMetadataRequests"))
         XCTAssertTrue(storeSource.contains("enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem)"))
         XCTAssertTrue(storeSource.contains("ClipboardLinkMetadataFetcher.fetch(for: urlString)"))
+        XCTAssertTrue(storeSource.contains("snapshot.items[index].payload.imageData = imageData"))
+        XCTAssertTrue(storeSource.contains("snapshot.items[index].payload.imageByteCount = imageData.count"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.preview(for:"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.cachedPreview(for:"))
         XCTAssertFalse(sourceFileExists("Sources/PasteBuddy/Models/LinkPreviewCache.swift"))
@@ -625,6 +629,23 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertTrue(chipSource.contains(".clipShape(Capsule())"))
         XCTAssertFalse(chipSource.contains(".shadow("))
+    }
+
+    func testIrohSyncForwardsEnrichedLinkMetadataToPeers() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+
+        XCTAssertTrue(appSource.contains("store.onLinkPreviewMetadataEnriched = { [irohSync] item in"))
+        XCTAssertTrue(appSource.contains("await irohSync.sendIfConnected(item)"))
+    }
+
+    func testIrohSyncReceiversRoutePeerItemsThroughPrivacyGate() throws {
+        let macAppSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let iosAppSource = try sourceFileContents("Sources/PasteBuddyiOS/PasteBuddyiOSApp.swift")
+        let keyboardSource = try sourceFileContents("Sources/PasteBuddyKeyboard/KeyboardViewController.swift")
+
+        XCTAssertTrue(macAppSource.contains("store.addSyncedItem(item)"))
+        XCTAssertTrue(iosAppSource.contains("store.addSyncedItem(item)"))
+        XCTAssertTrue(keyboardSource.contains("resolvedStore.addSyncedItem(item)"))
     }
 
     func testMenuBarStatusItemOwnsClickableMenuInsteadOfSwiftUIMenuBarExtra() throws {

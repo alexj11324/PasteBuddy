@@ -213,10 +213,33 @@ public final class IrohClipboardSyncService {
             connectionState = .failed(IrohClipboardSyncError.noSession.localizedDescription)
             return false
         }
+        return await send(item) { envelope in
+            try await currentSession.send(envelope)
+        }
+    }
+
+    @discardableResult
+    func send(
+        _ item: ClipboardItem,
+        transport: @escaping @Sendable (IrohClipboardSyncEnvelope) async throws -> Void
+    ) async -> Bool {
         do {
-            try await currentSession.send(IrohClipboardSyncEnvelope(item: item))
+            try await transport(IrohClipboardSyncEnvelope(item: item))
             lastSentAt = Date()
             return true
+        } catch let error as IrohClipboardSyncError {
+            guard case .frameTooLarge = error else {
+                connectionState = .failed(error.localizedDescription)
+                return false
+            }
+            let slimmedItem = Self.slimmedItemForFrameRetry(from: item)
+            do {
+                try await transport(IrohClipboardSyncEnvelope(item: slimmedItem))
+                lastSentAt = Date()
+                return true
+            } catch {
+                return false
+            }
         } catch {
             connectionState = .failed(error.localizedDescription)
             return false
@@ -276,6 +299,18 @@ public final class IrohClipboardSyncService {
         if case .connected = connectionState {
             connectionState = .ready
         }
+    }
+
+    static func slimmedItemForFrameRetry(from item: ClipboardItem) -> ClipboardItem {
+        var slimmed = item
+        slimmed.payload.rtfData = nil
+        slimmed.payload.rtfAssetID = nil
+        slimmed.payload.rtfByteCount = nil
+        slimmed.payload.imageData = nil
+        slimmed.payload.imageAssetID = nil
+        slimmed.payload.imageByteCount = nil
+        slimmed.refreshSearchDocument()
+        return slimmed
     }
 }
 

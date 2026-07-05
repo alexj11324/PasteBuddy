@@ -252,7 +252,14 @@ struct PasteBuddyApp: App {
         }
         configureStatusItemIfNeeded()
         irohSync.onItemReceived = { [store] item in
-            _ = store.addCapturedItem(item)
+            _ = store.addSyncedItem(item)
+        }
+        // Peers (iOS) cannot fetch link previews themselves, so re-send items
+        // once enrichment upgrades them; the receiver merges via dedupe.
+        store.onLinkPreviewMetadataEnriched = { [irohSync] item in
+            Task { @MainActor in
+                await irohSync.sendIfConnected(item)
+            }
         }
         await irohSync.start()
 

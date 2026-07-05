@@ -700,10 +700,15 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
 
         let trimmedSearch = request.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedSearch.isEmpty, let ftsQuery = ftsQuery(for: trimmedSearch) {
-            joins.append("JOIN clipboard_search_fts ON clipboard_search_fts.item_id = ci.id")
-            predicates.append("clipboard_search_fts MATCH ?")
-            arguments += [ftsQuery]
+        if !trimmedSearch.isEmpty {
+            if let ftsQuery = ftsQuery(for: trimmedSearch) {
+                joins.append("JOIN clipboard_search_fts ON clipboard_search_fts.item_id = ci.id")
+                predicates.append("clipboard_search_fts MATCH ?")
+                arguments += [ftsQuery]
+            } else {
+                predicates.append("INSTR(COALESCE(ci.searchable_text, ''), ?) > 0")
+                arguments += [ClipboardItem.normalizedSearchQuery(trimmedSearch)]
+            }
         }
 
         if let contentType = request.contentType {
@@ -1273,31 +1278,9 @@ public final class ClipboardItemRepository: @unchecked Sendable {
 
     private static func ftsQuery(for query: String) -> String? {
         let normalizedQuery = ClipboardItem.normalizedSearchString(query)
-        let terms = ftsTokens(in: normalizedQuery)
+        let terms = ClipboardItem.searchTokens(inNormalizedQuery: normalizedQuery)
         guard !terms.isEmpty else { return nil }
         return terms.map { "\($0)*" }.joined(separator: " ")
-    }
-
-    private static func ftsTokens(in normalizedQuery: String) -> [String] {
-        let tokenCharacters = CharacterSet.letters.union(.decimalDigits)
-        var tokens: [String] = []
-        var current = String.UnicodeScalarView()
-
-        func flushCurrentToken() {
-            guard !current.isEmpty else { return }
-            tokens.append(String(current))
-            current.removeAll(keepingCapacity: true)
-        }
-
-        for scalar in normalizedQuery.unicodeScalars {
-            if tokenCharacters.contains(scalar) {
-                current.append(scalar)
-            } else {
-                flushCurrentToken()
-            }
-        }
-        flushCurrentToken()
-        return tokens
     }
 
 }

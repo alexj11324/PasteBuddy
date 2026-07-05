@@ -1,6 +1,5 @@
 #if os(macOS)
 import AppKit
-import CryptoKit
 import Foundation
 import LinkPresentation
 
@@ -12,8 +11,8 @@ public final class ClipboardMonitor {
     private let onItemCaptured: (@MainActor (ClipboardItem) -> Void)?
     private var timer: Timer?
     private var lastChangeCount: Int
-    private var lastFingerprint: String?
     private var pendingCaptureTask: Task<Void, Never>?
+    @MainActor static var makeItemOverrideForTesting: (@Sendable () async -> ClipboardItem?)?
 
     public init(
         store: PasteBuddyStore,
@@ -50,7 +49,6 @@ public final class ClipboardMonitor {
     func pollOnce() {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
-        let changeCount = lastChangeCount
         let privacy = store.snapshot.privacy
         guard !privacy.isCaptureCurrentlyPaused() else { return }
 
@@ -60,24 +58,26 @@ public final class ClipboardMonitor {
         guard !privacy.excludesApplication(named: sourceApp, bundleIdentifier: bundleIdentifier) else { return }
 
         let pasteboardSnapshot = Self.snapshot(from: pasteboard, captureImages: privacy.captureImages)
-        let cheapFingerprint = Self.cheapFingerprint(changeCount: changeCount, snapshot: pasteboardSnapshot)
-        guard cheapFingerprint != lastFingerprint else { return }
-        lastFingerprint = cheapFingerprint
 
-        pendingCaptureTask?.cancel()
+        let previousTask = pendingCaptureTask
         pendingCaptureTask = Task { [recognizeText] in
-            guard let item = await Self.makeItem(
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
+
+            let item = await self.makeCapturedItem(
                 from: pasteboardSnapshot,
                 sourceApp: sourceApp,
                 sourceBundleIdentifier: bundleIdentifier,
                 privacy: privacy
-            ) else { return }
-            guard !Task.isCancelled else { return }
+            )
+            guard let item, !Task.isCancelled else { return }
 
             await MainActor.run {
                 let storedItem = self.store.addCapturedItem(item)
                 self.onItemCaptured?(storedItem)
-                self.lastFingerprint = Self.fingerprint(for: item)
+                Task {
+                    await self.store.enrichLinkPreviewMetadataIfNeeded(for: storedItem)
+                }
 
                 if item.contentType == .image,
                    self.store.snapshot.privacy.runLocalOCRAfterImageCapture,
@@ -99,106 +99,37 @@ public final class ClipboardMonitor {
         }
     }
 
+    private func makeCapturedItem(
+        from snapshot: PasteboardSnapshot,
+        sourceApp: String,
+        sourceBundleIdentifier: String?,
+        privacy: PrivacyConfiguration
+    ) async -> ClipboardItem? {
+        if let makeItemOverrideForTesting = Self.makeItemOverrideForTesting {
+            return await makeItemOverrideForTesting()
+        }
+        return await Task.detached(priority: .userInitiated) {
+            Self.makeItemFromSnapshot(
+                snapshot,
+                sourceApp: sourceApp,
+                sourceBundleIdentifier: sourceBundleIdentifier,
+                privacy: privacy
+            )
+        }.value
+    }
+
     static func makeItem(
         from pasteboard: NSPasteboard,
         sourceApp: String,
         sourceBundleIdentifier: String?,
         privacy: PrivacyConfiguration
     ) -> ClipboardItem? {
-        let deviceName = Host.current().localizedName ?? "This Mac"
-        let pasteboardURLs = Self.urls(from: pasteboard)
-        var urlStrings = pasteboardURLs
-            .compactMap { url in
-                url.isFileURL ? nil : ClipboardPayload.normalizedWebURLString(url.absoluteString)
-            }
-        var fileURLStrings = pasteboardURLs
-            .filter(\.isFileURL)
-            .map(\.absoluteString)
-
-        if let explicitURLString = pasteboard.string(forType: .URL),
-           let webURLString = ClipboardPayload.normalizedWebURLString(explicitURLString) {
-            urlStrings.append(webURLString)
-        }
-        if let explicitFileURLString = pasteboard.string(forType: .fileURL),
-           let explicitFileURL = URL(string: explicitFileURLString) {
-            fileURLStrings.append(explicitFileURL.absoluteString)
-        }
-        urlStrings = Self.normalizedStrings(urlStrings)
-        fileURLStrings = Self.normalizedStrings(fileURLStrings)
-
-        let rawText = pasteboard.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
-        let htmlString = pasteboard.string(forType: .html)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
-        let rtfData = pasteboard.data(forType: .rtf).flatMap { $0.isEmpty ? nil : $0 }
-        let richTextFallback = htmlString?.pasteBuddyPlainTextFromHTML.nilIfEmpty
-            ?? rtfData.flatMap(Self.plainTextFromRTF)
-
-        var text = Self.nonDuplicateText(
-            rawText ?? richTextFallback,
-            urlStrings: urlStrings,
-            fileURLStrings: fileURLStrings
-        )
-        if text == nil, urlStrings.isEmpty, fileURLStrings.isEmpty,
-           let rawText,
-           let webURLString = ClipboardPayload.normalizedWebURLString(rawText) {
-            urlStrings = [webURLString]
-        }
-
-        let imageData: Data?
-        if privacy.captureImages,
-           let image = NSImage(pasteboard: pasteboard),
-           let data = image.pasteBuddyPNGData() {
-            imageData = data
-        } else {
-            imageData = nil
-        }
-
-        if !privacy.captureText {
-            text = nil
-        }
-        if !privacy.captureURLs {
-            urlStrings = []
-        }
-        if !privacy.captureFiles {
-            fileURLStrings = []
-        }
-
-        let payload = ClipboardPayload(
-            text: text,
-            htmlString: privacy.captureText ? htmlString : nil,
-            rtfData: privacy.captureText ? rtfData : nil,
-            urlString: urlStrings.first,
-            fileURLString: fileURLStrings.first,
-            fileURLStrings: fileURLStrings,
-            imageData: imageData
-        )
-        let contentType = Self.contentType(for: payload)
-        guard let contentType, privacy.allowsCapture(of: contentType) else { return nil }
-
-        let item = ClipboardItem(
-            sourceAppName: sourceApp,
+        makeItemFromSnapshot(
+            snapshot(from: pasteboard, captureImages: privacy.captureImages),
+            sourceApp: sourceApp,
             sourceBundleIdentifier: sourceBundleIdentifier,
-            deviceName: deviceName,
-            contentType: contentType,
-            title: Self.title(for: contentType, payload: payload),
-            payload: payload,
-            ocrState: imageData != nil && privacy.runLocalOCRAfterImageCapture ? .pending(Date()) : .notNeeded
+            privacy: privacy
         )
-        let decision = privacy.captureDecision(
-            for: item,
-            sourceApplicationName: sourceApp,
-            sourceBundleIdentifier: sourceBundleIdentifier
-        )
-        return decision.isAllowed ? item : nil
-    }
-
-    nonisolated private static func fingerprint(for item: ClipboardItem) -> String {
-        let data = Data(item.searchDocument.normalizedText.utf8) + (item.payload.imageData ?? Data())
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private struct PasteboardSnapshot: Sendable {
@@ -210,7 +141,6 @@ public final class ClipboardMonitor {
         var rtfData: Data?
         var imageData: Data?
         var imageDataIsPNG: Bool
-        var pasteboardTypes: [String]
     }
 
     private static func snapshot(from pasteboard: NSPasteboard, captureImages: Bool) -> PasteboardSnapshot {
@@ -224,59 +154,8 @@ public final class ClipboardMonitor {
             htmlString: pasteboard.string(forType: .html),
             rtfData: pasteboard.data(forType: .rtf).flatMap { $0.isEmpty ? nil : $0 },
             imageData: pngData ?? tiffData,
-            imageDataIsPNG: pngData != nil,
-            pasteboardTypes: pasteboard.types?.map(\.rawValue) ?? []
+            imageDataIsPNG: pngData != nil
         )
-    }
-
-    nonisolated private static func cheapFingerprint(changeCount: Int, snapshot: PasteboardSnapshot) -> String {
-        var hasher = SHA256()
-        func update(_ value: String) {
-            hasher.update(data: Data(value.utf8))
-            hasher.update(data: Data([0]))
-        }
-        update(String(changeCount))
-        update(snapshot.pasteboardTypes.joined(separator: "|"))
-        update(snapshot.rawText ?? "")
-        update(snapshot.explicitURLString ?? "")
-        update(snapshot.explicitFileURLString ?? "")
-        update(String(snapshot.imageData?.count ?? 0))
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static func makeItem(
-        from snapshot: PasteboardSnapshot,
-        sourceApp: String,
-        sourceBundleIdentifier: String?,
-        privacy: PrivacyConfiguration
-    ) async -> ClipboardItem? {
-        let capturedItem = await Task.detached(priority: .userInitiated) {
-            makeItemFromSnapshot(
-                snapshot,
-                sourceApp: sourceApp,
-                sourceBundleIdentifier: sourceBundleIdentifier,
-                privacy: privacy
-            )
-        }.value
-        guard var item = capturedItem else { return nil }
-
-        guard item.contentType == .url,
-              privacy.captureImages,
-              !item.payload.hasImageAsset,
-              let urlString = item.payload.presentationURLString,
-              let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString) else {
-            return item
-        }
-
-        if let title = metadata.title {
-            item.title = title
-        }
-        if let imageData = metadata.imageData {
-            item.payload.imageData = imageData
-            item.payload.imageByteCount = imageData.count
-        }
-        item.refreshSearchDocument()
-        return item
     }
 
     nonisolated private static func makeItemFromSnapshot(
@@ -320,10 +199,11 @@ public final class ClipboardMonitor {
             urlStrings: urlStrings,
             fileURLStrings: fileURLStrings
         )
-        if text == nil, urlStrings.isEmpty, fileURLStrings.isEmpty,
-           let rawText,
-           let webURLString = ClipboardPayload.normalizedWebURLString(rawText) {
+        if urlStrings.isEmpty, fileURLStrings.isEmpty,
+           let candidateText = text,
+           let webURLString = ClipboardPayload.normalizedWebURLString(candidateText) {
             urlStrings = [webURLString]
+            text = nil
         }
 
         let imageData: Data?
@@ -473,8 +353,14 @@ public struct ClipboardLinkPreviewMetadata: Sendable {
 }
 
 public enum ClipboardLinkMetadataFetcher {
+    /// Test seam: production always fetches through LinkPresentation.
+    @MainActor public static var fetchOverrideForTesting: ((String) async -> ClipboardLinkPreviewMetadata?)?
+
     @MainActor
     public static func fetch(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
+        if let fetchOverrideForTesting {
+            return await fetchOverrideForTesting(urlString)
+        }
         guard let url = URL(string: urlString) else { return nil }
         do {
             let metadata = try await LPMetadataProvider().startFetchingMetadata(for: url)

@@ -76,7 +76,7 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         )
     }
 
-    func testRepositoryFTSUsesNormalizedTokenPrefixesWithDocumentedSubstringBoundary() throws {
+    func testRepositorySearchUsesNormalizedTokenPrefixesWithDocumentedSubstringBoundary() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -106,7 +106,7 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         )
         XCTAssertTrue(
             try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "oadmap")).isEmpty,
-            "SQLite FTS is intentionally token-prefix based; unlike in-memory contains, it does not match a substring from the middle of a token."
+            "Token-prefix search should not match a substring from the middle of a token."
         )
     }
 

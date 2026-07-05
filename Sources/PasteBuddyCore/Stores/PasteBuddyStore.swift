@@ -60,6 +60,9 @@ public final class PasteBuddyStore {
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
     @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
+    /// Fired after link-preview enrichment persists richer metadata, so hosts
+    /// can forward the upgraded item to peers that cannot fetch it themselves.
+    @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
 
     private static let defaultHistoryPageLimit = 100
     private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
@@ -242,7 +245,10 @@ public final class PasteBuddyStore {
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         let snapshotToSave = snapshot
-        let snapshotToPersist = snapshotForDiskPersistence(snapshotToSave)
+        let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
+        let snapshotToPersist = await Task.detached(priority: .utility) {
+            Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
+        }.value
         do {
             if let repositorySyncActor {
                 try await repositorySyncActor.synchronize(with: snapshotToSave)
@@ -258,7 +264,8 @@ public final class PasteBuddyStore {
 
     private func saveImmediately() {
         let snapshotToSave = snapshot
-        let snapshotToPersist = snapshotForDiskPersistence(snapshotToSave)
+        let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
+        let snapshotToPersist = Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
         do {
             let didSyncRepository = syncClipboardRepositoryFromSnapshot()
             diskStore.storageMode = snapshotToSave.security.storageMode
@@ -270,8 +277,8 @@ public final class PasteBuddyStore {
 
     private func scheduleSave(delayNanoseconds: UInt64) {
         let snapshotToSave = snapshot
-        let snapshotToPersist = snapshotForDiskPersistence(snapshotToSave)
         let dataRevisionToSync = dataRevision
+        let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
         pendingSaveTask?.cancel()
         pendingSaveTask = Task { [persistenceActor, repositorySyncActor] in
             if delayNanoseconds > 0 {
@@ -281,6 +288,13 @@ public final class PasteBuddyStore {
                     return
                 }
             }
+            guard !Task.isCancelled else { return }
+            // Externalizing large payloads (asset hashing + search-document refresh)
+            // is deliberately deferred past the debounce window and off the main
+            // actor so rapid save() bursts never pay for work that gets cancelled.
+            let snapshotToPersist = await Task.detached(priority: .utility) {
+                Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
+            }.value
             guard !Task.isCancelled else { return }
             do {
                 if let repositorySyncActor {
@@ -374,9 +388,11 @@ public final class PasteBuddyStore {
         guard !isHistoryAccessLocked else { return 0 }
         let filters = resolvedSearchFilters()
         guard !filters.isImpossible else { return 0 }
+        let normalizedQuery = ClipboardItem.normalizedSearchQuery(filters.textQuery)
 
         func matches(_ item: ClipboardItem) -> Bool {
-            item.matches(filters.textQuery) && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
+            item.matchesNormalizedSearchQuery(normalizedQuery)
+                && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
         }
 
         switch scope {
@@ -859,6 +875,7 @@ public final class PasteBuddyStore {
         if let existingID = dedupeIndex[newDeduplicationKey],
            let existingIndex = snapshot.items.firstIndex(where: { $0.id == existingID }) {
             snapshot.items[existingIndex].updatedAt = Date()
+            adoptRicherLinkPreviewMetadata(from: preparedItem, at: existingIndex)
             snapshot.items[existingIndex].refreshSearchDocument()
             snapshot.items.move(fromOffsets: IndexSet(integer: existingIndex), toOffset: 0)
             storedItem = snapshot.items[0]
@@ -872,9 +889,39 @@ public final class PasteBuddyStore {
         }
         selectSingleItem(storedItem.id)
         pruneHistory(maxItems: maxItems)
-        refreshExistingSmartPinboards()
         save()
         return storedItem
+    }
+
+    @discardableResult
+    public func addSyncedItem(_ item: ClipboardItem, maxItems: Int? = nil) -> ClipboardItem? {
+        let decision = snapshot.privacy.captureDecision(
+            for: item,
+            sourceApplicationName: item.sourceAppName,
+            sourceBundleIdentifier: item.sourceBundleIdentifier,
+            includePause: true
+        )
+        guard decision.isAllowed else { return nil }
+        return addCapturedItem(item, maxItems: maxItems)
+    }
+
+    /// Duplicate captures of the same link arrive both locally (re-copy) and
+    /// from sync peers re-sending an enriched copy. Deduplication keeps the
+    /// existing item, so richer link metadata must be merged in explicitly —
+    /// and only ever upgraded, never cleared by a barer duplicate.
+    /// `deduplicationHash` ignores every field touched here, so the dedupe
+    /// index stays valid without a rebuild.
+    private func adoptRicherLinkPreviewMetadata(from incoming: ClipboardItem, at index: Int) {
+        guard incoming.presentationContentType == .url,
+              snapshot.items[index].presentationContentType == .url,
+              !snapshot.items[index].payload.hasImageAsset,
+              incoming.payload.hasImageAsset else {
+            return
+        }
+        snapshot.items[index].title = incoming.title
+        snapshot.items[index].payload.imageData = incoming.payload.imageData
+        snapshot.items[index].payload.imageByteCount = incoming.payload.imageByteCount
+        snapshot.items[index].payload.imageAssetID = incoming.payload.imageAssetID
     }
 
     public func updateOCRText(_ text: String, for itemID: UUID) {
@@ -883,7 +930,6 @@ public final class PasteBuddyStore {
         snapshot.items[index].ocrState = .completed(Date())
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
-        rebuildDedupeIndex()
         refreshExistingSmartPinboards()
         save()
     }
@@ -894,7 +940,6 @@ public final class PasteBuddyStore {
         snapshot.items[index].ocrState = .pending(Date())
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
-        rebuildDedupeIndex()
         refreshExistingSmartPinboards()
         save()
     }
@@ -931,16 +976,20 @@ public final class PasteBuddyStore {
         if let title = metadata.title {
             snapshot.items[index].title = title
         }
+        var didAdoptImage = false
         if let imageData = metadata.imageData {
             snapshot.items[index].payload.imageData = imageData
             snapshot.items[index].payload.imageByteCount = imageData.count
+            didAdoptImage = true
         }
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
         syncPasteStackItem(snapshot.items[index])
-        rebuildDedupeIndex()
         refreshExistingSmartPinboards()
         save()
+        if didAdoptImage {
+            onLinkPreviewMetadataEnriched?(snapshot.items[index])
+        }
     }
     #endif
 
@@ -2414,6 +2463,7 @@ public final class PasteBuddyStore {
     }
 
     private func pruneHistory(now: Date = Date(), maxItems: Int? = nil) {
+        let previousItemCount = snapshot.items.count
         let pinnedItemIDs = userPinnedItemIDs()
         let maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(maxItems ?? snapshot.storage.maxHistoryItems)
         let maxStorageBytes = StorageConfiguration.clampMaxStorageBytes(snapshot.storage.maxStorageBytes)
@@ -2428,7 +2478,7 @@ public final class PasteBuddyStore {
             if index >= maxHistoryItems {
                 return false
             }
-            if let cutoff, item.createdAt < cutoff {
+            if let cutoff, max(item.createdAt, item.updatedAt) < cutoff {
                 return false
             }
             return true
@@ -2461,7 +2511,9 @@ public final class PasteBuddyStore {
             })
         }
         refreshExistingSmartPinboards()
-        rebuildDedupeIndex()
+        if snapshot.items.count != previousItemCount {
+            rebuildDedupeIndex()
+        }
     }
 
     private static func estimatedStorageBytes(for item: ClipboardItem) -> Int {
@@ -2472,8 +2524,11 @@ public final class PasteBuddyStore {
         PasteBuddyDedupeKey(contentType: item.contentType, hash: item.searchDocument.dedupeHash)
     }
 
-    private func snapshotForDiskPersistence(_ source: PasteBuddySnapshot) -> PasteBuddySnapshot {
-        guard repositorySyncActor != nil || clipboardRepository != nil else {
+    nonisolated private static func externalizedSnapshotForDiskPersistence(
+        _ source: PasteBuddySnapshot,
+        hasRepository: Bool
+    ) -> PasteBuddySnapshot {
+        guard hasRepository else {
             return source
         }
         var snapshot = source
@@ -2484,7 +2539,7 @@ public final class PasteBuddyStore {
         return snapshot
     }
 
-    private static func externalizedPayload(_ payload: ClipboardPayload) -> ClipboardPayload {
+    nonisolated private static func externalizedPayload(_ payload: ClipboardPayload) -> ClipboardPayload {
         var externalized = payload
         if let rtfData = payload.rtfData, !rtfData.isEmpty {
             externalized.rtfAssetID = sha256Hex(rtfData)
@@ -2506,7 +2561,7 @@ public final class PasteBuddyStore {
         }
     }
 
-    private static func sha256Hex(_ data: Data) -> String {
+    nonisolated private static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -2653,8 +2708,10 @@ public final class PasteBuddyStore {
     private func filtered(_ items: [ClipboardItem]) -> [ClipboardItem] {
         let filters = resolvedSearchFilters()
         guard !filters.isImpossible else { return [] }
+        let normalizedQuery = ClipboardItem.normalizedSearchQuery(filters.textQuery)
         return items.filter { item in
-            item.matches(filters.textQuery) && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
+            item.matchesNormalizedSearchQuery(normalizedQuery)
+                && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
         }
     }
 

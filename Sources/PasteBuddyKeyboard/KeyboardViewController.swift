@@ -27,7 +27,7 @@ final class KeyboardViewController: UIInputViewController {
 
         let syncService = MobileStoreFactory.makeIrohSyncService()
         syncService.onItemReceived = { [resolvedStore] item in
-            _ = resolvedStore.addCapturedItem(item)
+            _ = resolvedStore.addSyncedItem(item)
         }
         irohSync = syncService
 

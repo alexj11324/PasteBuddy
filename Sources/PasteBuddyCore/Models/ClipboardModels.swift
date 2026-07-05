@@ -1057,10 +1057,49 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public func matches(_ query: String) -> Bool {
+        matchesNormalizedSearchQuery(Self.normalizedSearchQuery(query))
+    }
+
+    /// Fast path for callers filtering many items against one query: normalize
+    /// once with `normalizedSearchQuery(_:)`, then reuse the result per item.
+    public func matchesNormalizedSearchQuery(_ normalizedQuery: String) -> Bool {
+        guard !normalizedQuery.isEmpty else { return true }
+        let terms = Self.searchTokens(inNormalizedQuery: normalizedQuery)
+        guard !terms.isEmpty else {
+            return searchDocument.normalizedText.contains(normalizedQuery)
+        }
+        let documentTokens = Self.searchTokens(inNormalizedQuery: searchDocument.normalizedText)
+        return terms.allSatisfy { term in
+            documentTokens.contains { $0.hasPrefix(term) }
+        }
+    }
+
+    public static func normalizedSearchQuery(_ query: String) -> String {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-        let normalizedQuery = Self.normalizedSearchString(trimmed)
-        return searchDocument.normalizedText.contains(normalizedQuery)
+        guard !trimmed.isEmpty else { return "" }
+        return normalizedSearchString(trimmed)
+    }
+
+    static func searchTokens(inNormalizedQuery normalizedQuery: String) -> [String] {
+        let tokenCharacters = CharacterSet.letters.union(.decimalDigits)
+        var tokens: [String] = []
+        var current = String.UnicodeScalarView()
+
+        func flushCurrentToken() {
+            guard !current.isEmpty else { return }
+            tokens.append(String(current))
+            current.removeAll(keepingCapacity: true)
+        }
+
+        for scalar in normalizedQuery.unicodeScalars {
+            if tokenCharacters.contains(scalar) {
+                current.append(scalar)
+            } else {
+                flushCurrentToken()
+            }
+        }
+        flushCurrentToken()
+        return tokens
     }
 
     public var captureRuleSearchText: String {
@@ -1214,6 +1253,9 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             .lowercased()
     }
 
+    /// PasteBuddyStore maintains its dedupe index incrementally and skips
+    /// rebuilds for mutations that only touch fields outside these inputs
+    /// (for example `ocrText`, titles, and link-preview images).
     public static func deduplicationHash(contentType: ClipboardContentType, payload: ClipboardPayload) -> String {
         var hasher = SHA256()
         func update(_ value: String) {
