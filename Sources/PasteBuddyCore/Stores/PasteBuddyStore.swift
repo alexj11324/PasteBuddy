@@ -877,40 +877,6 @@ public final class PasteBuddyStore {
         return storedItem
     }
 
-    @discardableResult
-    public func createTextItem(
-        text: String,
-        title: String? = nil,
-        sourceAppName: String = "PasteBuddy",
-        deviceName: String = PasteBuddyStore.defaultDeviceName
-    ) -> ClipboardItem? {
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return nil }
-        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let item = ClipboardItem(
-            sourceAppName: sourceAppName,
-            deviceName: deviceName,
-            contentType: .text,
-            title: trimmedTitle?.isEmpty == false ? trimmedTitle! : trimmedText.singleLinePreview,
-            payload: ClipboardPayload(text: text)
-        )
-        let decision = snapshot.privacy.captureDecision(
-            for: item,
-            sourceApplicationName: sourceAppName,
-            sourceBundleIdentifier: nil
-        )
-        guard decision.isAllowed else {
-            lastErrorMessage = decision.userMessage
-            return nil
-        }
-        let created = addCapturedItem(item)
-        if case .pinboard(let pinboardID) = selectedScope {
-            pinItem(created.id, to: pinboardID)
-        }
-        lastErrorMessage = nil
-        return created
-    }
-
     public func updateOCRText(_ text: String, for itemID: UUID) {
         guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].payload.ocrText = text

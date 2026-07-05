@@ -74,48 +74,6 @@ public struct AutomationPinboardItemResult: Codable, Equatable, Sendable {
     }
 }
 
-public enum AutomationContentKind: String, CaseIterable, Codable, Identifiable, Sendable {
-    case text
-    case url
-    case fileURL
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .text: "Text"
-        case .url: "URL"
-        case .fileURL: "File URL"
-        }
-    }
-}
-
-public struct AutomationCreatedItemResult: Codable, Equatable, Sendable {
-    public var item: AutomationItemSummary
-    public var pinboard: AutomationPinboardSummary?
-
-    public init(item: ClipboardItem, pinboard: Pinboard? = nil) {
-        self.item = AutomationItemSummary(item: item)
-        self.pinboard = pinboard.map(AutomationPinboardSummary.init(pinboard:))
-    }
-
-    public var displaySummary: String {
-        if let pinboard {
-            return PasteBuddyLocalization.format(
-                "automation.create_item.saved_to_pinboard",
-                defaultValue: "Created PasteBuddy item \"%@\" and saved it to %@.",
-                item.title,
-                pinboard.name
-            )
-        }
-        return PasteBuddyLocalization.format(
-            "automation.create_item.created",
-            defaultValue: "Created PasteBuddy item \"%@\".",
-            item.title
-        )
-    }
-}
-
 public enum AutomationItemTransferDestination: String, CaseIterable, Codable, Identifiable, Sendable {
     case clipboard
     case frontmostApp
@@ -167,12 +125,7 @@ public struct AutomationItemTransferResult: Codable, Equatable, Sendable {
 
 public enum AutomationActionError: LocalizedError, Equatable {
     case emptyQuery
-    case emptyText
-    case emptyContent
     case emptyPinboardName
-    case contentTypeDisabled(ClipboardContentType)
-    case sensitiveTextBlocked
-    case captureRuleBlocked(String)
     case noMatchingItem
     case pinboardNotFound(String)
 
@@ -183,37 +136,10 @@ public enum AutomationActionError: LocalizedError, Equatable {
                 "automation.error.empty_query",
                 defaultValue: "Enter a search query before running this PasteBuddy action."
             )
-        case .emptyText:
-            PasteBuddyLocalization.string(
-                "automation.error.empty_text",
-                defaultValue: "Enter text before creating a PasteBuddy item."
-            )
-        case .emptyContent:
-            PasteBuddyLocalization.string(
-                "automation.error.empty_content",
-                defaultValue: "Enter content before creating a PasteBuddy item."
-            )
         case .emptyPinboardName:
             PasteBuddyLocalization.string(
                 "automation.error.empty_pinboard_name",
                 defaultValue: "Enter a pinboard name before running this PasteBuddy action."
-            )
-        case .contentTypeDisabled(let type):
-            PasteBuddyLocalization.format(
-                "automation.error.content_type_disabled",
-                defaultValue: "%@ capture is disabled for PasteBuddy Shortcuts.",
-                type.displayName
-            )
-        case .sensitiveTextBlocked:
-            PasteBuddyLocalization.string(
-                "automation.error.sensitive_text_blocked",
-                defaultValue: "PasteBuddy blocked this action because the text looks sensitive."
-            )
-        case .captureRuleBlocked(let ruleName):
-            PasteBuddyLocalization.format(
-                "automation.error.capture_rule_blocked",
-                defaultValue: "PasteBuddy blocked this action because it matched the local capture rule \"%@\".",
-                ruleName
             )
         case .noMatchingItem:
             PasteBuddyLocalization.string(
@@ -250,65 +176,6 @@ public final class AutomationActionService {
             .map(AutomationItemSummary.init(item:))
 
         return AutomationSearchResult(query: trimmed, items: Array(items))
-    }
-
-    public func createTextItem(text: String, title: String? = nil) throws -> AutomationItemSummary {
-        try createContentItem(kind: .text, value: text, title: title).item
-    }
-
-    public func createContentItem(
-        kind: AutomationContentKind,
-        value: String,
-        title: String? = nil,
-        pinboardName: String? = nil
-    ) throws -> AutomationCreatedItemResult {
-        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedValue.isEmpty else {
-            if kind == .text {
-                throw AutomationActionError.emptyText
-            }
-            throw AutomationActionError.emptyContent
-        }
-
-        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidate: ClipboardItem
-        switch kind {
-        case .text:
-            candidate = ClipboardItem(
-                sourceAppName: "PasteBuddy Shortcuts",
-                deviceName: PasteBuddyStore.defaultDeviceName,
-                contentType: .text,
-                title: trimmedTitle?.isEmpty == false ? trimmedTitle! : trimmedValue.singleLinePreview,
-                payload: ClipboardPayload(text: value)
-            )
-        case .url:
-            let webURLString = ClipboardPayload.normalizedWebURLString(trimmedValue) ?? trimmedValue
-            candidate = ClipboardItem(
-                sourceAppName: "PasteBuddy Shortcuts",
-                deviceName: PasteBuddyStore.defaultDeviceName,
-                contentType: .url,
-                title: trimmedTitle?.isEmpty == false ? trimmedTitle! : webURLString,
-                payload: ClipboardPayload(urlString: webURLString)
-            )
-        case .fileURL:
-            candidate = ClipboardItem(
-                sourceAppName: "PasteBuddy Shortcuts",
-                deviceName: PasteBuddyStore.defaultDeviceName,
-                contentType: .file,
-                title: trimmedTitle?.isEmpty == false ? trimmedTitle! : URL(string: trimmedValue)?.lastPathComponent ?? "Shortcut File",
-                payload: ClipboardPayload(fileURLString: trimmedValue)
-            )
-        }
-
-        try validateShortcutItem(candidate)
-        let item = store.addCapturedItem(candidate)
-        let pinboard = try optionalPinboard(named: pinboardName)
-        if let pinboard {
-            store.pinItem(item.id, to: pinboard.id)
-            let updatedPinboard = store.snapshot.pinboards.first(where: { $0.id == pinboard.id }) ?? pinboard
-            return AutomationCreatedItemResult(item: item, pinboard: updatedPinboard)
-        }
-        return AutomationCreatedItemResult(item: item)
     }
 
     public func createPinboard(name: String, colorHex: String? = nil) throws -> AutomationPinboardSummary {
@@ -367,31 +234,6 @@ public final class AutomationActionService {
             throw AutomationActionError.pinboardNotFound(trimmedName)
         }
         return pinboard
-    }
-
-    private func optionalPinboard(named name: String?) throws -> Pinboard? {
-        guard let name else { return nil }
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return nil }
-        return try pinboard(named: trimmedName)
-    }
-
-    private func validateShortcutItem(_ item: ClipboardItem) throws {
-        let decision = store.snapshot.privacy.captureDecision(
-            for: item,
-            sourceApplicationName: item.sourceAppName
-        )
-        guard let blockReason = decision.blockReason else { return }
-        switch blockReason {
-        case .contentTypeDisabled(let type):
-            throw AutomationActionError.contentTypeDisabled(type)
-        case .sensitiveText:
-            throw AutomationActionError.sensitiveTextBlocked
-        case .customCaptureRule(let rule):
-            throw AutomationActionError.captureRuleBlocked(rule.name)
-        case .capturePaused, .sourceApplicationExcluded:
-            throw AutomationActionError.captureRuleBlocked(blockReason.displayName)
-        }
     }
 
     private func normalizedColorHex(_ value: String?) -> String? {

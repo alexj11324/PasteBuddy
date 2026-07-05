@@ -7777,6 +7777,22 @@
         }
       }
     },
+    "action.clear_mcp_access_log": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear MCP Access Log"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除 MCP 访问记录"
+          }
+        }
+      }
+    },
     "action.clear_search": {
       "localizations": {
         "en": {
@@ -7889,6 +7905,22 @@
         }
       }
     },
+    "action.connect_ai_tool": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect AI Tool..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接 AI 工具..."
+          }
+        }
+      }
+    },
     "action.copy": {
       "localizations": {
         "en": {
@@ -7917,6 +7949,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "复制为纯文本"
+          }
+        }
+      }
+    },
+    "action.copy_import_configuration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Import Configuration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制导入配置"
+          }
+        }
+      }
+    },
+    "action.copy_install_command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Install Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制安装命令"
+          }
+        }
+      }
+    },
+    "action.copy_install_link": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Install Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制安装链接"
+          }
+        }
+      }
+    },
+    "action.copy_pairing_link": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Pairing Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制配对链接"
           }
         }
       }
@@ -7985,6 +8081,22 @@
         }
       }
     },
+    "action.copy_server_command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Server Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制服务器命令"
+          }
+        }
+      }
+    },
     "action.copy_to_pastebuddy": {
       "localizations": {
         "en": {
@@ -8013,6 +8125,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "创建"
+          }
+        }
+      }
+    },
+    "action.custom_ai_tool": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom AI Tool"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自定义 AI 工具"
           }
         }
       }
@@ -8129,6 +8257,22 @@
         }
       }
     },
+    "action.enable_mcp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable MCP"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用 MCP"
+          }
+        }
+      }
+    },
     "action.enable_quick_paste_1_9": {
       "localizations": {
         "en": {
@@ -8141,6 +8285,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "启用快速粘贴 1-9"
+          }
+        }
+      }
+    },
+    "action.generate_server_config": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generate Server Config"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "生成服务器配置"
           }
         }
       }
@@ -8301,6 +8461,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "打开剪贴板架"
+          }
+        }
+      }
+    },
+    "action.open_install_link": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Install Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开安装链接"
           }
         }
       }
@@ -8785,6 +8961,22 @@
         }
       }
     },
+    "action.refresh_detected_ai_tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Detected Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新已检测工具"
+          }
+        }
+      }
+    },
     "action.reload_clipboard_history": {
       "localizations": {
         "en": {
@@ -9009,6 +9201,38 @@
         }
       }
     },
+    "action.revoke_mcp_access": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revoke MCP Access"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销 MCP 访问"
+          }
+        }
+      }
+    },
+    "action.run_install_command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run Install Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行安装命令"
+          }
+        }
+      }
+    },
     "action.save": {
       "localizations": {
         "en": {
@@ -9085,6 +9309,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "保存到 PasteBuddy"
+          }
+        }
+      }
+    },
+    "action.scan_pairing_qr": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan Pairing QR"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扫描配对二维码"
           }
         }
       }
@@ -9229,6 +9469,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "显示/隐藏面板"
+          }
+        }
+      }
+    },
+    "action.shut_down_mcp_server": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shut Down MCP Server"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭 MCP 服务器"
           }
         }
       }
@@ -9857,6 +10113,22 @@
         }
       }
     },
+    "format.added_mcp_client": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added PasteBuddy to %@. If the client is already running, refresh MCP servers or restart the client."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 PasteBuddy 添加到 %@。如果客户端已在运行，请刷新 MCP 服务器或重启客户端。"
+          }
+        }
+      }
+    },
     "format.assigned": {
       "localizations": {
         "en": {
@@ -9953,6 +10225,86 @@
         }
       }
     },
+    "format.copied_mcp_configuration_for": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied MCP configuration for %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制 %@ 的 MCP 配置。"
+          }
+        }
+      }
+    },
+    "format.copied_mcp_install_command_for": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied MCP install command for %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制 %@ 的 MCP 安装命令。"
+          }
+        }
+      }
+    },
+    "format.copied_mcp_install_link_for": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied MCP install link for %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制 %@ 的 MCP 安装链接。"
+          }
+        }
+      }
+    },
+    "format.copied_mcp_server_command_for": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied MCP server command for %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制 %@ 的 MCP 服务器命令。"
+          }
+        }
+      }
+    },
+    "format.detected_mcp_clients": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detected: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已检测到：%@"
+          }
+        }
+      }
+    },
     "format.excluded": {
       "localizations": {
         "en": {
@@ -9997,6 +10349,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "%d 个文件"
+          }
+        }
+      }
+    },
+    "format.installing_mcp_client": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adding PasteBuddy to %@..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在将 PasteBuddy 添加到 %@..."
           }
         }
       }
@@ -10097,6 +10465,38 @@
         }
       }
     },
+    "format.mcp_access_count": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d MCP access events"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 条 MCP 访问记录"
+          }
+        }
+      }
+    },
+    "format.mcp_client_install_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not add PasteBuddy to %@: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将 PasteBuddy 添加到 %@：%@"
+          }
+        }
+      }
+    },
     "format.move_to": {
       "localizations": {
         "en": {
@@ -10125,6 +10525,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "%d 个名称，%d 个 Bundle ID"
+          }
+        }
+      }
+    },
+    "format.opened_mcp_install_link_for": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opened the MCP install link for %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已打开 %@ 的 MCP 安装链接。"
           }
         }
       }
@@ -10605,6 +11021,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "管理员邮箱"
+          }
+        }
+      }
+    },
+    "label.advanced_ellipsis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高级..."
           }
         }
       }
@@ -11201,6 +11633,22 @@
         }
       }
     },
+    "label.client_install": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Client Install"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "客户端安装"
+          }
+        }
+      }
+    },
     "label.clipboard": {
       "localizations": {
         "en": {
@@ -11473,6 +11921,22 @@
         }
       }
     },
+    "label.configuration_location": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuration Location"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置位置"
+          }
+        }
+      }
+    },
     "label.confirm_action": {
       "localizations": {
         "en": {
@@ -11485,6 +11949,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "确认操作"
+          }
+        }
+      }
+    },
+    "label.connected_ai_tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected AI Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已连接的 AI 工具"
           }
         }
       }
@@ -11661,6 +12141,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "目标位置"
+          }
+        }
+      }
+    },
+    "label.detected_ai_tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detected AI Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已检测到的 AI 工具"
           }
         }
       }
@@ -12225,6 +12721,22 @@
         }
       }
     },
+    "label.import_configuration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import Configuration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入配置"
+          }
+        }
+      }
+    },
     "label.includes_image_data": {
       "localizations": {
         "en": {
@@ -12237,6 +12749,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "包含图片数据"
+          }
+        }
+      }
+    },
+    "label.install_command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装命令"
+          }
+        }
+      }
+    },
+    "label.install_link": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装链接"
           }
         }
       }
@@ -12449,6 +12993,22 @@
         }
       }
     },
+    "label.last_mcp_access": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last MCP Access"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次 MCP 访问"
+          }
+        }
+      }
+    },
     "label.last_sync": {
       "localizations": {
         "en": {
@@ -12609,6 +13169,22 @@
         }
       }
     },
+    "label.local_mcp_client": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local MCP Client"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地 MCP 客户端"
+          }
+        }
+      }
+    },
     "label.local_ocr": {
       "localizations": {
         "en": {
@@ -12765,6 +13341,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "MCP"
+          }
+        }
+      }
+    },
+    "label.mcp_advanced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP Advanced"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP 高级设置"
+          }
+        }
+      }
+    },
+    "label.mcp_ai_tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP & AI Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP 与 AI 工具"
+          }
+        }
+      }
+    },
+    "label.mcp_tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP 工具"
           }
         }
       }
@@ -13213,6 +13837,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Option"
+          }
+        }
+      }
+    },
+    "label.pair_this_mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pair This Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配对这台 Mac"
           }
         }
       }
@@ -14001,6 +14641,22 @@
         }
       }
     },
+    "label.server_command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器命令"
+          }
+        }
+      }
+    },
     "label.settings": {
       "localizations": {
         "en": {
@@ -14481,6 +15137,22 @@
         }
       }
     },
+    "label.supported_ai_tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supported AI Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支持的 AI 工具"
+          }
+        }
+      }
+    },
     "label.supported_locales": {
       "localizations": {
         "en": {
@@ -14673,6 +15345,22 @@
         }
       }
     },
+    "label.unknown_error": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown error"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知错误"
+          }
+        }
+      }
+    },
     "label.unpinned_history_size": {
       "localizations": {
         "en": {
@@ -14781,6 +15469,86 @@
           "stringUnit": {
             "state": "translated",
             "value": "旁白"
+          }
+        }
+      }
+    },
+    "mcp.tool.create_pinboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Pinboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "创建收藏板"
+          }
+        }
+      }
+    },
+    "mcp.tool.list_pinboards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List Pinboards"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列出收藏板"
+          }
+        }
+      }
+    },
+    "mcp.tool.pin_first_match": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin First Matching Item"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "固定第一个匹配项目"
+          }
+        }
+      }
+    },
+    "mcp.tool.retrieve_item": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrieve Clipboard Item"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "读取剪贴板项目"
+          }
+        }
+      }
+    },
+    "mcp.tool.search_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Clipboard History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索剪贴板历史"
           }
         }
       }
@@ -15201,6 +15969,38 @@
         }
       }
     },
+    "message.mcp_allows_ai_apps_to_connect": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow approved AI apps to read and organize your local clipboard history and pinboards through PasteBuddy MCP."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许经你批准的 AI 应用通过 PasteBuddy MCP 读取并整理本地剪贴板历史和收藏板。"
+          }
+        }
+      }
+    },
+    "message.mcp_server_shut_down": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP access is off."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP 访问已关闭。"
+          }
+        }
+      }
+    },
     "message.multiple_selected_items_paste_as_plain_text": {
       "localizations": {
         "en": {
@@ -15245,6 +16045,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "未识别到中文或英文文本。"
+          }
+        }
+      }
+    },
+    "message.no_connected_ai_tools_yet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No MCP client has called PasteBuddy yet."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有 MCP 客户端调用过 PasteBuddy。"
+          }
+        }
+      }
+    },
+    "message.no_detected_mcp_clients": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No supported MCP clients were detected. Use Custom AI Tool for any MCP-compatible app."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未检测到支持的 MCP 客户端。可用自定义 AI 工具连接任意兼容 MCP 的应用。"
           }
         }
       }
@@ -15325,6 +16157,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "从菜单栏打开。无需启动剪贴板工作流程，即可在下方使用相关设置部分。"
+          }
+        }
+      }
+    },
+    "message.pairing_qr_saved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pairing code saved. Connecting..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存配对码，正在连接..."
+          }
+        }
+      }
+    },
+    "message.paste_mcp_config_into_ai_tool": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the client install action when available, or import the configuration below for clients that only support manual MCP setup."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "优先使用客户端安装操作；只支持手动 MCP 设置的客户端，可导入下方配置。"
           }
         }
       }
@@ -15505,6 +16369,22 @@
         }
       }
     },
+    "message.retrieve_item_requires_explicit_mcp_opt_in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrieving full clipboard payloads is off by default. Turn on Retrieve Clipboard Item only for AI tools you trust."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认不允许读取完整剪贴板内容。仅对你信任的 AI 工具开启“读取剪贴板项目”。"
+          }
+        }
+      }
+    },
     "message.run_local_apple_ocr_after_image_capture": {
       "localizations": {
         "en": {
@@ -15581,6 +16461,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在将共享内容保存到历史记录..."
+          }
+        }
+      }
+    },
+    "message.scan_pairing_qr_from_iphone": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan this code from PasteBuddy on iPhone to pair with this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 iPhone 上的 PasteBuddy 扫描此二维码，即可与这台 Mac 配对。"
+          }
+        }
+      }
+    },
+    "message.scan_pairing_qr_from_mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan the QR code shown in PasteBuddy on your Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扫描 Mac 版 PasteBuddy 中显示的二维码。"
           }
         }
       }
@@ -17709,6 +18621,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "空闲"
+          }
+        }
+      }
+    },
+    "state.installing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installing..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在安装..."
+          }
+        }
+      }
+    },
+    "state.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无"
           }
         }
       }

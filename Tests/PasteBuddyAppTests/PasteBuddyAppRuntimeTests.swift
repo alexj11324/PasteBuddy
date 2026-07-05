@@ -744,21 +744,32 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(appSource.contains("await toggleClipboardShelf()"))
     }
 
-    func testMCPSettingsShowAgentConnectionWithoutToolDetails() throws {
+    func testMCPSettingsExposeConnectionMenuAndAdvancedControls() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let mcpStart = try XCTUnwrap(source.range(of: "Section(\"label.agent_connection\")"))
+        let mcpStart = try XCTUnwrap(source.range(of: "Section(\"label.mcp_ai_tools\")"))
         let syncStart = try XCTUnwrap(source.range(of: "Section(\"action.sync_sharing\")"))
         let mcpSource = String(source[mcpStart.lowerBound..<syncStart.lowerBound])
 
-        XCTAssertTrue(mcpSource.contains("action.allow_local_agent_connection"))
-        XCTAssertTrue(mcpSource.contains("label.agent_connection_status"))
-        XCTAssertTrue(mcpSource.contains("message.agent_connection_runs_on_this_mac"))
-        XCTAssertTrue(mcpSource.contains("message.swift_run_pastebuddymcp_print_client_config_codex"))
-        XCTAssertFalse(mcpSource.contains("ForEach(MCPToolName.allCases)"))
-        XCTAssertFalse(mcpSource.contains("setMCPTool"))
-        XCTAssertFalse(mcpSource.contains("label.last_mcp_access"))
-        XCTAssertFalse(mcpSource.contains("action.revoke_mcp_access"))
-        XCTAssertFalse(mcpSource.contains("message.tool_selections_are_saved_and_take_effect"))
+        XCTAssertTrue(mcpSource.contains("action.enable_mcp"))
+        XCTAssertTrue(mcpSource.contains("action.generate_server_config"))
+        XCTAssertTrue(mcpSource.contains("action.connect_ai_tool"))
+        XCTAssertTrue(mcpSource.contains("detectedMCPClientCandidates"))
+        XCTAssertTrue(mcpSource.contains("supportedMCPClientCandidates"))
+        XCTAssertTrue(source.contains("struct MCPClientDetector"))
+        XCTAssertFalse(source.contains("MCPClientConfigurationTarget.settingsMenuTargets"))
+        XCTAssertTrue(mcpSource.contains("action.shut_down_mcp_server"))
+        XCTAssertTrue(mcpSource.contains("label.connected_ai_tools"))
+        XCTAssertTrue(source.contains("struct MCPClientConfigurationSheet"))
+        XCTAssertTrue(source.contains("struct MCPClientCommandRunner"))
+        XCTAssertTrue(source.contains("runMCPInstallationCommand"))
+        XCTAssertTrue(source.contains("openMCPInstallationURL"))
+        XCTAssertTrue(source.contains("action.run_install_command"))
+        XCTAssertTrue(source.contains("struct MCPAdvancedSettingsSheet"))
+        XCTAssertTrue(source.contains("ForEach(MCPToolName.allCases)"))
+        XCTAssertTrue(source.contains("setMCPTool(tool, enabled: $0)"))
+        XCTAssertTrue(source.contains("action.revoke_mcp_access"))
+        XCTAssertTrue(source.contains("message.retrieve_item_requires_explicit_mcp_opt_in"))
+        XCTAssertFalse(mcpSource.contains("127.0.0.1"))
     }
 
     func testSettingsDoesNotExposeLocalHistoryEncryptionToggle() throws {
@@ -1056,6 +1067,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("ForEach(store.userPinboards)"))
         XCTAssertTrue(source.contains("store.syncSmartPinboard(for: category)"))
         XCTAssertTrue(source.contains("setSideScope(.pinboard(pinboard.id))"))
+        XCTAssertTrue(source.contains("NewPinboardNamePrompt.run()"))
+        XCTAssertFalse(source.contains("@State private var isShowingNewPinboardSheet"))
+        XCTAssertFalse(source.contains("NewPinboardSheet"))
+        XCTAssertFalse(source.contains("NewTextItemSheet"))
+        XCTAssertFalse(source.contains("label.new_text_item"))
         XCTAssertFalse(source.contains("label.today"))
         XCTAssertFalse(source.contains("label.filters"))
         XCTAssertFalse(source.contains("action.reload_clipboard_history"))
@@ -1079,12 +1095,28 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("ClipboardSidePanelView("))
         XCTAssertTrue(shelfSource.contains("enum ClipboardShelfGlass"))
         XCTAssertTrue(shelfSource.contains("struct ShelfToolbarCircleIcon"))
+        XCTAssertTrue(shelfSource.contains("NewPinboardNamePrompt.run()"))
+        XCTAssertFalse(shelfSource.contains("NewPinboardSheet"))
+        XCTAssertFalse(shelfSource.contains("NewTextItemSheet"))
+        XCTAssertFalse(shelfSource.contains("label.new_text_item"))
         XCTAssertTrue(shelfSource.contains("struct ClipboardImageThumbnailView"))
         XCTAssertTrue(shelfSource.contains("private var placeholderFill: Color"))
         XCTAssertTrue(shelfSource.contains("Color(nsColor: .controlBackgroundColor).opacity(0.42)"))
         XCTAssertTrue(shelfSource.contains("private var placeholderIconTint: Color"))
         XCTAssertTrue(shelfSource.contains("Color(nsColor: .secondaryLabelColor)"))
         XCTAssertTrue(shelfSource.contains("extension View"))
+
+        let quickFilterStart = try XCTUnwrap(source.range(of: "private var quickFilterStrip"))
+        let itemListStart = try XCTUnwrap(source.range(of: "private var itemList"))
+        let quickFilterSource = String(source[quickFilterStart.lowerBound..<itemListStart.lowerBound])
+        let scrollEnd = try XCTUnwrap(quickFilterSource.range(of: ".scrollIndicators(.never, axes: .horizontal)"))
+        let addButtonStart = try XCTUnwrap(quickFilterSource.range(of: "Button {\n                createNamedPinboard()"))
+
+        XCTAssertLessThan(scrollEnd.upperBound, addButtonStart.lowerBound)
+
+        let promptSource = try sourceFileContents("Sources/PasteBuddy/Views/NewPinboardNamePrompt.swift")
+        XCTAssertTrue(promptSource.contains("NSAlert()"))
+        XCTAssertTrue(promptSource.contains("alert.runModal()"))
     }
 
     func testSwiftUIShelfCollectionHasNoAppKitCollectionBridge() throws {

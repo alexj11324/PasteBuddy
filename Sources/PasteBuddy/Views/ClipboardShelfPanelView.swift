@@ -87,7 +87,6 @@ struct ClipboardShelfPanelView: View {
 
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isShelfFocused: Bool
-    @State private var isShowingNewTextItem = false
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
     @State private var shelfInteraction = ShelfInteractionModel()
@@ -140,17 +139,6 @@ struct ClipboardShelfPanelView: View {
         .task {
             await runShelfMinuteTicker()
         }
-        .sheet(isPresented: $isShowingNewTextItem) {
-            NewTextItemSheet { title, text in
-                guard store.createTextItem(text: text, title: title) != nil else {
-                    return store.lastErrorMessage ?? "PasteBuddy could not create this item."
-                }
-                isShowingNewTextItem = false
-                return nil
-            } onCancel: {
-                isShowingNewTextItem = false
-            }
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
     }
@@ -191,15 +179,7 @@ struct ClipboardShelfPanelView: View {
 
                 Menu {
                     Button {
-                        isShowingNewTextItem = true
-                    } label: {
-                        Label("label.new_text_item", systemImage: "square.and.pencil")
-                    }
-                    .keyboardShortcut("n", modifiers: [.command])
-
-                    Button {
-                        let pinboard = store.createPinboard()
-                        setScope(.pinboard(pinboard.id))
+                        createNamedPinboard()
                     } label: {
                         Label("label.new_pinboard", systemImage: "plus.rectangle.on.folder")
                     }
@@ -441,6 +421,12 @@ struct ClipboardShelfPanelView: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.clipboard_collections"))
+    }
+
+    private func createNamedPinboard() {
+        guard let name = NewPinboardNamePrompt.run() else { return }
+        let pinboard = store.createPinboard(named: name)
+        setScope(.pinboard(pinboard.id))
     }
 
     private var selectedCount: Int {

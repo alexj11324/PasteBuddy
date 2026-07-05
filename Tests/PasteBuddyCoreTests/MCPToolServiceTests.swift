@@ -18,17 +18,31 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
     }
 
-    func testMCPAgentConnectionEnablesStandardTools() throws {
+    func testMCPAgentConnectionEnablesStandardToolsWithoutPayloadRetrieval() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        store.setMCPTool(.retrieveItem, enabled: false)
         store.setMCPServerEnabled(true)
 
         XCTAssertTrue(store.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(store.snapshot.mcp.enabledTools, MCPToolName.defaultEnabledTools)
-        XCTAssertTrue(store.snapshot.mcp.enabledTools.contains(.retrieveItem))
+        XCTAssertTrue(store.snapshot.mcp.enabledTools.contains(.searchHistory))
+        XCTAssertTrue(store.snapshot.mcp.enabledTools.contains(.listPinboards))
+        XCTAssertFalse(store.snapshot.mcp.enabledTools.contains(.retrieveItem))
+    }
+
+    func testLegacyAllToolsConfigurationMigratesPayloadRetrievalBackToOptIn() throws {
+        let legacy = MCPConfiguration(
+            isServerEnabled: true,
+            enabledTools: Set(MCPToolName.allCases)
+        )
+        let data = try JSONEncoder().encode(legacy)
+
+        let decoded = try JSONDecoder().decode(MCPConfiguration.self, from: data)
+
+        XCTAssertEqual(decoded.enabledTools, MCPToolName.defaultEnabledTools)
+        XCTAssertFalse(decoded.enabledTools.contains(.retrieveItem))
     }
 
     func testMCPToolLevelAccessControls() throws {
@@ -58,6 +72,7 @@ final class MCPToolServiceTests: XCTestCase {
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
         store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
         let item = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Test Mac",
@@ -88,6 +103,7 @@ final class MCPToolServiceTests: XCTestCase {
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
         store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
         let item = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Test Mac",

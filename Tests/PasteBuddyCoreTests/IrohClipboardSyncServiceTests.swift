@@ -27,4 +27,14 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
 
         XCTAssertThrowsError(try IrohClipboardWireFormat.decode(lengthPrefix: lengthPrefix, body: Data([1, 2, 3])))
     }
+
+    func testPairingURLRoundTripsEndpointId() throws {
+        let endpointId = "abcdef123456"
+        let url = try XCTUnwrap(IrohClipboardSyncService.pairingURL(endpointId: endpointId))
+
+        XCTAssertEqual(try IrohClipboardSyncService.peerEndpointId(fromPairingCode: url.absoluteString), endpointId)
+        XCTAssertThrowsError(try IrohClipboardSyncService.peerEndpointId(fromPairingCode: "https://example.com/?endpoint=\(endpointId)")) { error in
+            XCTAssertEqual(error as? IrohClipboardSyncError, .invalidPairingCode)
+        }
+    }
 }

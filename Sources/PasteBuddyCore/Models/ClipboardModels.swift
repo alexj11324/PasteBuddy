@@ -2959,7 +2959,7 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
     public var id: String { rawValue }
 
     public static var defaultEnabledTools: Set<MCPToolName> {
-        Set(allCases)
+        [.searchHistory, .listPinboards, .createPinboard, .pinFirstMatch]
     }
 
     public var displayName: String {
@@ -3051,7 +3051,8 @@ public struct MCPConfiguration: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         isServerEnabled = try container.decodeIfPresent(Bool.self, forKey: .isServerEnabled) ?? false
-        enabledTools = try container.decodeIfPresent(Set<MCPToolName>.self, forKey: .enabledTools) ?? MCPToolName.defaultEnabledTools
+        let decodedTools = try container.decodeIfPresent(Set<MCPToolName>.self, forKey: .enabledTools) ?? MCPToolName.defaultEnabledTools
+        enabledTools = Self.migratedEnabledTools(decodedTools)
         lastAccessRevokedAt = try container.decodeIfPresent(Date.self, forKey: .lastAccessRevokedAt)
         accessLog = Array((try container.decodeIfPresent([MCPAccessLogEntry].self, forKey: .accessLog) ?? []).prefix(Self.maxAccessLogEntries))
     }
@@ -3066,6 +3067,10 @@ public struct MCPConfiguration: Codable, Equatable, Sendable {
 
     public func isToolEnabled(_ tool: MCPToolName) -> Bool {
         isServerEnabled && enabledTools.contains(tool)
+    }
+
+    private static func migratedEnabledTools(_ tools: Set<MCPToolName>) -> Set<MCPToolName> {
+        tools == Set(MCPToolName.allCases) ? MCPToolName.defaultEnabledTools : tools
     }
 }
 
@@ -3222,7 +3227,6 @@ public enum PrivacyCaptureStatus: Equatable, Sendable {
 
 public enum PrivacyProtectedSurface: String, CaseIterable, Codable, Identifiable, Sendable {
     case automaticClipboardCapture
-    case manualHistoryEntry
     case pinboards
     case search
     case shortcuts
@@ -3236,8 +3240,6 @@ public enum PrivacyProtectedSurface: String, CaseIterable, Codable, Identifiable
         switch self {
         case .automaticClipboardCapture:
             "Automatic Clipboard Capture"
-        case .manualHistoryEntry:
-            "Manual History Entry"
         case .pinboards:
             "Pinboards"
         case .search:

@@ -75,9 +75,13 @@ For packaged builds, replace `command` with the full path to the installed
 ```bash
 swift run PasteBuddyMCP --print-client-config codex --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
 swift run PasteBuddyMCP --print-client-config claude --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
+swift run PasteBuddyMCP --print-client-config claude-code --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
 swift run PasteBuddyMCP --print-client-config cursor --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
 swift run PasteBuddyMCP --print-client-config vscode --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
 swift run PasteBuddyMCP --print-client-config windsurf --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
+swift run PasteBuddyMCP --print-client-config gemini --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
+swift run PasteBuddyMCP --print-client-config opencode --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
+swift run PasteBuddyMCP --print-client-config kiro --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
 swift run PasteBuddyMCP --print-client-config custom --package-path /Users/alexjiang/Desktop/vibe/PasteBuddy
 ```
 
@@ -94,12 +98,34 @@ swift run PasteBuddyMCP --list-client-configs
 ```
 
 Codex receives a TOML snippet for `~/.codex/config.toml`. Claude Desktop,
-Cursor, Windsurf, and generic clients receive an `mcpServers` JSON snippet.
-VS Code receives an `mcp.servers` JSON wrapper, with the same command/args
-fields available for extensions that store MCP servers through a UI instead.
+Claude Code, Gemini CLI, Kiro, Windsurf, and generic clients receive an
+`mcpServers` JSON snippet. Cursor receives an `mcpServers` JSON snippet with an
+explicit `type: "stdio"` field. VS Code receives a top-level `servers` JSON
+snippet. OpenCode receives an `opencode.json`-style `mcp` object with
+`type: "local"` and a command array.
+
+PasteBuddy Settings detects known MCP-capable clients from installed `.app`
+bundles, common CLI/TUI executables, and explicit config-file locations. Unknown
+MCP-compatible clients remain supported through the Custom MCP Client guide,
+which exposes the raw command/args pair and generic JSON.
+
+When a detected client exposes an install entry point, Settings offers an
+end-to-end action before the manual snippet:
+
+- Codex: runs `codex mcp add pastebuddy -- ...`.
+- Claude Code: runs `claude mcp add --scope user --transport stdio pastebuddy -- ...`.
+- Cursor: opens the official `cursor://anysphere.cursor-deeplink/mcp/install`
+  link and can run `cursor --add-mcp ...`.
+- VS Code: opens the official `vscode:mcp/install` link and can run
+  `code --add-mcp ...`.
+- Gemini CLI: runs `gemini mcp add --scope user --transport stdio pastebuddy ...`.
+
+Clients without a stable command-line installer, such as Claude Desktop,
+Windsurf, OpenCode, Kiro, and unknown MCP clients, keep the manual import guide
+as the supported path.
 
 ## Deferred Work
 
 - Packaged signed helper location for distribution.
-- Client-specific setup screenshots for Codex, Claude, Cursor, VS Code, and
-  Windsurf.
+- Client-specific setup screenshots for Codex, Claude, Cursor, VS Code, Gemini,
+  OpenCode, Kiro, and Windsurf.

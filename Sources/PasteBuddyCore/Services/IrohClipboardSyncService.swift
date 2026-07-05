@@ -59,6 +59,7 @@ enum IrohClipboardWireFormat {
 }
 
 public enum IrohClipboardSyncError: LocalizedError, Equatable {
+    case invalidPairingCode
     case invalidPeerEndpointId
     case noEndpoint
     case noSession
@@ -70,6 +71,8 @@ public enum IrohClipboardSyncError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
+        case .invalidPairingCode:
+            "PasteBuddy pairing code is invalid."
         case .invalidPeerEndpointId:
             "Peer endpoint id is invalid."
         case .noEndpoint:
@@ -94,6 +97,9 @@ public enum IrohClipboardSyncError: LocalizedError, Equatable {
 @Observable
 public final class IrohClipboardSyncService {
     public private(set) var endpointId = ""
+    public var pairingURL: URL? {
+        Self.pairingURL(endpointId: endpointId)
+    }
     public var peerEndpointId: String {
         didSet { defaults.set(peerEndpointId, forKey: Self.peerEndpointDefaultsKey) }
     }
@@ -111,6 +117,8 @@ public final class IrohClipboardSyncService {
     @ObservationIgnored private var currentSession: IrohClipboardSession?
 
     private static let peerEndpointDefaultsKey = "pastebuddy.iroh.peerEndpointId"
+    nonisolated private static let pairingScheme = "pastebuddy"
+    nonisolated private static let pairingHost = "iroh-pair"
 
     public init(
         defaults: UserDefaults = .standard,
@@ -167,6 +175,36 @@ public final class IrohClipboardSyncService {
         } catch {
             connectionState = .failed(error.localizedDescription)
         }
+    }
+
+    public func applyPairingCode(_ code: String) throws {
+        peerEndpointId = try Self.peerEndpointId(fromPairingCode: code)
+    }
+
+    nonisolated public static func pairingURL(endpointId: String) -> URL? {
+        let trimmed = endpointId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = pairingScheme
+        components.host = pairingHost
+        components.queryItems = [
+            URLQueryItem(name: "endpoint", value: trimmed)
+        ]
+        return components.url
+    }
+
+    nonisolated public static func peerEndpointId(fromPairingCode code: String) throws -> String {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == pairingScheme,
+              components.host == pairingHost,
+              let endpoint = components.queryItems?.first(where: { $0.name == "endpoint" })?.value?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !endpoint.isEmpty else {
+            throw IrohClipboardSyncError.invalidPairingCode
+        }
+        return endpoint
     }
 
     @discardableResult

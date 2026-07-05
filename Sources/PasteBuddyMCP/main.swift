@@ -351,6 +351,12 @@ private struct PasteBuddyMCPMain {
         print("Configuration location: \(guide.configurationHint)")
         print("Command: \(guide.command)")
         print("Arguments: \(guide.arguments.isEmpty ? "(none)" : guide.arguments.joined(separator: " "))")
+        if let installationCommand = guide.installationCommand {
+            print("Install command: \(installationCommand)")
+        }
+        if let installationURL = guide.installationURL {
+            print("Install link: \(installationURL)")
+        }
         print("")
         print("```")
         print(guide.configurationSnippet)
@@ -390,7 +396,7 @@ private struct PasteBuddyMCPMain {
         Usage:
           PasteBuddyMCP
           PasteBuddyMCP --list-client-configs
-          PasteBuddyMCP --print-client-config <codex|claude|cursor|vscode|windsurf|custom> [--package-path <path>]
+          PasteBuddyMCP --print-client-config <claude|claude-code|codex|cursor|vscode|windsurf|gemini|opencode|kiro|custom> [--package-path <path>]
           PasteBuddyMCP --print-client-config <client> --executable-path <path-to-PasteBuddyMCP>
 
         With no arguments, PasteBuddyMCP starts the local stdio MCP server.

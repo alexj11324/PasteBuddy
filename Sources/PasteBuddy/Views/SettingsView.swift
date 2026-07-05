@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import Foundation
 import PasteBuddyCore
 import SwiftUI
@@ -13,14 +14,20 @@ struct SettingsView: View {
     @State private var newCaptureRuleApplication: InstalledApplication?
     @State private var showingCaptureRuleApplicationPicker = false
     @State private var showingExcludedApplicationsSheet = false
+    @State private var showingMCPAdvancedSettings = false
     @State private var destructiveConfirmation: SettingsDestructiveAction?
     @State private var selectedSettingsSection: SettingsSidebarSection? = .general
+    @State private var selectedMCPClient: MCPClientConfigurationTarget?
+    @State private var mcpClientCandidates: [MCPClientCandidate] = []
+    @State private var isRunningMCPClientInstall = false
+    @State private var mcpStatusMessage: String?
 
     var body: some View {
         settingsSplitView
             .frame(minWidth: 860, idealWidth: 1040, minHeight: 640, idealHeight: 760)
             .onAppear {
                 applyRequestedSettingsDestination()
+                reloadMCPClientCandidates()
             }
             .onChange(of: store.requestedSettingsDestination?.rawValue) { _, _ in
                 applyRequestedSettingsDestination()
@@ -46,6 +53,34 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingExcludedApplicationsSheet) {
                 ExcludedApplicationsSheet(store: store)
+            }
+            .sheet(isPresented: $showingMCPAdvancedSettings) {
+                MCPAdvancedSettingsSheet(store: store)
+            }
+            .sheet(item: $selectedMCPClient) { target in
+                MCPClientConfigurationSheet(
+                    guide: mcpClientGuide(for: target),
+                    isRunningInstallation: isRunningMCPClientInstall,
+                    statusMessage: mcpStatusMessage,
+                    onRunInstallationCommand: {
+                        runMCPInstallationCommand(for: target)
+                    },
+                    onOpenInstallationURL: {
+                        openMCPInstallationURL(for: target)
+                    },
+                    onCopyConfiguration: {
+                        copyMCPConfiguration(for: target)
+                    },
+                    onCopyCommand: {
+                        copyMCPServerCommand(for: target)
+                    },
+                    onCopyInstallationCommand: {
+                        copyMCPInstallationCommand(for: target)
+                    },
+                    onCopyInstallationURL: {
+                        copyMCPInstallationURL(for: target)
+                    }
+                )
             }
             .sheet(isPresented: $showingCaptureRuleApplicationPicker) {
                 InstalledApplicationPickerSheet(
@@ -564,30 +599,143 @@ struct SettingsView: View {
 
     private var integrationsSettingsForm: some View {
             Form {
-            Section("label.agent_connection") {
-                Toggle(
-                    "action.allow_local_agent_connection",
-                    isOn: Binding(
-                        get: { store.snapshot.mcp.isServerEnabled },
-                        set: { store.setMCPServerEnabled($0) }
-                    )
-                )
+            Section("label.mcp_ai_tools") {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle(
+                                "action.enable_mcp",
+                                isOn: Binding(
+                                    get: { store.snapshot.mcp.isServerEnabled },
+                                    set: { store.setMCPServerEnabled($0) }
+                                )
+                            )
+                            .font(.headline)
 
-                LabeledContent("label.agent_connection_status") {
-                    Label(
-                        store.snapshot.mcp.isServerEnabled ? "label.allowed" : "state.off",
-                        systemImage: store.snapshot.mcp.isServerEnabled ? "checkmark.circle.fill" : "pause.circle"
-                    )
-                    .foregroundStyle(store.snapshot.mcp.isServerEnabled ? .green : .secondary)
+                            Text("message.mcp_allows_ai_apps_to_connect")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Label(
+                            store.snapshot.mcp.isServerEnabled ? "state.enabled" : "state.off",
+                            systemImage: store.snapshot.mcp.isServerEnabled ? "checkmark.circle.fill" : "pause.circle"
+                        )
+                        .foregroundStyle(store.snapshot.mcp.isServerEnabled ? .green : .secondary)
+                    }
+
+                    Divider()
+
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(store.snapshot.mcp.isServerEnabled ? .green : .secondary)
+                            .frame(width: 8, height: 8)
+
+                        Text(mcpServerCommandSummary)
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+
+                        Spacer()
+
+                        Button {
+                            copyMCPServerCommand(for: .custom)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("action.copy_server_command")
+
+                        Button("label.advanced_ellipsis") {
+                            showingMCPAdvancedSettings = true
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("action.generate_server_config") {
+                            selectedMCPClient = .custom
+                        }
+
+                        Menu {
+                            if detectedMCPClientCandidates.isEmpty {
+                                Text("message.no_detected_mcp_clients")
+                            } else {
+                                Section("label.detected_ai_tools") {
+                                    ForEach(detectedMCPClientCandidates) { candidate in
+                                        Button {
+                                            selectedMCPClient = candidate.target
+                                        } label: {
+                                            Label(candidate.displayName, systemImage: candidate.target.systemImageName)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Section("label.supported_ai_tools") {
+                                ForEach(supportedMCPClientCandidates) { candidate in
+                                    Button {
+                                        selectedMCPClient = candidate.target
+                                    } label: {
+                                        Label(candidate.displayName, systemImage: candidate.target.systemImageName)
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            Button {
+                                reloadMCPClientCandidates()
+                            } label: {
+                                Label("action.refresh_detected_ai_tools", systemImage: "arrow.clockwise")
+                            }
+
+                            Button {
+                                selectedMCPClient = .custom
+                            } label: {
+                                Label("action.custom_ai_tool", systemImage: "wrench.and.screwdriver")
+                            }
+                        } label: {
+                            Label("action.connect_ai_tool", systemImage: "plus.circle")
+                        }
+
+                        Spacer()
+
+                        Button("action.shut_down_mcp_server", role: .destructive) {
+                            shutdownMCPServer()
+                        }
+                        .disabled(!store.snapshot.mcp.isServerEnabled)
+                    }
+
+                    Text(mcpClientDetectionSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let mcpStatusMessage {
+                        Text(mcpStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
 
-                Text("message.agent_connection_runs_on_this_mac")
-                    .foregroundStyle(.secondary)
-
-                Text("message.swift_run_pastebuddymcp_print_client_config_codex")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            Section("label.connected_ai_tools") {
+                if let latestAccess = store.snapshot.mcp.accessLog.first {
+                    LabeledContent("label.local_mcp_client") {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(latestAccess.accessedAt.formatted(date: .abbreviated, time: .shortened))
+                            Text(localized("format.mcp_access_count", store.snapshot.mcp.accessLog.count))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Text("message.no_connected_ai_tools_yet")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .multilineTextAlignment(.center)
+                }
             }
 
             Section("action.sync_sharing") {
@@ -655,6 +803,26 @@ struct SettingsView: View {
                         Text(irohSync.endpointId)
                             .font(.caption.monospaced())
                             .textSelection(.enabled)
+                    }
+                }
+
+                if let pairingURL = irohSync.pairingURL {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 12) {
+                            IrohPairingQRCodeView(value: pairingURL.absoluteString)
+                                .frame(width: 132, height: 132)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("message.scan_pairing_qr_from_iphone")
+                                    .foregroundStyle(.secondary)
+                                Text(pairingURL.absoluteString)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                Button("action.copy_pairing_link") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(pairingURL.absoluteString, forType: .string)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -777,6 +945,134 @@ struct SettingsView: View {
         }
     }
 
+    private var mcpServerCommandSummary: String {
+        commandSummary(for: mcpClientGuide(for: .custom))
+    }
+
+    private var detectedMCPClientCandidates: [MCPClientCandidate] {
+        mcpClientCandidates.filter(\.isDetected)
+    }
+
+    private var supportedMCPClientCandidates: [MCPClientCandidate] {
+        mcpClientCandidates.filter { !$0.isDetected }
+    }
+
+    private var mcpClientDetectionSummary: String {
+        guard !detectedMCPClientCandidates.isEmpty else {
+            return localized("message.no_detected_mcp_clients")
+        }
+        let names = detectedMCPClientCandidates
+            .map(\.displayName)
+            .joined(separator: ", ")
+        return localized("format.detected_mcp_clients", names)
+    }
+
+    private func reloadMCPClientCandidates() {
+        mcpClientCandidates = MCPClientDetector().candidates(
+            applications: InstalledApplicationCatalog().applications()
+        )
+    }
+
+    private func mcpClientGuide(for target: MCPClientConfigurationTarget) -> MCPClientConfigurationGuide {
+        if FileManager.default.isExecutableFile(atPath: packagedMCPExecutablePath) {
+            return MCPClientConfigurationGuideBuilder.packagedGuide(
+                for: target,
+                executablePath: packagedMCPExecutablePath
+            )
+        }
+        return MCPClientConfigurationGuideBuilder.developmentGuide(
+            for: target,
+            packagePath: developmentPackagePath
+        )
+    }
+
+    private var packagedMCPExecutablePath: String {
+        Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/PasteBuddyMCP")
+            .path
+    }
+
+    private var developmentPackagePath: String {
+        let sourcePath = #filePath
+        if let range = sourcePath.range(of: "/Sources/PasteBuddy/") {
+            return String(sourcePath[..<range.lowerBound])
+        }
+        return FileManager.default.currentDirectoryPath
+    }
+
+    private func copyMCPConfiguration(for target: MCPClientConfigurationTarget) {
+        let guide = mcpClientGuide(for: target)
+        copyToPasteboard(guide.configurationSnippet)
+        mcpStatusMessage = localized("format.copied_mcp_configuration_for", target.displayName)
+    }
+
+    private func copyMCPServerCommand(for target: MCPClientConfigurationTarget) {
+        let guide = mcpClientGuide(for: target)
+        copyToPasteboard(commandSummary(for: guide))
+        mcpStatusMessage = localized("format.copied_mcp_server_command_for", target.displayName)
+    }
+
+    private func runMCPInstallationCommand(for target: MCPClientConfigurationTarget) {
+        let guide = mcpClientGuide(for: target)
+        guard let parts = guide.installationCommandParts, !parts.isEmpty else { return }
+        isRunningMCPClientInstall = true
+        mcpStatusMessage = localized("format.installing_mcp_client", target.displayName)
+
+        let resolvedParts = MCPClientDetector().resolvedCommandParts(parts, for: target)
+        let searchPath = MCPClientDetector().shellSearchPath
+        Task {
+            let result = await MCPClientCommandRunner.run(parts: resolvedParts, searchPath: searchPath)
+            await MainActor.run {
+                isRunningMCPClientInstall = false
+                if result.exitCode == 0 {
+                    mcpStatusMessage = localized("format.added_mcp_client", target.displayName)
+                } else {
+                    let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    mcpStatusMessage = localized(
+                        "format.mcp_client_install_failed",
+                        target.displayName,
+                        detail.isEmpty ? localized("label.unknown_error") : detail
+                    )
+                }
+            }
+        }
+    }
+
+    private func openMCPInstallationURL(for target: MCPClientConfigurationTarget) {
+        guard let urlString = mcpClientGuide(for: target).installationURL,
+              let url = URL(string: urlString) else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+        mcpStatusMessage = localized("format.opened_mcp_install_link_for", target.displayName)
+    }
+
+    private func copyMCPInstallationCommand(for target: MCPClientConfigurationTarget) {
+        guard let command = mcpClientGuide(for: target).installationCommand else { return }
+        copyToPasteboard(command)
+        mcpStatusMessage = localized("format.copied_mcp_install_command_for", target.displayName)
+    }
+
+    private func copyMCPInstallationURL(for target: MCPClientConfigurationTarget) {
+        guard let url = mcpClientGuide(for: target).installationURL else { return }
+        copyToPasteboard(url)
+        mcpStatusMessage = localized("format.copied_mcp_install_link_for", target.displayName)
+    }
+
+    private func shutdownMCPServer() {
+        store.setMCPServerEnabled(false)
+        mcpStatusMessage = localized("message.mcp_server_shut_down")
+    }
+
+    private func commandSummary(for guide: MCPClientConfigurationGuide) -> String {
+        ([guide.command] + guide.arguments).joined(separator: " ")
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     private var syncReadinessDetail: String {
         switch store.syncReadiness {
         case .blocked(let requirements):
@@ -850,6 +1146,227 @@ struct SettingsView: View {
         )
     }
 
+}
+
+private struct MCPClientConfigurationSheet: View {
+    var guide: MCPClientConfigurationGuide
+    var isRunningInstallation: Bool
+    var statusMessage: String?
+    var onRunInstallationCommand: () -> Void
+    var onOpenInstallationURL: () -> Void
+    var onCopyConfiguration: () -> Void
+    var onCopyCommand: () -> Void
+    var onCopyInstallationCommand: () -> Void
+    var onCopyInstallationURL: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label(guide.target.displayName, systemImage: guide.target.systemImageName)
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                Button("action.close") {
+                    dismiss()
+                }
+            }
+
+            Text("message.paste_mcp_config_into_ai_tool")
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("label.configuration_location") {
+                    Text(guide.configurationHint)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+
+                LabeledContent("label.server_command") {
+                    Text(commandSummary)
+                        .font(.caption.monospaced())
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if guide.installationCommand != nil || guide.installationURL != nil {
+                Text("label.client_install")
+                    .font(.headline)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    if let installationCommand = guide.installationCommand {
+                        LabeledContent("label.install_command") {
+                            Text(installationCommand)
+                                .font(.caption.monospaced())
+                                .lineLimit(3)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                    }
+
+                    if let installationURL = guide.installationURL {
+                        LabeledContent("label.install_link") {
+                            Text(installationURL)
+                                .font(.caption.monospaced())
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                HStack {
+                    if guide.installationCommandParts != nil {
+                        Button {
+                            onRunInstallationCommand()
+                        } label: {
+                            Text(
+                                isRunningInstallation
+                                    ? LocalizedStringKey("state.installing")
+                                    : LocalizedStringKey("action.run_install_command")
+                            )
+                        }
+                        .disabled(isRunningInstallation)
+                        .keyboardShortcut(.defaultAction)
+                    }
+
+                    if guide.installationURL != nil {
+                        Button("action.open_install_link") {
+                            onOpenInstallationURL()
+                        }
+                    }
+
+                    Spacer()
+                }
+            }
+
+            Text("label.import_configuration")
+                .font(.headline)
+
+            ScrollView {
+                Text(guide.configurationSnippet)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .frame(minHeight: 160)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+            HStack {
+                Button("action.copy_import_configuration") {
+                    onCopyConfiguration()
+                }
+                .keyboardShortcut(guide.installationCommandParts == nil ? .defaultAction : nil)
+
+                Button("action.copy_server_command") {
+                    onCopyCommand()
+                }
+
+                if guide.installationCommand != nil {
+                    Button("action.copy_install_command") {
+                        onCopyInstallationCommand()
+                    }
+                }
+
+                if guide.installationURL != nil {
+                    Button("action.copy_install_link") {
+                        onCopyInstallationURL()
+                    }
+                }
+
+                Spacer()
+            }
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(24)
+        .frame(width: 680)
+        .frame(minHeight: 500)
+    }
+
+    private var commandSummary: String {
+        ([guide.command] + guide.arguments).joined(separator: " ")
+    }
+}
+
+private struct MCPAdvancedSettingsSheet: View {
+    @Bindable var store: PasteBuddyStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("label.mcp_advanced")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                Button("action.close") {
+                    dismiss()
+                }
+            }
+
+            Toggle(
+                "action.enable_mcp",
+                isOn: Binding(
+                    get: { store.snapshot.mcp.isServerEnabled },
+                    set: { store.setMCPServerEnabled($0) }
+                )
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("label.mcp_tools")
+                    .font(.headline)
+
+                ForEach(MCPToolName.allCases) { tool in
+                    Toggle(
+                        tool.settingsTitleKey,
+                        isOn: Binding(
+                            get: { store.snapshot.mcp.enabledTools.contains(tool) },
+                            set: { store.setMCPTool(tool, enabled: $0) }
+                        )
+                    )
+                }
+            }
+
+            Text("message.retrieve_item_requires_explicit_mcp_opt_in")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            LabeledContent("label.last_mcp_access") {
+                if let latestAccess = store.snapshot.mcp.accessLog.first {
+                    Text(latestAccess.accessedAt.formatted(date: .abbreviated, time: .shortened))
+                } else {
+                    Text("state.none")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Button("action.clear_mcp_access_log") {
+                    store.clearMCPAccessLog()
+                }
+                .disabled(store.snapshot.mcp.accessLog.isEmpty)
+
+                Button("action.revoke_mcp_access", role: .destructive) {
+                    store.revokeMCPAccess()
+                }
+                .disabled(!store.snapshot.mcp.isServerEnabled && store.snapshot.mcp.enabledTools.isEmpty)
+
+                Spacer()
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+        .frame(minHeight: 460)
+    }
 }
 
 private struct ExcludedApplicationsSheet: View {
@@ -983,6 +1500,38 @@ private struct ExcludedApplicationsSheet: View {
             store.removeExcludedBundleIdentifier(bundleIdentifier)
         }
         self.selectedRowID = nil
+    }
+}
+
+private struct IrohPairingQRCodeView: View {
+    let value: String
+
+    var body: some View {
+        if let image = qrImage {
+            Image(nsImage: image)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+                .padding(8)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.secondary.opacity(0.2), lineWidth: 1)
+                }
+        }
+    }
+
+    private var qrImage: NSImage? {
+        guard let data = value.data(using: .utf8),
+              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let outputImage = filter.outputImage else { return nil }
+        let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+        let representation = NSCIImageRep(ciImage: scaledImage)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+        return image
     }
 }
 
@@ -1229,6 +1778,268 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("action.clear_unpinned_history", comment: "")
         case .clearAllHistory:
             NSLocalizedString("action.clear_all_history", comment: "")
+        }
+    }
+}
+
+private struct MCPClientCandidate: Identifiable, Hashable {
+    var target: MCPClientConfigurationTarget
+    var displayName: String
+    var isDetected: Bool
+
+    var id: String {
+        target.id
+    }
+}
+
+private struct MCPClientDetector {
+    private struct KnownClient {
+        var target: MCPClientConfigurationTarget
+        var bundleIdentifiers: Set<String> = []
+        var applicationNames: Set<String> = []
+        var executableNames: Set<String> = []
+        var homeRelativeConfigurationPaths: Set<String> = []
+    }
+
+    var fileManager: FileManager = .default
+
+    func candidates(applications: [InstalledApplication]) -> [MCPClientCandidate] {
+        supportedClients.map { client in
+            MCPClientCandidate(
+                target: client.target,
+                displayName: client.target.displayName,
+                isDetected: isDetected(client, applications: applications)
+            )
+        }
+    }
+
+    var shellSearchPath: String {
+        executableSearchPaths.joined(separator: ":")
+    }
+
+    func resolvedCommandParts(_ parts: [String], for target: MCPClientConfigurationTarget) -> [String] {
+        guard let commandName = parts.first else { return parts }
+        let resolvedCommand = preferredExecutablePath(for: target, commandName: commandName)
+            ?? executablePath(named: commandName)
+            ?? commandName
+        return [resolvedCommand] + parts.dropFirst()
+    }
+
+    private func preferredExecutablePath(for target: MCPClientConfigurationTarget, commandName: String) -> String? {
+        let path: String?
+        switch target {
+        case .vscode where commandName == "code":
+            path = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+        case .cursor where commandName == "cursor":
+            path = "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+        default:
+            path = nil
+        }
+        guard let path, fileManager.isExecutableFile(atPath: path) else {
+            return nil
+        }
+        return path
+    }
+
+    private var supportedClients: [KnownClient] {
+        [
+            KnownClient(
+                target: .claude,
+                bundleIdentifiers: ["com.anthropic.claudefordesktop"],
+                applicationNames: ["Claude"],
+                homeRelativeConfigurationPaths: ["Library/Application Support/Claude/claude_desktop_config.json"]
+            ),
+            KnownClient(
+                target: .claudeCode,
+                executableNames: ["claude"],
+                homeRelativeConfigurationPaths: [".claude.json"]
+            ),
+            KnownClient(
+                target: .codex,
+                bundleIdentifiers: ["com.openai.codex"],
+                applicationNames: ["Codex"],
+                executableNames: ["codex"],
+                homeRelativeConfigurationPaths: [".codex/config.toml"]
+            ),
+            KnownClient(
+                target: .cursor,
+                bundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
+                applicationNames: ["Cursor"],
+                executableNames: ["cursor"],
+                homeRelativeConfigurationPaths: [".cursor/mcp.json"]
+            ),
+            KnownClient(
+                target: .vscode,
+                bundleIdentifiers: ["com.microsoft.VSCode"],
+                applicationNames: ["Visual Studio Code"]
+            ),
+            KnownClient(
+                target: .windsurf,
+                bundleIdentifiers: ["com.exafunction.windsurf", "com.codeium.windsurf"],
+                applicationNames: ["Windsurf"],
+                executableNames: ["windsurf"],
+                homeRelativeConfigurationPaths: [".codeium/mcp_config.json", ".codeium/windsurf/mcp_config.json"]
+            ),
+            KnownClient(
+                target: .gemini,
+                executableNames: ["gemini"],
+                homeRelativeConfigurationPaths: [".gemini/settings.json"]
+            ),
+            KnownClient(
+                target: .opencode,
+                bundleIdentifiers: ["ai.opencode.desktop"],
+                applicationNames: ["OpenCode"],
+                executableNames: ["opencode"],
+                homeRelativeConfigurationPaths: [".config/opencode/opencode.json"]
+            ),
+            KnownClient(
+                target: .kiro,
+                bundleIdentifiers: ["com.amazon.codewhisperer"],
+                applicationNames: ["Kiro", "Kiro CLI"],
+                executableNames: ["kiro"],
+                homeRelativeConfigurationPaths: [".kiro/settings/mcp.json"]
+            )
+        ]
+    }
+
+    private func isDetected(_ client: KnownClient, applications: [InstalledApplication]) -> Bool {
+        applications.contains { application in
+            matches(application, client: client)
+        } || client.executableNames.contains { executableExists(named: $0) }
+            || client.homeRelativeConfigurationPaths.contains { homeRelativePathExists($0) }
+    }
+
+    private func matches(_ application: InstalledApplication, client: KnownClient) -> Bool {
+        if let bundleIdentifier = application.bundleIdentifier,
+           client.bundleIdentifiers.contains(bundleIdentifier) {
+            return true
+        }
+        return client.applicationNames.contains { name in
+            application.displayName.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }
+    }
+
+    private func executableExists(named name: String) -> Bool {
+        executablePath(named: name) != nil
+    }
+
+    private func executablePath(named name: String) -> String? {
+        executableSearchPaths
+            .map { URL(fileURLWithPath: $0).appendingPathComponent(name).path }
+            .first { fileManager.isExecutableFile(atPath: $0) }
+    }
+
+    private func homeRelativePathExists(_ relativePath: String) -> Bool {
+        let path = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(relativePath)
+            .path
+        return fileManager.fileExists(atPath: path)
+    }
+
+    private var executableSearchPaths: [String] {
+        let homePath = fileManager.homeDirectoryForCurrentUser.path
+        let commonPaths = [
+            "\(homePath)/.local/bin",
+            "\(homePath)/.npm-global/bin",
+            "\(homePath)/.opencode/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin"
+        ]
+        let environmentPaths = ProcessInfo.processInfo.environment["PATH"]?
+            .split(separator: ":")
+            .map(String.init) ?? []
+        var seen = Set<String>()
+        return (environmentPaths + commonPaths).filter { seen.insert($0).inserted }
+    }
+}
+
+private struct MCPClientCommandRunner {
+    struct Result {
+        var exitCode: Int32
+        var output: String
+    }
+
+    static func run(parts: [String], searchPath: String) async -> Result {
+        await Task.detached(priority: .userInitiated) {
+            guard let command = parts.first else {
+                return Result(exitCode: 2, output: "Missing command")
+            }
+
+            let process = Process()
+            if command.contains("/") {
+                process.executableURL = URL(fileURLWithPath: command)
+                process.arguments = Array(parts.dropFirst())
+            } else {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                process.arguments = parts
+            }
+
+            var environment = ProcessInfo.processInfo.environment
+            environment["PATH"] = searchPath
+            process.environment = environment
+
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(decoding: outputData + errorData, as: UTF8.self)
+                return Result(exitCode: process.terminationStatus, output: output)
+            } catch {
+                return Result(exitCode: 1, output: error.localizedDescription)
+            }
+        }.value
+    }
+}
+
+private extension MCPClientConfigurationTarget {
+    var systemImageName: String {
+        switch self {
+        case .claude:
+            "sparkles"
+        case .claudeCode:
+            "terminal"
+        case .codex:
+            "chevron.left.forwardslash.chevron.right"
+        case .cursor:
+            "cube"
+        case .vscode:
+            "keyboard"
+        case .windsurf:
+            "wind"
+        case .gemini:
+            "sparkles"
+        case .opencode:
+            "terminal"
+        case .kiro:
+            "hammer"
+        case .custom:
+            "wrench.and.screwdriver"
+        }
+    }
+}
+
+private extension MCPToolName {
+    var settingsTitleKey: LocalizedStringKey {
+        switch self {
+        case .searchHistory:
+            "mcp.tool.search_history"
+        case .retrieveItem:
+            "mcp.tool.retrieve_item"
+        case .listPinboards:
+            "mcp.tool.list_pinboards"
+        case .createPinboard:
+            "mcp.tool.create_pinboard"
+        case .pinFirstMatch:
+            "mcp.tool.pin_first_match"
         }
     }
 }

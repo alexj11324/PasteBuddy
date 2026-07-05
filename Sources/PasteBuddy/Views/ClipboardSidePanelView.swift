@@ -36,7 +36,6 @@ struct ClipboardSidePanelView: View {
     @State private var sideItems: [ClipboardItem] = []
     @State private var sideItemTotalCount = 0
     @State private var interaction = ShelfInteractionModel()
-    @State private var isShowingNewTextItem = false
     @State private var pinnedState: Bool?
 
     var body: some View {
@@ -79,17 +78,6 @@ struct ClipboardSidePanelView: View {
         .focused($isListFocused)
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
-        }
-        .sheet(isPresented: $isShowingNewTextItem) {
-            NewTextItemSheet { title, text in
-                guard store.createTextItem(text: text, title: title) != nil else {
-                    return store.lastErrorMessage ?? "PasteBuddy could not create this item."
-                }
-                isShowingNewTextItem = false
-                return nil
-            } onCancel: {
-                isShowingNewTextItem = false
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
@@ -202,73 +190,74 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.clipboard"),
-                    systemImageName: "clock.arrow.circlepath",
-                    color: store.isCapturePaused ? .orange : .blue,
-                    isSelected: sideScope == .history
-                ) {
-                    setSideScope(.history)
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("action.paste_stack"),
-                    systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                    color: store.isPasteStackActive ? .green : .secondary,
-                    isSelected: sideScope == .pasteStack
-                ) {
-                    setSideScope(.pasteStack)
-                }
-
-                ForEach(SmartPinboardCategory.allCases) { category in
+        HStack(spacing: 8) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
                     ClipboardSidePanelFilterChip(
-                        title: localized(category.displayName),
-                        systemImageName: category.systemImageName,
-                        color: Color(hex: category.colorHex) ?? .accentColor,
-                        isSelected: isSmartCategorySelected(category)
+                        title: localized("label.clipboard"),
+                        systemImageName: "clock.arrow.circlepath",
+                        color: store.isCapturePaused ? .orange : .blue,
+                        isSelected: sideScope == .history
                     ) {
-                        selectSmartCategory(category)
+                        setSideScope(.history)
                     }
-                }
 
-                ForEach(store.userPinboards) { pinboard in
                     ClipboardSidePanelFilterChip(
-                        title: pinboard.name,
-                        systemImageName: "pin.fill",
-                        color: Color(hex: pinboard.colorHex) ?? .blue,
-                        isSelected: sideScope == .pinboard(pinboard.id)
+                        title: localized("action.paste_stack"),
+                        systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
+                        color: store.isPasteStackActive ? .green : .secondary,
+                        isSelected: sideScope == .pasteStack
                     ) {
-                        setSideScope(.pinboard(pinboard.id))
+                        setSideScope(.pasteStack)
                     }
-                }
 
-                Menu {
-                    Button {
-                        isShowingNewTextItem = true
-                    } label: {
-                        Label("label.new_text_item", systemImage: "square.and.pencil")
+                    ForEach(SmartPinboardCategory.allCases) { category in
+                        ClipboardSidePanelFilterChip(
+                            title: localized(category.displayName),
+                            systemImageName: category.systemImageName,
+                            color: Color(hex: category.colorHex) ?? .accentColor,
+                            isSelected: isSmartCategorySelected(category)
+                        ) {
+                            selectSmartCategory(category)
+                        }
                     }
-                    Button {
-                        let pinboard = store.createPinboard()
-                        setSideScope(.pinboard(pinboard.id))
-                    } label: {
-                        Label("label.new_pinboard", systemImage: "plus.rectangle.on.folder")
+
+                    ForEach(store.userPinboards) { pinboard in
+                        ClipboardSidePanelFilterChip(
+                            title: pinboard.name,
+                            systemImageName: "pin.fill",
+                            color: Color(hex: pinboard.colorHex) ?? .blue,
+                            isSelected: sideScope == .pinboard(pinboard.id)
+                        ) {
+                            setSideScope(.pinboard(pinboard.id))
+                        }
                     }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
-                .labelStyle(.iconOnly)
-                .help(localized("action.add_item_or_pinboard"))
+                .padding(.vertical, 1)
             }
-            .padding(.vertical, 1)
+            .scrollIndicators(.never, axes: .horizontal)
+
+            Button {
+                createNamedPinboard()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .help(localized("label.new_pinboard"))
+            .accessibilityLabel(localized("label.new_pinboard"))
         }
-        .scrollIndicators(.never, axes: .horizontal)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func createNamedPinboard() {
+        guard let name = NewPinboardNamePrompt.run() else { return }
+        let pinboard = store.createPinboard(named: name)
+        setSideScope(.pinboard(pinboard.id))
     }
 
     private var itemList: some View {

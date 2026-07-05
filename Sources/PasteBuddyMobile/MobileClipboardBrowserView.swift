@@ -2,13 +2,15 @@ import CoreTransferable
 import PasteBuddyCore
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS) && canImport(VisionKit)
+import VisionKit
+#endif
 
 public struct MobileClipboardBrowserView: View {
     @Bindable private var store: PasteBuddyStore
     private let irohSync: IrohClipboardSyncService?
     @State private var sharingRoute: MobilePinboardSharingRoute?
     @State private var previewRoute: MobilePreviewRoute?
-    @State private var isShowingTextEntry = false
 
     public init(store: PasteBuddyStore, irohSync: IrohClipboardSyncService? = nil) {
         self.store = store
@@ -129,12 +131,6 @@ public struct MobileClipboardBrowserView: View {
             }
             .toolbar {
                 ToolbarItemGroup {
-                    Button {
-                        isShowingTextEntry = true
-                    } label: {
-                        Label("label.new_text", systemImage: "square.and.pencil")
-                    }
-
                     Menu {
                         Picker("label.type", selection: $store.contentTypeFilter) {
                             Text("label.any_type").tag(nil as ClipboardContentType?)
@@ -195,9 +191,6 @@ public struct MobileClipboardBrowserView: View {
         }
         .sheet(item: $sharingRoute) { route in
             MobilePinboardSharingView(store: store, pinboardID: route.id)
-        }
-        .sheet(isPresented: $isShowingTextEntry) {
-            MobileTextEntryView(store: store)
         }
         .mobilePreviewPresentation(previewRoute: $previewRoute, itemProvider: clipboardItem)
     }
@@ -268,6 +261,8 @@ private struct MobilePreviewRoute: Identifiable {
 private struct MobileIrohClipboardSyncView: View {
     @Bindable var store: PasteBuddyStore
     @Bindable var irohSync: IrohClipboardSyncService
+    @State private var isShowingPairingScanner = false
+    @State private var pairingStatusMessage: String?
 
     var body: some View {
         Form {
@@ -275,6 +270,24 @@ private struct MobileIrohClipboardSyncView: View {
                 Text(irohSync.endpointId.isEmpty ? NSLocalizedString("state.binding", comment: "") : irohSync.endpointId)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
+            }
+
+            Section("label.pair_this_mac") {
+                #if os(iOS) && canImport(VisionKit)
+                Button("action.scan_pairing_qr") {
+                    isShowingPairingScanner = true
+                }
+                .disabled(!IrohPairingScannerView.isAvailable)
+                #endif
+
+                Text("message.scan_pairing_qr_from_mac")
+                    .foregroundStyle(.secondary)
+
+                if let pairingStatusMessage {
+                    Text(pairingStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("label.peer_endpoint_id") {
@@ -313,6 +326,14 @@ private struct MobileIrohClipboardSyncView: View {
             }
         }
         .task { await irohSync.start() }
+        #if os(iOS) && canImport(VisionKit)
+        .sheet(isPresented: $isShowingPairingScanner) {
+            IrohPairingScannerView { code in
+                isShowingPairingScanner = false
+                applyPairingCode(code)
+            }
+        }
+        #endif
     }
 
     private var statusText: String {
@@ -331,50 +352,81 @@ private struct MobileIrohClipboardSyncView: View {
             message
         }
     }
-}
 
-private struct MobileTextEntryView: View {
-    @Bindable var store: PasteBuddyStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var text = ""
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("label.content") {
-                    TextField("label.title", text: $title)
-                    TextEditor(text: $text)
-                        .frame(minHeight: 180)
-                }
-            }
-            .navigationTitle("label.new_text")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("action.cancel") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("action.save") {
-                        save()
-                    }
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
+    private func applyPairingCode(_ code: String) {
+        do {
+            try irohSync.applyPairingCode(code)
+            pairingStatusMessage = NSLocalizedString("message.pairing_qr_saved", comment: "")
+            Task { await irohSync.connectToPeer() }
+        } catch {
+            pairingStatusMessage = error.localizedDescription
         }
     }
+}
 
-    private func save() {
-        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        _ = store.createTextItem(
-            text: text,
-            title: trimmedTitle.isEmpty ? nil : trimmedTitle,
-            sourceAppName: "PasteBuddy iOS"
+#if os(iOS) && canImport(VisionKit)
+private struct IrohPairingScannerView: UIViewControllerRepresentable {
+    static var isAvailable: Bool {
+        DataScannerViewController.isSupported && DataScannerViewController.isAvailable
+    }
+
+    let onCode: (String) -> Void
+
+    func makeUIViewController(context: Context) -> DataScannerViewController {
+        let controller = DataScannerViewController(
+            recognizedDataTypes: [.barcode(symbologies: [.qr])],
+            qualityLevel: .balanced,
+            recognizesMultipleItems: false,
+            isHighFrameRateTrackingEnabled: false,
+            isPinchToZoomEnabled: true,
+            isGuidanceEnabled: true,
+            isHighlightingEnabled: true
         )
-        dismiss()
+        controller.delegate = context.coordinator
+        try? controller.startScanning()
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: DataScannerViewController, context: Context) {}
+
+    static func dismantleUIViewController(_ uiViewController: DataScannerViewController, coordinator: Coordinator) {
+        uiViewController.stopScanning()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCode: onCode)
+    }
+
+    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+        private let onCode: (String) -> Void
+        private var hasMatchedCode = false
+
+        init(onCode: @escaping (String) -> Void) {
+            self.onCode = onCode
+        }
+
+        func dataScanner(
+            _ dataScanner: DataScannerViewController,
+            didAdd addedItems: [RecognizedItem],
+            allItems: [RecognizedItem]
+        ) {
+            handle(addedItems.first)
+        }
+
+        func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) {
+            handle(item)
+        }
+
+        private func handle(_ item: RecognizedItem?) {
+            guard !hasMatchedCode,
+                  case .barcode(let barcode) = item,
+                  let payload = barcode.payloadStringValue else { return }
+            hasMatchedCode = true
+            onCode(payload)
+        }
     }
 }
+#endif
 
 private extension View {
     @ViewBuilder

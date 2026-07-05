@@ -1235,7 +1235,13 @@ final class PasteBuddyStoreTests: XCTestCase {
             historyUnlockAuthenticator: FakeHistoryUnlockAuthenticator(result: true)
         )
 
-        store.createTextItem(text: "clipboard content", title: "Visible Secret")
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Unit Test",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Visible Secret",
+            payload: ClipboardPayload(text: "clipboard content")
+        ))
 
         XCTAssertEqual(store.snapshot.security.storageMode, .standard)
         XCTAssertFalse(store.snapshot.security.requiresBiometricUnlock)
@@ -1294,7 +1300,13 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(harness.snapshotStore.storageMode, .encrypted)
         XCTAssertEqual(store.filteredItems.map(\.title), ["Legacy Secret"])
 
-        store.createTextItem(text: "new encrypted content", title: "New Encrypted Item")
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Unit Test",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "New Encrypted Item",
+            payload: ClipboardPayload(text: "new encrypted content")
+        ))
 
         let encryptedRaw = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
         XCTAssertFalse(encryptedRaw.contains("legacy encrypted content"))
@@ -1539,28 +1551,6 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(preview.rows.map(\.contentType), [.image, .text])
         XCTAssertTrue(preview.fallbackDescription?.contains("plain text") ?? false)
         XCTAssertTrue(preview.fallbackDescription?.contains("visible order") ?? false)
-    }
-
-    func testCreateTextItemAddsManualHistoryEntryAndPinsInCurrentPinboard() throws {
-        let harness = try StoreHarness()
-        defer { harness.cleanup() }
-
-        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        store.createPinboard(named: "Drafts")
-        let pinboardID = store.snapshot.pinboards.last!.id
-
-        let created = try XCTUnwrap(store.createTextItem(
-            text: "Reusable reply template",
-            title: "Reply Template",
-            sourceAppName: "PasteBuddy",
-            deviceName: "Test Mac"
-        ))
-
-        XCTAssertEqual(created.contentType, .text)
-        XCTAssertEqual(store.snapshot.items.first?.id, created.id)
-        XCTAssertEqual(store.snapshot.items.first?.payload.text, "Reusable reply template")
-        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboardID })?.itemIDs, [created.id])
-        XCTAssertEqual(store.selectedItem?.id, created.id)
     }
 
     func testEditTextItemUpdatesPayloadAndSearchableTextWithoutChangingTitle() throws {
@@ -2101,43 +2091,6 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(report.syncBoundaryStatement.contains("encrypted records"))
         XCTAssertTrue(report.vendorServerStatement.contains("does not send clipboard payloads to vendor servers"))
         XCTAssertTrue(report.mcpBoundaryStatement.contains("MCP Agent connection is on"))
-    }
-
-    func testManualTextCreationRespectsPrivacyRulesBeforeHistoryPinboardsAndSearch() throws {
-        let harness = try StoreHarness()
-        defer { harness.cleanup() }
-
-        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        let pinboard = store.createPinboard(named: "Drafts")
-        _ = store.addCaptureRule(
-            name: "No payroll drafts",
-            condition: .containsText,
-            pattern: "payroll",
-            contentTypes: [.text]
-        )
-
-        XCTAssertNil(store.createTextItem(
-            text: "payroll draft for review",
-            title: "Payroll",
-            sourceAppName: "PasteBuddy",
-            deviceName: "Test Mac"
-        ))
-        XCTAssertTrue(store.snapshot.items.isEmpty)
-        XCTAssertTrue(store.filteredItems.isEmpty)
-        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs, [])
-        XCTAssertTrue(store.lastErrorMessage?.contains("No payroll drafts") ?? false)
-
-        store.toggleTextCapture()
-
-        XCTAssertNil(store.createTextItem(
-            text: "Reusable reply template",
-            title: "Reply",
-            sourceAppName: "PasteBuddy",
-            deviceName: "Test Mac"
-        ))
-        XCTAssertTrue(store.snapshot.items.isEmpty)
-        XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs, [])
-        XCTAssertTrue(store.lastErrorMessage?.contains("Text capture is disabled") ?? false)
     }
 
     func testPrivacyConfigurationCaptureRules() {

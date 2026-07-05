@@ -2,16 +2,6 @@
 import AppIntents
 import PasteBuddyCore
 
-extension AutomationContentKind: AppEnum {
-    public static let typeDisplayRepresentation: TypeDisplayRepresentation = "PasteBuddy Content Type"
-
-    public static let caseDisplayRepresentations: [AutomationContentKind: DisplayRepresentation] = [
-        .text: "Text",
-        .url: "URL",
-        .fileURL: "File URL"
-    ]
-}
-
 struct PasteBuddySearchClipboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Search PasteBuddy Clipboard"
     static let description = IntentDescription("Search local PasteBuddy clipboard history and return matching item titles.")
@@ -29,32 +19,6 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
         let service = AutomationActionService(store: store)
         let result = try service.searchClipboard(query: query, limit: limit ?? 5)
         return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
-    }
-}
-
-struct PasteBuddyCreateTextItemIntent: AppIntent {
-    static let title: LocalizedStringResource = "Create PasteBuddy Text Item"
-    static let description = IntentDescription("Create a local PasteBuddy text item.")
-
-    @Parameter(title: "Text")
-    var text: String
-
-    @Parameter(title: "Title")
-    var title: String?
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
-        let service = AutomationActionService(store: store)
-        do {
-            let summary = try service.createTextItem(text: text, title: title)
-            await store.flushPendingSave()
-            return .result(dialog: IntentDialog(stringLiteral: "Created PasteBuddy item: \(summary.title)."))
-        } catch {
-            await store.flushPendingSave()
-            throw error
-        }
     }
 }
 
@@ -137,43 +101,6 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
     }
 }
 
-struct PasteBuddyCreateContentItemIntent: AppIntent {
-    static let title: LocalizedStringResource = "Create PasteBuddy Content Item"
-    static let description = IntentDescription("Create a local PasteBuddy text, URL, or file URL item and optionally save it to a pinboard.")
-
-    @Parameter(title: "Content Type")
-    var contentKind: AutomationContentKind
-
-    @Parameter(title: "Content")
-    var value: String
-
-    @Parameter(title: "Title")
-    var title: String?
-
-    @Parameter(title: "Pinboard Name")
-    var pinboardName: String?
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
-        let service = AutomationActionService(store: store)
-        do {
-            let result = try service.createContentItem(
-                kind: contentKind,
-                value: value,
-                title: title,
-                pinboardName: pinboardName
-            )
-            await store.flushPendingSave()
-            return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
-        } catch {
-            await store.flushPendingSave()
-            throw error
-        }
-    }
-}
-
 struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Save PasteBuddy Match to Pinboard"
     static let description = IntentDescription("Find the first matching local PasteBuddy item and save it to a named pinboard.")
@@ -215,16 +142,6 @@ struct PasteBuddyAppShortcuts: AppShortcutsProvider {
         )
 
         AppShortcut(
-            intent: PasteBuddyCreateTextItemIntent(),
-            phrases: [
-                "Create \(.applicationName) text item",
-                "Save text to \(.applicationName)"
-            ],
-            shortTitle: "Create Text",
-            systemImageName: "square.and.pencil"
-        )
-
-        AppShortcut(
             intent: PasteBuddyCopyFirstMatchIntent(),
             phrases: [
                 "Copy from \(.applicationName)",
@@ -252,16 +169,6 @@ struct PasteBuddyAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Create Pinboard",
             systemImageName: "pin"
-        )
-
-        AppShortcut(
-            intent: PasteBuddyCreateContentItemIntent(),
-            phrases: [
-                "Create \(.applicationName) content item",
-                "Save content to \(.applicationName)"
-            ],
-            shortTitle: "Create Content",
-            systemImageName: "doc.badge.plus"
         )
 
         AppShortcut(
