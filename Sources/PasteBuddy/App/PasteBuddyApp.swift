@@ -98,6 +98,11 @@ struct PasteBuddyApp: App {
                 await startRuntimeIfNeeded()
             }
         }
+        appDelegate.handleOpenURLs = { urls in
+            Task { @MainActor in
+                await handleDevelopmentPanelURLs(urls)
+            }
+        }
     }
 
     private func localized(_ key: String) -> String {
@@ -248,11 +253,34 @@ struct PasteBuddyApp: App {
         shelfPanelController?.toggle()
     }
 
+    private func handleDevelopmentPanelURLs(_ urls: [URL]) async {
+        for url in urls {
+            guard let command = PasteBuddyDevelopmentPanelCommand.parse(
+                url,
+                identity: PasteBuddyRuntimeIdentityService.current
+            ) else {
+                PasteBuddyDiagnostics.record(.shelf, "developmentURLRejected")
+                continue
+            }
+
+            PasteBuddyDiagnostics.record(.shelf, "developmentURLAccepted")
+            switch command {
+            case .show(let mode):
+                await showClipboardPanelMode(mode)
+            case .toggle:
+                await toggleClipboardShelf()
+            }
+        }
+    }
+
     private func showClipboardShelfMode() async {
+        await showClipboardPanelMode(.shelf)
+    }
+
+    private func showClipboardPanelMode(_ mode: ClipboardPanelDisplayMode) async {
         await startRuntimeIfNeeded()
-        PasteBuddyDiagnostics.record(.hotKey, "shelfModeRequested")
-        panelDisplayMode = .shelf
-        shelfPanelController?.displayMode = .shelf
+        PasteBuddyDiagnostics.record(.hotKey, "\(mode.rawValue)ModeRequested")
+        panelDisplayMode = mode
         shelfPanelController?.placement = shelfPlacement
         shelfPanelController?.show()
     }

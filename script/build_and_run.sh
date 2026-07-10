@@ -285,6 +285,10 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+if [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]]; then
+  /usr/bin/plutil -insert CFBundleURLTypes -json '[{"CFBundleURLName":"com.alexjiang.PasteBuddy.dev.panel","CFBundleURLSchemes":["pastebuddy-dev"]}]' "$INFO_PLIST"
+fi
+
 CONFIGURED_SENTRY_DSN="$(resolve_sentry_dsn)"
 CONFIGURED_SENTRY_ENVIRONMENT="${PASTEBUDDY_SENTRY_ENVIRONMENT:-}"
 if [[ -n "$CONFIGURED_SENTRY_DSN" ]]; then

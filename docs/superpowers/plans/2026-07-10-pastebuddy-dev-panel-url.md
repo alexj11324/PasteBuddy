@@ -238,6 +238,8 @@ git commit -m "feat: accept development panel URLs"
 func testDevelopmentPanelURLIsRegisteredAndRoutedOnlyForStableDevApp() throws {
     let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
     let buildSource = try sourceFileContents("script/build_and_run.sh")
+    XCTAssertTrue(sourceFileExists("script/open_dev_panel.sh"))
+    guard sourceFileExists("script/open_dev_panel.sh") else { return }
     let commandSource = try sourceFileContents("script/open_dev_panel.sh")
 
     XCTAssertTrue(appSource.contains("appDelegate.handleOpenURLs ="))

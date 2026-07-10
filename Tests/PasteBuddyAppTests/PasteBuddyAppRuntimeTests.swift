@@ -117,6 +117,30 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(delivered, [first, second])
     }
 
+    func testDevelopmentPanelURLIsRegisteredAndRoutedOnlyForStableDevApp() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let buildSource = try sourceFileContents("script/build_and_run.sh")
+        XCTAssertTrue(sourceFileExists("script/open_dev_panel.sh"))
+        guard sourceFileExists("script/open_dev_panel.sh") else { return }
+        let commandSource = try sourceFileContents("script/open_dev_panel.sh")
+
+        XCTAssertTrue(appSource.contains("appDelegate.handleOpenURLs ="))
+        XCTAssertTrue(appSource.contains("PasteBuddyDevelopmentPanelCommand.parse("))
+        XCTAssertTrue(appSource.contains("await toggleClipboardShelf()"))
+        XCTAssertTrue(appSource.contains("await showClipboardPanelMode(mode)"))
+
+        XCTAssertTrue(buildSource.contains("\"$SIGNING_CHANNEL\" == \"development\""))
+        XCTAssertTrue(buildSource.contains("\"$BUNDLE_ID\" == \"com.alexjiang.PasteBuddy.dev\""))
+        XCTAssertTrue(buildSource.contains("CFBundleURLTypes"))
+        XCTAssertTrue(buildSource.contains("pastebuddy-dev"))
+
+        XCTAssertTrue(commandSource.contains("/Applications/PasteBuddy Dev.app"))
+        XCTAssertTrue(commandSource.contains("codesign --verify --deep --strict"))
+        XCTAssertTrue(commandSource.contains("Authority=Apple Development:"))
+        XCTAssertTrue(commandSource.contains("/usr/bin/open -g -a \"$APP_BUNDLE\" \"$url\""))
+        XCTAssertFalse(commandSource.contains("osascript"))
+    }
+
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
