@@ -1254,6 +1254,161 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.pinboards.first(where: { $0.id == researchID })?.colorHex, "#F25F5C")
     }
 
+    func testCollectionOrderDefaultsToCanonicalMixedOrderWithoutMutatingSnapshot() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let first = Pinboard(name: "First", colorHex: "#4EA7FC")
+        let second = Pinboard(name: "Second", colorHex: "#70C1B3")
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.snapshot = PasteBuddySnapshot(pinboards: [first, second])
+
+        XCTAssertNil(store.snapshot.general.collectionOrder)
+        XCTAssertEqual(store.collectionOrder, [
+            .history,
+            .pasteStack,
+            .smart(.text),
+            .smart(.links),
+            .smart(.images),
+            .smart(.files),
+            .pinboard(first.id),
+            .pinboard(second.id)
+        ])
+        XCTAssertNil(store.snapshot.general.collectionOrder)
+    }
+
+    func testCollectionOrderRepairsSavedDuplicatesStaleIDsAndMissingEntries() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let first = Pinboard(name: "First", colorHex: "#4EA7FC")
+        let second = Pinboard(name: "Second", colorHex: "#70C1B3")
+        let staleID = UUID()
+        let savedOrder: [ClipboardCollectionID] = [
+            .pinboard(second.id),
+            .smart(.images),
+            .pinboard(staleID),
+            .smart(.images),
+            .history,
+            .pinboard(second.id)
+        ]
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.snapshot = PasteBuddySnapshot(pinboards: [first, second])
+        store.snapshot.general.collectionOrder = savedOrder
+
+        XCTAssertEqual(store.collectionOrder, [
+            .pinboard(second.id),
+            .smart(.images),
+            .history,
+            .pasteStack,
+            .smart(.text),
+            .smart(.links),
+            .smart(.files),
+            .pinboard(first.id)
+        ])
+        XCTAssertEqual(store.snapshot.general.collectionOrder, savedOrder)
+    }
+
+    func testCrossTypeCollectionMovePersistsWithoutChangingQueryRevision() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let favoritesID = store.snapshot.pinboards[0].id
+        let queryRevision = store.queryRevision
+
+        XCTAssertTrue(store.moveCollection(
+            .pinboard(favoritesID),
+            relativeTo: .smart(.links),
+            afterTarget: false
+        ))
+        XCTAssertEqual(store.queryRevision, queryRevision)
+        XCTAssertEqual(store.collectionOrder, [
+            .history,
+            .pasteStack,
+            .smart(.text),
+            .pinboard(favoritesID),
+            .smart(.links),
+            .smart(.images),
+            .smart(.files)
+        ])
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.collectionOrder, store.collectionOrder)
+    }
+
+    func testCollectionMoveRejectsInvalidAndOutOfBoundsDestinations() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let favoritesID = store.snapshot.pinboards[0].id
+        let stale = ClipboardCollectionID.pinboard(UUID())
+        let originalOrder = store.collectionOrder
+
+        XCTAssertFalse(store.moveCollection(.history, relativeTo: .history, afterTarget: true))
+        XCTAssertFalse(store.moveCollection(stale, relativeTo: .history, afterTarget: true))
+        XCTAssertFalse(store.moveCollection(.history, relativeTo: stale, afterTarget: true))
+        XCTAssertFalse(store.moveCollection(.history, by: -1))
+        XCTAssertFalse(store.moveCollection(.pinboard(favoritesID), by: 1))
+        XCTAssertFalse(store.moveCollection(.history, by: 0))
+        XCTAssertEqual(store.collectionOrder, originalOrder)
+
+        XCTAssertTrue(store.moveCollection(.pasteStack, by: -1))
+        XCTAssertEqual(Array(store.collectionOrder.prefix(2)), [.pasteStack, .history])
+    }
+
+    func testCreatingAndDeletingCustomPinboardsImmediatelyReconcilesStoredCollectionOrder() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let favoritesID = store.snapshot.pinboards[0].id
+        XCTAssertTrue(store.moveCollection(.pinboard(favoritesID), relativeTo: .pasteStack, afterTarget: true))
+
+        let created = store.createPinboard(named: "Research")
+
+        XCTAssertEqual(store.snapshot.general.collectionOrder, [
+            .history,
+            .pasteStack,
+            .pinboard(favoritesID),
+            .smart(.text),
+            .smart(.links),
+            .smart(.images),
+            .smart(.files),
+            .pinboard(created.id)
+        ])
+
+        store.deletePinboard(favoritesID)
+
+        XCTAssertEqual(store.snapshot.general.collectionOrder, [
+            .history,
+            .pasteStack,
+            .smart(.text),
+            .smart(.links),
+            .smart(.images),
+            .smart(.files),
+            .pinboard(created.id)
+        ])
+    }
+
+    func testClipboardCollectionIDsHaveStableStringIDsAndLegacyGeneralConfigurationDecodes() throws {
+        let pinboardID = try XCTUnwrap(UUID(uuidString: "10000000-2000-3000-4000-500000000000"))
+
+        XCTAssertEqual(ClipboardCollectionID.history.id, "history")
+        XCTAssertEqual(ClipboardCollectionID.pasteStack.id, "pasteStack")
+        XCTAssertEqual(ClipboardCollectionID.smart(.links).id, "smart:links")
+        XCTAssertEqual(ClipboardCollectionID.pinboard(pinboardID).id, "pinboard:\(pinboardID.uuidString)")
+
+        let legacyData = Data(#"{"launchAtLoginEnabled":true}"#.utf8)
+        let decoded = try JSONDecoder().decode(GeneralConfiguration.self, from: legacyData)
+
+        XCTAssertTrue(decoded.launchAtLoginEnabled)
+        XCTAssertNil(decoded.collectionOrder)
+    }
+
     func testUserPinboardReorderKeepsSmartPinboardsOutOfDisplayedOffsets() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
