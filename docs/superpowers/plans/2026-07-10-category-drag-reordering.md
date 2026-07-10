@@ -1,296 +1,65 @@
-# Category Drag Reordering Implementation Plan
+# SwiftUI Category Reorder Interaction Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make every Shelf and Side Panel collection chip draggable across collection types and persist the shared order across relaunches.
+**Goal:** Replace the failed AppKit category drop target with a SwiftUI move interaction that previews insertion with animation, commits once, and preserves card-copy behavior.
 
-**Architecture:** Add a stable Codable collection identifier to the existing snapshot general configuration. `PasteBuddyStore` owns normalization and moves; both macOS panels render that one order and exchange a category-specific native `Transferable` payload, leaving clipboard-card drops on their existing payload type.
+**Architecture:** Commits `6eedd9e` and `f0286d6` already provide the persisted mixed collection order. This slice uses one view-local drag session per panel and one shared SwiftUI `DragGesture` modifier; pointer movement changes only the preview order, while release calls the existing store move once. Clipboard-card drops remain typed SwiftUI destinations routed through `ClipboardCollectionDropTarget`.
 
-**Tech Stack:** Swift 6, Observation, SwiftUI `draggable`/`dropDestination`, CoreTransferable, SwiftPM/XCTest, AppKit runtime verification.
+**Tech Stack:** Swift 6, SwiftUI `DragGesture`/`dropDestination`, CoreTransferable, SwiftPM/XCTest, Computer Use.
 
 ---
 
-### Task 1: Persist and normalize one mixed collection order
+### Task 1: Specify the move and live-preview contract
 
 **Files:**
-- Modify: `Sources/PasteBuddyCore/Models/ClipboardModels.swift`
-- Modify: `Sources/PasteBuddyCore/Stores/PasteBuddyStore.swift`
-- Test: `Tests/PasteBuddyCoreTests/PasteBuddyStoreTests.swift`
-
-- [ ] **Step 1: Write failing model/store tests**
-
-Add tests that prove:
-
-```swift
-func testCollectionOrderDefaultsToBuiltInsSmartCategoriesThenExistingUserPinboards()
-func testCollectionOrderRepairsDuplicatesStaleIDsAndMissingEntries()
-func testMoveCollectionAcrossTypesPersistsWithoutChangingQueryRevision()
-func testCreatingAndDeletingPinboardsReconcilesPersistedCollectionOrder()
-```
-
-The canonical expectation is:
-
-```swift
-[
-    .history,
-    .pasteStack,
-    .smart(.text),
-    .smart(.links),
-    .smart(.images),
-    .smart(.files),
-    .pinboard(favoritesID)
-]
-```
-
-- [ ] **Step 2: Run the tests and verify they fail**
-
-Run:
-
-```bash
-swift test --disable-sandbox --filter 'PasteBuddyStoreTests/testCollectionOrder|PasteBuddyStoreTests/testMoveCollection|PasteBuddyStoreTests/testCreatingAndDeletingPinboardsReconciles'
-```
-
-Expected: compile failure because `ClipboardCollectionID` and store ordering APIs do not exist.
-
-- [ ] **Step 3: Add the minimal Codable identifier and optional legacy field**
-
-In `ClipboardModels.swift` add:
-
-```swift
-public enum ClipboardCollectionID: Hashable, Codable, Sendable, Identifiable {
-    case history
-    case pasteStack
-    case smart(SmartPinboardCategory)
-    case pinboard(UUID)
-
-    public var id: String {
-        switch self {
-        case .history: "history"
-        case .pasteStack: "pasteStack"
-        case .smart(let category): "smart:\(category.rawValue)"
-        case .pinboard(let id): "pinboard:\(id.uuidString)"
-        }
-    }
-}
-```
-
-Add `collectionOrder: [ClipboardCollectionID]? = nil` to `GeneralConfiguration`. Keeping it optional lets synthesized `Codable` decode old snapshots without a migration or custom decoder.
-
-- [ ] **Step 4: Add one resolver and two move APIs to the store**
-
-Implement the shared resolver using the saved order plus a canonical list:
-
-```swift
-public var collectionOrder: [ClipboardCollectionID] {
-    let canonical: [ClipboardCollectionID] = [
-        .history,
-        .pasteStack
-    ] + SmartPinboardCategory.allCases.map(ClipboardCollectionID.smart)
-      + userPinboards.map { .pinboard($0.id) }
-    let valid = Set(canonical)
-    var seen = Set<ClipboardCollectionID>()
-    let saved = (snapshot.general.collectionOrder ?? []).filter {
-        valid.contains($0) && seen.insert($0).inserted
-    }
-    return saved + canonical.filter { seen.insert($0).inserted }
-}
-```
-
-Add:
-
-```swift
-public func moveCollection(
-    _ source: ClipboardCollectionID,
-    relativeTo target: ClipboardCollectionID,
-    afterTarget: Bool
-)
-
-public func moveCollection(_ collection: ClipboardCollectionID, by offset: Int)
-```
-
-Both operate on `collectionOrder`, return on no-op/invalid input, assign the final array to `snapshot.general.collectionOrder`, and call the existing `save()`. The relative move removes the source before calculating the target insertion index. The offset form bounds-checks `index + offset` and delegates to the same mutation path.
-
-After custom pinboard creation or deletion, assign `snapshot.general.collectionOrder = collectionOrder` before the existing save so the stored array immediately appends or removes the ID.
-
-- [ ] **Step 5: Run the focused tests**
-
-Run the Step 2 command.
-
-Expected: all selected tests pass; the persistence test reloads a new `PasteBuddyStore` and sees the same mixed order.
-
-- [ ] **Step 6: Commit the model/store slice**
-
-```bash
-git add Sources/PasteBuddyCore/Models/ClipboardModels.swift Sources/PasteBuddyCore/Stores/PasteBuddyStore.swift Tests/PasteBuddyCoreTests/PasteBuddyStoreTests.swift
-git commit -m "feat: persist collection chip order"
-```
-
-### Task 2: Render and drag the shared order in both panels
-
-**Files:**
-- Modify: `Sources/PasteBuddy/Models/PinboardItemDragPayload.swift`
-- Modify: `Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift`
-- Modify: `Sources/PasteBuddy/Views/ClipboardSidePanelView.swift`
-- Modify: `Sources/PasteBuddy/Views/PinboardEditPrompt.swift`
+- Modify: `Tests/PasteBuddyAppTests/PasteBuddyAppRuntimeTests.swift`
 - Test: `Tests/PasteBuddyAppTests/PasteBuddyAppRuntimeTests.swift`
 
-- [ ] **Step 1: Write failing UI contract tests**
-
-Add/adjust source-contract tests that require:
-
-```swift
-XCTAssertTrue(shelfSource.contains("ForEach(store.collectionOrder)"))
-XCTAssertTrue(sideSource.contains("ForEach(store.collectionOrder)"))
-XCTAssertTrue(payloadSource.contains("struct ClipboardCollectionDragPayload"))
-XCTAssertTrue(payloadSource.contains("pasteBuddyCollectionID"))
-XCTAssertTrue(shelfSource.contains("dropDestination(for: ClipboardCollectionDragPayload.self"))
-XCTAssertTrue(sideSource.contains("dropDestination(for: ClipboardCollectionDragPayload.self"))
-XCTAssertTrue(promptSource.contains("store.moveCollection"))
-XCTAssertFalse(promptSource.contains("store.moveUserPinboards"))
-```
-
-Keep existing assertions that smart categories have no item-drop closure or edit menu and custom pinboards retain `ShelfCollectionChipDropTarget` card drops.
-
-- [ ] **Step 2: Run the UI tests and verify they fail**
+- [ ] Add executable state tests for preview-only reorder, translated source placeholder, repeated-hover no-op, one completion result, and zero-result cancellation. Update the contract test to require the shared SwiftUI gesture modifier, midpoint frames, conditional typed card destination, and no category pasteboard payload or `ShelfCollectionChipDropTarget`.
+- [ ] Run the focused test and confirm it fails against the current AppKit implementation:
 
 ```bash
-swift test --disable-sandbox --filter 'PasteBuddyAppRuntimeTests/test.*Collection|PasteBuddyAppRuntimeTests/testOnlyCustomPinboards'
+swift test --disable-sandbox --scratch-path /private/tmp/pastebuddy-current-build \
+  --filter PasteBuddyAppRuntimeTests.testShelfAndSideCollectionChipsUseSwiftUIAnimatedMoveReordering
 ```
 
-Expected: failures for the missing category payload and shared-order rendering.
+Expected: failure because the shared SwiftUI gesture session does not exist.
 
-- [ ] **Step 3: Add a category-specific native drag payload**
+### Task 2: Implement one SwiftUI gesture session
 
-In `PinboardItemDragPayload.swift`, add `import PasteBuddyCore`, then add:
+**Files:**
+- Modify: `Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift`
+- Modify: `Sources/PasteBuddy/Views/ClipboardSidePanelView.swift`
+- Test: `Tests/PasteBuddyAppTests/PasteBuddyAppRuntimeTests.swift`
 
-```swift
-struct ClipboardCollectionDragPayload: Codable, Transferable {
-    let collection: ClipboardCollectionID
-
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .pasteBuddyCollectionID)
-    }
-}
-
-extension UTType {
-    static let pasteBuddyCollectionID = UTType(exportedAs: "app.pastebuddy.collection-id")
-}
-```
-
-Do not add a plaintext proxy. This keeps category drags distinct from `PinboardItemDragPayload` and prevents accidental card imports.
-
-- [ ] **Step 4: Render `store.collectionOrder` in Shelf**
-
-Replace the four fixed groups in `collectionStrip` with `ForEach(store.collectionOrder)` and a `@ViewBuilder` switch:
-
-```swift
-@ViewBuilder
-private func collectionChip(for collection: ClipboardCollectionID) -> some View {
-    switch collection {
-    case .history: /* existing Clipboard chip */
-    case .pasteStack: /* existing Paste Stack chip */
-    case .smart(let category): /* existing smart chip, no card drop/edit menu */
-    case .pinboard(let id): /* existing custom chip/drop/edit menu when ID resolves */
-    }
-}
-```
-
-Pass the collection ID and move closures into `ShelfCollectionChip`. Attach `.draggable(ClipboardCollectionDragPayload(collection: collectionID))`. Add a `GeometryReader` inside the existing capsule overlay and attach:
-
-```swift
-.dropDestination(for: ClipboardCollectionDragPayload.self) { payloads, location in
-    guard let source = payloads.first?.collection else { return false }
-    return onReorder(source, collectionID, location.x >= proxy.size.width / 2)
-} isTargeted: { isCollectionDropTargeted = $0 }
-```
-
-The existing AppKit overlay remains registered only for `.pasteBuddyPinboardItemIDs`, so card drops and category drops keep separate paths. Highlight the capsule when either drop path targets it.
-
-- [ ] **Step 5: Render the same order and drag behavior in Side Panel**
-
-Apply the same `ForEach(store.collectionOrder)` switch to `quickFilterStrip` and the same category payload/drop logic to `ClipboardSidePanelFilterChip`. Keep its compact visual metrics and its existing card-drop overlay.
-
-Both views call:
-
-```swift
-store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)
-```
-
-No drag handler may assign `selectedScope`, `shelfScope`, or `sideScope`.
-
-- [ ] **Step 6: Preserve pointer and accessibility alternatives**
-
-Add conditional localized accessibility actions for every chip using existing keys `action.move_left` and `action.move_right`; omit the action at its corresponding edge. Update `CustomPinboardActionsMenu` so its buttons call `store.moveCollection(.pinboard(pinboard.id), by: -1/+1)` and disable using the mixed order index. Built-in and smart chips receive no edit context menu.
-
-- [ ] **Step 7: Run focused app and store tests**
+- [ ] Add a small shared `ClipboardCollectionDragSession` that records source, original order, preview order, translation, and the pending target/side. Preview moves mutate only local state; completion returns one relative move; cancellation restores the store order without saving.
+- [ ] Add a shared SwiftUI `ClipboardCollectionReorderModifier`. Its `DragGesture` reads chip frames in one named coordinate space, offsets the source with the pointer, animates only changed midpoint placement, and commits one move on end.
+- [ ] Remove the category `Transferable` and custom UTType so internal reordering never enters the copy/move pasteboard system. Keep Escape cancellation in both panels.
+- [ ] Keep `PinboardItemDragPayload` on a separate conditional typed `dropDestination`, so Clipboard/Paste Stack/custom pinboards copy cards and smart categories register no card destination.
+- [ ] Remove `ShelfCollectionChipDropTarget`, its `NSViewRepresentable`, pasteboard decoding, and temporary drag diagnostics.
+- [ ] Use the preview order in both Shelf and Side Panel strips. Keep the existing `ClipboardPanelCollectionMoveState` suppression so the single persisted move does not run a list query.
+- [ ] Run the focused test and both app/store suites:
 
 ```bash
-swift test --disable-sandbox --filter PasteBuddyAppRuntimeTests
-swift test --disable-sandbox --filter PasteBuddyStoreTests
+swift test --disable-sandbox --scratch-path /private/tmp/pastebuddy-current-build \
+  --filter PasteBuddyAppRuntimeTests
+swift test --disable-sandbox --scratch-path /private/tmp/pastebuddy-current-build \
+  --filter PasteBuddyStoreTests
 ```
 
-Expected: both suites pass, including existing card-drop, smart-category, custom-icon, and query-revision regressions.
+Expected: all selected tests pass.
 
-- [ ] **Step 8: Commit the UI slice**
-
-```bash
-git add Sources/PasteBuddy/Models/PinboardItemDragPayload.swift Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift Sources/PasteBuddy/Views/ClipboardSidePanelView.swift Sources/PasteBuddy/Views/PinboardEditPrompt.swift Tests/PasteBuddyAppTests/PasteBuddyAppRuntimeTests.swift
-git commit -m "feat: reorder collection chips by dragging"
-```
-
-### Task 3: Verify the complete branch on real signed products
+### Task 3: Verify the real signed interaction
 
 **Files:**
 - Modify only if verification exposes a defect.
 
-- [ ] **Step 1: Run repository gates**
-
-```bash
-git diff --check
-python3 script/localization_catalog_workflow.py check
-swift test --disable-sandbox
-```
-
-Expected: localization status `ok`; all tests pass except the two environment-dependent Secure Enclave skips.
-
-- [ ] **Step 2: Compile the signed iOS simulator product**
-
-Run the normal simulator build without `CODE_SIGNING_ALLOWED=NO`. If Desktop file coordination stalls, copy the exact tracked/untracked working files to `/private/tmp` and build the same project there:
-
-```bash
-xcodebuild -project PasteBuddyiOS.xcodeproj -scheme PasteBuddyiOS -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -derivedDataPath /private/tmp/pastebuddy-ios-deriveddata build
-```
-
-Expected: `** BUILD SUCCEEDED **` for the app and all extensions.
-
-- [ ] **Step 3: Install and verify the stable macOS development identity**
-
-```bash
-script/build_and_run.sh --verify
-codesign --verify --deep --strict --verbose=4 "/Applications/PasteBuddy Dev.app"
-codesign -dvvv -r- "/Applications/PasteBuddy Dev.app"
-```
-
-Expected diagnostics: `accessibilityTrusted=true`, `stableLaunchPathMatched=true`, bundle `com.alexjiang.PasteBuddy.dev`, path `/Applications/PasteBuddy Dev.app`, and `signingChannel=development` with Apple Development signing.
-
-- [ ] **Step 4: Verify real drag behavior with Computer Use**
-
-Open only the approved Side Panel/Shelf via `script/open_dev_panel.sh`. Read live window and chip frames before each interaction. With Computer Use:
-
-1. Drag Clipboard after a smart category and confirm both panels show the new order.
-2. Relaunch the stable app and confirm the order remains.
-3. Drag a clipboard card into Favorites and confirm it appears there.
-4. Open Favorites editing and confirm name/color/icon controls remain.
-5. Right-click a smart category and confirm no editing menu appears.
-6. Select an image and press Space; confirm the preview opens and Apple Live Text analyzes the original image.
-
-Do not open the main history window and do not use guessed coordinates.
-
-- [ ] **Step 5: Inspect and commit any verification-only fixes**
-
-```bash
-git status --short
-git diff --check
-```
-
-If fixes were needed, run the affected gates again and commit only those fixes. Otherwise leave the two feature commits unchanged.
+- [ ] Run `git diff --check`, localization check, and the complete Swift test suite.
+- [ ] Run `script/build_and_run.sh --verify`; require stable `/Applications/PasteBuddy Dev.app`, `com.alexjiang.PasteBuddy.dev`, Apple Development signing, `accessibilityTrusted=true`, and `stableLaunchPathMatched=true`.
+- [ ] Open only Side Panel and Shelf. Read live window/chip frames before each Computer Use action.
+- [ ] In each panel, drag Text across Paste Stack slowly: confirm no copy badge, Paste Stack animates aside before release, and Text fills the gap on release.
+- [ ] Press Escape during the live preview: confirm the frame-sized gap and hidden source immediately restore, then relaunch and confirm no order was persisted.
+- [ ] Relaunch and confirm order persistence; restore the user's original order afterward.
+- [ ] Drag a card into Favorites and confirm copy succeeds; attempt the same on a smart category and confirm rejection/no membership or scope change.
+- [ ] Inspect the final diff, commit the implementation, and rerun any gate affected by review fixes.
