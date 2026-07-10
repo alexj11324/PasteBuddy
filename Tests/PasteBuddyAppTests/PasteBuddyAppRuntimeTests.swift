@@ -486,8 +486,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(collectionSource.contains("var dragItemProvider: ((Item) -> NSItemProvider?)?"))
         XCTAssertFalse(collectionSource.contains(".onDrag { provider }"))
         XCTAssertTrue(collectionSource.contains(".draggable(payload)"))
-        XCTAssertTrue(collectionSource.contains(".onTapGesture {"))
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         XCTAssertFalse(collectionSource.contains("NSViewRepresentable"))
         XCTAssertFalse(collectionSource.contains("NSCollectionView"))
         XCTAssertFalse(collectionSource.contains("NSScrollView"))
@@ -1334,9 +1335,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
-        XCTAssertTrue(collectionSource.contains(".onTapGesture {"))
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
-        XCTAssertFalse(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertTrue(collectionSource.contains("TapGesture().onEnded"))
+        XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))
             XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow) { moveSelection(.left) }"))

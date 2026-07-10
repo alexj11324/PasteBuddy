@@ -117,14 +117,16 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             .frame(width: itemSize.width, height: itemSize.height)
             .contentShape(Rectangle())
             .id(itemID)
-            .onTapGesture {
-                guard selectable else { return }
-                onSelect(itemID)
-            }
             .onTapGesture(count: 2) {
                 guard selectable else { return }
                 onDoubleClick(itemID)
             }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    guard selectable else { return }
+                    onSelect(itemID)
+                }
+            )
             .popover(
                 isPresented: presentedPreviewBinding(for: itemID),
                 attachmentAnchor: .rect(.bounds),
