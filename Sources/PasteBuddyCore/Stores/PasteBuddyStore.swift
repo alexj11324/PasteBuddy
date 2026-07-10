@@ -780,6 +780,53 @@ public final class PasteBuddyStore {
         snapshot.pinboards.filter { !SmartPinboardCategory.isSmartPinboardName($0.name) }
     }
 
+    public var collectionOrder: [ClipboardCollectionID] {
+        let canonicalOrder: [ClipboardCollectionID] = [
+            .history,
+            .pasteStack
+        ] + SmartPinboardCategory.allCases.map(ClipboardCollectionID.smart)
+            + userPinboards.map { .pinboard($0.id) }
+        let validCollections = Set(canonicalOrder)
+        var seen: Set<ClipboardCollectionID> = []
+        let savedOrder = (snapshot.general.collectionOrder ?? []).filter {
+            validCollections.contains($0) && seen.insert($0).inserted
+        }
+        return savedOrder + canonicalOrder.filter { seen.insert($0).inserted }
+    }
+
+    @discardableResult
+    public func moveCollection(
+        _ source: ClipboardCollectionID,
+        relativeTo target: ClipboardCollectionID,
+        afterTarget: Bool
+    ) -> Bool {
+        guard source != target else { return false }
+        var order = collectionOrder
+        guard let sourceIndex = order.firstIndex(of: source) else { return false }
+        let previousOrder = order
+        order.remove(at: sourceIndex)
+        guard let targetIndex = order.firstIndex(of: target) else { return false }
+        order.insert(source, at: targetIndex + (afterTarget ? 1 : 0))
+        guard order != previousOrder else { return false }
+        snapshot.general.collectionOrder = order
+        save()
+        return true
+    }
+
+    @discardableResult
+    public func moveCollection(_ collection: ClipboardCollectionID, by offset: Int) -> Bool {
+        guard offset != 0 else { return false }
+        let order = collectionOrder
+        guard let sourceIndex = order.firstIndex(of: collection) else { return false }
+        let (destinationIndex, overflow) = sourceIndex.addingReportingOverflow(offset)
+        guard !overflow, order.indices.contains(destinationIndex) else { return false }
+        return moveCollection(
+            collection,
+            relativeTo: order[destinationIndex],
+            afterTarget: offset > 0
+        )
+    }
+
     public var hasActiveFilters: Bool {
         contentTypeFilter != nil || sourceAppFilter != nil || deviceFilter != nil || dateFilter != .any
     }
@@ -1239,6 +1286,7 @@ public final class PasteBuddyStore {
         )
         snapshot.pinboards.append(pinboard)
         selectedScope = .pinboard(pinboard.id)
+        snapshot.general.collectionOrder = collectionOrder
         save()
         return pinboard
     }
@@ -1248,6 +1296,7 @@ public final class PasteBuddyStore {
         if selectedScope == .pinboard(id) {
             selectedScope = .history
         }
+        snapshot.general.collectionOrder = collectionOrder
         save()
     }
 

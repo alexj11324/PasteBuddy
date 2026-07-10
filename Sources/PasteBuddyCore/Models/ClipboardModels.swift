@@ -110,6 +110,26 @@ public enum SmartPinboardCategory: String, CaseIterable, Codable, Identifiable, 
     public static let obsoletePinboardNames: Set<String> = ["Smart: Mixed"]
 }
 
+public enum ClipboardCollectionID: Hashable, Codable, Sendable, Identifiable {
+    case history
+    case pasteStack
+    case smart(SmartPinboardCategory)
+    case pinboard(UUID)
+
+    public var id: String {
+        switch self {
+        case .history:
+            "history"
+        case .pasteStack:
+            "pasteStack"
+        case .smart(let category):
+            "smart:\(category.rawValue)"
+        case .pinboard(let id):
+            "pinboard:\(id.uuidString)"
+        }
+    }
+}
+
 public enum ClipboardReuseCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     case general
     case snippet
@@ -1602,9 +1622,14 @@ public struct PinboardInvitationInbox: Codable, Equatable, Sendable {
 
 public struct GeneralConfiguration: Codable, Equatable, Sendable {
     public var launchAtLoginEnabled: Bool
+    public var collectionOrder: [ClipboardCollectionID]?
 
-    public init(launchAtLoginEnabled: Bool = false) {
+    public init(
+        launchAtLoginEnabled: Bool = false,
+        collectionOrder: [ClipboardCollectionID]? = nil
+    ) {
         self.launchAtLoginEnabled = launchAtLoginEnabled
+        self.collectionOrder = collectionOrder
     }
 }
 
