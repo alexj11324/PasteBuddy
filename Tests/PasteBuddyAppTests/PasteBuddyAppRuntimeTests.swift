@@ -933,7 +933,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let initial: [ClipboardCollectionID] = [.history, .pasteStack, text]
         var session = ClipboardCollectionDragSession()
 
-        session.begin(source: text, order: initial, sourceOriginX: 100)
+        session.begin(source: text, order: initial, frames: [:], sourceOriginX: 100)
         session.updateTranslation(40)
 
         XCTAssertTrue(session.previewMove(relativeTo: .pasteStack, afterTarget: false))
@@ -956,7 +956,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let initial: [ClipboardCollectionID] = [.history, .pasteStack, text]
         var session = ClipboardCollectionDragSession()
 
-        session.begin(source: text, order: initial)
+        session.begin(source: text, order: initial, frames: [:])
         XCTAssertTrue(session.previewMove(relativeTo: .history, afterTarget: false))
         XCTAssertNotEqual(session.displayOrder(fallback: initial), initial)
 
@@ -981,6 +981,31 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".scrollDisabled(collectionDragSession.isActive)"))
         }
+    }
+
+    func testCollectionDragTargetsUseGestureStartFramesInsteadOfAnimatedLiveFrames() throws {
+        let text = ClipboardCollectionID.smart(.text)
+        let links = ClipboardCollectionID.smart(.links)
+        let order: [ClipboardCollectionID] = [text, .history, links, .pasteStack]
+        var liveFrames: [ClipboardCollectionID: CGRect] = [
+            text: CGRect(x: 0, y: 0, width: 60, height: 30),
+            .history: CGRect(x: 65, y: 0, width: 100, height: 30),
+            links: CGRect(x: 170, y: 0, width: 70, height: 30),
+            .pasteStack: CGRect(x: 245, y: 0, width: 116, height: 30),
+        ]
+        var session = ClipboardCollectionDragSession()
+        session.begin(source: .pasteStack, order: order, frames: liveFrames, sourceOriginX: 245)
+
+        liveFrames[links] = CGRect(x: 300, y: 0, width: 70, height: 30)
+        let linksTarget = try XCTUnwrap(session.dropTarget(at: 180))
+        XCTAssertEqual(linksTarget.collection, links)
+        XCTAssertFalse(linksTarget.afterTarget)
+        XCTAssertTrue(session.previewMove(relativeTo: linksTarget.collection, afterTarget: linksTarget.afterTarget))
+        XCTAssertEqual(session.displayOrder(fallback: order), [text, .history, .pasteStack, links])
+
+        let historyTarget = try XCTUnwrap(session.dropTarget(at: 90))
+        XCTAssertEqual(historyTarget.collection, .history)
+        XCTAssertFalse(historyTarget.afterTarget)
     }
 
     func testShelfAndSideCollectionChipsUseSwiftUIAnimatedMoveReordering() throws {
@@ -1008,9 +1033,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertTrue(shelfSource.contains("DragGesture("))
         XCTAssertTrue(shelfSource.contains("minimumDistance: 4"))
-        XCTAssertTrue(shelfSource.contains("value.location.x >= targetFrame.midX"))
+        XCTAssertTrue(shelfSource.contains("session.dropTarget(at: value.location.x)"))
         XCTAssertTrue(shelfSource.contains("withAnimation"))
-        XCTAssertTrue(shelfSource.contains("session.previewMove(relativeTo: target, afterTarget: afterTarget)"))
+        XCTAssertTrue(shelfSource.contains("relativeTo: target.collection"))
+        XCTAssertTrue(shelfSource.contains("afterTarget: target.afterTarget"))
         XCTAssertTrue(shelfSource.contains("session.updateTranslation(value.translation.width)"))
         XCTAssertTrue(shelfSource.contains("let move = withAnimation"))
         XCTAssertTrue(shelfSource.contains("guard let move else { return }"))
