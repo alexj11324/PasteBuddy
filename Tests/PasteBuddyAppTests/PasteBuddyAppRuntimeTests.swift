@@ -853,6 +853,41 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(chipSource.contains("private var helpText: String"))
     }
 
+    func testCollectionDragPayloadUsesDedicatedCodableType() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Models/PinboardItemDragPayload.swift")
+        let collectionStart = try XCTUnwrap(source.range(of: "struct ClipboardCollectionDragPayload"))
+        let itemStart = try XCTUnwrap(source.range(of: "struct PinboardItemDragPayload"))
+        let collectionSource = String(source[collectionStart.lowerBound..<itemStart.lowerBound])
+
+        XCTAssertTrue(source.contains("import PasteBuddyCore"))
+        XCTAssertTrue(collectionSource.contains("struct ClipboardCollectionDragPayload: Codable, Transferable"))
+        XCTAssertTrue(collectionSource.contains("let collection: ClipboardCollectionID"))
+        XCTAssertTrue(collectionSource.contains("CodableRepresentation(contentType: .pasteBuddyCollectionID)"))
+        XCTAssertFalse(collectionSource.contains("ProxyRepresentation"))
+        XCTAssertTrue(source.contains("static let pasteBuddyCollectionID = UTType(exportedAs: \"app.pastebuddy.collection-id\")"))
+    }
+
+    func testShelfAndSidePanelRenderSharedCollectionOrder() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("ForEach(store.collectionOrder) { collection in"))
+            XCTAssertTrue(source.contains("collectionChip(for: collection)"))
+            XCTAssertTrue(source.contains("@ViewBuilder\n    private func collectionChip(for collection: ClipboardCollectionID) -> some View"))
+            XCTAssertTrue(source.contains("case .history:"))
+            XCTAssertTrue(source.contains("case .pasteStack:"))
+            XCTAssertTrue(source.contains("case .smart(let category):"))
+            XCTAssertTrue(source.contains("case .pinboard(let id):"))
+            XCTAssertTrue(source.contains("canMoveLeft: store.collectionOrder.first != collection"))
+            XCTAssertTrue(source.contains("canMoveRight: store.collectionOrder.last != collection"))
+            XCTAssertTrue(source.contains("onMoveLeft: { store.moveCollection(collection, by: -1) }"))
+            XCTAssertTrue(source.contains("onMoveRight: { store.moveCollection(collection, by: 1) }"))
+            XCTAssertFalse(source.contains("ForEach(SmartPinboardCategory.allCases)"))
+            XCTAssertFalse(source.contains("ForEach(store.userPinboards)"))
+        }
+    }
+
     func testShelfCollectionChipsAcceptDraggedClipboardItems() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
@@ -863,6 +898,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
 
         XCTAssertTrue(source.contains("enum ClipboardCollectionDropTarget"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .history) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
         XCTAssertFalse(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
@@ -885,10 +921,64 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let chipSource = String(source[chipStart.lowerBound..<rowStart.lowerBound])
 
         XCTAssertTrue(stripSource.contains("HStack(spacing: 5)"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .history) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
         XCTAssertFalse(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
         XCTAssertTrue(chipSource.contains("ShelfCollectionChipDropTarget("))
+    }
+
+    func testShelfAndSideCollectionChipsUseNativeCategoryReordering() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let shelfChipStart = try XCTUnwrap(shelfSource.range(of: "private struct ShelfCollectionChip"))
+        let shelfChipEnd = try XCTUnwrap(shelfSource.range(of: "private struct ShelfSelectedCountChip"))
+        let sideChipStart = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelFilterChip"))
+        let sideChipEnd = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelListRow"))
+        let shelfChipSource = String(shelfSource[shelfChipStart.lowerBound..<shelfChipEnd.lowerBound])
+        let sideChipSource = String(sideSource[sideChipStart.lowerBound..<sideChipEnd.lowerBound])
+
+        for chipSource in [shelfChipSource, sideChipSource] {
+            XCTAssertTrue(chipSource.contains("let collection: ClipboardCollectionID"))
+            XCTAssertTrue(chipSource.contains("let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool"))
+            XCTAssertTrue(chipSource.contains(".draggable(ClipboardCollectionDragPayload(collection: collection))"))
+            XCTAssertTrue(chipSource.contains(".dropDestination(for: ClipboardCollectionDragPayload.self)"))
+            XCTAssertTrue(chipSource.contains(".onGeometryChange(for: CGFloat.self"))
+            XCTAssertTrue(chipSource.contains("location.x >= dropTargetWidth / 2"))
+            XCTAssertTrue(chipSource.contains("isDropTargeted || isCollectionDropTargeted"))
+            XCTAssertTrue(chipSource.contains(".accessibilityActions {"))
+            XCTAssertTrue(chipSource.contains("if canMoveLeft"))
+            XCTAssertTrue(chipSource.contains("if canMoveRight"))
+            XCTAssertTrue(chipSource.contains("action.move_left"))
+            XCTAssertTrue(chipSource.contains("action.move_right"))
+        }
+
+        let appKitDropStart = try XCTUnwrap(shelfSource.range(of: "struct ShelfCollectionChipDropTarget: NSViewRepresentable"))
+        let selectedCountStart = try XCTUnwrap(shelfSource.range(of: "private struct ShelfSelectedCountChip"))
+        let appKitDropSource = String(shelfSource[appKitDropStart.lowerBound..<selectedCountStart.lowerBound])
+        XCTAssertTrue(appKitDropSource.contains("UTType.pasteBuddyPinboardItemIDs.identifier"))
+        XCTAssertFalse(appKitDropSource.contains("pasteBuddyCollectionID"))
+    }
+
+    func testCollectionReorderHandlersDoNotSelectPanelScopes() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let shelfHandlerStart = try XCTUnwrap(shelfSource.range(of: "private func reorderCollection("))
+        let shelfHandlerEnd = try XCTUnwrap(shelfSource.range(of: "private func dropItems("))
+        let sideHandlerStart = try XCTUnwrap(sideSource.range(of: "private func reorderCollection("))
+        let sideHandlerEnd = try XCTUnwrap(sideSource.range(of: "private func dropItems("))
+        let shelfHandler = String(shelfSource[shelfHandlerStart.lowerBound..<shelfHandlerEnd.lowerBound])
+        let sideHandler = String(sideSource[sideHandlerStart.lowerBound..<sideHandlerEnd.lowerBound])
+
+        for handler in [shelfHandler, sideHandler] {
+            XCTAssertTrue(handler.contains("store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)"))
+            XCTAssertFalse(handler.contains("selectedScope ="))
+            XCTAssertFalse(handler.contains("setScope("))
+            XCTAssertFalse(handler.contains("setSideScope("))
+            XCTAssertFalse(handler.contains("selectSmartCategory("))
+        }
+        XCTAssertFalse(shelfHandler.contains("shelfScope ="))
+        XCTAssertFalse(sideHandler.contains("sideScope ="))
     }
 
     func testOnlyCustomPinboardsExposeAppearanceAndOrderEditing() throws {
@@ -896,15 +986,32 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
         let promptSource = try sourceFileContents("Sources/PasteBuddy/Views/PinboardEditPrompt.swift")
 
-        XCTAssertTrue(shelfSource.contains("systemImageName: pinboard.systemImageName ?? \"pin.fill\""))
-        XCTAssertTrue(sideSource.contains("systemImageName: pinboard.systemImageName ?? \"pin.fill\""))
-        XCTAssertTrue(shelfSource.contains("CustomPinboardActionsMenu("))
-        XCTAssertTrue(sideSource.contains("CustomPinboardActionsMenu("))
+        for source in [shelfSource, sideSource] {
+            let helperStart = try XCTUnwrap(source.range(of: "@ViewBuilder\n    private func collectionChip"))
+            let helperEnd = try XCTUnwrap(source.range(of: "private func createNamedPinboard"))
+            let helperSource = String(source[helperStart.lowerBound..<helperEnd.lowerBound])
+            let smartStart = try XCTUnwrap(helperSource.range(of: "case .smart(let category):"))
+            let pinboardStart = try XCTUnwrap(helperSource.range(of: "case .pinboard(let id):"))
+            let smartSource = String(helperSource[smartStart.lowerBound..<pinboardStart.lowerBound])
+            let pinboardSource = String(helperSource[pinboardStart.lowerBound...])
+
+            XCTAssertTrue(smartSource.contains("systemImageName: category.systemImageName"))
+            XCTAssertFalse(smartSource.contains("onDropPayloads:"))
+            XCTAssertFalse(smartSource.contains(".contextMenu"))
+            XCTAssertTrue(pinboardSource.contains("systemImageName: pinboard.systemImageName ?? \"pin.fill\""))
+            XCTAssertTrue(pinboardSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
+            XCTAssertTrue(pinboardSource.contains("CustomPinboardActionsMenu("))
+            XCTAssertEqual(helperSource.components(separatedBy: ".contextMenu {").count - 1, 1)
+        }
         XCTAssertTrue(promptSource.contains("Pinboard.customizableSystemImageNames"))
         XCTAssertTrue(promptSource.contains("label.edit_pinboard"))
         XCTAssertTrue(promptSource.contains("label.icon"))
         XCTAssertTrue(promptSource.contains("label.color"))
-        XCTAssertTrue(promptSource.contains("store.moveUserPinboards"))
+        XCTAssertTrue(promptSource.contains("store.collectionOrder.firstIndex(of: .pinboard(pinboard.id))"))
+        XCTAssertTrue(promptSource.contains("store.collectionOrder.count - 1"))
+        XCTAssertTrue(promptSource.contains("store.moveCollection(.pinboard(pinboard.id), by: -1)"))
+        XCTAssertTrue(promptSource.contains("store.moveCollection(.pinboard(pinboard.id), by: 1)"))
+        XCTAssertFalse(promptSource.contains("store.moveUserPinboards"))
         XCTAssertFalse(promptSource.contains("SmartPinboardCategory"))
     }
 
@@ -1447,8 +1554,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))
         XCTAssertTrue(source.contains("localized(\"label.clipboard\")"))
         XCTAssertTrue(source.contains("localized(\"action.paste_stack\")"))
-        XCTAssertTrue(source.contains("ForEach(SmartPinboardCategory.allCases)"))
-        XCTAssertTrue(source.contains("ForEach(store.userPinboards)"))
+        XCTAssertTrue(source.contains("ForEach(store.collectionOrder) { collection in"))
+        XCTAssertFalse(source.contains("ForEach(SmartPinboardCategory.allCases)"))
+        XCTAssertFalse(source.contains("ForEach(store.userPinboards)"))
         XCTAssertTrue(source.contains("store.syncSmartPinboard(for: category)"))
         XCTAssertTrue(source.contains("setSideScope(.pinboard(pinboard.id))"))
         XCTAssertTrue(source.contains("NewPinboardNamePrompt.run()"))

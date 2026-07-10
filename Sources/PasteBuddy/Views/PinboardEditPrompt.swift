@@ -150,18 +150,18 @@ struct CustomPinboardActionsMenu: View {
         } label: {
             Label("action.move_left", systemImage: "arrow.left")
         }
-        .disabled(userPinboardIndex == 0)
+        .disabled(collectionIndex.map { $0 == 0 } ?? true)
 
         Button {
             moveRight()
         } label: {
             Label("action.move_right", systemImage: "arrow.right")
         }
-        .disabled(userPinboardIndex.map { $0 >= store.userPinboards.count - 1 } ?? true)
+        .disabled(collectionIndex.map { $0 >= store.collectionOrder.count - 1 } ?? true)
     }
 
-    private var userPinboardIndex: Int? {
-        store.userPinboards.firstIndex(where: { $0.id == pinboard.id })
+    private var collectionIndex: Int? {
+        store.collectionOrder.firstIndex(of: .pinboard(pinboard.id))
     }
 
     private func editPinboard() {
@@ -175,13 +175,11 @@ struct CustomPinboardActionsMenu: View {
     }
 
     private func moveLeft() {
-        guard let index = userPinboardIndex, index > 0 else { return }
-        store.moveUserPinboards(fromOffsets: IndexSet(integer: index), toOffset: index - 1)
+        store.moveCollection(.pinboard(pinboard.id), by: -1)
     }
 
     private func moveRight() {
-        guard let index = userPinboardIndex, index < store.userPinboards.count - 1 else { return }
-        store.moveUserPinboards(fromOffsets: IndexSet(integer: index), toOffset: index + 2)
+        store.moveCollection(.pinboard(pinboard.id), by: 1)
     }
 }
 
