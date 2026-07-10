@@ -11,8 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     var flushPendingSave: (() async -> Void)?
+    var handleOpenURLs: (([URL]) -> Void)? {
+        didSet { deliverPendingOpenURLs() }
+    }
     private var didFinishLaunching = false
     private var didRequestRuntimeStart = false
+    private var pendingOpenURLs: [URL] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -26,6 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         flag
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        pendingOpenURLs.append(contentsOf: urls)
+        deliverPendingOpenURLs()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -43,6 +52,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         didRequestRuntimeStart = true
         startRuntime()
+    }
+
+    private func deliverPendingOpenURLs() {
+        guard let handleOpenURLs, !pendingOpenURLs.isEmpty else { return }
+        let urls = pendingOpenURLs
+        pendingOpenURLs.removeAll(keepingCapacity: true)
+        handleOpenURLs(urls)
     }
 }
 

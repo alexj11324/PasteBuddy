@@ -17,6 +17,106 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testDevelopmentPanelCommandAcceptsOnlyStableDevelopmentIdentity() throws {
+        let identity = PasteBuddyRuntimeIdentity(
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev",
+            bundlePath: "/Applications/PasteBuddy Dev.app",
+            executablePath: "/Applications/PasteBuddy Dev.app/Contents/MacOS/PasteBuddy",
+            stableAppPath: "/Applications/PasteBuddy Dev.app",
+            signingChannel: "development",
+            codeSigningIdentity: "APPLE-DEVELOPMENT"
+        )
+
+        XCTAssertEqual(
+            PasteBuddyDevelopmentPanelCommand.parse(
+                try XCTUnwrap(URL(string: "pastebuddy-dev://panel/side")),
+                identity: identity
+            ),
+            .show(.sidePanel)
+        )
+        XCTAssertEqual(
+            PasteBuddyDevelopmentPanelCommand.parse(
+                try XCTUnwrap(URL(string: "pastebuddy-dev://panel/shelf")),
+                identity: identity
+            ),
+            .show(.shelf)
+        )
+        XCTAssertEqual(
+            PasteBuddyDevelopmentPanelCommand.parse(
+                try XCTUnwrap(URL(string: "pastebuddy-dev://panel/toggle")),
+                identity: identity
+            ),
+            .toggle
+        )
+
+        var releaseIdentity = identity
+        releaseIdentity.bundleIdentifier = "com.alexjiang.PasteBuddy"
+        releaseIdentity.signingChannel = "release"
+        XCTAssertNil(
+            PasteBuddyDevelopmentPanelCommand.parse(
+                try XCTUnwrap(URL(string: "pastebuddy-dev://panel/side")),
+                identity: releaseIdentity
+            )
+        )
+
+        var copiedIdentity = identity
+        copiedIdentity.bundlePath = "/private/tmp/PasteBuddy Dev.app"
+        XCTAssertNil(
+            PasteBuddyDevelopmentPanelCommand.parse(
+                try XCTUnwrap(URL(string: "pastebuddy-dev://panel/side")),
+                identity: copiedIdentity
+            )
+        )
+    }
+
+    func testDevelopmentPanelCommandRejectsMalformedURLs() throws {
+        let identity = PasteBuddyRuntimeIdentity(
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev",
+            bundlePath: "/Applications/PasteBuddy Dev.app",
+            executablePath: "/Applications/PasteBuddy Dev.app/Contents/MacOS/PasteBuddy",
+            stableAppPath: "/Applications/PasteBuddy Dev.app",
+            signingChannel: "development",
+            codeSigningIdentity: "APPLE-DEVELOPMENT"
+        )
+        let rejected = [
+            "PASTEBUDDY-DEV://panel/side",
+            "pastebuddy-dev://PANEL/side",
+            "pastebuddy-dev://panel/%73ide",
+            "pastebuddy-dev://panel/side/extra",
+            "pastebuddy-dev://user@panel/side",
+            "pastebuddy-dev://panel:7/side",
+            "pastebuddy-dev://panel/side?x=1",
+            "pastebuddy-dev://panel/side#fragment",
+            "pastebuddy-dev://panel/unknown"
+        ]
+
+        for rawURL in rejected {
+            XCTAssertNil(
+                PasteBuddyDevelopmentPanelCommand.parse(
+                    try XCTUnwrap(URL(string: rawURL)),
+                    identity: identity
+                ),
+                rawURL
+            )
+        }
+    }
+
+    func testAppDelegateQueuesOpenURLsUntilHandlerIsInstalled() throws {
+        let delegate = AppDelegate()
+        let first = try XCTUnwrap(URL(string: "pastebuddy-dev://panel/side"))
+        let second = try XCTUnwrap(URL(string: "pastebuddy-dev://panel/shelf"))
+        var delivered: [URL] = []
+
+        delegate.application(NSApplication.shared, open: [first, second])
+        XCTAssertTrue(delivered.isEmpty)
+
+        delegate.handleOpenURLs = { delivered.append(contentsOf: $0) }
+        XCTAssertEqual(delivered, [first, second])
+
+        delegate.handleOpenURLs = { delivered.append(contentsOf: $0) }
+        XCTAssertEqual(delivered, [first, second])
+    }
+
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
