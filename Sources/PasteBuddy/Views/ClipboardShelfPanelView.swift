@@ -107,9 +107,9 @@ struct ClipboardCollectionDragSession {
         self.translationX = translationX
     }
 
-    func visualOffset(currentSourceMinX: CGFloat) -> CGFloat {
+    func visualOffset(currentSourceLayoutMinX: CGFloat) -> CGFloat {
         guard isActive else { return 0 }
-        return translationX + sourceOriginX - currentSourceMinX
+        return translationX + sourceOriginX - currentSourceLayoutMinX
     }
 
     @discardableResult
@@ -547,6 +547,7 @@ struct ClipboardShelfPanelView: View {
             .padding(.vertical, 1)
         }
         .scrollIndicators(.never, axes: .horizontal)
+        .scrollDisabled(collectionDragSession.isActive)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.clipboard_collections"))
@@ -1457,28 +1458,31 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
     let onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
 
     func body(content: Content) -> some View {
-        content
-            .onGeometryChange(
-                for: CGRect.self,
-                of: { $0.frame(in: .named(ClipboardCollectionDragCoordinateSpace.name)) }
-            ) { frame in
-                collectionFrames[collection] = frame
-            }
-            .highPriorityGesture(
-                DragGesture(
-                    minimumDistance: 4,
-                    coordinateSpace: .named(ClipboardCollectionDragCoordinateSpace.name)
-                )
-                .onChanged(handleDragChanged)
-                .onEnded(handleDragEnded)
+        ZStack {
+            content
+                .offset(x: dragOffset)
+                .scaleEffect(session.source == collection ? 1.03 : 1)
+        }
+        .onGeometryChange(
+            for: CGRect.self,
+            of: { $0.frame(in: .named(ClipboardCollectionDragCoordinateSpace.name)) }
+        ) { frame in
+            guard collectionFrames[collection] != frame else { return }
+            collectionFrames[collection] = frame
+        }
+        .highPriorityGesture(
+            DragGesture(
+                minimumDistance: 4,
+                coordinateSpace: .named(ClipboardCollectionDragCoordinateSpace.name)
             )
-            .offset(x: dragOffset)
-            .scaleEffect(session.source == collection ? 1.03 : 1)
-            .zIndex(session.source == collection ? 1 : 0)
-            .modifier(ClipboardCollectionCardDropModifier(
-                onDropPayloads: onDropPayloads,
-                isTargeted: $isTargeted
-            ))
+            .onChanged(handleDragChanged)
+            .onEnded(handleDragEnded)
+        )
+        .zIndex(session.source == collection ? 1 : 0)
+        .modifier(ClipboardCollectionCardDropModifier(
+            onDropPayloads: onDropPayloads,
+            isTargeted: $isTargeted
+        ))
     }
 
     private var dragOffset: CGFloat {
@@ -1486,7 +1490,7 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
               let currentFrame = collectionFrames[collection] else {
             return 0
         }
-        return session.visualOffset(currentSourceMinX: currentFrame.minX)
+        return session.visualOffset(currentSourceLayoutMinX: currentFrame.minX)
     }
 
     private func handleDragChanged(_ value: DragGesture.Value) {
@@ -1513,10 +1517,11 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
     private func handleDragEnded(_ value: DragGesture.Value) {
         guard session.source == collection else { return }
         session.updateTranslation(value.translation.width)
-        withAnimation(animation) {
-            guard let move = session.complete() else { return }
-            _ = onReorder(move.source, move.target, move.afterTarget)
+        let move = withAnimation(animation) {
+            session.complete()
         }
+        guard let move else { return }
+        _ = onReorder(move.source, move.target, move.afterTarget)
     }
 
     private func closestCollection(to x: CGFloat) -> ClipboardCollectionID? {

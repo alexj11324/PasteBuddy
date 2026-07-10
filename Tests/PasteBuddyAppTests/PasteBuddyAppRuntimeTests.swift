@@ -940,7 +940,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(session.displayOrder(fallback: initial), [.history, text, .pasteStack])
         XCTAssertEqual(session.displayOrder(fallback: initial).count, initial.count)
         XCTAssertTrue(session.displayOrder(fallback: initial).contains(text))
-        XCTAssertEqual(session.visualOffset(currentSourceMinX: 160), -20)
+        XCTAssertEqual(session.visualOffset(currentSourceLayoutMinX: 160), -20)
         XCTAssertFalse(session.previewMove(relativeTo: .pasteStack, afterTarget: false))
 
         XCTAssertEqual(
@@ -964,6 +964,23 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertEqual(session.displayOrder(fallback: initial), initial)
         XCTAssertNil(session.complete())
+    }
+
+    func testCollectionReorderMeasuresStationarySlotOutsideVisualTransform() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let modifierStart = try XCTUnwrap(shelfSource.range(of: "struct ClipboardCollectionReorderModifier"))
+        let modifierEnd = try XCTUnwrap(shelfSource.range(of: "struct ClipboardCollectionCardDropModifier"))
+        let modifierSource = String(shelfSource[modifierStart.lowerBound..<modifierEnd.lowerBound])
+        let offset = try XCTUnwrap(modifierSource.range(of: ".offset(x: dragOffset)"))
+        let geometry = try XCTUnwrap(modifierSource.range(of: ".onGeometryChange("))
+
+        XCTAssertTrue(modifierSource.contains("ZStack {"))
+        XCTAssertLessThan(offset.lowerBound, geometry.lowerBound)
+        XCTAssertTrue(modifierSource.contains("currentSourceLayoutMinX"))
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains(".scrollDisabled(collectionDragSession.isActive)"))
+        }
     }
 
     func testShelfAndSideCollectionChipsUseSwiftUIAnimatedMoveReordering() throws {
@@ -995,7 +1012,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("withAnimation"))
         XCTAssertTrue(shelfSource.contains("session.previewMove(relativeTo: target, afterTarget: afterTarget)"))
         XCTAssertTrue(shelfSource.contains("session.updateTranslation(value.translation.width)"))
-        XCTAssertTrue(shelfSource.contains("guard let move = session.complete() else { return }"))
+        XCTAssertTrue(shelfSource.contains("let move = withAnimation"))
+        XCTAssertTrue(shelfSource.contains("guard let move else { return }"))
         XCTAssertTrue(shelfSource.contains("dropDestination(for: PinboardItemDragPayload.self"))
         XCTAssertTrue(shelfSource.contains("if let onDropPayloads"))
         XCTAssertFalse(shelfSource.contains("DropProposal(operation: .move)"))

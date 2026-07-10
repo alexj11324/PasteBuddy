@@ -208,6 +208,7 @@ struct ClipboardSidePanelView: View {
                 .padding(.vertical, 1)
             }
             .scrollIndicators(.never, axes: .horizontal)
+            .scrollDisabled(collectionDragSession.isActive)
 
             Button {
                 createNamedPinboard()
