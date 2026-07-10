@@ -231,17 +231,22 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
     ) -> [UUID: UUID] {
         var itemIDRemaps: [UUID: UUID] = [:]
         var dedupeIndex: [CloudSyncItemDedupeKey: UUID] = [:]
-        for item in snapshot.items {
+        var itemIndexByID: [UUID: Int] = [:]
+        var remoteOnlyItemIDs: [UUID] = []
+        itemIndexByID.reserveCapacity(snapshot.items.count + remoteItems.count)
+        dedupeIndex.reserveCapacity(snapshot.items.count + remoteItems.count)
+        for (index, item) in snapshot.items.enumerated() {
+            itemIndexByID[item.id] = index
             dedupeIndex[Self.deduplicationKey(for: item)] = item.id
         }
 
         for originalRemoteItem in remoteItems {
             var remoteItem = originalRemoteItem
             remoteItem.refreshSearchDocument()
-            guard let localIndex = snapshot.items.firstIndex(where: { $0.id == remoteItem.id }) else {
-                let remoteDedupeKey = Self.deduplicationKey(for: remoteItem)
+            let remoteDedupeKey = Self.deduplicationKey(for: remoteItem)
+            guard let localIndex = itemIndexByID[remoteItem.id] else {
                 if let localID = dedupeIndex[remoteDedupeKey],
-                   let duplicateIndex = snapshot.items.firstIndex(where: { $0.id == localID }) {
+                   let duplicateIndex = itemIndexByID[localID] {
                     itemIDRemaps[remoteItem.id] = localID
                     let localItem = snapshot.items[duplicateIndex]
                     if remoteItem.updatedAt > localItem.updatedAt {
@@ -267,7 +272,12 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
                     }
                     continue
                 }
+                // Process remote-only items in place so dedupe/conflict indexes remain O(1),
+                // then move them to the front as one stable block below. This matches
+                // peer-sync semantics while preserving the relative order of local recopy history.
                 snapshot.items.append(remoteItem)
+                remoteOnlyItemIDs.append(remoteItem.id)
+                itemIndexByID[remoteItem.id] = snapshot.items.count - 1
                 dedupeIndex[remoteDedupeKey] = remoteItem.id
                 report.addedItems += 1
                 continue
@@ -277,7 +287,12 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
             guard localItem != remoteItem else { continue }
 
             if remoteItem.updatedAt > localItem.updatedAt {
+                let previousDedupeKey = Self.deduplicationKey(for: localItem)
                 snapshot.items[localIndex] = remoteItem
+                if dedupeIndex[previousDedupeKey] == remoteItem.id {
+                    dedupeIndex.removeValue(forKey: previousDedupeKey)
+                }
+                dedupeIndex[remoteDedupeKey] = remoteItem.id
                 report.updatedItems += 1
                 report.conflicts.append(CloudSyncMergeConflict(
                     entity: .item,
@@ -296,9 +311,13 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
                     resolution: .keptLocal
                 ))
             }
-            dedupeIndex[Self.deduplicationKey(for: snapshot.items[localIndex])] = snapshot.items[localIndex].id
         }
-        snapshot.items.sort { $0.createdAt > $1.createdAt }
+        if !remoteOnlyItemIDs.isEmpty {
+            let remoteOnlyIDSet = Set(remoteOnlyItemIDs)
+            let itemByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+            snapshot.items = remoteOnlyItemIDs.compactMap { itemByID[$0] }
+                + snapshot.items.filter { !remoteOnlyIDSet.contains($0.id) }
+        }
         return itemIDRemaps
     }
 
@@ -308,10 +327,16 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
         itemIDRemaps: [UUID: UUID],
         report: inout CloudSyncMergeReport
     ) {
+        var pinboardIndexByID: [UUID: Int] = [:]
+        pinboardIndexByID.reserveCapacity(snapshot.pinboards.count + remotePinboards.count)
+        for (index, pinboard) in snapshot.pinboards.enumerated() {
+            pinboardIndexByID[pinboard.id] = index
+        }
         for originalRemotePinboard in remotePinboards {
             let remotePinboard = Self.remappedPinboard(originalRemotePinboard, itemIDRemaps: itemIDRemaps)
-            guard let localIndex = snapshot.pinboards.firstIndex(where: { $0.id == remotePinboard.id }) else {
+            guard let localIndex = pinboardIndexByID[remotePinboard.id] else {
                 snapshot.pinboards.append(remotePinboard)
+                pinboardIndexByID[remotePinboard.id] = snapshot.pinboards.count - 1
                 report.addedPinboards += 1
                 continue
             }
@@ -343,9 +368,7 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
     }
 
     private static func deduplicationKey(for item: ClipboardItem) -> CloudSyncItemDedupeKey {
-        var item = item
-        item.refreshSearchDocument()
-        return CloudSyncItemDedupeKey(contentType: item.contentType, hash: item.searchDocument.dedupeHash)
+        CloudSyncItemDedupeKey(contentType: item.contentType, hash: item.searchDocument.dedupeHash)
     }
 
     private static func remappedPinboard(_ pinboard: Pinboard, itemIDRemaps: [UUID: UUID]) -> Pinboard {

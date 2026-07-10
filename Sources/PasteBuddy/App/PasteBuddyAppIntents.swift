@@ -92,10 +92,10 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
         let service = AutomationActionService(store: store)
         do {
             let pinboard = try service.createPinboard(name: name, colorHex: colorHex)
-            await store.flushPendingSave()
+            try await store.flushPendingSaveOrThrow()
             return .result(dialog: IntentDialog(stringLiteral: "Created PasteBuddy pinboard: \(pinboard.name)."))
         } catch {
-            await store.flushPendingSave()
+            try? await store.flushPendingSaveOrThrow()
             throw error
         }
     }
@@ -118,10 +118,10 @@ struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
         let service = AutomationActionService(store: store)
         do {
             let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
-            await store.flushPendingSave()
+            try await store.flushPendingSaveOrThrow()
             return .result(dialog: IntentDialog(stringLiteral: "Saved \(result.item.title) to \(result.pinboard.name)."))
         } catch {
-            await store.flushPendingSave()
+            try? await store.flushPendingSaveOrThrow()
             throw error
         }
     }

@@ -35,11 +35,20 @@
 - IMPORTANT: PasteBuddy 主窗口/历史窗口只能由用户明确手动触发；验证 Shelf、菜单栏图标、popover、状态菜单或后台运行时，禁止为了方便主动打开主窗口，也禁止在菜单栏状态菜单里新增“Open PasteBuddy”这类直接打开主窗口入口。需要查看主窗口时必须先得到用户明确授权。
 
 ## PasteBuddy Shelf 状态隔离与性能（IMPORTANT）
-- IMPORTANT: Shelf 顶部 `Clipboard` / `Paste Stack` / Pinboard chip 只是 Shelf 内部浏览切页时，禁止直接写全局 `store.selectedScope`；必须使用 Shelf 本地状态（如 `shelfScope`）驱动 chip 高亮、空态、快捷键和 `store.filteredItems(for:)` 查询。
+- IMPORTANT: `NSPasteboard.changeCount`、`string(forType:)`、`data(forType:)` 与完整 snapshot 读取不得在 `MainActor` 上同步执行；这些调用会经过 pasteboard XPC，必须在后台串行读取并把结果回送主 actor，同时合并读取期间发生的重复 poll。
+- IMPORTANT: SwiftUI `body`、Shelf、Side Panel 与过滤菜单不得同步调用 `DatabasePool.read` / repository 查询；Repository-backed 分页必须使用 `filteredItemsPageAndCount` 的 async 路径，并在应用结果前校验 query/data revision，丢弃过期请求。
+- IMPORTANT: Shelf 顶部 `Clipboard` / `Paste Stack` / Pinboard chip 只是 Shelf 内部浏览切页时，禁止直接写全局 `store.selectedScope`；必须使用 Shelf 本地状态（如 `shelfScope`）驱动 chip 高亮、空态、快捷键和 `store.filteredItemsPageAndCount(for:offset:limit:)` 查询。
 - IMPORTANT: 不要让 Shelf 内部切换触发主窗口 `ItemListView`、CommandMenu 或 `mainListItemsSnapshot` 的全局刷新；尤其是 Pinboard -> Clipboard 不得因为全局 scope 改动而让 History 路径在主线程扫描/排序完整 `snapshot.items`。
 - IMPORTANT: 如果确实需要把 Shelf 操作同步到全局 store，只能在明确的用户动作后同步（例如选择/复制/粘贴/删除），并确认不会把一次 chip 点击扩散成两轮 refresh 或完整 History 重算。
 - IMPORTANT: 修复 Shelf 卡顿时必须优先排查全局状态副作用、`queryRevision` bump、`selectedItemsInDisplayOrder`、`mainListItemsSnapshot` 和命令菜单 disabled 计算，不要只盯着 Shelf card 动画或 collection reload。
 - IMPORTANT: 为这类修复添加正式回归测试，验证 scoped 查询/快捷键不会 mutate `selectedScope` 或 bump 不必要的 `queryRevision`；不要只靠手动点击感觉判断。
+
+## PasteBuddy 多进程持久化一致性（IMPORTANT）
+- IMPORTANT: macOS 主应用、App Intents、MCP，以及 iOS 主应用/键盘/Share Action 会创建彼此独立的 `PasteBuddyStore`；任何单个 actor 内的 generation 或任务串行化都不能单独防止跨进程旧快照覆盖。
+- IMPORTANT: `EncryptedSnapshotStore` 的磁盘写入必须继续使用独立 lock 文件与快照文件内固定长度 revision header 的 CAS；revision 与 payload 必须通过同一个临时文件 + 原子 rename 一起提交。读取建立 baseline，其他进程改写后旧 writer 必须明确失败，禁止退回无条件覆盖、双文件 sidecar commit 或仅依赖 `.atomic` 写入。
+- IMPORTANT: SQLite repository 的写事务必须继续校验 `snapshot_metadata` 中的 repository revision，并在同一事务内换新 revision；新增写入口不得绕开该校验，迁移专用的 destructive/replace 路径必须保持显式、受限。
+- IMPORTANT: CAS 冲突按持久化不可用 fail fast 并向用户/调用方暴露，禁止静默重试旧完整快照；若未来需要自动重试，必须基于重新加载后的三方 merge 或操作 journal，而不是 last-writer-wins。
+- IMPORTANT: 修改这条路径时至少保留独立 `EncryptedSnapshotStore` 实例和独立 `ClipboardItemRepository` 实例的 stale-writer 回归测试。
 
 ## PasteBuddy Shelf Liquid Glass 背景（IMPORTANT）
 - IMPORTANT: Shelf 底板、搜索框、空态/提示卡片等 custom glass surface 必须共享同一个 `ClipboardShelfGlass.defaultTintOpacity` 默认逻辑；禁止给搜索框或局部背景保留单独的 opacity state、slider 或调试控件。

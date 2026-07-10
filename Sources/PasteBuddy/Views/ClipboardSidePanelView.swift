@@ -9,19 +9,9 @@ private enum ClipboardSidePanelMetrics {
     static let sourceAppSuggestionWidth: CGFloat = 220
 }
 
-private struct ClipboardSidePanelQueryState: Equatable {
-    let dataRevision: Int
-    let queryRevision: Int
-    let scope: PasteScope
-    let searchQuery: String
-    let contentTypeFilter: ClipboardContentType?
-    let sourceAppFilter: String?
-    let deviceFilter: String?
-    let dateFilter: ClipboardDateFilter
-    let pasteStackRevision: Int
-}
-
 struct ClipboardSidePanelView: View {
+    private static let pageSize = 100
+
     @Environment(\.openSettings) private var openSettings
     @Bindable var store: PasteBuddyStore
     @Binding var isPinned: Bool
@@ -37,6 +27,10 @@ struct ClipboardSidePanelView: View {
     @State private var sideItemTotalCount = 0
     @State private var interaction = ShelfInteractionModel()
     @State private var pinnedState: Bool?
+    @State private var sideRefreshTask: Task<Void, Never>?
+    @State private var sideLoadMoreTask: Task<Void, Never>?
+    @State private var sideLoadMoreRequestID: UUID?
+    @State private var isLoadingNextSidePage = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,6 +58,12 @@ struct ClipboardSidePanelView: View {
         }
         .onDisappear {
             interaction.dismissPreview()
+            sideRefreshTask?.cancel()
+            sideRefreshTask = nil
+            sideLoadMoreTask?.cancel()
+            sideLoadMoreTask = nil
+            sideLoadMoreRequestID = nil
+            isLoadingNextSidePage = false
         }
         .onChange(of: queryState) {
             refreshSideItems()
@@ -190,14 +190,15 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             ScrollView(.horizontal) {
-                HStack(spacing: 8) {
+                HStack(spacing: 5) {
                     ClipboardSidePanelFilterChip(
                         title: localized("label.clipboard"),
                         systemImageName: "clock.arrow.circlepath",
                         color: store.isCapturePaused ? .orange : .blue,
-                        isSelected: sideScope == .history
+                        isSelected: sideScope == .history,
+                        onDropPayloads: { dropItems($0, into: .history) }
                     ) {
                         setSideScope(.history)
                     }
@@ -206,7 +207,8 @@ struct ClipboardSidePanelView: View {
                         title: localized("action.paste_stack"),
                         systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
                         color: store.isPasteStackActive ? .green : .secondary,
-                        isSelected: sideScope == .pasteStack
+                        isSelected: sideScope == .pasteStack,
+                        onDropPayloads: { dropItems($0, into: .pasteStack) }
                     ) {
                         setSideScope(.pasteStack)
                     }
@@ -225,11 +227,15 @@ struct ClipboardSidePanelView: View {
                     ForEach(store.userPinboards) { pinboard in
                         ClipboardSidePanelFilterChip(
                             title: pinboard.name,
-                            systemImageName: "pin.fill",
+                            systemImageName: pinboard.systemImageName ?? "pin.fill",
                             color: Color(hex: pinboard.colorHex) ?? .blue,
-                            isSelected: sideScope == .pinboard(pinboard.id)
+                            isSelected: sideScope == .pinboard(pinboard.id),
+                            onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }
                         ) {
                             setSideScope(.pinboard(pinboard.id))
+                        }
+                        .contextMenu {
+                            CustomPinboardActionsMenu(store: store, pinboard: pinboard)
                         }
                     }
                 }
@@ -322,7 +328,7 @@ struct ClipboardSidePanelView: View {
                     dragPayload: { item in
                         PinboardItemDragPayload(
                             ids: [item.id],
-                            plainText: PasteboardWriter.plainText(for: item)
+                            plainTextProvider: { ClipboardPlainTextRenderer.plainText(for: item) }
                         )
                     },
                     onSelect: { id in
@@ -341,16 +347,25 @@ struct ClipboardSidePanelView: View {
     }
 
     private var footer: some View {
-        Text(localized("format.items", sideItemTotalCount))
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .frame(height: 32)
-            .padding(.horizontal, 4)
+        HStack(spacing: 12) {
+            Text(localized("format.items", sideItemTotalCount))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            if sideItems.count < sideItemTotalCount {
+                Button(action: loadNextSidePage) {
+                    Label("label.more", systemImage: "ellipsis")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 32)
+        .padding(.horizontal, 4)
     }
 
-    private var queryState: ClipboardSidePanelQueryState {
-        ClipboardSidePanelQueryState(
+    private var queryState: ClipboardPanelQueryState {
+        ClipboardPanelQueryState(
             dataRevision: store.dataRevision,
             queryRevision: store.queryRevision,
             scope: sideScope,
@@ -358,8 +373,7 @@ struct ClipboardSidePanelView: View {
             contentTypeFilter: store.contentTypeFilter,
             sourceAppFilter: store.sourceAppFilter,
             deviceFilter: store.deviceFilter,
-            dateFilter: store.dateFilter,
-            pasteStackRevision: store.pasteStackItems.count
+            dateFilter: store.dateFilter
         )
     }
 
@@ -415,14 +429,61 @@ struct ClipboardSidePanelView: View {
     }
 
     private func refreshSideItems() {
-        let items = store.filteredItems(for: sideScope)
-        sideItems = items
-        sideItemTotalCount = store.filteredItemCount(for: sideScope)
-        interaction.replaceItems(
-            items,
-            storeSelectedIDs: store.selectedItemIDs,
-            storePrimarySelectedID: store.selectedItemID
-        )
+        sideRefreshTask?.cancel()
+        sideLoadMoreTask?.cancel()
+        sideLoadMoreTask = nil
+        sideLoadMoreRequestID = nil
+        isLoadingNextSidePage = false
+        let requestedState = queryState
+        sideRefreshTask = Task { @MainActor in
+            let page = await store.filteredItemsPageAndCount(
+                for: requestedState.scope,
+                offset: 0,
+                limit: Self.pageSize
+            )
+            guard !Task.isCancelled, queryState == requestedState else { return }
+            sideItems = page.items
+            sideItemTotalCount = page.totalCount
+            interaction.replaceItems(
+                page.items,
+                storeSelectedIDs: store.selectedItemIDs,
+                storePrimarySelectedID: store.selectedItemID
+            )
+        }
+    }
+
+    private func loadNextSidePage() {
+        guard !isLoadingNextSidePage, sideItems.count < sideItemTotalCount else { return }
+        isLoadingNextSidePage = true
+        let requestID = UUID()
+        sideLoadMoreRequestID = requestID
+        let requestedState = queryState
+        let requestedOffset = sideItems.count
+        sideLoadMoreTask = Task { @MainActor in
+            let page = await store.filteredItemsPageAndCount(
+                for: requestedState.scope,
+                offset: requestedOffset,
+                limit: Self.pageSize
+            )
+            defer {
+                if sideLoadMoreRequestID == requestID {
+                    isLoadingNextSidePage = false
+                    sideLoadMoreTask = nil
+                    sideLoadMoreRequestID = nil
+                }
+            }
+            guard !Task.isCancelled,
+                  queryState == requestedState,
+                  sideItems.count == requestedOffset else { return }
+            let existingIDs = Set(sideItems.map(\.id))
+            sideItems.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
+            sideItemTotalCount = page.totalCount
+            interaction.replaceItems(
+                sideItems,
+                storeSelectedIDs: store.selectedItemIDs,
+                storePrimarySelectedID: store.selectedItemID
+            )
+        }
     }
 
     private func setSideScope(_ scope: PasteScope) {
@@ -443,6 +504,15 @@ struct ClipboardSidePanelView: View {
     private func selectSmartCategory(_ category: SmartPinboardCategory) {
         let pinboard = store.syncSmartPinboard(for: category)
         setSideScope(.pinboard(pinboard.id))
+    }
+
+    private func dropItems(
+        _ payloads: [PinboardItemDragPayload],
+        into target: ClipboardCollectionDropTarget
+    ) -> Bool {
+        var seen = Set<UUID>()
+        let ids = payloads.flatMap(\.ids).filter { seen.insert($0).inserted }
+        return target.apply(ids: ids, store: store, selectScope: setSideScope)
     }
 
     private func selectItem(_ item: ClipboardItem) {
@@ -640,7 +710,25 @@ private struct ClipboardSidePanelFilterChip: View {
     let systemImageName: String
     let color: Color
     let isSelected: Bool
+    var onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
     let action: () -> Void
+    @State private var isDropTargeted = false
+
+    init(
+        title: String,
+        systemImageName: String,
+        color: Color,
+        isSelected: Bool,
+        onDropPayloads: (([PinboardItemDragPayload]) -> Bool)? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.systemImageName = systemImageName
+        self.color = color
+        self.isSelected = isSelected
+        self.onDropPayloads = onDropPayloads
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -657,12 +745,21 @@ private struct ClipboardSidePanelFilterChip: View {
             .frame(height: 30)
             .background {
                 Capsule()
-                    .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
+                    .fill(isSelected || isDropTargeted ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
             }
             .clipShape(Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .overlay {
+            if let onDropPayloads {
+                ShelfCollectionChipDropTarget(
+                    isTargeted: $isDropTargeted,
+                    onDropPayloads: onDropPayloads
+                )
+                .clipShape(Capsule())
+            }
+        }
         .help(title)
     }
 }

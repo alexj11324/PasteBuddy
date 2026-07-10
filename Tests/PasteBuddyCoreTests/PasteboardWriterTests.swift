@@ -19,6 +19,7 @@ final class PasteboardWriterTests: XCTestCase {
                 try await probe.recognize(imageData)
             }
         )
+        try await prime(monitor)
 
         pasteboard.clearContents()
         pasteboard.writeObjects([Self.testImage()])
@@ -52,6 +53,7 @@ final class PasteboardWriterTests: XCTestCase {
                 try await probe.recognize(imageData)
             }
         )
+        try await prime(monitor)
 
         pasteboard.clearContents()
         pasteboard.writeObjects([Self.testImage()])
@@ -84,6 +86,7 @@ final class PasteboardWriterTests: XCTestCase {
                 try await probe.recognize(imageData)
             }
         )
+        try await prime(monitor)
 
         pasteboard.clearContents()
         pasteboard.writeObjects([Self.testImage()])
@@ -796,6 +799,99 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "async delayed paste")
     }
 
+    func testAsyncDirectPasteCancellationDuringDispatchDelayCopiesButDoesNotSend() async throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyAsyncDirectCancelDelay-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("existing clipboard", forType: .string)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Cancelled Delay",
+            payload: ClipboardPayload(text: "copied before cancellation")
+        )
+        let prepared = expectation(description: "Paste preparation started")
+        var sentPasteEvent = false
+
+        let task = Task { @MainActor in
+            await PasteboardWriter.pasteToFrontmostAppAsync(
+                item,
+                to: pasteboard,
+                isAccessibilityTrusted: true,
+                options: PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0.08),
+                prepareForPaste: {
+                    prepared.fulfill()
+                },
+                sendPasteEvent: {
+                    sentPasteEvent = true
+                }
+            )
+        }
+
+        await fulfillment(of: [prepared], timeout: 1)
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertEqual(result.outcome, .failedNoTargetApplication)
+        XCTAssertEqual(result.itemCount, 1)
+        XCTAssertFalse(sentPasteEvent)
+        XCTAssertEqual(pasteboard.string(forType: .string), "copied before cancellation")
+    }
+
+    func testAsyncMultiItemDirectPasteCancellationDuringActivationWaitDoesNotCopyOrSend() async throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyAsyncMultiCancelActivation-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("existing clipboard", forType: .string)
+        let items = [
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Cancelled One",
+                payload: ClipboardPayload(text: "must not be copied one")
+            ),
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Cancelled Two",
+                payload: ClipboardPayload(text: "must not be copied two")
+            )
+        ]
+        let prepared = expectation(description: "Paste preparation started")
+        var sentPasteEvent = false
+
+        let task = Task { @MainActor in
+            await PasteboardWriter.pasteToFrontmostAppAsync(
+                items,
+                to: pasteboard,
+                isAccessibilityTrusted: true,
+                targetBundleIdentifier: "com.example.Target",
+                activeApplicationBundleIdentifier: {
+                    "com.example.Other"
+                },
+                options: PasteboardWriter.DirectPasteOptions(activationWaitTimeout: 0.08),
+                prepareForPaste: {
+                    prepared.fulfill()
+                },
+                sendPasteEvent: {
+                    sentPasteEvent = true
+                }
+            )
+        }
+
+        await fulfillment(of: [prepared], timeout: 1)
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertEqual(result.outcome, .failedNoTargetApplication)
+        XCTAssertEqual(result.itemCount, 2)
+        XCTAssertFalse(sentPasteEvent)
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing clipboard")
+    }
+
     func testDirectPasteEmptySelectionReportsNoOp() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectEmpty-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }
@@ -823,6 +919,16 @@ final class PasteboardWriterTests: XCTestCase {
         NSRect(x: 2, y: 2, width: 4, height: 4).fill()
         image.unlockFocus()
         return image
+    }
+
+    private func prime(_ monitor: ClipboardMonitor) async throws {
+        XCTAssertNil(monitor.lastChangeCountForTesting)
+        monitor.pollOnce()
+        let deadline = Date().addingTimeInterval(1)
+        while monitor.lastChangeCountForTesting == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNotNil(monitor.lastChangeCountForTesting)
     }
 
     private func waitForOCRText(_ expectedText: String, in store: PasteBuddyStore) async throws -> ClipboardItem {

@@ -8401,6 +8401,38 @@
         }
       }
     },
+    "action.move_left": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Left"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "左移"
+          }
+        }
+      }
+    },
+    "action.move_right": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Right"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右移"
+          }
+        }
+      }
+    },
     "action.open": {
       "localizations": {
         "en": {
@@ -9921,6 +9953,22 @@
         }
       }
     },
+    "automation.error.history_locked": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlock PasteBuddy history before running this action."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行此操作前，请先解锁 PasteBuddy 历史记录。"
+          }
+        }
+      }
+    },
     "automation.error.no_matching_item": {
       "localizations": {
         "en": {
@@ -10065,6 +10113,23 @@
         }
       }
     },
+    "capture.error.backlog_full": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard capture paused briefly because incoming content exceeded the safe memory budget."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由于传入内容超出安全内存预算，剪贴板捕获已短暂暂停。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.clipboard_capture_backlog_full. Prefer the semantic key in code."
+    },
     "dialog.clear_all_history": {
       "localizations": {
         "en": {
@@ -10112,6 +10177,618 @@
           }
         }
       }
+    },
+    "error.database.invalid_stored_uuid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy database contains an invalid UUID: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 数据库包含无效的 UUID：%@"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.pastebuddy_database_contains_an_invalid_uuid. Prefer the semantic key in code."
+    },
+    "error.database.missing_stored_item": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy database could not index missing clipboard item: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 数据库无法索引缺失的剪贴板项目：%@"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.pastebuddy_database_could_not_index_missing_clipboard. Prefer the semantic key in code."
+    },
+    "error.encryption.invalid_key_material": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored encryption key has an invalid size."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储的加密密钥长度无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.stored_encryption_key_has_an_invalid_size. Prefer the semantic key in code."
+    },
+    "error.encryption.invalid_sealed_box": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted data could not be opened."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法打开加密数据。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.encrypted_data_could_not_be_opened. Prefer the semantic key in code."
+    },
+    "error.encryption.key_identifier_mismatch": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted envelope uses key %@, but %@ is required."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加密封装使用密钥 %@，但要求使用 %@。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.encrypted_envelope_uses_key_but_is_required. Prefer the semantic key in code."
+    },
+    "error.encryption.key_unwrapping_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Enclave key unwrapping failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全隔区密钥解封失败：%@"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.secure_enclave_key_unwrapping_failed. Prefer the semantic key in code."
+    },
+    "error.encryption.key_wrapping_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Enclave key wrapping failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全隔区密钥封装失败：%@"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.secure_enclave_key_wrapping_failed. Prefer the semantic key in code."
+    },
+    "error.encryption.keychain_delete_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain delete failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串删除失败，状态码 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.keychain_delete_failed_with_status. Prefer the semantic key in code."
+    },
+    "error.encryption.keychain_read_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain read failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串读取失败，状态码 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.keychain_read_failed_with_status. Prefer the semantic key in code."
+    },
+    "error.encryption.keychain_write_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain write failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串写入失败，状态码 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.keychain_write_failed_with_status. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.multiple_private_keys_match": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multiple Secure Enclave private keys can unwrap the persisted AES key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有多个安全隔区私钥可以解包已存储的 AES 密钥。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.multiple_secure_enclave_private_keys_can_unwrap. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.no_private_key_matches": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No stored Secure Enclave private key can unwrap the persisted AES key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有已存储的安全隔区私钥可以解包已存储的 AES 密钥。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.no_stored_secure_enclave_private_key_can. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.private_key_attributes_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key attributes are invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私钥属性无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_private_key_attributes_are_invalid. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.private_key_not_secure_enclave": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key is not a valid Secure Enclave key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该私钥不是有效的安全隔区密钥。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_private_key_is_not_a_valid. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.private_key_reference_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key reference is missing or invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私钥引用缺失或无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_private_key_reference_is_missing_or. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.private_key_reference_missing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key reference is missing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私钥引用缺失。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_private_key_reference_is_missing. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.public_key_derivation_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Secure Enclave public key could not be derived."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法派生安全隔区公钥。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_secure_enclave_public_key_could_not. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.selected_private_key_missing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected Secure Enclave private key is missing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选的安全隔区私钥缺失。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_selected_secure_enclave_private_key_is. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.selected_private_key_unloadable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected private key could not be loaded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法载入所选私钥。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_selected_private_key_could_not_be. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.unknown_security_framework_error": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An unknown Security framework error occurred."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发生未知的 Security 框架错误。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.an_unknown_security_framework_error_occurred. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.unwrapping_algorithm_unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ECIES AES-GCM key unwrapping is not supported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持 ECIES AES-GCM 密钥解包。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.ecies_aes_gcm_key_unwrapping_is_not. Prefer the semantic key in code."
+    },
+    "error.encryption.reason.wrapping_algorithm_unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ECIES AES-GCM key wrapping is not supported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持 ECIES AES-GCM 密钥封装。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.ecies_aes_gcm_key_wrapping_is_not. Prefer the semantic key in code."
+    },
+    "error.encryption.secure_enclave_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Enclave key wrapping is unavailable: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全隔区密钥封装不可用：%@"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.secure_enclave_key_wrapping_is_unavailable. Prefer the semantic key in code."
+    },
+    "error.encryption.unsupported_algorithm": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted envelope algorithm %@ is unsupported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持加密封装算法 %@。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.encrypted_envelope_algorithm_is_unsupported. Prefer the semantic key in code."
+    },
+    "error.encryption.unsupported_envelope_version": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted envelope version %d is unsupported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持加密封装版本 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.encrypted_envelope_version_is_unsupported. Prefer the semantic key in code."
+    },
+    "error.history_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy history is unavailable because it could not be loaded or saved safely."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 历史记录不可用，因为无法安全地加载或保存。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.history_unavailable. Prefer the semantic key in code."
+    },
+    "error.iroh.frame_too_large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh clipboard frame is too large: %d bytes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 剪贴板帧过大：%d 字节。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.iroh_clipboard_frame_is_too_large_bytes. Prefer the semantic key in code."
+    },
+    "error.iroh.invalid_frame": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh clipboard frame is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 剪贴板帧无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.iroh_clipboard_frame_is_invalid. Prefer the semantic key in code."
+    },
+    "error.iroh.invalid_pairing_code": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy pairing code is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 配对码无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.pastebuddy_pairing_code_is_invalid. Prefer the semantic key in code."
+    },
+    "error.iroh.invalid_peer_endpoint_id": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peer endpoint id is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对等端点 ID 无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.peer_endpoint_id_is_invalid. Prefer the semantic key in code."
+    },
+    "error.iroh.invalid_secret_key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored iroh identity is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储的 Iroh 身份无效。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.stored_iroh_identity_is_invalid. Prefer the semantic key in code."
+    },
+    "error.iroh.keychain_read_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh identity Keychain read failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 身份钥匙串读取失败，状态码 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.iroh_identity_keychain_read_failed_with_status. Prefer the semantic key in code."
+    },
+    "error.iroh.keychain_write_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh identity Keychain write failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 身份钥匙串写入失败，状态码 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.iroh_identity_keychain_write_failed_with_status. Prefer the semantic key in code."
+    },
+    "error.iroh.no_endpoint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh endpoint is not ready."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 端点尚未就绪。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.iroh_endpoint_is_not_ready. Prefer the semantic key in code."
+    },
+    "error.iroh.no_session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No active iroh clipboard session."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有活跃的 Iroh 剪贴板会话。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.no_active_iroh_clipboard_session. Prefer the semantic key in code."
+    },
+    "error.iroh.unsupported_envelope_version": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh clipboard envelope version %d is unsupported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持 Iroh 剪贴板封装版本 %d。"
+          }
+        }
+      },
+      "comment": "Legacy alias for format.iroh_clipboard_envelope_version_is_unsupported. Prefer the semantic key in code."
     },
     "format.added_mcp_client": {
       "localizations": {
@@ -10305,6 +10982,54 @@
         }
       }
     },
+    "format.encrypted_envelope_algorithm_is_unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted envelope algorithm %@ is unsupported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持加密封装算法 %@。"
+          }
+        }
+      }
+    },
+    "format.encrypted_envelope_uses_key_but_is_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted envelope uses key %@, but %@ is required."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加密封装使用密钥 %@，但要求使用 %@。"
+          }
+        }
+      }
+    },
+    "format.encrypted_envelope_version_is_unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted envelope version %d is unsupported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持加密封装版本 %d。"
+          }
+        }
+      }
+    },
     "format.excluded": {
       "localizations": {
         "en": {
@@ -10369,6 +11094,70 @@
         }
       }
     },
+    "format.iroh_clipboard_envelope_version_is_unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh clipboard envelope version %d is unsupported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持 Iroh 剪贴板封装版本 %d。"
+          }
+        }
+      }
+    },
+    "format.iroh_clipboard_frame_is_too_large_bytes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh clipboard frame is too large: %d bytes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 剪贴板帧过大：%d 字节。"
+          }
+        }
+      }
+    },
+    "format.iroh_identity_keychain_read_failed_with_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh identity Keychain read failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 身份钥匙串读取失败，状态码 %d。"
+          }
+        }
+      }
+    },
+    "format.iroh_identity_keychain_write_failed_with_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh identity Keychain write failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 身份钥匙串写入失败，状态码 %d。"
+          }
+        }
+      }
+    },
     "format.items": {
       "localizations": {
         "en": {
@@ -10413,6 +11202,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "最多保留 %d 个项目"
+          }
+        }
+      }
+    },
+    "format.keychain_delete_failed_with_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain delete failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串删除失败，状态码 %d。"
+          }
+        }
+      }
+    },
+    "format.keychain_read_failed_with_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain read failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串读取失败，状态码 %d。"
+          }
+        }
+      }
+    },
+    "format.keychain_write_failed_with_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain write failed with status %d."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串写入失败，状态码 %d。"
           }
         }
       }
@@ -10573,6 +11410,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "粘贴栈（%d）"
+          }
+        }
+      }
+    },
+    "format.pastebuddy_database_contains_an_invalid_uuid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy database contains an invalid UUID: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 数据库包含无效的 UUID：%@"
+          }
+        }
+      }
+    },
+    "format.pastebuddy_database_could_not_index_missing_clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy database could not index missing clipboard item: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 数据库无法索引缺失的剪贴板项目：%@"
           }
         }
       }
@@ -10749,6 +11618,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "席位：%d"
+          }
+        }
+      }
+    },
+    "format.secure_enclave_key_unwrapping_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Enclave key unwrapping failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全隔区密钥解封失败：%@"
+          }
+        }
+      }
+    },
+    "format.secure_enclave_key_wrapping_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Enclave key wrapping failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全隔区密钥封装失败：%@"
+          }
+        }
+      }
+    },
+    "format.secure_enclave_key_wrapping_is_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Enclave key wrapping is unavailable: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全隔区密钥封装不可用：%@"
           }
         }
       }
@@ -12669,6 +13586,166 @@
           "stringUnit": {
             "state": "translated",
             "value": "HTML"
+          }
+        }
+      }
+    },
+    "label.icon": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Icon"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图标"
+          }
+        }
+      }
+    },
+    "label.icon_bolt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bolt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "闪电"
+          }
+        }
+      }
+    },
+    "label.icon_book": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Book"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "书籍"
+          }
+        }
+      }
+    },
+    "label.icon_bookmark": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bookmark"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "书签"
+          }
+        }
+      }
+    },
+    "label.icon_default_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认图钉"
+          }
+        }
+      }
+    },
+    "label.icon_folder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹"
+          }
+        }
+      }
+    },
+    "label.icon_heart": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heart"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "爱心"
+          }
+        }
+      }
+    },
+    "label.icon_star": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Star"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "星标"
+          }
+        }
+      }
+    },
+    "label.icon_tag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tag"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标签"
+          }
+        }
+      }
+    },
+    "label.icon_tray": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tray"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收纳盒"
           }
         }
       }
@@ -15473,6 +16550,22 @@
         }
       }
     },
+    "mcp.error.history_locked": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlock PasteBuddy history before using MCP clipboard tools."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 MCP 剪贴板工具前，请先解锁 PasteBuddy 历史记录。"
+          }
+        }
+      }
+    },
     "mcp.tool.create_pinboard": {
       "localizations": {
         "en": {
@@ -15633,6 +16726,22 @@
         }
       }
     },
+    "message.an_unknown_security_framework_error_occurred": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An unknown Security framework error occurred."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发生未知的 Security 框架错误。"
+          }
+        }
+      }
+    },
     "message.automatic_clipboard_capture_is_stopped_until_the": {
       "localizations": {
         "en": {
@@ -15709,6 +16818,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "点按以打开 PasteBuddy 菜单。"
+          }
+        }
+      }
+    },
+    "message.clipboard_capture_backlog_full": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard capture paused briefly because incoming content exceeded the safe memory budget."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由于传入内容超出安全内存预算，剪贴板捕获已短暂暂停。"
+          }
+        }
+      }
+    },
+    "message.clipboard_capture_paused_briefly_because_incoming_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard capture paused briefly because incoming content exceeded the safe memory budget."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由于传入内容超出安全内存预算，剪贴板捕获已短暂暂停。"
           }
         }
       }
@@ -15873,6 +17014,38 @@
         }
       }
     },
+    "message.ecies_aes_gcm_key_unwrapping_is_not": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ECIES AES-GCM key unwrapping is not supported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持 ECIES AES-GCM 密钥解包。"
+          }
+        }
+      }
+    },
+    "message.ecies_aes_gcm_key_wrapping_is_not": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ECIES AES-GCM key wrapping is not supported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持 ECIES AES-GCM 密钥封装。"
+          }
+        }
+      }
+    },
     "message.edit_the_saved_text_then_choose_save": {
       "localizations": {
         "en": {
@@ -15885,6 +17058,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "编辑保存的文本，然后选择保存文本。"
+          }
+        }
+      }
+    },
+    "message.encrypted_data_could_not_be_opened": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted data could not be opened."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法打开加密数据。"
           }
         }
       }
@@ -15905,6 +17094,38 @@
         }
       }
     },
+    "message.history_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy history is unavailable because it could not be loaded or saved safely."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 历史记录不可用，因为无法安全地加载或保存。"
+          }
+        }
+      }
+    },
+    "message.iroh_clipboard_frame_is_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh clipboard frame is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 剪贴板帧无效。"
+          }
+        }
+      }
+    },
     "message.iroh_clipboard_sync_local_peer": {
       "localizations": {
         "en": {
@@ -15917,6 +17138,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "使用 iroh 点对点传输。剪贴板内容只会发送给已连接的对端。"
+          }
+        }
+      }
+    },
+    "message.iroh_endpoint_is_not_ready": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh endpoint is not ready."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iroh 端点尚未就绪。"
           }
         }
       }
@@ -16001,6 +17238,22 @@
         }
       }
     },
+    "message.multiple_secure_enclave_private_keys_can_unwrap": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multiple Secure Enclave private keys can unwrap the persisted AES key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有多个安全隔区私钥可以解包已存储的 AES 密钥。"
+          }
+        }
+      }
+    },
     "message.multiple_selected_items_paste_as_plain_text": {
       "localizations": {
         "en": {
@@ -16029,6 +17282,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "新的复制内容会显示在这里。"
+          }
+        }
+      }
+    },
+    "message.no_active_iroh_clipboard_session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No active iroh clipboard session."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有活跃的 Iroh 剪贴板会话。"
           }
         }
       }
@@ -16077,6 +17346,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "尚未检测到支持的 MCP 客户端。可用自定义 AI 工具连接任意兼容 MCP 的应用。"
+          }
+        }
+      }
+    },
+    "message.no_encrypted_cloudkit_records_found": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No encrypted CloudKit records found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到加密的 CloudKit 记录。"
           }
         }
       }
@@ -16141,6 +17426,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有匹配的应用。"
+          }
+        }
+      }
+    },
+    "message.no_stored_secure_enclave_private_key_can": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No stored Secure Enclave private key can unwrap the persisted AES key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有已存储的安全隔区私钥可以解包已存储的 AES 密钥。"
           }
         }
       }
@@ -16225,6 +17526,38 @@
         }
       }
     },
+    "message.pastebuddy_history_is_unavailable_because_it_could": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy history is unavailable because it could not be loaded or saved safely."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 历史记录不可用，因为无法安全地加载或保存。"
+          }
+        }
+      }
+    },
+    "message.pastebuddy_pairing_code_is_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy pairing code is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 配对码无效。"
+          }
+        }
+      }
+    },
     "message.pastebuddy_stores_only_the_hash_of_this": {
       "localizations": {
         "en": {
@@ -16237,6 +17570,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 只保存此令牌的哈希值。"
+          }
+        }
+      }
+    },
+    "message.peer_endpoint_id_is_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peer endpoint id is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对等端点 ID 无效。"
           }
         }
       }
@@ -16593,6 +17942,38 @@
         }
       }
     },
+    "message.stored_encryption_key_has_an_invalid_size": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored encryption key has an invalid size."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储的加密密钥长度无效。"
+          }
+        }
+      }
+    },
+    "message.stored_iroh_identity_is_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored iroh identity is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储的 Iroh 身份无效。"
+          }
+        }
+      }
+    },
     "message.stores_pastebuddy_history_in_the_user_s": {
       "localizations": {
         "en": {
@@ -16657,6 +18038,70 @@
         }
       }
     },
+    "message.the_private_key_attributes_are_invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key attributes are invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私钥属性无效。"
+          }
+        }
+      }
+    },
+    "message.the_private_key_is_not_a_valid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key is not a valid Secure Enclave key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该私钥不是有效的安全隔区密钥。"
+          }
+        }
+      }
+    },
+    "message.the_private_key_reference_is_missing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key reference is missing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私钥引用缺失。"
+          }
+        }
+      }
+    },
+    "message.the_private_key_reference_is_missing_or": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The private key reference is missing or invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私钥引用缺失或无效。"
+          }
+        }
+      }
+    },
     "message.the_same_local_privacy_boundary_covers_history": {
       "localizations": {
         "en": {
@@ -16669,6 +18114,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "相同的本地隐私边界适用于历史记录、收藏板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
+          }
+        }
+      }
+    },
+    "message.the_secure_enclave_public_key_could_not": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Secure Enclave public key could not be derived."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法派生安全隔区公钥。"
+          }
+        }
+      }
+    },
+    "message.the_selected_private_key_could_not_be": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected private key could not be loaded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法载入所选私钥。"
+          }
+        }
+      }
+    },
+    "message.the_selected_secure_enclave_private_key_is": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected Secure Enclave private key is missing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选的安全隔区私钥缺失。"
           }
         }
       }
@@ -17357,6 +18850,214 @@
           "stringUnit": {
             "state": "translated",
             "value": "分享扩展已启用"
+          }
+        }
+      }
+    },
+    "mobile.error.history_load_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy could not load encrypted history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 无法加载加密历史记录。"
+          }
+        }
+      }
+    },
+    "mobile.error.history_unavailable_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History Unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史记录不可用"
+          }
+        }
+      }
+    },
+    "mobile.error.image_data_too_large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared image is too large to import safely (limit: %d MB)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享的图片过大，无法安全导入（上限：%d MB）。"
+          }
+        }
+      }
+    },
+    "mobile.error.image_dimensions_too_large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared image dimensions are too large to process safely."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享的图片尺寸过大，无法安全处理。"
+          }
+        }
+      }
+    },
+    "mobile.error.image_frame_count_too_large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared image contains too many frames to process safely."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享的图片包含的帧数过多，无法安全处理。"
+          }
+        }
+      }
+    },
+    "mobile.error.invalid_image_data": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared image data is invalid."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享的图片数据无效。"
+          }
+        }
+      }
+    },
+    "mobile.error.no_shared_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No shared content was provided."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有提供共享内容。"
+          }
+        }
+      }
+    },
+    "mobile.error.provider_batch_timed_out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared content batch took too long to load."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这批分享内容加载时间过长。"
+          }
+        }
+      }
+    },
+    "mobile.error.provider_load_timed_out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared content took too long to load."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享内容加载时间过长。"
+          }
+        }
+      }
+    },
+    "mobile.error.shared_batch_too_large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared content is too large to import safely (limit: %d MB)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享内容过大，无法安全导入（上限：%d MB）。"
+          }
+        }
+      }
+    },
+    "mobile.error.too_many_shared_items": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many shared items were provided (limit: %d)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享项目过多（上限：%d）。"
+          }
+        }
+      }
+    },
+    "mobile.error.unreadable_shared_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared content for %@ could not be read."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法读取 %@ 类型的共享内容。"
+          }
+        }
+      }
+    },
+    "mobile.error.unsupported_shared_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared content did not include text, a URL, a file URL, or image data."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共享内容不包含文本、URL、文件 URL 或图片数据。"
           }
         }
       }
@@ -18736,6 +20437,23 @@
           }
         }
       }
+    },
+    "status.cloudkit.no_encrypted_records": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No encrypted CloudKit records found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到加密的 CloudKit 记录。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.no_encrypted_cloudkit_records_found. Prefer the semantic key in code."
     }
   },
   "version": "1.0"

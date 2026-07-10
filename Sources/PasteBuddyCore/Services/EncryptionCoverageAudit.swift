@@ -77,11 +77,11 @@ public enum EncryptionCoverageAudit {
     public static let current = EncryptionCoverageReport(items: [
         EncryptionCoverageItem(
             surface: .clipboardText,
-            protection: "Stored in the local PasteBuddy snapshot and never uploaded unless the user turns on sync."
+            protection: "Encrypted mode stores clipboard text only in the AES-GCM snapshot and removes the plaintext SQLite repository."
         ),
         EncryptionCoverageItem(
             surface: .clipboardURLs,
-            protection: "Stored in the local PasteBuddy snapshot with no separate plaintext search index."
+            protection: "Encrypted mode removes the separate plaintext search index before reporting encryption enabled."
         ),
         EncryptionCoverageItem(
             surface: .fileReferences,
@@ -89,11 +89,11 @@ public enum EncryptionCoverageAudit {
         ),
         EncryptionCoverageItem(
             surface: .imageAndScreenshotBytes,
-            protection: "Image data is stored in the local PasteBuddy snapshot."
+            protection: "Encrypted mode hydrates image bytes into the AES-GCM snapshot before removing plaintext asset rows."
         ),
         EncryptionCoverageItem(
             surface: .ocrMetadata,
-            protection: "Apple Vision OCR text is saved as local item metadata after local recognition."
+            protection: "Apple Vision OCR text is local metadata; encrypted mode stores it only inside the AES-GCM snapshot."
         ),
         EncryptionCoverageItem(
             surface: .thumbnails,

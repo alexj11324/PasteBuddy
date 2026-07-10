@@ -82,6 +82,7 @@ public struct MCPPinFirstMatchResponse: Codable, Equatable, Sendable {
 public enum MCPToolServiceError: LocalizedError, Equatable {
     case serverDisabled
     case toolDisabled(MCPToolName)
+    case historyLocked
     case missingArgument(String)
     case invalidPinboard
     case noMatchingItem
@@ -93,6 +94,11 @@ public enum MCPToolServiceError: LocalizedError, Equatable {
             "PasteBuddy MCP access is disabled. Enable it in Settings before connecting an MCP client."
         case .toolDisabled(let tool):
             "\(tool.displayName) is disabled for MCP clients."
+        case .historyLocked:
+            PasteBuddyLocalization.string(
+                "mcp.error.history_locked",
+                defaultValue: "Unlock PasteBuddy history before using MCP clipboard tools."
+            )
         case .missingArgument(let name):
             "Missing required argument: \(name)."
         case .invalidPinboard:
@@ -116,10 +122,11 @@ public final class MCPToolService {
     public func searchHistory(query: String, limit: Int = 5) throws -> MCPHistorySearchResponse {
         do {
             try require(.searchHistory)
+            try requireHistoryUnlocked()
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
             let cappedLimit = min(max(limit, 1), 25)
-            let items = visibleItems(matching: trimmed, limit: cappedLimit)
+            let items = try visibleItems(matching: trimmed, limit: cappedLimit)
                 .map(AutomationItemSummary.init(item:))
             recordAccess(tool: .searchHistory, outcome: .succeeded, resultCount: items.count)
             return MCPHistorySearchResponse(query: trimmed, items: items)
@@ -132,6 +139,7 @@ public final class MCPToolService {
     public func retrieveItem(itemID: UUID, includeImageData: Bool = false) throws -> MCPClipboardItemResponse {
         do {
             try require(.retrieveItem)
+            try requireHistoryUnlocked()
             guard let item = store.snapshot.items.first(where: { $0.id == itemID }) else {
                 throw MCPToolServiceError.noMatchingItem
             }
@@ -154,6 +162,7 @@ public final class MCPToolService {
     public func listPinboards() throws -> MCPPinboardListResponse {
         do {
             try require(.listPinboards)
+            try requireHistoryUnlocked()
             let visibleItemIDs = Set(store.snapshot.items.filter(isMCPVisible).map(\.id))
             let pinboards = store.snapshot.pinboards.map {
                 MCPPinboardSummary(pinboard: $0, visibleItemIDs: visibleItemIDs)
@@ -186,6 +195,7 @@ public final class MCPToolService {
     public func pinFirstMatch(query: String, pinboardID: UUID? = nil, pinboardName: String? = nil) throws -> MCPPinFirstMatchResponse {
         do {
             try require(.pinFirstMatch)
+            try requireHistoryUnlocked()
             let item = try firstVisibleMatchingItem(query: query)
             guard let pinboard = resolvePinboard(id: pinboardID, name: pinboardName) else {
                 throw MCPToolServiceError.invalidPinboard
@@ -206,6 +216,7 @@ public final class MCPToolService {
     }
 
     private func require(_ tool: MCPToolName) throws {
+        try store.requirePersistenceReady()
         guard store.snapshot.mcp.isServerEnabled else {
             throw MCPToolServiceError.serverDisabled
         }
@@ -214,21 +225,42 @@ public final class MCPToolService {
         }
     }
 
+    private func requireHistoryUnlocked() throws {
+        guard !store.isHistoryAccessLocked else {
+            throw MCPToolServiceError.historyLocked
+        }
+    }
+
     private func firstVisibleMatchingItem(query: String) throws -> ClipboardItem {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
-        guard let item = visibleItems(matching: trimmed, limit: 1).first else {
+        guard let item = try visibleItems(matching: trimmed, limit: 1).first else {
             throw MCPToolServiceError.noMatchingItem
         }
         return item
     }
 
-    private func visibleItems(matching query: String, limit: Int) -> [ClipboardItem] {
-        store.snapshot.items
-            .filter { $0.matches(query) && isMCPVisible($0) }
-            .sorted { $0.createdAt > $1.createdAt }
-            .prefix(max(limit, 0))
-            .map { $0 }
+    private func visibleItems(matching query: String, limit: Int) throws -> [ClipboardItem] {
+        let resolvedLimit = max(limit, 0)
+        guard resolvedLimit > 0 else { return [] }
+        let pageSize = max(resolvedLimit, 25)
+        var offset = 0
+        var visibleItems: [ClipboardItem] = []
+        while visibleItems.count < resolvedLimit {
+            let page = try store.searchItems(query: query, offset: offset, limit: pageSize)
+            guard !page.isEmpty else { break }
+            for item in page where isMCPVisible(item) {
+                visibleItems.append(item)
+                if visibleItems.count == resolvedLimit {
+                    break
+                }
+            }
+            offset += page.count
+            if page.count < pageSize {
+                break
+            }
+        }
+        return visibleItems
     }
 
     private func isMCPVisible(_ item: ClipboardItem) -> Bool {
@@ -254,6 +286,9 @@ public final class MCPToolService {
         itemID: UUID? = nil,
         pinboardID: UUID? = nil
     ) {
+        if error is PasteBuddyPersistenceError {
+            return
+        }
         if let serviceError = error as? MCPToolServiceError, serviceError == .serverDisabled {
             return
         }
@@ -261,6 +296,8 @@ public final class MCPToolService {
         if let serviceError = error as? MCPToolServiceError, case .toolDisabled = serviceError {
             outcome = .denied
         } else if let serviceError = error as? MCPToolServiceError, case .privacyBlocked = serviceError {
+            outcome = .denied
+        } else if let serviceError = error as? MCPToolServiceError, serviceError == .historyLocked {
             outcome = .denied
         } else {
             outcome = .failed

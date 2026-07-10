@@ -24,6 +24,41 @@ final class AutomationActionServiceTests: XCTestCase {
         XCTAssertFalse(result.displaySummary.contains("confidential launch payload"))
     }
 
+    func testSearchUsesRepositoryWithoutMutatingGlobalUIQueryState() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Repository Automation Match",
+            payload: ClipboardPayload(text: "repository automation needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        store.selectedScope = .pasteStack
+        store.searchQuery = "visible UI query"
+        let queryRevision = store.queryRevision
+        let fetchCount = repository.fetchPageInvocationCount
+        let service = AutomationActionService(store: store)
+
+        let result = try service.searchClipboard(query: "automation needle")
+
+        XCTAssertEqual(result.items.map(\.id), [item.id])
+        XCTAssertEqual(repository.fetchPageInvocationCount, fetchCount + 1)
+        XCTAssertEqual(store.searchQuery, "visible UI query")
+        XCTAssertEqual(store.selectedScope, .pasteStack)
+        XCTAssertEqual(store.queryRevision, queryRevision)
+    }
+
     func testCreatePinboardActionNormalizesColorAndRejectsEmptyName() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -136,5 +171,67 @@ final class AutomationActionServiceTests: XCTestCase {
         XCTAssertEqual(result.destination, .clipboard)
         XCTAssertEqual(result.format, .plainText)
         XCTAssertFalse(result.displaySummary.contains("secret payload body"))
+    }
+
+    func testLockedHistoryRejectsAutomationItemAccessWithoutInvokingTransfer() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Locked Secret",
+            payload: ClipboardPayload(text: "must remain inaccessible")
+        ))
+        let service = AutomationActionService(store: store)
+        _ = try service.createPinboard(name: "Private")
+        store.setBiometricHistoryLockEnabled(true)
+        var transferCallCount = 0
+
+        let operations: [() throws -> Void] = [
+            { _ = try service.searchClipboard(query: "locked") },
+            { _ = try service.firstMatchingItem(query: "locked") },
+            { _ = try service.pinFirstMatchingItem(query: "locked", toPinboardNamed: "Private") },
+            {
+                _ = try service.transferFirstMatchingItem(query: "locked") { _, _ in
+                    transferCallCount += 1
+                }
+            }
+        ]
+
+        for operation in operations {
+            XCTAssertThrowsError(try operation()) { error in
+                XCTAssertEqual(
+                    error.localizedDescription,
+                    "Unlock PasteBuddy history before running this action."
+                )
+            }
+        }
+        XCTAssertEqual(transferCallCount, 0)
+        XCTAssertEqual(
+            store.snapshot.pinboards.first(where: { $0.name == "Private" })?.itemIDs,
+            []
+        )
+    }
+
+    func testBlockedPersistenceRejectsAutomationReadsAndMutations() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try harness.snapshotStore.save(PasteBuddySnapshot())
+        try Data("not a valid PasteBuddy store".utf8).write(to: harness.snapshotStore.fileURL)
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.load()
+        let service = AutomationActionService(store: store)
+
+        XCTAssertTrue(store.isPersistenceWriteBlocked)
+        XCTAssertThrowsError(try service.searchClipboard(query: "anything")) { error in
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+        }
+        XCTAssertThrowsError(try service.createPinboard(name: "Must Not Succeed")) { error in
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+        }
+        XCTAssertFalse(store.snapshot.pinboards.contains(where: { $0.name == "Must Not Succeed" }))
     }
 }

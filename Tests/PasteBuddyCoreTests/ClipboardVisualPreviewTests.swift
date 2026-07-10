@@ -68,6 +68,29 @@ final class ClipboardVisualPreviewTests: XCTestCase {
         XCTAssertTrue(completed.searchDocument.normalizedText.contains("receipt total"))
     }
 
+    func testSearchOnlyRefreshReusesBinaryContentHashUntilPayloadContentChanges() {
+        var item = ClipboardItem(
+            sourceAppName: "Screenshot",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Pending OCR",
+            payload: ClipboardPayload(imageData: Data(repeating: 0x01, count: 1_024))
+        )
+        let originalContentHash = item.searchDocument.contentHash
+
+        item.payload.ocrText = "Receipt total 42 dollars"
+        item.title = "Receipt"
+        item.refreshSearchDocumentPreservingContentHash()
+
+        XCTAssertEqual(item.searchDocument.contentHash, originalContentHash)
+        XCTAssertTrue(item.searchDocument.normalizedText.contains("receipt total"))
+
+        item.payload.imageData = Data(repeating: 0x02, count: 1_024)
+        item.refreshSearchDocument()
+
+        XCTAssertNotEqual(item.searchDocument.contentHash, originalContentHash)
+    }
+
     func testLegacyDecodedItemRebuildsMissingSearchDocument() throws {
         let legacyJSON = Data("""
         {
@@ -123,6 +146,27 @@ final class ClipboardVisualPreviewTests: XCTestCase {
 
         XCTAssertTrue(item.visualPreview.prefersImageThumbnail)
         XCTAssertEqual(item.visualPreview.headline, "GitHub")
+    }
+
+    func testLinkPreviewFallsBackToLongURLSlugWhenMetadataUnavailable() {
+        let item = ClipboardItem(
+            sourceAppName: "Brave Browser",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "dpit.lib00.com",
+            payload: ClipboardPayload(
+                urlString: "https://dpit.lib00.com/zh/content/1242/uncovering-the-reason-behind-openai-codex-ai-downgrade-system-prompt-configuration-guide"
+            )
+        )
+
+        XCTAssertEqual(
+            item.visualPreview.headline,
+            "Uncovering the reason behind openai codex ai downgrade system prompt configuration guide"
+        )
+        XCTAssertEqual(
+            item.visualPreview.body,
+            "https://dpit.lib00.com/zh/content/1242/uncovering-the-reason-behind-openai-codex-ai-downgrade-system-prompt-configuration-guide"
+        )
     }
 
     func testMixedLinkWithSavedPreviewThumbnailStillPresentsAsLink() {

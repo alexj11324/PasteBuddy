@@ -1063,15 +1063,18 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     /// Fast path for callers filtering many items against one query: normalize
     /// once with `normalizedSearchQuery(_:)`, then reuse the result per item.
     public func matchesNormalizedSearchQuery(_ normalizedQuery: String) -> Bool {
+        matchesNormalizedSearchQuery(
+            normalizedQuery,
+            terms: Self.searchTerms(inNormalizedQuery: normalizedQuery)
+        )
+    }
+
+    func matchesNormalizedSearchQuery(_ normalizedQuery: String, terms: [String]) -> Bool {
         guard !normalizedQuery.isEmpty else { return true }
-        let terms = Self.searchTokens(inNormalizedQuery: normalizedQuery)
-        guard !terms.isEmpty else {
-            return searchDocument.normalizedText.contains(normalizedQuery)
+        if searchDocument.normalizedText.contains(normalizedQuery) {
+            return true
         }
-        let documentTokens = Self.searchTokens(inNormalizedQuery: searchDocument.normalizedText)
-        return terms.allSatisfy { term in
-            documentTokens.contains { $0.hasPrefix(term) }
-        }
+        return terms.count > 1 && terms.allSatisfy(searchDocument.normalizedText.contains)
     }
 
     public static func normalizedSearchQuery(_ query: String) -> String {
@@ -1080,26 +1083,8 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         return normalizedSearchString(trimmed)
     }
 
-    static func searchTokens(inNormalizedQuery normalizedQuery: String) -> [String] {
-        let tokenCharacters = CharacterSet.letters.union(.decimalDigits)
-        var tokens: [String] = []
-        var current = String.UnicodeScalarView()
-
-        func flushCurrentToken() {
-            guard !current.isEmpty else { return }
-            tokens.append(String(current))
-            current.removeAll(keepingCapacity: true)
-        }
-
-        for scalar in normalizedQuery.unicodeScalars {
-            if tokenCharacters.contains(scalar) {
-                current.append(scalar)
-            } else {
-                flushCurrentToken()
-            }
-        }
-        flushCurrentToken()
-        return tokens
+    static func searchTerms(inNormalizedQuery normalizedQuery: String) -> [String] {
+        normalizedQuery.split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 
     public var captureRuleSearchText: String {
@@ -1107,6 +1092,13 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
+        Self.effectiveContentTypes(contentType: contentType, payload: payload)
+    }
+
+    static func effectiveContentTypes(
+        contentType: ClipboardContentType,
+        payload: ClipboardPayload
+    ) -> Set<ClipboardContentType> {
         var types: Set<ClipboardContentType> = []
         let hasPresentationURL = payload.presentationURLString != nil
         let hasTextContent = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -1143,6 +1135,8 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                           displayTitle != host,
                           displayTitle != urlString {
             displayTitle
+        } else if let fallbackHeadline = Self.fallbackLinkHeadline(from: urlString) {
+            fallbackHeadline
         } else {
             host ?? title
         }
@@ -1154,6 +1148,35 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             systemImageName: "link",
             prefersImageThumbnail: payload.hasImageAsset
         )
+    }
+
+    private static func fallbackLinkHeadline(from urlString: String) -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+        let slug = url.deletingPathExtension().lastPathComponent
+            .removingPercentEncoding?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let slug, !slug.isEmpty else { return nil }
+
+        let separatorCount = slug.reduce(into: 0) { count, character in
+            if character == "-" || character == "_" {
+                count += 1
+            }
+        }
+        guard separatorCount >= 4 || slug.count >= 24 else { return nil }
+
+        let words = slug
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard !words.isEmpty else { return nil }
+
+        let headline = words.joined(separator: " ")
+        guard headline.contains(where: \.isLetter) else { return nil }
+        if headline == headline.lowercased(), let first = headline.first {
+            return String(first).uppercased() + headline.dropFirst()
+        }
+        return headline
     }
 
     public static func normalizedLabels(_ labels: [String]) -> [String] {
@@ -1171,6 +1194,17 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public mutating func refreshSearchDocument() {
+        refreshSearchDocument(reusingContentHash: nil)
+    }
+
+    /// Rebuilds search-only metadata after OCR/title/label changes or asset
+    /// hydration. Callers must not use this after changing deduplicated payload
+    /// bytes/URLs; keeping this internal prevents that contract leaking as API.
+    mutating func refreshSearchDocumentPreservingContentHash() {
+        refreshSearchDocument(reusingContentHash: searchDocument.contentHash)
+    }
+
+    private mutating func refreshSearchDocument(reusingContentHash contentHash: String?) {
         labels = Self.normalizedLabels(labels)
         searchDocument = Self.makeSearchDocument(
             title: title,
@@ -1180,7 +1214,8 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
             contentType: contentType,
             reuseCategory: reuseCategory,
             payload: payload,
-            ocrState: ocrState
+            ocrState: ocrState,
+            reusingContentHash: contentHash
         )
     }
 
@@ -1193,6 +1228,30 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         reuseCategory: ClipboardReuseCategory,
         payload: ClipboardPayload,
         ocrState: OCRState
+    ) -> ClipboardSearchDocument {
+        makeSearchDocument(
+            title: title,
+            labels: labels,
+            sourceAppName: sourceAppName,
+            deviceName: deviceName,
+            contentType: contentType,
+            reuseCategory: reuseCategory,
+            payload: payload,
+            ocrState: ocrState,
+            reusingContentHash: nil
+        )
+    }
+
+    private static func makeSearchDocument(
+        title: String,
+        labels: [String],
+        sourceAppName: String,
+        deviceName: String,
+        contentType: ClipboardContentType,
+        reuseCategory: ClipboardReuseCategory,
+        payload: ClipboardPayload,
+        ocrState: OCRState,
+        reusingContentHash contentHash: String?
     ) -> ClipboardSearchDocument {
         let searchablePayloadText = payload.searchableText
         let previewBody: String
@@ -1238,7 +1297,7 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
                 reuseCategory: reuseCategory,
                 payload: payload
             ),
-            dedupeHash: deduplicationHash(contentType: contentType, payload: payload),
+            dedupeHash: contentHash ?? deduplicationHash(contentType: contentType, payload: payload),
             searchHash: ClipboardSearchDocument.searchDocumentHash(
                 normalizedText: normalizedText,
                 previewHeadline: title.singleLinePreview,
@@ -1386,9 +1445,21 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
 }
 
 public struct Pinboard: Identifiable, Codable, Equatable, Sendable {
+    public static let customizableSystemImageNames = [
+        "heart.fill",
+        "star.fill",
+        "bookmark.fill",
+        "folder.fill",
+        "tag.fill",
+        "tray.fill",
+        "bolt.fill",
+        "book.fill"
+    ]
+
     public var id: UUID
     public var name: String
     public var colorHex: String
+    public var systemImageName: String?
     public var itemIDs: [UUID]
     public var sharing: PinboardSharingState?
     public var createdAt: Date
@@ -1398,6 +1469,7 @@ public struct Pinboard: Identifiable, Codable, Equatable, Sendable {
         id: UUID = UUID(),
         name: String,
         colorHex: String,
+        systemImageName: String? = nil,
         itemIDs: [UUID] = [],
         sharing: PinboardSharingState? = nil,
         createdAt: Date = Date(),
@@ -1406,6 +1478,7 @@ public struct Pinboard: Identifiable, Codable, Equatable, Sendable {
         self.id = id
         self.name = name
         self.colorHex = colorHex
+        self.systemImageName = systemImageName
         self.itemIDs = itemIDs
         self.sharing = sharing
         self.createdAt = createdAt

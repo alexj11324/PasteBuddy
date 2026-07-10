@@ -18,6 +18,22 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
     }
 
+    func testBlockedPersistenceRejectsMCPBeforeServerOrToolChecks() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try harness.snapshotStore.save(PasteBuddySnapshot())
+        try Data("not a valid PasteBuddy store".utf8).write(to: harness.snapshotStore.fileURL)
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.load()
+        let service = MCPToolService(store: store)
+
+        XCTAssertTrue(store.isPersistenceWriteBlocked)
+        XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+        }
+        XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
+    }
+
     func testMCPAgentConnectionEnablesStandardToolsWithoutPayloadRetrieval() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -213,6 +229,118 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertThrowsError(try service.pinFirstMatch(query: "payroll", pinboardID: pinboard.id)) { error in
             XCTAssertEqual(error as? MCPToolServiceError, .noMatchingItem)
         }
+    }
+
+    func testRepositorySearchPagesPastPrivacyBlockedItemsForSearchAndPinWithoutChangingUIState() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 6_000_000)
+        let hiddenItems = (0..<30).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Needle Private \(index)",
+                payload: ClipboardPayload(text: "needle private body \(index)")
+            )
+        }
+        let visibleItems = (0..<3).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-30 - index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-30 - index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Needle Public \(index)",
+                payload: ClipboardPayload(text: "needle public body \(index)")
+            )
+        }
+        let pinboard = Pinboard(name: "MCP Results", colorHex: "#4EA7FC")
+        var snapshot = PasteBuddySnapshot(items: hiddenItems + visibleItems, pinboards: [pinboard])
+        snapshot.privacy.customCaptureRules = [CaptureRule(
+            name: "No private MCP access",
+            condition: .containsText,
+            pattern: "private",
+            contentTypes: [.text]
+        )]
+        snapshot.mcp = MCPConfiguration(
+            isServerEnabled: true,
+            enabledTools: [.searchHistory, .pinFirstMatch]
+        )
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        store.selectedScope = .pasteStack
+        store.searchQuery = "keep the UI query"
+        let queryRevision = store.queryRevision
+        let service = MCPToolService(store: store)
+
+        let searchFetchCount = repository.fetchPageInvocationCount
+        let response = try service.searchHistory(query: "needle", limit: 3)
+
+        XCTAssertEqual(response.items.map(\.id), visibleItems.map(\.id))
+        XCTAssertEqual(repository.fetchPageInvocationCount, searchFetchCount + 2)
+        XCTAssertEqual(store.searchQuery, "keep the UI query")
+        XCTAssertEqual(store.selectedScope, .pasteStack)
+        XCTAssertEqual(store.queryRevision, queryRevision)
+
+        let pinFetchCount = repository.fetchPageInvocationCount
+        let pinned = try service.pinFirstMatch(query: "needle", pinboardID: pinboard.id)
+
+        XCTAssertEqual(pinned.item.id, visibleItems[0].id)
+        XCTAssertEqual(repository.fetchPageInvocationCount, pinFetchCount + 2)
+        XCTAssertEqual(
+            store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs,
+            [visibleItems[0].id]
+        )
+        XCTAssertEqual(store.searchQuery, "keep the UI query")
+        XCTAssertEqual(store.selectedScope, .pasteStack)
+        XCTAssertEqual(store.queryRevision, queryRevision)
+    }
+
+    func testLockedHistoryRejectsEveryMCPClipboardReadPath() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Locked MCP Secret",
+            payload: ClipboardPayload(text: "locked MCP payload")
+        ))
+        let pinboard = store.createPinboard(named: "Locked MCP")
+        store.setBiometricHistoryLockEnabled(true)
+        let service = MCPToolService(store: store)
+
+        let operations: [() throws -> Void] = [
+            { _ = try service.searchHistory(query: "locked") },
+            { _ = try service.retrieveItem(itemID: item.id) },
+            { _ = try service.listPinboards() },
+            { _ = try service.pinFirstMatch(query: "locked", pinboardID: pinboard.id) }
+        ]
+        for operation in operations {
+            XCTAssertThrowsError(try operation()) { error in
+                XCTAssertEqual(error as? MCPToolServiceError, .historyLocked)
+            }
+        }
+        XCTAssertEqual(
+            store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs,
+            []
+        )
+        XCTAssertEqual(store.snapshot.mcp.accessLog.prefix(4).map(\.outcome), Array(repeating: .denied, count: 4))
     }
 
     func testMCPCreatePinboardAndPinFirstMatch() throws {

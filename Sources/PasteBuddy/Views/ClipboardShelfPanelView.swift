@@ -26,21 +26,21 @@ enum ClipboardShelfGlass {
     static let detailSuppressionOpacity = 0.28
 }
 
-private struct ClipboardShelfQueryState: Equatable {
+struct ClipboardPanelQueryState: Equatable {
     let dataRevision: Int
     let queryRevision: Int
-    let shelfScope: PasteScope
+    let scope: PasteScope
     let searchQuery: String
     let contentTypeFilter: ClipboardContentType?
     let sourceAppFilter: String?
     let deviceFilter: String?
     let dateFilter: ClipboardDateFilter
-    let pasteStackRevision: Int
 }
 
 private enum ClipboardShelfDisplayItem: Identifiable {
     case launchAtLoginPrompt
     case empty(title: String, detail: String, systemImageName: String)
+    case loadMore
     case clipboard(ClipboardItem)
 
     var id: UUID {
@@ -49,17 +49,40 @@ private enum ClipboardShelfDisplayItem: Identifiable {
             UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         case .empty:
             UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        case .loadMore:
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         case .clipboard(let item):
             item.id
         }
     }
 }
 
-private enum ShelfCollectionDropTarget {
+enum ClipboardCollectionDropTarget {
     case history
     case pasteStack
-    case smartCategory(SmartPinboardCategory)
     case pinboard(UUID)
+
+    @MainActor
+    func apply(
+        ids: [UUID],
+        store: PasteBuddyStore,
+        selectScope: (PasteScope) -> Void
+    ) -> Bool {
+        guard !ids.isEmpty else { return false }
+        switch self {
+        case .history:
+            selectScope(.history)
+            return true
+        case .pasteStack:
+            guard store.addItemsToPasteStack(ids) else { return false }
+            selectScope(.pasteStack)
+            return true
+        case .pinboard(let pinboardID):
+            store.pinItems(ids, to: pinboardID)
+            selectScope(.pinboard(pinboardID))
+            return true
+        }
+    }
 }
 
 enum ClipboardPanelSearchInput {
@@ -76,6 +99,7 @@ enum ClipboardPanelSearchInput {
 
 struct ClipboardShelfPanelView: View {
     private static let basePasteSearchAnimation = Animation.smooth(duration: 0.24, extraBounce: 0)
+    private static let pageSize = 100
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var store: PasteBuddyStore
@@ -89,10 +113,15 @@ struct ClipboardShelfPanelView: View {
     @FocusState private var isShelfFocused: Bool
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var shelfItems: [ClipboardItem] = []
+    @State private var shelfItemTotalCount = 0
     @State private var shelfInteraction = ShelfInteractionModel()
     @State private var isSearchRailPresented = false
     @State private var relativeDateReference = Date()
     @State private var shelfScope: PasteScope = .history
+    @State private var shelfRefreshTask: Task<Void, Never>?
+    @State private var shelfLoadMoreTask: Task<Void, Never>?
+    @State private var shelfLoadMoreRequestID: UUID?
+    @State private var isLoadingNextShelfPage = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -121,6 +150,12 @@ struct ClipboardShelfPanelView: View {
         }
         .onDisappear {
             isSearchRailPresented = false
+            shelfRefreshTask?.cancel()
+            shelfRefreshTask = nil
+            shelfLoadMoreTask?.cancel()
+            shelfLoadMoreTask = nil
+            shelfLoadMoreRequestID = nil
+            isLoadingNextShelfPage = false
         }
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
@@ -370,7 +405,7 @@ struct ClipboardShelfPanelView: View {
 
     private var collectionStrip: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: 5) {
                 ShelfCollectionChip(
                     title: localized("label.clipboard"),
                     systemImageName: "clock.arrow.circlepath",
@@ -396,8 +431,7 @@ struct ClipboardShelfPanelView: View {
                         title: localized(category.displayName),
                         systemImageName: category.systemImageName,
                         color: Color(hex: category.colorHex) ?? .accentColor,
-                        isSelected: isSmartCategorySelected(category),
-                        onDropPayloads: { dropItems($0, into: .smartCategory(category)) }
+                        isSelected: isSmartCategorySelected(category)
                     ) {
                         selectSmartCategory(category)
                     }
@@ -406,12 +440,15 @@ struct ClipboardShelfPanelView: View {
                 ForEach(store.userPinboards) { pinboard in
                     ShelfCollectionChip(
                         title: pinboard.name,
-                        systemImageName: "pin.fill",
+                        systemImageName: pinboard.systemImageName ?? "pin.fill",
                         color: Color(hex: pinboard.colorHex) ?? .blue,
                         isSelected: shelfScope == .pinboard(pinboard.id),
                         onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }
                     ) {
                         setScope(.pinboard(pinboard.id))
+                    }
+                    .contextMenu {
+                        CustomPinboardActionsMenu(store: store, pinboard: pinboard)
                     }
                 }
             }
@@ -451,20 +488,23 @@ struct ClipboardShelfPanelView: View {
             ]
         }
 
-        return renderedShelfItems.map(ClipboardShelfDisplayItem.clipboard)
+        var items = renderedShelfItems.map(ClipboardShelfDisplayItem.clipboard)
+        if shelfItems.count < shelfItemTotalCount {
+            items.append(.loadMore)
+        }
+        return items
     }
 
-    private var shelfQueryState: ClipboardShelfQueryState {
-        ClipboardShelfQueryState(
+    private var shelfQueryState: ClipboardPanelQueryState {
+        ClipboardPanelQueryState(
             dataRevision: store.dataRevision,
             queryRevision: store.queryRevision,
-            shelfScope: shelfScope,
+            scope: shelfScope,
             searchQuery: store.searchQuery,
             contentTypeFilter: store.contentTypeFilter,
             sourceAppFilter: store.sourceAppFilter,
             deviceFilter: store.deviceFilter,
-            dateFilter: store.dateFilter,
-            pasteStackRevision: store.pasteStackItems.count
+            dateFilter: store.dateFilter
         )
     }
 
@@ -590,7 +630,7 @@ struct ClipboardShelfPanelView: View {
             guard case .clipboard(let item) = displayItem else { return nil }
             return PinboardItemDragPayload(
                 ids: [item.id],
-                plainText: PasteboardWriter.plainText(for: item)
+                plainTextProvider: { ClipboardPlainTextRenderer.plainText(for: item) }
             )
         } onSelect: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
@@ -626,6 +666,20 @@ struct ClipboardShelfPanelView: View {
                         detail: detail,
                         systemImageName: systemImageName
                     )
+                }
+                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+            case .loadMore:
+                VStack {
+                    Spacer(minLength: 0)
+                    Button(action: loadNextShelfPage) {
+                        EmptyShelfCard(
+                            title: localized("label.more"),
+                            detail: localized("format.items", max(shelfItemTotalCount - shelfItems.count, 0)),
+                            systemImageName: "ellipsis.circle"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(localized("label.more"))
                 }
                 .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
             case .clipboard(let item):
@@ -729,31 +783,9 @@ struct ClipboardShelfPanelView: View {
         }
     }
 
-    private func dropItems(_ payloads: [PinboardItemDragPayload], into target: ShelfCollectionDropTarget) -> Bool {
+    private func dropItems(_ payloads: [PinboardItemDragPayload], into target: ClipboardCollectionDropTarget) -> Bool {
         let ids = droppedItemIDs(from: payloads)
-        guard !ids.isEmpty else { return false }
-
-        switch target {
-        case .history:
-            setScope(.history)
-            return true
-        case .pasteStack:
-            guard store.addItemsToPasteStack(ids) else { return false }
-            setScope(.pasteStack)
-            return true
-        case .smartCategory(let category):
-            guard ids.contains(where: { id in
-                store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true
-            }) else {
-                return false
-            }
-            selectSmartCategory(category)
-            return true
-        case .pinboard(let pinboardID):
-            store.pinItems(ids, to: pinboardID)
-            setScope(.pinboard(pinboardID))
-            return true
-        }
+        return target.apply(ids: ids, store: store, selectScope: setScope)
     }
 
     private func droppedItemIDs(from payloads: [PinboardItemDragPayload]) -> [UUID] {
@@ -953,14 +985,61 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func refreshShelfItems() {
-        let items = store.filteredItems(for: shelfScope)
-        shelfItems = items
+        shelfRefreshTask?.cancel()
+        shelfLoadMoreTask?.cancel()
+        shelfLoadMoreTask = nil
+        shelfLoadMoreRequestID = nil
+        isLoadingNextShelfPage = false
+        let requestedState = shelfQueryState
+        shelfRefreshTask = Task { @MainActor in
+            let page = await store.filteredItemsPageAndCount(
+                for: requestedState.scope,
+                offset: 0,
+                limit: Self.pageSize
+            )
+            guard !Task.isCancelled, shelfQueryState == requestedState else { return }
+            shelfItems = page.items
+            shelfItemTotalCount = page.totalCount
+            shelfInteraction.replaceItems(
+                page.items,
+                storeSelectedIDs: store.selectedItemIDs,
+                storePrimarySelectedID: store.selectedItemID
+            )
+        }
+    }
 
-        shelfInteraction.replaceItems(
-            items,
-            storeSelectedIDs: store.selectedItemIDs,
-            storePrimarySelectedID: store.selectedItemID
-        )
+    private func loadNextShelfPage() {
+        guard !isLoadingNextShelfPage, shelfItems.count < shelfItemTotalCount else { return }
+        isLoadingNextShelfPage = true
+        let requestID = UUID()
+        shelfLoadMoreRequestID = requestID
+        let requestedState = shelfQueryState
+        let requestedOffset = shelfItems.count
+        shelfLoadMoreTask = Task { @MainActor in
+            let page = await store.filteredItemsPageAndCount(
+                for: requestedState.scope,
+                offset: requestedOffset,
+                limit: Self.pageSize
+            )
+            defer {
+                if shelfLoadMoreRequestID == requestID {
+                    isLoadingNextShelfPage = false
+                    shelfLoadMoreTask = nil
+                    shelfLoadMoreRequestID = nil
+                }
+            }
+            guard !Task.isCancelled,
+                  shelfQueryState == requestedState,
+                  shelfItems.count == requestedOffset else { return }
+            let existingIDs = Set(shelfItems.map(\.id))
+            shelfItems.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
+            shelfItemTotalCount = page.totalCount
+            shelfInteraction.replaceItems(
+                shelfItems,
+                storeSelectedIDs: store.selectedItemIDs,
+                storePrimarySelectedID: store.selectedItemID
+            )
+        }
     }
 
     private func runShelfMinuteTicker() async {
@@ -1120,7 +1199,7 @@ private struct ShelfCollectionChip: View {
     }
 }
 
-private struct ShelfCollectionChipDropTarget: NSViewRepresentable {
+struct ShelfCollectionChipDropTarget: NSViewRepresentable {
     @Binding var isTargeted: Bool
     let onDropPayloads: ([PinboardItemDragPayload]) -> Bool
 
@@ -1305,9 +1384,36 @@ private struct ClipboardShelfCard: View {
     }
 }
 
+struct ClipboardTextPreview {
+    static let initialCharacterLimit = 8_000
+
+    let initialText: String
+    let isTruncated: Bool
+
+    private let fullText: String
+
+    init(_ text: String, characterLimit: Int = Self.initialCharacterLimit) {
+        let characterLimit = max(characterLimit, 0)
+        let endIndex = text.index(
+            text.startIndex,
+            offsetBy: characterLimit,
+            limitedBy: text.endIndex
+        ) ?? text.endIndex
+
+        fullText = text
+        isTruncated = endIndex != text.endIndex
+        initialText = isTruncated ? String(text[..<endIndex]) + "…" : text
+    }
+
+    func text(showingFullText: Bool) -> String {
+        showingFullText ? fullText : initialText
+    }
+}
+
 struct ShelfExpandedPreview: View {
     private static let textPreviewHeight: CGFloat = 420
 
+    @State private var showsFullText = false
     @FocusState private var isPreviewFocused: Bool
 
     let item: ClipboardItem
@@ -1329,6 +1435,9 @@ struct ShelfExpandedPreview: View {
         .focused($isPreviewFocused)
         .onAppear {
             requestPreviewFocus()
+        }
+        .onChange(of: item.id) {
+            showsFullText = false
         }
         .onMoveCommand(perform: handlePreviewMoveCommand)
         .onExitCommand(perform: onDismiss)
@@ -1402,17 +1511,32 @@ struct ShelfExpandedPreview: View {
     }
 
     private func previewText(_ text: String) -> some View {
-        ScrollView {
-            Text(text.isEmpty ? item.visualPreview.body : text)
-                .font(.system(size: 16, design: .monospaced))
-                .lineSpacing(4)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(12)
+        let preview = ClipboardTextPreview(text.isEmpty ? item.visualPreview.body : text)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            ScrollView {
+                Text(preview.text(showingFullText: showsFullText))
+                    .font(.system(size: 16, design: .monospaced))
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(12)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+
+            if preview.isTruncated && !showsFullText {
+                Button {
+                    showsFullText = true
+                    requestPreviewFocus()
+                } label: {
+                    Label("label.more", systemImage: "ellipsis")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
         }
         .onMoveCommand(perform: handlePreviewMoveCommand)
         .onKeyPress(phases: .down, action: handlePreviewKeyPress)
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
     }
 
     private func requestPreviewFocus() {
@@ -1489,24 +1613,28 @@ private struct ShelfExpandedImagePreview: View {
         .accessibilityLabel(localized("label.captured_image_preview"))
         .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
             let cachedImage = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)
+            liveTextImage = nil
             fallbackImage = cachedImage
 
             let imageData = await imageDataProvider(item)
-
-            if let imageData, let image = NSImage(data: imageData) {
+            if let imageData, let analysisImage = NSImage(data: imageData) {
                 guard !Task.isCancelled else { return }
-                liveTextImage = image
-                fallbackImage = image
+                liveTextImage = analysisImage
                 return
             }
 
-            guard cachedImage == nil else { return }
+            if let cachedImage {
+                liveTextImage = cachedImage
+                return
+            }
+
             let loadedImage = await ClipboardImageCache.thumbnail(
                 for: item,
                 imageData: imageData,
                 maxPixelSize: maxPixelSize
             )
             guard !Task.isCancelled else { return }
+            liveTextImage = loadedImage
             fallbackImage = loadedImage
         }
     }
@@ -2567,28 +2695,84 @@ struct SourceApplicationIconBadge: View {
 
 @MainActor
 enum SourceApplicationIconResolver {
-    private static let cache = NSCache<NSString, NSImage>()
+    enum LookupResult {
+        case icon(NSImage)
+        case missing
+        case temporaryFailure
+    }
+
+    final class LookupCache {
+        private let icons = NSCache<NSString, NSImage>()
+        private let negativeCapacity: Int
+        private var negativeKeys: Set<String> = []
+        private var negativeOrder: [String] = []
+
+        var negativeEntryCount: Int {
+            negativeKeys.count
+        }
+
+        init(negativeCapacity: Int) {
+            self.negativeCapacity = max(negativeCapacity, 0)
+        }
+
+        fileprivate func icon(for key: String) -> NSImage? {
+            icons.object(forKey: key as NSString)
+        }
+
+        fileprivate func isKnownMissing(_ key: String) -> Bool {
+            negativeKeys.contains(key)
+        }
+
+        fileprivate func store(_ image: NSImage, for key: String) {
+            icons.setObject(image, forKey: key as NSString)
+            negativeKeys.remove(key)
+            negativeOrder.removeAll { $0 == key }
+        }
+
+        fileprivate func recordMissing(_ key: String) {
+            guard negativeCapacity > 0, negativeKeys.insert(key).inserted else { return }
+            negativeOrder.append(key)
+            if negativeOrder.count > negativeCapacity {
+                negativeKeys.remove(negativeOrder.removeFirst())
+            }
+        }
+    }
+
+    private static let cache = LookupCache(negativeCapacity: 256)
 
     static func icon(for item: ClipboardItem) -> NSImage? {
+        icon(
+            for: item,
+            cache: cache,
+            bundleLookup: lookupIcon(forBundleIdentifier:),
+            nameLookup: lookupIcon(forApplicationName:)
+        )
+    }
+
+    static func icon(
+        for item: ClipboardItem,
+        cache: LookupCache,
+        bundleLookup: (String) -> LookupResult,
+        nameLookup: (String) -> LookupResult
+    ) -> NSImage? {
         if let bundleIdentifier = normalized(item.sourceBundleIdentifier) {
-            let cacheKey = "bundle:\(bundleIdentifier)" as NSString
-            if let cached = cache.object(forKey: cacheKey) {
-                return cached
-            }
-            if let image = icon(forBundleIdentifier: bundleIdentifier) {
-                cache.setObject(image, forKey: cacheKey)
+            if let image = resolvedIcon(
+                cacheKey: "bundle:\(bundleIdentifier)",
+                lookupValue: bundleIdentifier,
+                cache: cache,
+                lookup: bundleLookup
+            ) {
                 return image
             }
         }
 
         guard let appName = normalized(item.sourceAppName) else { return nil }
-        let cacheKey = "name:\(appName.lowercased())" as NSString
-        if let cached = cache.object(forKey: cacheKey) {
-            return cached
-        }
-        guard let image = icon(forApplicationName: appName) else { return nil }
-        cache.setObject(image, forKey: cacheKey)
-        return image
+        return resolvedIcon(
+            cacheKey: "name:\(appName.lowercased())",
+            lookupValue: appName,
+            cache: cache,
+            lookup: nameLookup
+        )
     }
 
     static func hasKnownSource(for item: ClipboardItem) -> Bool {
@@ -2605,20 +2789,30 @@ enum SourceApplicationIconResolver {
         return AppIconThemeColorResolver.themeColor(for: sourceIcon, cacheKey: key, fallback: fallback)
     }
 
-    private static func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
+    private static func lookupIcon(forBundleIdentifier bundleIdentifier: String) -> LookupResult {
         if let image = runningApplicationIcon(bundleIdentifier: bundleIdentifier) {
-            return image
+            return .icon(image)
         }
 
         guard let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
-            return nil
+            return .missing
         }
-        return icon(forApplicationURL: applicationURL)
+        return .icon(icon(forApplicationURL: applicationURL))
     }
 
     static func icon(forApplicationName appName: String) -> NSImage? {
+        guard let appName = normalized(appName) else { return nil }
+        return resolvedIcon(
+            cacheKey: "name:\(appName.lowercased())",
+            lookupValue: appName,
+            cache: cache,
+            lookup: lookupIcon(forApplicationName:)
+        )
+    }
+
+    private static func lookupIcon(forApplicationName appName: String) -> LookupResult {
         if let image = runningApplicationIcon(appName: appName) {
-            return image
+            return .icon(image)
         }
 
         let fileManager = FileManager.default
@@ -2628,11 +2822,34 @@ enum SourceApplicationIconResolver {
         for directory in searchDirectories {
             let candidate = directory.appendingPathComponent(appFileName, isDirectory: true)
             if fileManager.fileExists(atPath: candidate.path) {
-                return icon(forApplicationURL: candidate)
+                return .icon(icon(forApplicationURL: candidate))
             }
         }
 
-        return nil
+        return .missing
+    }
+
+    private static func resolvedIcon(
+        cacheKey: String,
+        lookupValue: String,
+        cache: LookupCache,
+        lookup: (String) -> LookupResult
+    ) -> NSImage? {
+        if let image = cache.icon(for: cacheKey) {
+            return image
+        }
+        guard !cache.isKnownMissing(cacheKey) else { return nil }
+
+        switch lookup(lookupValue) {
+        case .icon(let image):
+            cache.store(image, for: cacheKey)
+            return image
+        case .missing:
+            cache.recordMissing(cacheKey)
+            return nil
+        case .temporaryFailure:
+            return nil
+        }
     }
 
     private static func applicationSearchDirectories() -> [URL] {

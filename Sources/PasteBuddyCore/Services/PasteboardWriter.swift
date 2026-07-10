@@ -171,6 +171,9 @@ public enum PasteboardWriter {
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) async -> DirectPasteResult {
+        guard !Task.isCancelled else {
+            return cancelledPasteResult(itemCount: 1, format: format)
+        }
         guard isAccessibilityTrusted else {
             return copyFallbackResult(
                 item,
@@ -186,6 +189,9 @@ public enum PasteboardWriter {
             activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
             timeout: options.activationWaitTimeout
         ) else {
+            guard !Task.isCancelled else {
+                return cancelledPasteResult(itemCount: 1, format: format)
+            }
             return copyFallbackResult(
                 item,
                 format: format,
@@ -195,7 +201,9 @@ public enum PasteboardWriter {
             )
         }
         copy(item, format: format, to: pasteboard)
-        await waitBeforePasteEventAsync(options.pasteDispatchDelay)
+        guard await waitBeforePasteEventAsync(options.pasteDispatchDelay) else {
+            return cancelledPasteResult(itemCount: 1, format: format)
+        }
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -277,6 +285,9 @@ public enum PasteboardWriter {
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) async -> DirectPasteResult {
+        guard !Task.isCancelled else {
+            return cancelledPasteResult(itemCount: items.count, format: format)
+        }
         guard !items.isEmpty else {
             return DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
         }
@@ -308,6 +319,9 @@ public enum PasteboardWriter {
             activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
             timeout: options.activationWaitTimeout
         ) else {
+            guard !Task.isCancelled else {
+                return cancelledPasteResult(itemCount: items.count, format: format)
+            }
             return copyFallbackResult(
                 items,
                 format: format,
@@ -317,7 +331,9 @@ public enum PasteboardWriter {
             )
         }
         copy(items, format: format, to: pasteboard)
-        await waitBeforePasteEventAsync(options.pasteDispatchDelay)
+        guard await waitBeforePasteEventAsync(options.pasteDispatchDelay) else {
+            return cancelledPasteResult(itemCount: items.count, format: format)
+        }
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -347,6 +363,14 @@ public enum PasteboardWriter {
         return DirectPasteResult(
             outcome: fallbackOutcome(for: outcome, options: options),
             itemCount: 1,
+            format: format
+        )
+    }
+
+    private static func cancelledPasteResult(itemCount: Int, format: PasteFormat) -> DirectPasteResult {
+        DirectPasteResult(
+            outcome: .failedNoTargetApplication,
+            itemCount: itemCount,
             format: format
         )
     }
@@ -413,6 +437,7 @@ public enum PasteboardWriter {
         activeApplicationBundleIdentifier: (() -> String?)?,
         timeout: TimeInterval
     ) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard let targetBundleIdentifier = normalizedBundleIdentifier(targetBundleIdentifier),
               let activeApplicationBundleIdentifier
         else {
@@ -421,14 +446,18 @@ public enum PasteboardWriter {
 
         let deadline = Date().addingTimeInterval(max(0, timeout))
         repeat {
+            guard !Task.isCancelled else { return false }
             if normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier {
                 return true
             }
             guard Date() < deadline else { break }
-            await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005)))
+            guard await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005))) else {
+                return false
+            }
         } while true
 
-        return normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier
+        return !Task.isCancelled
+            && normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier
     }
 
     private static func waitBeforePasteEvent(_ delay: TimeInterval) {
@@ -439,12 +468,16 @@ public enum PasteboardWriter {
         } while Date() < deadline
     }
 
-    private static func waitBeforePasteEventAsync(_ delay: TimeInterval) async {
-        guard delay > 0 else { return }
+    private static func waitBeforePasteEventAsync(_ delay: TimeInterval) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard delay > 0 else { return true }
         let deadline = Date().addingTimeInterval(delay)
         repeat {
-            await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005)))
+            guard await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005))) else {
+                return false
+            }
         } while Date() < deadline
+        return !Task.isCancelled
     }
 
     private static func sleepBriefly(until deadline: Date) {
@@ -453,10 +486,16 @@ public enum PasteboardWriter {
         Thread.sleep(forTimeInterval: interval)
     }
 
-    private static func sleepAsync(until deadline: Date) async {
+    private static func sleepAsync(until deadline: Date) async -> Bool {
+        guard !Task.isCancelled else { return false }
         let interval = deadline.timeIntervalSinceNow
-        guard interval > 0 else { return }
-        try? await Task.sleep(nanoseconds: nanoseconds(for: interval))
+        guard interval > 0 else { return true }
+        do {
+            try await Task.sleep(nanoseconds: nanoseconds(for: interval))
+            return !Task.isCancelled
+        } catch {
+            return false
+        }
     }
 
     private static func nanoseconds(for interval: TimeInterval) -> UInt64 {

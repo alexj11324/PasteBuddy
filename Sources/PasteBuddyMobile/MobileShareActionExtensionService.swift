@@ -59,10 +59,12 @@ public enum MobileShareActionExtensionService {
             from: providers,
             configuration: resolvedConfiguration
         )
+        try Task.checkCancellation()
         let service = SharedContentImportService()
-        let importedItems = try inputs.map { input in
-            try service.importContent(input, into: store)
-        }
+        let importedItems = try await service.importContentsAsync(inputs, into: store)
+        try Task.checkCancellation()
+        try await store.flushPendingSaveOrThrow()
+        try Task.checkCancellation()
         return MobileShareActionImportResult(
             importedItems: importedItems,
             targetPinboardID: targetPinboardID,

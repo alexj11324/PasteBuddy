@@ -3,6 +3,7 @@ import OSLog
 import PasteBuddyCore
 
 enum PasteBuddyDiagnosticCategory: String, Sendable {
+    case lifecycle
     case hotKey
     case shelf
     case directPaste

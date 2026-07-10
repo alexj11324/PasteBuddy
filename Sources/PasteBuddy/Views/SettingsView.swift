@@ -27,7 +27,9 @@ struct SettingsView: View {
             .frame(minWidth: 860, idealWidth: 1040, minHeight: 640, idealHeight: 760)
             .onAppear {
                 applyRequestedSettingsDestination()
-                reloadMCPClientCandidates()
+            }
+            .task {
+                await reloadMCPClientCandidates()
             }
             .onChange(of: store.requestedSettingsDestination?.rawValue) { _, _ in
                 applyRequestedSettingsDestination()
@@ -686,7 +688,9 @@ struct SettingsView: View {
                             Divider()
 
                             Button {
-                                reloadMCPClientCandidates()
+                                Task {
+                                    await reloadMCPClientCandidates(forceRefresh: true)
+                                }
                             } label: {
                                 Label("action.refresh_detected_ai_tools", systemImage: "arrow.clockwise")
                             }
@@ -967,9 +971,11 @@ struct SettingsView: View {
         return localized("format.detected_mcp_clients", names)
     }
 
-    private func reloadMCPClientCandidates() {
+    private func reloadMCPClientCandidates(forceRefresh: Bool = false) async {
+        let applications = await InstalledApplicationCatalog().applications(forceRefresh: forceRefresh)
+        guard !Task.isCancelled else { return }
         mcpClientCandidates = MCPClientDetector().candidates(
-            applications: InstalledApplicationCatalog().applications()
+            applications: applications
         )
     }
 
@@ -1437,7 +1443,9 @@ private struct ExcludedApplicationsSheet: View {
         }
         .padding(28)
         .frame(width: 720, height: 520)
-        .onAppear(perform: loadApplications)
+        .task {
+            applications = await InstalledApplicationCatalog().applications()
+        }
         .sheet(isPresented: $showingApplicationPicker) {
             InstalledApplicationPickerSheet { application in
                 store.excludeApplication(
@@ -1445,7 +1453,6 @@ private struct ExcludedApplicationsSheet: View {
                     bundleIdentifier: application.bundleIdentifier
                 )
                 selectedRowID = nil
-                loadApplications()
             }
         }
     }
@@ -1482,10 +1489,6 @@ private struct ExcludedApplicationsSheet: View {
         return rows.sorted {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
-    }
-
-    private func loadApplications() {
-        applications = InstalledApplicationCatalog().applications()
     }
 
     private func removeSelectedRow() {
@@ -1582,9 +1585,9 @@ private struct InstalledApplicationPickerSheet: View {
         }
         .padding(24)
         .frame(width: 560, height: 560)
-        .onAppear {
+        .task {
             if applications.isEmpty {
-                applications = InstalledApplicationCatalog().applications()
+                applications = await InstalledApplicationCatalog().applications()
             }
         }
     }

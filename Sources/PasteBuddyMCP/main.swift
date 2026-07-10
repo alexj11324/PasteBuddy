@@ -188,7 +188,7 @@ private final class PasteBuddyMCPServer {
                 )
             }
 
-            await store.flushPendingSave()
+            try await store.flushPendingSaveOrThrow()
             let json = try jsonString(payload)
             return [
                 "content": [
@@ -199,7 +199,7 @@ private final class PasteBuddyMCPServer {
                 ]
             ]
         } catch {
-            await store.flushPendingSave()
+            try? await store.flushPendingSaveOrThrow()
             throw error
         }
     }

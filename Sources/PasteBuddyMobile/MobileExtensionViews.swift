@@ -6,6 +6,7 @@ public struct MobileShareImportView: View {
     private let input: SharedContentInput
     @State private var selectedPinboardID: UUID?
     @State private var statusMessage: String?
+    @State private var isSaving = false
 
     public init(store: PasteBuddyStore, input: SharedContentInput) {
         self.store = store
@@ -59,6 +60,7 @@ public struct MobileShareImportView: View {
                 Button("action.save") {
                     save()
                 }
+                .disabled(isSaving)
             }
         }
     }
@@ -79,21 +81,26 @@ public struct MobileShareImportView: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         var mutableInput = input
         mutableInput.preferredPinboardID = selectedPinboardID
-        do {
-            _ = try SharedContentImportService().importContent(mutableInput, into: store)
-            statusMessage = selectedPinboardID == nil
-                ? PasteBuddyLocalization.string(
-                    "mobile.share_action.saved_to_history",
-                    defaultValue: "Saved to history."
-                )
-                : PasteBuddyLocalization.string(
-                    "mobile.share_action.saved_to_history_and_pinboard",
-                    defaultValue: "Saved to history and selected pinboard."
-                )
-        } catch {
-            statusMessage = error.localizedDescription
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                _ = try await SharedContentImportService().importContentsAsync([mutableInput], into: store)
+                statusMessage = selectedPinboardID == nil
+                    ? PasteBuddyLocalization.string(
+                        "mobile.share_action.saved_to_history",
+                        defaultValue: "Saved to history."
+                    )
+                    : PasteBuddyLocalization.string(
+                        "mobile.share_action.saved_to_history_and_pinboard",
+                        defaultValue: "Saved to history and selected pinboard."
+                    )
+            } catch {
+                statusMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -246,7 +253,12 @@ public struct MobileKeyboardHistoryView: View {
                 )
             }
 
-            if let statusMessage {
+            if let persistenceError = store.lastErrorMessage {
+                Text(persistenceError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let statusMessage {
                 Text(statusMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -356,7 +368,14 @@ public struct MobileKeyboardHistoryView: View {
                                     Menu {
                                         ForEach(store.snapshot.pinboards) { pinboard in
                                             Button(pinboard.name) {
-                                                store.pinItem(item.id, to: pinboard.id)
+                                                Task { @MainActor in
+                                                    store.pinItem(item.id, to: pinboard.id)
+                                                    do {
+                                                        try await store.flushPendingSaveOrThrow()
+                                                    } catch {
+                                                        statusMessage = error.localizedDescription
+                                                    }
+                                                }
                                             }
                                         }
                                     } label: {
@@ -511,15 +530,21 @@ private struct MobileKeyboardIrohSyncStrip: View {
     }
 
     private func syncCurrentClipboard() {
-        guard let item = MobilePasteboardWriter.currentClipboardItem() else {
-            statusMessage = PasteBuddyLocalization.string(
-                "mobile.keyboard_sync.no_clipboard_item",
-                defaultValue: "No current clipboard item is available."
-            )
-            return
-        }
-        let storedItem = store.addCapturedItem(item)
         Task { @MainActor in
+            guard let item = await MobilePasteboardWriter.currentClipboardItem() else {
+                statusMessage = PasteBuddyLocalization.string(
+                    "mobile.keyboard_sync.no_clipboard_item",
+                    defaultValue: "No current clipboard item is available."
+                )
+                return
+            }
+            let storedItem = store.addCapturedItemWithCurrentSearchDocument(item)
+            do {
+                try await store.flushPendingSaveOrThrow()
+            } catch {
+                statusMessage = error.localizedDescription
+                return
+            }
             if !irohSync.connectionState.isConnected {
                 await irohSync.connectToPeer()
             }

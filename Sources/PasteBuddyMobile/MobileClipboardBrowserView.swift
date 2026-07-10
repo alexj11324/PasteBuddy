@@ -302,9 +302,10 @@ private struct MobileIrohClipboardSyncView: View {
 
             Section("label.actions") {
                 Button("action.sync_current_clipboard") {
-                    if let item = MobilePasteboardWriter.currentClipboardItem() {
-                        let storedItem = store.addCapturedItem(item)
-                        Task { await irohSync.send(storedItem) }
+                    Task { @MainActor in
+                        guard let item = await MobilePasteboardWriter.currentClipboardItem() else { return }
+                        let storedItem = store.addCapturedItemWithCurrentSearchDocument(item)
+                        await irohSync.send(storedItem)
                     }
                 }
                 .disabled(!irohSync.connectionState.isConnected)
@@ -553,11 +554,40 @@ private struct MobileClipboardItemRow: View {
     }
 }
 
+private struct MobileClipboardTextPreview {
+    static let initialCharacterLimit = 8_000
+
+    let initialText: String
+    let isTruncated: Bool
+
+    private let fullText: String
+
+    init(_ text: String) {
+        let endIndex = text.index(
+            text.startIndex,
+            offsetBy: Self.initialCharacterLimit,
+            limitedBy: text.endIndex
+        ) ?? text.endIndex
+
+        fullText = text
+        isTruncated = endIndex != text.endIndex
+        initialText = isTruncated ? String(text[..<endIndex]) + "…" : text
+    }
+
+    func text(showingFullText: Bool) -> String {
+        showingFullText ? fullText : initialText
+    }
+}
+
 private struct MobileClipboardItemDetailView: View {
+    @State private var showsFullText = false
+
     let item: ClipboardItem
     var isFullScreen = false
 
     var body: some View {
+        let textPreview = MobileClipboardTextPreview(ClipboardPlainTextRenderer.plainText(for: item))
+
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text(item.title)
@@ -566,9 +596,17 @@ private struct MobileClipboardItemDetailView: View {
 
                 MobileVisualPreviewSummary(item: item)
 
-                Text(ClipboardPlainTextRenderer.plainText(for: item))
+                Text(textPreview.text(showingFullText: showsFullText))
                     .font(.body)
                     .textSelection(.enabled)
+
+                if textPreview.isTruncated && !showsFullText {
+                    Button {
+                        showsFullText = true
+                    } label: {
+                        Label("label.more", systemImage: "ellipsis")
+                    }
+                }
 
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                     GridRow {
@@ -619,6 +657,9 @@ private struct MobileClipboardItemDetailView: View {
             .padding()
         }
         .navigationTitle("label.preview")
+        .onChange(of: item.id) {
+            showsFullText = false
+        }
     }
 }
 

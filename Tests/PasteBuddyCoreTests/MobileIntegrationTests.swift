@@ -194,9 +194,21 @@ final class MobileIntegrationTests: XCTestCase {
     func testShareActionExtensionServiceImportsMultipleProvidersIntoSelectedPinboard() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
 
-        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("share-batch.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        store.load()
         let pinboardID = store.snapshot.pinboards[0].id
+        let synchronizeCount = repository.incrementalSyncInvocationCount
+        let journalCount = repository.captureJournalInvocationCount
 
         let textProvider = NSItemProvider()
         textProvider.suggestedName = "Shared Selection"
@@ -210,11 +222,14 @@ final class MobileIntegrationTests: XCTestCase {
 
         let imageProvider = NSItemProvider()
         imageProvider.suggestedName = "Shared Screenshot"
+        let imageData = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
         imageProvider.registerDataRepresentation(
             forTypeIdentifier: UTType.image.identifier,
             visibility: .all
         ) { completion in
-            completion(Data([0x89, 0x50, 0x4e, 0x47]), nil)
+            completion(imageData, nil)
             return nil
         }
 
@@ -236,6 +251,51 @@ final class MobileIntegrationTests: XCTestCase {
         XCTAssertEqual(store.snapshot.items.map(\.sourceAppName), ["PasteBuddy Share Extension", "PasteBuddy Share Extension"])
         XCTAssertEqual(store.snapshot.items.first?.contentType, .image)
         XCTAssertEqual(store.snapshot.items.last?.contentType, .text)
+        XCTAssertEqual(repository.incrementalSyncInvocationCount, synchronizeCount)
+        XCTAssertEqual(repository.captureJournalInvocationCount, journalCount + 1)
+        XCTAssertEqual(
+            Set(try harness.snapshotStore.load().items.map(\.id)),
+            Set(result.importedItems.map(\.id)),
+            "The extension service must flush its debounced batch before reporting success."
+        )
+    }
+
+    func testShareActionBatchValidatesEveryInputBeforeMutatingStore() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pinboardID = store.snapshot.pinboards[0].id
+        let safeProvider = NSItemProvider()
+        safeProvider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { completion in
+            completion(Data("Safe shared text".utf8), nil)
+            return nil
+        }
+        let blockedProvider = NSItemProvider()
+        blockedProvider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { completion in
+            completion(Data("api_key = sk_live_51ABCDEF0123456789".utf8), nil)
+            return nil
+        }
+
+        await XCTAssertThrowsErrorAsync(
+            try await MobileShareActionExtensionService.importSupportedContent(
+                from: [safeProvider, blockedProvider],
+                into: store,
+                configuration: MobileItemProviderImportConfiguration(
+                    preferredPinboardID: pinboardID
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? SharedContentImportError, .sensitiveTextBlocked)
+        }
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+        XCTAssertTrue(store.snapshot.pinboards[0].itemIDs.isEmpty)
     }
 
     func testItemProviderAdapterTreatsFileURLAsFileBeforeGenericURL() async throws {
@@ -558,6 +618,209 @@ final class MobileIntegrationTests: XCTestCase {
         }
     }
 
+    func testItemProviderAdapterTimesOutWhenProviderNeverCompletes() async {
+        let progressBox = ProviderProgressBox()
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.image.identifier,
+            visibility: .all
+        ) { _ in
+            progressBox.progress
+        }
+
+        await XCTAssertThrowsErrorAsync(
+            try await MobileItemProviderAdapter.firstSupportedInput(
+                from: [provider],
+                configuration: MobileItemProviderImportConfiguration(
+                    loadTimeout: .milliseconds(30)
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileItemProviderAdapterError,
+                .loadTimedOut(UTType.image.identifier)
+            )
+        }
+        XCTAssertTrue(progressBox.progress.isCancelled)
+    }
+
+    func testSupportedInputsLoadsProvidersConcurrentlyAndPreservesProviderOrder() async throws {
+        let coordinator = OrderedProviderLoadCoordinator()
+        let firstProvider = NSItemProvider()
+        firstProvider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { completion in
+            coordinator.registerFirst(completion)
+            return nil
+        }
+        let secondProvider = NSItemProvider()
+        secondProvider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { completion in
+            coordinator.completeSecond(completion)
+            return nil
+        }
+
+        let inputs = try await MobileItemProviderAdapter.supportedInputs(
+            from: [firstProvider, secondProvider],
+            configuration: MobileItemProviderImportConfiguration(
+                loadTimeout: .milliseconds(200)
+            )
+        )
+
+        XCTAssertEqual(inputs.compactMap(\.text), ["First provider", "Second provider"])
+    }
+
+    func testSupportedInputsRejectsACombinedBatchBeyondTheMemoryBudget() async {
+        let providers = ["a", "b"].map { suffix in
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.plainText.identifier,
+                visibility: .all
+            ) { completion in
+                completion(Data(String(repeating: suffix, count: 700).utf8), nil)
+                return nil
+            }
+            return provider
+        }
+
+        await XCTAssertThrowsErrorAsync(
+            try await MobileItemProviderAdapter.supportedInputs(
+                from: providers,
+                configuration: MobileItemProviderImportConfiguration(
+                    maxTotalLoadedBytes: 1_000
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileItemProviderAdapterError,
+                .batchPayloadTooLarge(limitBytes: 1_000)
+            )
+        }
+    }
+
+    func testSupportedInputsAcceptsUnevenItemsWithinCombinedMemoryBudget() async throws {
+        let providers = [700, 200].map { byteCount in
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.plainText.identifier,
+                visibility: .all
+            ) { completion in
+                completion(Data(repeating: 0x61, count: byteCount), nil)
+                return nil
+            }
+            return provider
+        }
+
+        let inputs = try await MobileItemProviderAdapter.supportedInputs(
+            from: providers,
+            configuration: MobileItemProviderImportConfiguration(
+                deviceName: "iPhone",
+                maxTotalLoadedBytes: 1_000
+            )
+        )
+
+        XCTAssertEqual(inputs.compactMap(\.text).map(\.utf8.count), [700, 200])
+    }
+
+    func testSupportedInputsRejectsOversizedTextDataBeforeCreatingAString() async {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { completion in
+            completion(Data(repeating: 0x61, count: 1_001), nil)
+            return nil
+        }
+
+        await XCTAssertThrowsErrorAsync(
+            try await MobileItemProviderAdapter.supportedInputs(
+                from: [provider],
+                configuration: MobileItemProviderImportConfiguration(
+                    deviceName: "iPhone",
+                    maxTotalLoadedBytes: 1_000
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileItemProviderAdapterError,
+                .batchPayloadTooLarge(limitBytes: 1_000)
+            )
+        }
+    }
+
+    func testSupportedInputsRejectsProviderCountAboveConfiguredLimit() async {
+        await XCTAssertThrowsErrorAsync(
+            try await MobileItemProviderAdapter.supportedInputs(
+                from: [NSItemProvider(), NSItemProvider(), NSItemProvider()],
+                configuration: MobileItemProviderImportConfiguration(maxProviderCount: 2)
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileItemProviderAdapterError,
+                .tooManyProviders(limit: 2)
+            )
+        }
+    }
+
+    func testSupportedInputsEnforcesWholeBatchDeadline() async throws {
+        let progressBox = ProviderProgressBox()
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { _ in
+            progressBox.progress
+        }
+
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+        await XCTAssertThrowsErrorAsync(
+            try await MobileItemProviderAdapter.supportedInputs(
+                from: [provider],
+                configuration: MobileItemProviderImportConfiguration(
+                    loadTimeout: .seconds(1),
+                    batchTimeout: .milliseconds(30)
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? MobileItemProviderAdapterError, .batchLoadTimedOut)
+        }
+        XCTAssertLessThan(startedAt.duration(to: clock.now), .milliseconds(800))
+    }
+
+    func testCancelledAsyncSharedImportDoesNotMutateHistory() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let service = SharedContentImportService()
+        let input = SharedContentInput(
+            text: "Do not persist after cancellation",
+            source: .shareExtension,
+            deviceName: "Test iPhone"
+        )
+
+        let result = await Task { @MainActor () -> Result<[ClipboardItem], Error> in
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            do {
+                return .success(try await service.importContentsAsync([input], into: store))
+            } catch {
+                return .failure(error)
+            }
+        }.value
+
+        guard case .failure(let error) = result else {
+            return XCTFail("Expected a cancelled import to fail.")
+        }
+        XCTAssertTrue(error is CancellationError)
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+    }
+
     func testAppGroupStoreUsesPasteBuddyEncryptedStorePathWhenContainerIsAvailable() throws {
         do {
             let store = try EncryptedSnapshotStore.appGroupStore(groupIdentifier: "group.com.example.PasteBuddy.tests")
@@ -571,6 +834,125 @@ final class MobileIntegrationTests: XCTestCase {
             XCTAssertEqual(groupIdentifier, "group.com.example.PasteBuddy.tests")
         }
     }
+
+    func testMobilePasteboardRepresentationRejectsMissingTextAndInvalidImageData() {
+        let validText = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test iPhone",
+            contentType: .text,
+            title: "Valid Text",
+            payload: ClipboardPayload(text: "copy me")
+        )
+        let missingText = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test iPhone",
+            contentType: .text,
+            title: "Missing Text",
+            payload: ClipboardPayload()
+        )
+        let invalidImage = ClipboardItem(
+            sourceAppName: "Photos",
+            deviceName: "Test iPhone",
+            contentType: .image,
+            title: "Invalid Image",
+            payload: ClipboardPayload(imageData: Data([0x00, 0x01]))
+        )
+
+        XCTAssertNotNil(MobilePasteboardWriter.copyRepresentation(for: validText, format: .original))
+        XCTAssertNil(MobilePasteboardWriter.copyRepresentation(for: missingText, format: .original))
+        XCTAssertNil(MobilePasteboardWriter.copyRepresentation(for: invalidImage, format: .original))
+    }
+
+    func testMobileImageSafetyRejectsOversizedCompressedAndDecodedImagesBeforeUse() {
+        let policy = MobileImageSafetyPolicy(
+            maxCompressedBytes: 1_024,
+            maxPixelCount: 10_000
+        )
+
+        XCTAssertThrowsError(
+            try policy.validateCompressedByteCount(1_025)
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileImageSafetyError,
+                .compressedDataTooLarge(actualBytes: 1_025, limitBytes: 1_024)
+            )
+        }
+        XCTAssertThrowsError(
+            try policy.validateDimensions(width: 101, height: 100)
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileImageSafetyError,
+                .pixelCountTooLarge(width: 101, height: 100, limit: 10_000)
+            )
+        }
+        XCTAssertThrowsError(
+            try policy.validateFrameCount(65)
+        ) { error in
+            XCTAssertEqual(
+                error as? MobileImageSafetyError,
+                .frameCountTooLarge(actual: 65, limit: 64)
+            )
+        }
+    }
+
+    func testMobileTargetsDeclareTheSameSharedKeychainAccessGroup() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let entitlementPaths = [
+            "Support/Entitlements/PasteBuddy-iOS.entitlements",
+            "Support/Entitlements/PasteBuddyShareAction.entitlements",
+            "Support/Entitlements/PasteBuddyKeyboard.entitlements"
+        ]
+
+        for relativePath in entitlementPaths {
+            let data = try Data(contentsOf: repositoryRoot.appendingPathComponent(relativePath))
+            let entitlements = try XCTUnwrap(
+                PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            )
+            XCTAssertEqual(
+                entitlements["keychain-access-groups"] as? [String],
+                ["$(AppIdentifierPrefix)com.alexjiang.PasteBuddy.shared"],
+                relativePath
+            )
+        }
+    }
+}
+
+private final class OrderedProviderLoadCoordinator: @unchecked Sendable {
+    typealias Completion = (Data?, Error?) -> Void
+
+    private let lock = NSLock()
+    private var firstCompletion: Completion?
+    private var secondStarted = false
+
+    func registerFirst(_ completion: @escaping Completion) {
+        let shouldComplete = lock.withLock {
+            if secondStarted {
+                return true
+            }
+            firstCompletion = completion
+            return false
+        }
+        if shouldComplete {
+            completion(Data("First provider".utf8), nil)
+        }
+    }
+
+    func completeSecond(_ completion: @escaping Completion) {
+        let firstCompletion = lock.withLock {
+            secondStarted = true
+            defer { self.firstCompletion = nil }
+            return self.firstCompletion
+        }
+        completion(Data("Second provider".utf8), nil)
+        firstCompletion?(Data("First provider".utf8), nil)
+    }
+}
+
+private final class ProviderProgressBox: @unchecked Sendable {
+    let progress = Progress(totalUnitCount: 1)
 }
 
 @MainActor

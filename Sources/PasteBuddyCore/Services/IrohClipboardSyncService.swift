@@ -32,8 +32,12 @@ public struct IrohClipboardSyncEnvelope: Codable, Equatable, Sendable {
 enum IrohClipboardWireFormat {
     static let alpn = Data("pastebuddy-clipboard-sync/1".utf8)
     static let maxFrameBytes = 8 * 1024 * 1024
+    static let supportedEnvelopeVersion = 1
 
     static func encode(_ envelope: IrohClipboardSyncEnvelope) throws -> Data {
+        if let byteCount = obviouslyOversizedInlineByteCount(in: envelope.item) {
+            throw IrohClipboardSyncError.frameTooLarge(byteCount)
+        }
         let payload = try JSONEncoder.pasteBuddy.encode(envelope)
         guard payload.count <= maxFrameBytes else {
             throw IrohClipboardSyncError.frameTooLarge(payload.count)
@@ -49,12 +53,66 @@ enum IrohClipboardWireFormat {
             throw IrohClipboardSyncError.invalidFrame
         }
         let declaredLength = lengthPrefix.withUnsafeBytes { rawBuffer in
-            UInt32(littleEndian: rawBuffer.load(as: UInt32.self))
+            UInt32(littleEndian: rawBuffer.loadUnaligned(as: UInt32.self))
         }
         guard declaredLength == body.count, body.count <= maxFrameBytes else {
             throw IrohClipboardSyncError.invalidFrame
         }
-        return try JSONDecoder.pasteBuddy.decode(IrohClipboardSyncEnvelope.self, from: body)
+        let envelope = try JSONDecoder.pasteBuddy.decode(IrohClipboardSyncEnvelope.self, from: body)
+        guard envelope.version == supportedEnvelopeVersion else {
+            throw IrohClipboardSyncError.unsupportedEnvelopeVersion(envelope.version)
+        }
+        return envelope
+    }
+
+    private static func obviouslyOversizedInlineByteCount(in item: ClipboardItem) -> Int? {
+        var lowerBound = 0
+        let payload = item.payload
+
+        func append(_ byteCount: Int) -> Int? {
+            guard byteCount <= Int.max - lowerBound else { return Int.max }
+            lowerBound += byteCount
+            return lowerBound > maxFrameBytes ? lowerBound : nil
+        }
+
+        for data in [payload.rtfData, payload.imageData].compactMap({ $0 }) {
+            let byteCount = base64EncodedByteCount(for: data.count)
+            if let oversizedByteCount = append(byteCount) {
+                return oversizedByteCount
+            }
+        }
+        let strings = [
+            item.sourceAppName,
+            item.sourceBundleIdentifier,
+            item.deviceName,
+            item.title,
+            payload.text,
+            payload.htmlString,
+            payload.rtfAssetID,
+            payload.urlString,
+            payload.fileURLString,
+            payload.imageAssetID,
+            payload.ocrText,
+            item.searchDocument.normalizedText,
+            item.searchDocument.previewHeadline,
+            item.searchDocument.previewBody,
+            item.searchDocument.contentHash,
+            item.searchDocument.searchHash
+        ] + item.labels.map(Optional.some) + payload.fileURLStrings.map(Optional.some)
+        for string in strings.compactMap({ $0 }) {
+            let byteCount = string.utf8.count
+            if let oversizedByteCount = append(byteCount) {
+                return oversizedByteCount
+            }
+        }
+        return nil
+    }
+
+    private static func base64EncodedByteCount(for rawByteCount: Int) -> Int {
+        guard rawByteCount <= Int.max - 2 else { return Int.max }
+        let groupCount = (rawByteCount + 2) / 3
+        guard groupCount <= Int.max / 4 else { return Int.max }
+        return groupCount * 4
     }
 }
 
@@ -65,6 +123,7 @@ public enum IrohClipboardSyncError: LocalizedError, Equatable {
     case noSession
     case invalidFrame
     case frameTooLarge(Int)
+    case unsupportedEnvelopeVersion(Int)
     case keychainReadFailed(OSStatus)
     case keychainWriteFailed(OSStatus)
     case invalidSecretKey
@@ -72,24 +131,95 @@ public enum IrohClipboardSyncError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidPairingCode:
-            "PasteBuddy pairing code is invalid."
+            PasteBuddyLocalization.string(
+                "error.iroh.invalid_pairing_code",
+                defaultValue: "PasteBuddy pairing code is invalid."
+            )
         case .invalidPeerEndpointId:
-            "Peer endpoint id is invalid."
+            PasteBuddyLocalization.string(
+                "error.iroh.invalid_peer_endpoint_id",
+                defaultValue: "Peer endpoint id is invalid."
+            )
         case .noEndpoint:
-            "Iroh endpoint is not ready."
+            PasteBuddyLocalization.string(
+                "error.iroh.no_endpoint",
+                defaultValue: "Iroh endpoint is not ready."
+            )
         case .noSession:
-            "No active iroh clipboard session."
+            PasteBuddyLocalization.string(
+                "error.iroh.no_session",
+                defaultValue: "No active iroh clipboard session."
+            )
         case .invalidFrame:
-            "Iroh clipboard frame is invalid."
+            PasteBuddyLocalization.string(
+                "error.iroh.invalid_frame",
+                defaultValue: "Iroh clipboard frame is invalid."
+            )
         case .frameTooLarge(let byteCount):
-            "Iroh clipboard frame is too large: \(byteCount) bytes."
+            PasteBuddyLocalization.format(
+                "error.iroh.frame_too_large",
+                defaultValue: "Iroh clipboard frame is too large: %d bytes.",
+                byteCount
+            )
+        case .unsupportedEnvelopeVersion(let version):
+            PasteBuddyLocalization.format(
+                "error.iroh.unsupported_envelope_version",
+                defaultValue: "Iroh clipboard envelope version %d is unsupported.",
+                version
+            )
         case .keychainReadFailed(let status):
-            "Iroh identity Keychain read failed with status \(status)."
+            PasteBuddyLocalization.format(
+                "error.iroh.keychain_read_failed",
+                defaultValue: "Iroh identity Keychain read failed with status %d.",
+                status
+            )
         case .keychainWriteFailed(let status):
-            "Iroh identity Keychain write failed with status \(status)."
+            PasteBuddyLocalization.format(
+                "error.iroh.keychain_write_failed",
+                defaultValue: "Iroh identity Keychain write failed with status %d.",
+                status
+            )
         case .invalidSecretKey:
-            "Stored iroh identity is invalid."
+            PasteBuddyLocalization.string(
+                "error.iroh.invalid_secret_key",
+                defaultValue: "Stored iroh identity is invalid."
+            )
         }
+    }
+}
+
+struct IrohClipboardSessionState {
+    private(set) var currentToken: UUID?
+
+    mutating func beginSession() -> UUID {
+        let token = UUID()
+        currentToken = token
+        return token
+    }
+
+    mutating func closeSession(token: UUID) -> Bool {
+        guard currentToken == token else { return false }
+        currentToken = nil
+        return true
+    }
+}
+
+@MainActor
+final class IrohClipboardStartGate {
+    private var task: Task<Void, Never>?
+
+    func run(_ operation: @escaping @MainActor @Sendable () async -> Void) async {
+        if let task {
+            await task.value
+            return
+        }
+
+        let task = Task { @MainActor in
+            await operation()
+        }
+        self.task = task
+        await task.value
+        self.task = nil
     }
 }
 
@@ -108,13 +238,15 @@ public final class IrohClipboardSyncService {
     public private(set) var lastReceivedAt: Date?
     public private(set) var lastReceivedTitle: String?
 
-    @ObservationIgnored public var onItemReceived: (@MainActor (ClipboardItem) -> Void)?
+    @ObservationIgnored public var onItemReceived: (@MainActor (ClipboardItem) async -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let identityStore: IrohClipboardIdentityStore
     @ObservationIgnored private var endpoint: Endpoint?
     @ObservationIgnored private var acceptTask: Task<Void, Never>?
     @ObservationIgnored private var currentSession: IrohClipboardSession?
+    @ObservationIgnored private var sessionState = IrohClipboardSessionState()
+    @ObservationIgnored private let startGate = IrohClipboardStartGate()
 
     private static let peerEndpointDefaultsKey = "pastebuddy.iroh.peerEndpointId"
     nonisolated private static let pairingScheme = "pastebuddy"
@@ -135,6 +267,13 @@ public final class IrohClipboardSyncService {
     }
 
     public func start() async {
+        guard endpoint == nil else { return }
+        await startGate.run { [weak self] in
+            await self?.bindEndpoint()
+        }
+    }
+
+    private func bindEndpoint() async {
         guard endpoint == nil else { return }
         connectionState = .binding
         do {
@@ -229,7 +368,11 @@ public final class IrohClipboardSyncService {
             return true
         } catch let error as IrohClipboardSyncError {
             guard case .frameTooLarge = error else {
-                connectionState = .failed(error.localizedDescription)
+                markSendFailure(error)
+                return false
+            }
+            guard item.payload.rtfData != nil || item.payload.imageData != nil else {
+                markSendFailure(error)
                 return false
             }
             let slimmedItem = Self.slimmedItemForFrameRetry(from: item)
@@ -237,11 +380,15 @@ public final class IrohClipboardSyncService {
                 try await transport(IrohClipboardSyncEnvelope(item: slimmedItem))
                 lastSentAt = Date()
                 return true
-            } catch {
+            } catch let retryError as IrohClipboardSyncError {
+                markSendFailure(retryError)
+                return false
+            } catch let retryError {
+                markSendFailure(retryError)
                 return false
             }
         } catch {
-            connectionState = .failed(error.localizedDescription)
+            markSendFailure(error)
             return false
         }
     }
@@ -249,6 +396,12 @@ public final class IrohClipboardSyncService {
     public func sendIfConnected(_ item: ClipboardItem) async {
         guard currentSession != nil else { return }
         _ = await send(item)
+    }
+
+    public func reportReceivePersistenceFailure(_ error: any Error) {
+        currentSession?.stop()
+        currentSession = nil
+        connectionState = .failed(error.localizedDescription)
     }
 
     private func runAcceptLoop() async {
@@ -260,26 +413,44 @@ public final class IrohClipboardSyncService {
                     continue
                 }
                 let connection = try await accepting.connect()
+                let remoteEndpointId = connection.remoteId().description
+                guard authorizeIncomingPeer(remoteEndpointId) else { continue }
                 let stream = try await connection.acceptBi()
-                adoptSession(stream: stream, connection: connection, remoteIdHex: connection.remoteId().description)
+                adoptSession(stream: stream, connection: connection, remoteIdHex: remoteEndpointId)
             } catch {
                 continue
             }
         }
     }
 
+    func authorizeIncomingPeer(_ remoteEndpointId: String) -> Bool {
+        guard let canonicalRemote = Self.canonicalEndpointId(remoteEndpointId) else { return false }
+        let configuredPeer = peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if configuredPeer.isEmpty {
+            peerEndpointId = canonicalRemote
+            return true
+        }
+        guard Self.canonicalEndpointId(configuredPeer) == canonicalRemote else { return false }
+        peerEndpointId = canonicalRemote
+        return true
+    }
+
+    nonisolated private static func canonicalEndpointId(_ endpointId: String) -> String? {
+        let trimmed = endpointId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try? EndpointId.fromString(s: trimmed).description
+    }
+
     private func adoptSession(stream: BiStream, connection: Connection, remoteIdHex: String) {
+        let sessionToken = sessionState.beginSession()
         currentSession?.stop()
         let session = IrohClipboardSession(
             stream: stream,
             onEnvelopeReceived: { [weak self] envelope in
-                Task { @MainActor in
-                    self?.receive(envelope)
-                }
+                await self?.receive(envelope)
             },
             onClosed: { [weak self] in
                 Task { @MainActor in
-                    self?.handleSessionClosed()
+                    self?.handleSessionClosed(token: sessionToken)
                 }
             }
         )
@@ -288,13 +459,14 @@ public final class IrohClipboardSyncService {
         connectionState = .connected(peerShortId: String(remoteIdHex.prefix(10)))
     }
 
-    private func receive(_ envelope: IrohClipboardSyncEnvelope) {
+    private func receive(_ envelope: IrohClipboardSyncEnvelope) async {
         lastReceivedAt = envelope.sentAt
         lastReceivedTitle = envelope.item.title
-        onItemReceived?(envelope.item)
+        await onItemReceived?(envelope.item)
     }
 
-    private func handleSessionClosed() {
+    private func handleSessionClosed(token: UUID) {
+        guard sessionState.closeSession(token: token) else { return }
         currentSession = nil
         if case .connected = connectionState {
             connectionState = .ready
@@ -312,6 +484,10 @@ public final class IrohClipboardSyncService {
         slimmed.refreshSearchDocument()
         return slimmed
     }
+
+    private func markSendFailure(_ error: any Error) {
+        connectionState = .failed(error.localizedDescription)
+    }
 }
 
 public struct IrohClipboardIdentity: Sendable {
@@ -319,88 +495,144 @@ public struct IrohClipboardIdentity: Sendable {
     public let endpointId: String
 }
 
+struct IrohClipboardKeychainClient: @unchecked Sendable {
+    let copyMatching: ([String: Any]) -> (status: OSStatus, data: Data?)
+    let add: ([String: Any]) -> OSStatus
+
+    static let live = IrohClipboardKeychainClient(
+        copyMatching: { query in
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            return (status, item as? Data)
+        },
+        add: { query in
+            SecItemAdd(query as CFDictionary, nil)
+        }
+    )
+}
+
 public final class IrohClipboardIdentityStore: @unchecked Sendable {
     public static let standard = IrohClipboardIdentityStore()
 
     private let service: String
     private let account: String
+    private let accessGroup: String?
+    private let keychainClient: IrohClipboardKeychainClient
 
-    public init(
+    public convenience init(
         service: String = "com.alexjiang.PasteBuddy.iroh",
-        account: String = "clipboard-sync-secret-key"
+        account: String = "clipboard-sync-secret-key",
+        accessGroup: String? = nil
+    ) {
+        self.init(
+            service: service,
+            account: account,
+            accessGroup: accessGroup,
+            keychainClient: .live
+        )
+    }
+
+    init(
+        service: String,
+        account: String,
+        accessGroup: String?,
+        keychainClient: IrohClipboardKeychainClient
     ) {
         self.service = service
         self.account = account
+        self.accessGroup = accessGroup
+        self.keychainClient = keychainClient
     }
 
     public func loadOrCreate() throws -> IrohClipboardIdentity {
-        if let stored = try load() {
+        if let stored = try load(query: baseQuery()) {
             return stored
         }
+        if accessGroup != nil,
+           let legacyIdentity = try load(query: legacyBaseQuery()) {
+            // A query without kSecAttrAccessGroup is not a precise "legacy"
+            // selector: it can match any access group available to this app.
+            // Keep the old entry after copying so we never delete the new
+            // shared-group winner through an unscoped query.
+            return try insertOrLoadWinner(secretKey: legacyIdentity.secretKey)
+        }
         let secretKey = SecretKey.generate()
-        try save(secretKey.toBytes())
-        return IrohClipboardIdentity(secretKey: secretKey, endpointId: secretKey.public().description)
+        return try insertOrLoadWinner(secretKey: secretKey)
     }
 
-    private func load() throws -> IrohClipboardIdentity? {
-        var item: CFTypeRef?
-        var query = baseQuery()
+    private func load(query baseQuery: [String: Any]) throws -> IrohClipboardIdentity? {
+        var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let result = keychainClient.copyMatching(query)
+        let status = result.status
         if status == errSecItemNotFound {
             return nil
         }
         guard status == errSecSuccess else {
             throw IrohClipboardSyncError.keychainReadFailed(status)
         }
-        guard let data = item as? Data,
+        guard let data = result.data,
               let secretKey = try? SecretKey.fromBytes(bytes: data) else {
             throw IrohClipboardSyncError.invalidSecretKey
         }
         return IrohClipboardIdentity(secretKey: secretKey, endpointId: secretKey.public().description)
     }
 
-    private func save(_ data: Data) throws {
+    private func insertOrLoadWinner(secretKey: SecretKey) throws -> IrohClipboardIdentity {
         var query = baseQuery()
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        query[kSecValueData as String] = data
+        query[kSecValueData as String] = secretKey.toBytes()
         query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
-        let status = SecItemAdd(query as CFDictionary, nil)
+        let status = keychainClient.add(query)
         if status == errSecDuplicateItem {
-            var updateQuery = baseQuery()
-            updateQuery[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
-            let updateStatus = SecItemUpdate(updateQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-            guard updateStatus == errSecSuccess else {
-                throw IrohClipboardSyncError.keychainWriteFailed(updateStatus)
-            }
-            return
+            return try loadDuplicateWinner()
         }
         guard status == errSecSuccess else {
             throw IrohClipboardSyncError.keychainWriteFailed(status)
         }
+        return IrohClipboardIdentity(secretKey: secretKey, endpointId: secretKey.public().description)
     }
 
-    private func baseQuery() -> [String: Any] {
-        [
+    private func loadDuplicateWinner() throws -> IrohClipboardIdentity {
+        guard let identity = try load(query: baseQuery()) else {
+            throw IrohClipboardSyncError.keychainReadFailed(errSecItemNotFound)
+        }
+        return identity
+    }
+
+    func baseQuery() -> [String: Any] {
+        baseQuery(accessGroup: accessGroup)
+    }
+
+    private func legacyBaseQuery() -> [String: Any] {
+        baseQuery(accessGroup: nil)
+    }
+
+    private func baseQuery(accessGroup: String?) -> [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+        if let accessGroup {
+            query[kSecAttrAccessGroup as String] = accessGroup
+        }
+        return query
     }
 }
 
 private final class IrohClipboardSession: @unchecked Sendable {
     private let stream: BiStream
     private let sender: IrohClipboardSender
-    private let onEnvelopeReceived: @Sendable (IrohClipboardSyncEnvelope) -> Void
+    private let onEnvelopeReceived: @Sendable (IrohClipboardSyncEnvelope) async -> Void
     private let onClosed: @Sendable () -> Void
     private var receiveTask: Task<Void, Never>?
 
     init(
         stream: BiStream,
-        onEnvelopeReceived: @escaping @Sendable (IrohClipboardSyncEnvelope) -> Void,
+        onEnvelopeReceived: @escaping @Sendable (IrohClipboardSyncEnvelope) async -> Void,
         onClosed: @escaping @Sendable () -> Void
     ) {
         self.stream = stream
@@ -429,14 +661,14 @@ private final class IrohClipboardSession: @unchecked Sendable {
             do {
                 let lengthPrefix = try await receiver.readExact(size: UInt32(MemoryLayout<UInt32>.size))
                 let byteCount = lengthPrefix.withUnsafeBytes { rawBuffer in
-                    UInt32(littleEndian: rawBuffer.load(as: UInt32.self))
+                    UInt32(littleEndian: rawBuffer.loadUnaligned(as: UInt32.self))
                 }
                 guard byteCount <= IrohClipboardWireFormat.maxFrameBytes else {
                     break
                 }
                 let body = try await receiver.readExact(size: byteCount)
                 let envelope = try IrohClipboardWireFormat.decode(lengthPrefix: lengthPrefix, body: body)
-                onEnvelopeReceived(envelope)
+                await onEnvelopeReceived(envelope)
             } catch {
                 break
             }

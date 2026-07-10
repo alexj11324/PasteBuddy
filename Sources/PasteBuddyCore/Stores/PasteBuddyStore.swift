@@ -1,6 +1,30 @@
 import CryptoKit
 import Foundation
 import Observation
+#if canImport(Darwin)
+import Darwin
+#endif
+
+public enum PasteBuddyPersistenceError: LocalizedError, Equatable {
+    case historyUnavailable
+
+    public var errorDescription: String? {
+        PasteBuddyLocalization.string(
+            "message.history_unavailable",
+            defaultValue: "PasteBuddy history is unavailable because it could not be loaded or saved safely."
+        )
+    }
+}
+
+public struct PasteBuddyFilteredItemsPage: Equatable, Sendable {
+    public var items: [ClipboardItem]
+    public var totalCount: Int
+
+    public init(items: [ClipboardItem], totalCount: Int) {
+        self.items = items
+        self.totalCount = totalCount
+    }
+}
 
 @MainActor
 @Observable
@@ -17,11 +41,15 @@ public final class PasteBuddyStore {
         didSet { bumpQueryRevision() }
     }
     public var lastErrorMessage: String?
+    public private(set) var isPersistenceWriteBlocked: Bool
     public var isPasteStackActive: Bool {
         didSet { bumpQueryRevision() }
     }
     public var pasteStackItems: [ClipboardItem] {
-        didSet { bumpQueryRevision() }
+        didSet {
+            pasteStackContentRevision &+= 1
+            bumpQueryRevision()
+        }
     }
     public var pasteStackDirection: PasteStackDirection {
         didSet { bumpQueryRevision() }
@@ -53,19 +81,42 @@ public final class PasteBuddyStore {
     private var diskStore: EncryptedSnapshotStore
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
     @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor
-    @ObservationIgnored private let clipboardRepository: ClipboardItemRepository?
-    @ObservationIgnored private let repositorySyncActor: ClipboardRepositorySyncActor?
+    @ObservationIgnored private let persistenceCommitGate: PersistenceCommitGate
+    @ObservationIgnored private var clipboardRepository: ClipboardItemRepository?
+    @ObservationIgnored private var repositorySyncActor: ClipboardRepositorySyncActor?
+    @ObservationIgnored private var deferredRepositoryDatabaseURL: URL?
+    @ObservationIgnored private var repositoryDatabaseURLForStandardStorage: URL?
+    @ObservationIgnored private var deferredRepositoryInitializationTask: Task<(ClipboardItemRepository, Bool), Error>?
+    @ObservationIgnored internal private(set) var lastDeferredRepositoryInitializationWasOnMainThreadForTesting: Bool?
+    @ObservationIgnored var beforeApplyingAsyncLoadForTesting: (@MainActor @Sendable () async -> Void)?
+    @ObservationIgnored var beforeCommittingHistoryStorageMigrationForTesting: (@MainActor @Sendable () async -> Void)?
+    @ObservationIgnored var beforePersistingFlushSnapshotForTesting: (@MainActor @Sendable () async -> Void)?
+    @ObservationIgnored var beforePersistingStandardMigrationSnapshotForTesting: (@MainActor @Sendable () async -> Void)?
     @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
+    @ObservationIgnored internal private(set) var itemByIDIndexBuildCountForTesting = 0
+    @ObservationIgnored internal private(set) var dedupeIndexBuildCountForTesting = 0
+    @ObservationIgnored internal private(set) var lastInMemoryPageQueryRanOnMainThreadForTesting: Bool?
+    @ObservationIgnored private var captureHistoryState: PasteBuddyCaptureHistoryState?
+    @ObservationIgnored private var pasteStackContentRevision: Int
+    @ObservationIgnored internal private(set) var captureHotPathItemInspectionCountForTesting = 0
     @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingSaveTaskID: UUID?
+    @ObservationIgnored private var persistenceGeneration: UInt64 = 0
+    @ObservationIgnored private var isHistoryStorageMigrationInProgress = false
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
+    @ObservationIgnored private var dedupeIndexRevision: Int?
     @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
+    @ObservationIgnored private var pendingRepositoryCaptureJournal = ClipboardRepositoryCaptureJournal()
+    @ObservationIgnored private var pendingRepositoryJournalRevision: Int?
+    @ObservationIgnored private var pendingRepositoryRequiresFullSync = false
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
 
     private static let defaultHistoryPageLimit = 100
     private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
+    private static let maximumPersistenceStabilityAttempts = 8
 
     public nonisolated static var defaultDeviceName: String {
         #if os(macOS)
@@ -87,6 +138,11 @@ public final class PasteBuddyStore {
     private func bumpQueryRevision() {
         queryRevision &+= 1
         bumpPresentationRevision()
+    }
+
+    private func nextPersistenceGeneration() -> UInt64 {
+        persistenceGeneration &+= 1
+        return persistenceGeneration
     }
 
     public init(
@@ -111,35 +167,35 @@ public final class PasteBuddyStore {
                 )
             }
         }
-        let resolvedClipboardRepository: ClipboardItemRepository?
-        if let clipboardRepository {
-            resolvedClipboardRepository = clipboardRepository
-        } else if diskStore == nil {
-            do {
-                resolvedClipboardRepository = ClipboardItemRepository(
-                    database: try PasteBuddyDatabase(fileURL: PasteBuddyDatabase.defaultDatabaseURL())
-                )
-            } catch {
-                resolvedClipboardRepository = nil
-            }
+        let resolvedClipboardRepository = clipboardRepository
+        let deferredRepositoryDatabaseURL: URL?
+        if clipboardRepository == nil, usesDefaultDiskStore {
+            deferredRepositoryDatabaseURL = try? PasteBuddyDatabase.defaultDatabaseURL()
         } else {
-            resolvedClipboardRepository = nil
+            deferredRepositoryDatabaseURL = nil
         }
         var initialSnapshot = PasteBuddySnapshot()
         initialSnapshot.security.storageMode = resolvedDiskStore.storageMode
         self.diskStore = resolvedDiskStore
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
         self.persistenceActor = SnapshotPersistenceActor(diskStore: resolvedDiskStore)
+        self.persistenceCommitGate = PersistenceCommitGate()
         self.clipboardRepository = resolvedClipboardRepository
         self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
+        self.deferredRepositoryDatabaseURL = deferredRepositoryDatabaseURL
+        self.repositoryDatabaseURLForStandardStorage = resolvedClipboardRepository?.fileURL ?? deferredRepositoryDatabaseURL
+        self.deferredRepositoryInitializationTask = nil
+        self.lastDeferredRepositoryInitializationWasOnMainThreadForTesting = nil
         self.saveDebounceNanoseconds = saveDebounceNanoseconds ?? (usesDefaultDiskStore ? Self.defaultSaveDebounceNanoseconds : nil)
         self.snapshot = initialSnapshot
         self.selectedScope = .history
         self.selectedItemID = nil
         self.selectedItemIDs = []
         self.searchQuery = ""
+        self.isPersistenceWriteBlocked = false
         self.isPasteStackActive = false
         self.pasteStackItems = []
+        self.pasteStackContentRevision = 0
         self.pasteStackDirection = .topToBottom
         self.contentTypeFilter = nil
         self.sourceAppFilter = nil
@@ -154,25 +210,43 @@ public final class PasteBuddyStore {
         self.dataRevision = 0
         self.queryRevision = 0
         self.repositorySyncedDataRevision = nil
+        self.pendingRepositoryJournalRevision = nil
     }
 
     public func load() {
         do {
-            var loadedSnapshot = try diskStore.load()
-            if Self.needsExternalAssetHydration(loadedSnapshot),
-               let clipboardRepository {
-                let repositorySnapshot = try clipboardRepository.exportSnapshot()
-                if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
-                    loadedSnapshot = repositorySnapshot
+            let diskSnapshot = try diskStore.load()
+            let diskStorageMode = diskStore.lastLoadedStorageMode ?? diskSnapshot.security.storageMode
+            // Once an encrypted snapshot exists it is the committed source of
+            // truth. SQLite can survive a crash between the encrypted write and
+            // plaintext cleanup, and must never roll that snapshot back.
+            let loadedFromRepository: Bool
+            if diskStorageMode == .encrypted {
+                loadedFromRepository = false
+            } else {
+                loadedFromRepository = try clipboardRepository?.hasStoredSnapshot() == true
+            }
+            var loadedSnapshot: PasteBuddySnapshot
+            if loadedFromRepository, let clipboardRepository {
+                loadedSnapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
+            } else {
+                loadedSnapshot = diskSnapshot
+            }
+            let resolvedStorageMode: SnapshotStorageMode = (
+                diskStorageMode == .encrypted || loadedSnapshot.security.storageMode == .encrypted
+            ) ? .encrypted : .standard
+            if resolvedStorageMode == .encrypted {
+                if loadedFromRepository, let clipboardRepository {
+                    loadedSnapshot = try clipboardRepository.exportSnapshot()
                 }
+                loadedSnapshot.security.storageMode = .encrypted
+                diskStore.storageMode = .encrypted
+                try diskStore.save(loadedSnapshot)
+                try removePlaintextRepositoryForEncryptedStorage()
             }
             snapshot = loadedSnapshot
-            if let loadedStorageMode = diskStore.lastLoadedStorageMode {
-                snapshot.security.storageMode = loadedStorageMode
-                diskStore.storageMode = loadedStorageMode
-            } else {
-                diskStore.storageMode = snapshot.security.storageMode
-            }
+            snapshot.security.storageMode = resolvedStorageMode
+            diskStore.storageMode = resolvedStorageMode
             if snapshot.security.requiresBiometricUnlock {
                 lockHistory()
             } else {
@@ -180,32 +254,90 @@ public final class PasteBuddyStore {
             }
             refreshDerivedDocumentsIfNeeded()
             rebuildDedupeIndex()
-            syncClipboardRepositoryFromSnapshot()
+            rebuildCaptureHistoryState()
+            if resolvedStorageMode == .encrypted {
+                repositorySyncedDataRevision = nil
+            } else if loadedFromRepository {
+                repositorySyncedDataRevision = dataRevision
+                presentationCache = PasteBuddyPresentationCache()
+            } else {
+                if syncClipboardRepositoryFromSnapshot(), let clipboardRepository {
+                    var lightweightSnapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
+                    lightweightSnapshot.security.storageMode = resolvedStorageMode
+                    snapshot = lightweightSnapshot
+                    refreshDerivedDocumentsIfNeeded()
+                    rebuildDedupeIndex()
+                    rebuildCaptureHistoryState()
+                    repositorySyncedDataRevision = dataRevision
+                    presentationCache = PasteBuddyPresentationCache()
+                }
+            }
+            clearPendingRepositoryPlan()
+            isPersistenceWriteBlocked = false
+            lastErrorMessage = nil
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
+            pendingSaveTask?.cancel()
+            pendingSaveTask = nil
+            pendingSaveTaskID = nil
+            repositorySyncedDataRevision = nil
+            isPersistenceWriteBlocked = true
             lastErrorMessage = error.localizedDescription
         }
     }
 
     public func loadAsync() async {
+        guard !isHistoryStorageMigrationInProgress else { return }
+        let revisionBeforePendingFlush = dataRevision
+        if pendingSaveTask != nil {
+            guard await flushPendingSave() else { return }
+            guard dataRevision == revisionBeforePendingFlush else { return }
+        }
+        let revisionBeforeLoad = dataRevision
         do {
-            let result = try await persistenceActor.load()
-            var loadedSnapshot = result.snapshot
-            if Self.needsExternalAssetHydration(loadedSnapshot),
-               let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
-                if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
-                    loadedSnapshot = repositorySnapshot
+            let diskResult = try await persistenceActor.load()
+            let diskStorageMode = diskResult.loadedStorageMode ?? diskResult.snapshot.security.storageMode
+            if diskStorageMode == .encrypted {
+                // Do not open plaintext residue after an encrypted commit. Keep
+                // an existing deferred URL only long enough to remove it below.
+                if clipboardRepository == nil,
+                   let databaseURL = deferredRepositoryDatabaseURL,
+                   !Self.sqliteFilesExist(at: databaseURL) {
+                    deferredRepositoryDatabaseURL = nil
                 }
-            }
-            snapshot = loadedSnapshot
-            if let loadedStorageMode = result.loadedStorageMode {
-                snapshot.security.storageMode = loadedStorageMode
-                diskStore.storageMode = loadedStorageMode
             } else {
-                diskStore.storageMode = snapshot.security.storageMode
+                try await initializeDeferredRepositoryIfNeeded()
             }
+            let loadedFromRepository: Bool
+            if diskStorageMode == .encrypted {
+                loadedFromRepository = false
+            } else {
+                loadedFromRepository = try await repositorySyncActor?.hasStoredSnapshot() == true
+            }
+            var loadedSnapshot: PasteBuddySnapshot
+            if loadedFromRepository, let repositorySyncActor {
+                loadedSnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+            } else {
+                loadedSnapshot = diskResult.snapshot
+            }
+            let resolvedStorageMode: SnapshotStorageMode = (
+                diskStorageMode == .encrypted || loadedSnapshot.security.storageMode == .encrypted
+            ) ? .encrypted : .standard
+            if resolvedStorageMode == .encrypted, loadedFromRepository, let repositorySyncActor {
+                loadedSnapshot = try await repositorySyncActor.exportSnapshot()
+            }
+
+            if let beforeApplyingAsyncLoadForTesting {
+                await beforeApplyingAsyncLoadForTesting()
+            }
+            guard dataRevision == revisionBeforeLoad else {
+                return
+            }
+
+            loadedSnapshot.security.storageMode = resolvedStorageMode
+            snapshot = loadedSnapshot
+            diskStore.storageMode = resolvedStorageMode
             if snapshot.security.requiresBiometricUnlock {
                 lockHistory()
             } else {
@@ -213,19 +345,146 @@ public final class PasteBuddyStore {
             }
             refreshDerivedDocumentsIfNeeded()
             rebuildDedupeIndex()
-            if let repositorySyncActor {
-                try await repositorySyncActor.synchronize(with: snapshot)
+            rebuildCaptureHistoryState()
+            isPersistenceWriteBlocked = false
+            lastErrorMessage = nil
+
+            if resolvedStorageMode == .encrypted {
+                if repositorySyncActor != nil || clipboardRepository != nil || deferredRepositoryDatabaseURL != nil {
+                    isHistoryStorageMigrationInProgress = true
+                    if let beforeCommittingHistoryStorageMigrationForTesting {
+                        await beforeCommittingHistoryStorageMigrationForTesting()
+                    }
+                    try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
+                    try await removePlaintextRepositoryForEncryptedStorageAsync()
+                    try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
+                    isHistoryStorageMigrationInProgress = false
+                }
+                repositorySyncedDataRevision = nil
+                clearPendingRepositoryPlan()
+            } else if !loadedFromRepository, let repositorySyncActor {
+                let revisionToSync = dataRevision
+                let snapshotToSync = snapshot
+                try await repositorySyncActor.synchronize(with: snapshotToSync)
+                if dataRevision == revisionToSync {
+                    var lightweightSnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+                    if dataRevision == revisionToSync {
+                        lightweightSnapshot.security.storageMode = resolvedStorageMode
+                        snapshot = lightweightSnapshot
+                        refreshDerivedDocumentsIfNeeded()
+                        rebuildDedupeIndex()
+                        rebuildCaptureHistoryState()
+                        repositorySyncedDataRevision = dataRevision
+                        clearPendingRepositoryPlan()
+                        presentationCache = PasteBuddyPresentationCache()
+                    } else {
+                        repositorySyncedDataRevision = nil
+                    }
+                } else {
+                    repositorySyncedDataRevision = nil
+                }
+            } else if loadedFromRepository {
                 repositorySyncedDataRevision = dataRevision
+                clearPendingRepositoryPlan()
                 presentationCache = PasteBuddyPresentationCache()
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
+            isHistoryStorageMigrationInProgress = false
+            pendingSaveTask?.cancel()
+            pendingSaveTask = nil
+            pendingSaveTaskID = nil
+            repositorySyncedDataRevision = nil
+            isPersistenceWriteBlocked = true
             lastErrorMessage = error.localizedDescription
         }
     }
 
+    nonisolated private static func sqliteFilesExist(at databaseURL: URL) -> Bool {
+        let fileManager = FileManager.default
+        return [
+            databaseURL,
+            URL(fileURLWithPath: databaseURL.path + "-wal"),
+            URL(fileURLWithPath: databaseURL.path + "-shm")
+        ].contains { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    private func initializeDeferredRepositoryIfNeeded() async throws {
+        guard clipboardRepository == nil,
+              let databaseURL = deferredRepositoryDatabaseURL else {
+            return
+        }
+        let task: Task<(ClipboardItemRepository, Bool), Error>
+        if let deferredRepositoryInitializationTask {
+            task = deferredRepositoryInitializationTask
+        } else {
+            task = Task.detached(priority: .userInitiated) {
+                #if canImport(Darwin)
+                let initializedOnMainThread = pthread_main_np() != 0
+                #else
+                let initializedOnMainThread = false
+                #endif
+                let repository = ClipboardItemRepository(
+                    database: try PasteBuddyDatabase(fileURL: databaseURL)
+                )
+                return (repository, initializedOnMainThread)
+            }
+            deferredRepositoryInitializationTask = task
+        }
+        defer { deferredRepositoryInitializationTask = nil }
+        let (repository, initializedOnMainThread) = try await task.value
+        clipboardRepository = repository
+        repositorySyncActor = ClipboardRepositorySyncActor(repository: repository)
+        deferredRepositoryDatabaseURL = nil
+        lastDeferredRepositoryInitializationWasOnMainThreadForTesting = initializedOnMainThread
+    }
+
+    private func removePlaintextRepositoryForEncryptedStorage() throws {
+        let databaseURL = clipboardRepository?.fileURL ?? deferredRepositoryDatabaseURL
+        try clipboardRepository?.eraseSensitiveContent()
+        repositorySyncActor = nil
+        clipboardRepository = nil
+        deferredRepositoryDatabaseURL = nil
+        repositorySyncedDataRevision = nil
+        clearPendingRepositoryPlan()
+        if let databaseURL {
+            try Self.removeSQLiteFiles(at: databaseURL)
+        }
+    }
+
+    private func removePlaintextRepositoryForEncryptedStorageAsync() async throws {
+        let databaseURL = clipboardRepository?.fileURL ?? deferredRepositoryDatabaseURL
+        if let repositorySyncActor {
+            try await repositorySyncActor.eraseSensitiveContent()
+        }
+        self.repositorySyncActor = nil
+        clipboardRepository = nil
+        deferredRepositoryDatabaseURL = nil
+        repositorySyncedDataRevision = nil
+        clearPendingRepositoryPlan()
+        if let databaseURL {
+            try await Task.detached(priority: .utility) {
+                try Self.removeSQLiteFiles(at: databaseURL)
+            }.value
+        }
+    }
+
+    nonisolated private static func removeSQLiteFiles(at databaseURL: URL) throws {
+        let fileManager = FileManager.default
+        for url in [
+            databaseURL,
+            URL(fileURLWithPath: databaseURL.path + "-wal"),
+            URL(fileURLWithPath: databaseURL.path + "-shm")
+        ] where fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
     public func save() {
+        guard !isPersistenceWriteBlocked else { return }
+        guard !isHistoryStorageMigrationInProgress else { return }
+        markRepositoryFullSyncRequired()
         guard let saveDebounceNanoseconds else {
             saveImmediately()
             return
@@ -234,6 +493,9 @@ public final class PasteBuddyStore {
     }
 
     private func saveAndFlush() {
+        guard !isPersistenceWriteBlocked else { return }
+        guard !isHistoryStorageMigrationInProgress else { return }
+        markRepositoryFullSyncRequired()
         guard saveDebounceNanoseconds != nil else {
             saveImmediately()
             return
@@ -241,46 +503,210 @@ public final class PasteBuddyStore {
         scheduleSave(delayNanoseconds: 0)
     }
 
-    public func flushPendingSave() async {
-        pendingSaveTask?.cancel()
-        pendingSaveTask = nil
-        let snapshotToSave = snapshot
-        let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
-        let snapshotToPersist = await Task.detached(priority: .utility) {
-            Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
-        }.value
+    @discardableResult
+    public func flushPendingSave() async -> Bool {
         do {
-            if let repositorySyncActor {
-                try await repositorySyncActor.synchronize(with: snapshotToSave)
-                repositorySyncedDataRevision = dataRevision
-                presentationCache = PasteBuddyPresentationCache()
-            }
-            try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
-            diskStore.storageMode = snapshotToSave.security.storageMode
+            return try await flushPendingSaveRespectingCancellation()
+        } catch is CancellationError {
+            return false
         } catch {
+            isPersistenceWriteBlocked = true
             lastErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    public func flushPendingSaveOrThrow() async throws {
+        guard try await flushPendingSaveRespectingCancellation() else {
+            throw PasteBuddyPersistenceError.historyUnavailable
+        }
+    }
+
+    private func flushPendingSaveRespectingCancellation() async throws -> Bool {
+        guard !isHistoryStorageMigrationInProgress else { return false }
+        guard !isPersistenceWriteBlocked else {
+            pendingSaveTask?.cancel()
+            pendingSaveTask = nil
+            pendingSaveTaskID = nil
+            return false
+        }
+
+        while true {
+            while let inFlightSave = pendingSaveTask {
+                pendingSaveTask = nil
+                pendingSaveTaskID = nil
+                inFlightSave.cancel()
+                await inFlightSave.value
+            }
+            try Task.checkCancellation()
+
+            let snapshotToSave = snapshot
+            let dataRevisionToSync = dataRevision
+            let persistenceGeneration = nextPersistenceGeneration()
+            let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
+            let repositoryRequiresFullSync = pendingRepositoryRequiresFullSync
+            let captureJournal = pendingRepositoryCaptureJournal
+            let externalizationTask = Task.detached(priority: .utility) {
+                try Task.checkCancellation()
+                return try Self.externalizedSnapshotForDiskPersistence(
+                    snapshotToSave,
+                    hasRepository: hasRepository
+                )
+            }
+            let snapshotToPersist = try await withTaskCancellationHandler {
+                try await externalizationTask.value
+            } onCancel: {
+                externalizationTask.cancel()
+            }
+            try Task.checkCancellation()
+            if let beforePersistingFlushSnapshotForTesting {
+                self.beforePersistingFlushSnapshotForTesting = nil
+                await beforePersistingFlushSnapshotForTesting()
+            }
+            try Task.checkCancellation()
+
+            guard let commitLease = await persistenceCommitGate.acquire(
+                generation: persistenceGeneration
+            ) else {
+                try Task.checkCancellation()
+                continue
+            }
+            do {
+                try Task.checkCancellation()
+            } catch {
+                persistenceCommitGate.release(commitLease, outcome: .abortedBeforeWrite)
+                throw error
+            }
+
+            // Cancellation is honored up to this explicit commit point. Once the
+            // repository transaction starts, finish the matching snapshot write
+            // as one shielded unit so cancellation cannot leave the two stores
+            // at different revisions.
+            let commitTask = Task {
+                var crossedWriteBarrier = false
+                do {
+                    if let repositorySyncActor {
+                        if repositoryRequiresFullSync {
+                            try await repositorySyncActor.synchronize(with: snapshotToSave)
+                            crossedWriteBarrier = true
+                        } else if !captureJournal.isEmpty {
+                            try await repositorySyncActor.applyCaptureJournal(captureJournal)
+                            crossedWriteBarrier = true
+                        }
+                    }
+                    crossedWriteBarrier = true
+                    let didPersist = try await persistenceActor.save(
+                        snapshotToPersist,
+                        storageMode: snapshotToSave.security.storageMode,
+                        generation: persistenceGeneration
+                    )
+                    guard didPersist else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
+                    persistenceCommitGate.release(commitLease, outcome: .committed)
+                    return true
+                } catch {
+                    persistenceCommitGate.release(
+                        commitLease,
+                        outcome: crossedWriteBarrier ? .failedAfterWrite : .abortedBeforeWrite
+                    )
+                    throw error
+                }
+            }
+            do {
+                _ = try await commitTask.value
+                diskStore.storageMode = snapshotToSave.security.storageMode
+                completeRepositorySave(dataRevision: dataRevisionToSync)
+            } catch {
+                isPersistenceWriteBlocked = true
+                lastErrorMessage = error.localizedDescription
+                return false
+            }
+
+            guard dataRevision == dataRevisionToSync, pendingSaveTask == nil else {
+                continue
+            }
+            lastErrorMessage = nil
+            return true
+        }
+    }
+
+    public func requirePersistenceReady() throws {
+        guard !isPersistenceWriteBlocked else {
+            throw PasteBuddyPersistenceError.historyUnavailable
         }
     }
 
     private func saveImmediately() {
+        guard !isPersistenceWriteBlocked else { return }
+        let persistenceGeneration = nextPersistenceGeneration()
+        guard let commitLease = persistenceCommitGate.tryAcquireImmediately(
+            generation: persistenceGeneration
+        ) else {
+            scheduleSave(delayNanoseconds: 0)
+            return
+        }
         let snapshotToSave = snapshot
+        let dataRevisionToSync = dataRevision
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
-        let snapshotToPersist = Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
+        let repositoryWritePlanned = clipboardRepository != nil
+            && (pendingRepositoryRequiresFullSync
+                || !pendingRepositoryCaptureJournal.isEmpty
+                || repositorySyncedDataRevision != dataRevisionToSync)
+        var crossedWriteBarrier = false
         do {
-            let didSyncRepository = syncClipboardRepositoryFromSnapshot()
+            let snapshotToPersist = try Self.externalizedSnapshotForDiskPersistence(
+                snapshotToSave,
+                hasRepository: hasRepository
+            )
+            guard applyPendingRepositoryPlanImmediately(snapshot: snapshotToSave) else {
+                persistenceCommitGate.release(commitLease, outcome: .abortedBeforeWrite)
+                isPersistenceWriteBlocked = true
+                return
+            }
+            crossedWriteBarrier = repositoryWritePlanned
             diskStore.storageMode = snapshotToSave.security.storageMode
-            try diskStore.save(didSyncRepository ? snapshotToPersist : snapshotToSave)
+            crossedWriteBarrier = true
+            try diskStore.save(snapshotToPersist)
+            persistenceCommitGate.release(commitLease, outcome: .committed)
+            completeRepositorySave(dataRevision: dataRevisionToSync)
+        } catch is CancellationError {
+            persistenceCommitGate.release(
+                commitLease,
+                outcome: crossedWriteBarrier ? .failedAfterWrite : .abortedBeforeWrite
+            )
+            // A synchronous save can inherit cancellation from a MainActor task.
+            // Preserve the mutation by handing it to an independent writer instead
+            // of silently dropping the only pending persistence attempt.
+            scheduleSave(delayNanoseconds: 0)
         } catch {
+            persistenceCommitGate.release(
+                commitLease,
+                outcome: crossedWriteBarrier ? .failedAfterWrite : .abortedBeforeWrite
+            )
+            isPersistenceWriteBlocked = true
             lastErrorMessage = error.localizedDescription
         }
     }
 
     private func scheduleSave(delayNanoseconds: UInt64) {
+        guard !isPersistenceWriteBlocked else { return }
         let snapshotToSave = snapshot
         let dataRevisionToSync = dataRevision
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
-        pendingSaveTask?.cancel()
-        pendingSaveTask = Task { [persistenceActor, repositorySyncActor] in
+        let repositoryRequiresFullSync = pendingRepositoryRequiresFullSync
+        let captureJournal = pendingRepositoryCaptureJournal
+        let precedingSaveTask = pendingSaveTask
+        precedingSaveTask?.cancel()
+        let saveTaskID = UUID()
+        let persistenceGeneration = nextPersistenceGeneration()
+        pendingSaveTaskID = saveTaskID
+        pendingSaveTask = Task { [persistenceActor, persistenceCommitGate, repositorySyncActor] in
+            // Cancellation is cooperative and an older writer may already be
+            // inside repository I/O. Chain writers so a replacement can never
+            // finish before (and then be overwritten by) its predecessor.
+            await precedingSaveTask?.value
+            guard !Task.isCancelled else { return }
             if delayNanoseconds > 0 {
                 do {
                     try await Task.sleep(nanoseconds: delayNanoseconds)
@@ -292,31 +718,160 @@ public final class PasteBuddyStore {
             // Externalizing large payloads (asset hashing + search-document refresh)
             // is deliberately deferred past the debounce window and off the main
             // actor so rapid save() bursts never pay for work that gets cancelled.
-            let snapshotToPersist = await Task.detached(priority: .utility) {
-                Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
-            }.value
+            let externalizationTask = Task.detached(priority: .utility) {
+                try Self.externalizedSnapshotForDiskPersistence(
+                    snapshotToSave,
+                    hasRepository: hasRepository
+                )
+            }
+            let snapshotToPersist: PasteBuddySnapshot
+            do {
+                snapshotToPersist = try await withTaskCancellationHandler {
+                    try await externalizationTask.value
+                } onCancel: {
+                    externalizationTask.cancel()
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    guard self.pendingSaveTaskID == saveTaskID else { return }
+                    self.repositorySyncedDataRevision = nil
+                    self.pendingSaveTask = nil
+                    self.pendingSaveTaskID = nil
+                    self.isPersistenceWriteBlocked = true
+                    self.lastErrorMessage = error.localizedDescription
+                }
+                return
+            }
             guard !Task.isCancelled else { return }
+            guard let commitLease = await persistenceCommitGate.acquire(
+                generation: persistenceGeneration
+            ) else {
+                return
+            }
+            guard !Task.isCancelled else {
+                persistenceCommitGate.release(commitLease, outcome: .abortedBeforeWrite)
+                return
+            }
+            var crossedWriteBarrier = false
             do {
                 if let repositorySyncActor {
-                    try await repositorySyncActor.synchronize(with: snapshotToSave)
+                    if repositoryRequiresFullSync {
+                        try await repositorySyncActor.synchronize(with: snapshotToSave)
+                        crossedWriteBarrier = true
+                    } else if !captureJournal.isEmpty {
+                        try await repositorySyncActor.applyCaptureJournal(captureJournal)
+                        crossedWriteBarrier = true
+                    }
                 }
-                try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
+                crossedWriteBarrier = true
+                let didPersist = try await persistenceActor.save(
+                    snapshotToPersist,
+                    storageMode: snapshotToSave.security.storageMode,
+                    generation: persistenceGeneration
+                )
+                guard didPersist else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                persistenceCommitGate.release(commitLease, outcome: .committed)
                 await MainActor.run {
+                    guard self.pendingSaveTaskID == saveTaskID else { return }
                     guard self.dataRevision == dataRevisionToSync else { return }
-                    self.repositorySyncedDataRevision = dataRevisionToSync
-                    self.presentationCache = PasteBuddyPresentationCache()
+                    self.completeRepositorySave(dataRevision: dataRevisionToSync)
                     self.pendingSaveTask = nil
+                    self.pendingSaveTaskID = nil
                     self.diskStore.storageMode = snapshotToSave.security.storageMode
                     self.lastErrorMessage = nil
                 }
             } catch {
+                persistenceCommitGate.release(
+                    commitLease,
+                    outcome: crossedWriteBarrier ? .failedAfterWrite : .abortedBeforeWrite
+                )
                 await MainActor.run {
+                    guard self.pendingSaveTaskID == saveTaskID else { return }
                     guard !Task.isCancelled else { return }
                     self.repositorySyncedDataRevision = nil
                     self.pendingSaveTask = nil
+                    self.pendingSaveTaskID = nil
+                    self.isPersistenceWriteBlocked = true
                     self.lastErrorMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    private func saveCaptureMutation(
+        _ mutation: ClipboardRepositoryCaptureMutation,
+        repositoryWasCurrent: Bool
+    ) {
+        saveCaptureMutations([mutation], repositoryWasCurrent: repositoryWasCurrent)
+    }
+
+    private func saveCaptureMutations(
+        _ mutations: [ClipboardRepositoryCaptureMutation],
+        repositoryWasCurrent: Bool
+    ) {
+        guard !mutations.isEmpty else { return }
+        guard !isPersistenceWriteBlocked else { return }
+        guard !isHistoryStorageMigrationInProgress else { return }
+        if clipboardRepository != nil {
+            if repositoryWasCurrent, !pendingRepositoryRequiresFullSync {
+                pendingRepositoryCaptureJournal.mutations.append(contentsOf: mutations)
+                pendingRepositoryJournalRevision = dataRevision
+            } else {
+                markRepositoryFullSyncRequired()
+            }
+        }
+        guard let saveDebounceNanoseconds else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(delayNanoseconds: saveDebounceNanoseconds)
+    }
+
+    private func canAppendCaptureMutationToRepositoryJournal() -> Bool {
+        guard clipboardRepository != nil, !pendingRepositoryRequiresFullSync else { return false }
+        return repositorySyncedDataRevision == dataRevision
+            || pendingRepositoryJournalRevision == dataRevision
+    }
+
+    private func markRepositoryFullSyncRequired() {
+        guard clipboardRepository != nil else { return }
+        pendingRepositoryRequiresFullSync = true
+        pendingRepositoryCaptureJournal.mutations.removeAll()
+        pendingRepositoryJournalRevision = dataRevision
+    }
+
+    private func clearPendingRepositoryPlan() {
+        pendingRepositoryRequiresFullSync = false
+        pendingRepositoryCaptureJournal.mutations.removeAll()
+        pendingRepositoryJournalRevision = nil
+    }
+
+    private func completeRepositorySave(dataRevision savedDataRevision: Int) {
+        guard clipboardRepository != nil, dataRevision == savedDataRevision else { return }
+        repositorySyncedDataRevision = savedDataRevision
+        clearPendingRepositoryPlan()
+        presentationCache = PasteBuddyPresentationCache()
+    }
+
+    private func applyPendingRepositoryPlanImmediately(snapshot snapshotToSave: PasteBuddySnapshot) -> Bool {
+        guard let clipboardRepository else { return true }
+        do {
+            if pendingRepositoryRequiresFullSync {
+                try clipboardRepository.synchronize(with: snapshotToSave)
+            } else if !pendingRepositoryCaptureJournal.isEmpty {
+                try clipboardRepository.applyCaptureJournal(pendingRepositoryCaptureJournal)
+            } else if repositorySyncedDataRevision != dataRevision {
+                try clipboardRepository.synchronize(with: snapshotToSave)
+            }
+            return true
+        } catch {
+            repositorySyncedDataRevision = nil
+            lastErrorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -343,6 +898,125 @@ public final class PasteBuddyStore {
         return makeFilteredItems(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
 
+    /// Fetches a page and its count without synchronously dispatching a GRDB
+    /// read from MainActor. Shelf and side-panel rendering must use this path.
+    public func filteredItemsPageAndCount(
+        for scope: PasteScope,
+        offset: Int,
+        limit: Int = 100
+    ) async -> PasteBuddyFilteredItemsPage {
+        lastInMemoryPageQueryRanOnMainThreadForTesting = nil
+        guard !isHistoryAccessLocked, limit > 0 else {
+            return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
+        }
+
+        let resolvedOffset = max(offset, 0)
+        let filters = resolvedSearchFilters()
+        guard !filters.isImpossible else {
+            return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
+        }
+
+        let pinboardID: UUID?
+        switch scope {
+        case .history:
+            pinboardID = nil
+        case .pinboard(let id):
+            pinboardID = id
+        case .pasteStack:
+            pinboardID = nil
+        }
+
+        if let clipboardRepository,
+           repositorySyncedDataRevision == dataRevision {
+            let request = ClipboardItemPageRequest(
+                searchQuery: filters.textQuery,
+                contentType: contentTypeFilter,
+                sourceAppName: filters.sourceAppName,
+                deviceName: deviceFilter,
+                dateFilter: dateFilter,
+                pinboardID: pinboardID,
+                limit: limit,
+                offset: resolvedOffset
+            )
+            do {
+                let result = try await clipboardRepository.fetchPageAndCount(request)
+                return PasteBuddyFilteredItemsPage(
+                    items: result.items,
+                    totalCount: result.totalCount
+                )
+            } catch is CancellationError {
+                return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
+            } catch {
+                lastErrorMessage = error.localizedDescription
+                return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
+            }
+        }
+
+        let sourceItems: [ClipboardItem]
+        let orderedItemIDs: [UUID]?
+        switch scope {
+        case .history:
+            sourceItems = snapshot.items
+            orderedItemIDs = nil
+        case .pasteStack:
+            sourceItems = pasteStackItemsInPasteOrder
+            orderedItemIDs = nil
+        case .pinboard(let id):
+            guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
+                return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
+            }
+            sourceItems = snapshot.items
+            orderedItemIDs = pinboard.itemIDs
+        }
+        let query = PasteBuddyInMemoryPageQuery(
+            items: sourceItems,
+            orderedItemIDs: orderedItemIDs,
+            filters: filters,
+            contentType: contentTypeFilter,
+            deviceName: deviceFilter,
+            dateFilter: dateFilter,
+            offset: resolvedOffset,
+            limit: limit
+        )
+        let queryTask = Task.detached(priority: .userInitiated) {
+            query.execute()
+        }
+        let result = await withTaskCancellationHandler {
+            await queryTask.value
+        } onCancel: {
+            queryTask.cancel()
+        }
+        guard !result.wasCancelled else {
+            return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
+        }
+        lastInMemoryPageQueryRanOnMainThreadForTesting = result.ranOnMainThread
+        return result.page
+    }
+
+    public func searchItems(
+        query: String,
+        offset: Int = 0,
+        limit: Int
+    ) throws -> [ClipboardItem] {
+        guard !isHistoryAccessLocked, limit > 0 else { return [] }
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return [] }
+        let resolvedOffset = max(offset, 0)
+        if let clipboardRepository,
+           repositorySyncedDataRevision == dataRevision {
+            return try clipboardRepository.fetchPage(ClipboardItemPageRequest(
+                searchQuery: trimmedQuery,
+                limit: limit,
+                offset: resolvedOffset
+            ))
+        }
+        return Self.page(
+            snapshot.items.filter { $0.matches(trimmedQuery) },
+            offset: resolvedOffset,
+            limit: limit
+        )
+    }
+
     public func filteredItemCount(for scope: PasteScope) -> Int {
         makeFilteredItemCount(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
@@ -364,23 +1038,25 @@ public final class PasteBuddyStore {
         let scopedItems: [ClipboardItem]
         switch scope {
         case .history:
-            if let databaseItems = databaseFilteredItems(pinboardID: nil) {
-                return databaseItems
-            }
             scopedItems = snapshot.items
-            return filtered(scopedItems).sorted { $0.createdAt > $1.createdAt }
+            let items = filtered(scopedItems)
+            if clipboardRepository != nil, repositorySyncedDataRevision == dataRevision {
+                return Self.page(items, offset: 0, limit: Self.defaultHistoryPageLimit)
+            }
+            return items
         case .pasteStack:
             return filtered(pasteStackItemsInPasteOrder)
         case .pinboard(let id):
-            if let databaseItems = databaseFilteredItems(pinboardID: id) {
-                return databaseItems
-            }
             guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
                 return []
             }
             let itemByID = cachedItemByID()
             scopedItems = pinboard.itemIDs.compactMap { itemByID[$0] }
-            return filtered(scopedItems)
+            let items = filtered(scopedItems)
+            if clipboardRepository != nil, repositorySyncedDataRevision == dataRevision {
+                return Self.page(items, offset: 0, limit: Self.defaultHistoryPageLimit)
+            }
+            return items
         }
     }
 
@@ -389,9 +1065,10 @@ public final class PasteBuddyStore {
         let filters = resolvedSearchFilters()
         guard !filters.isImpossible else { return 0 }
         let normalizedQuery = ClipboardItem.normalizedSearchQuery(filters.textQuery)
+        let searchTerms = ClipboardItem.searchTerms(inNormalizedQuery: normalizedQuery)
 
         func matches(_ item: ClipboardItem) -> Bool {
-            item.matchesNormalizedSearchQuery(normalizedQuery)
+            item.matchesNormalizedSearchQuery(normalizedQuery, terms: searchTerms)
                 && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
         }
 
@@ -420,7 +1097,7 @@ public final class PasteBuddyStore {
         guard !isHistoryAccessLocked else { return [] }
         switch selectedScope {
         case .history:
-            return filtered(snapshot.items).sorted { $0.createdAt > $1.createdAt }
+            return filtered(snapshot.items)
         case .pasteStack:
             return filtered(pasteStackItemsInPasteOrder)
         case .pinboard(let id):
@@ -438,7 +1115,7 @@ public final class PasteBuddyStore {
         let preferredID = selectedItemID ?? selectedItemIDs.first
         guard let preferredID else { return filteredItems.first }
         return pasteStackItems.first(where: { $0.id == preferredID })
-            ?? snapshot.items.first(where: { $0.id == preferredID })
+            ?? cachedItemByID()[preferredID]
     }
 
     public func hydratedItem(for item: ClipboardItem) async -> ClipboardItem {
@@ -447,7 +1124,7 @@ public final class PasteBuddyStore {
         guard needsImageData || needsRTFData else {
             return item
         }
-        if let snapshotItem = snapshot.items.first(where: { $0.id == item.id }) {
+        if let snapshotItem = cachedItemByID()[item.id] {
             let snapshotHasNeededImageData = !needsImageData || snapshotItem.payload.imageData != nil
             let snapshotHasNeededRTFData = !needsRTFData || snapshotItem.payload.rtfData != nil
             if snapshotHasNeededImageData && snapshotHasNeededRTFData {
@@ -466,19 +1143,25 @@ public final class PasteBuddyStore {
     }
 
     public func hydratedItems(for items: [ClipboardItem]) async -> [ClipboardItem] {
-        var hydrated: [ClipboardItem] = []
-        hydrated.reserveCapacity(items.count)
-        for item in items {
-            hydrated.append(await hydratedItem(for: item))
+        let needsAssetHydration = items.contains { item in
+            (item.payload.imageData == nil && item.payload.imageAssetID != nil)
+                || (item.payload.rtfData == nil && item.payload.rtfAssetID != nil)
         }
-        return hydrated
+        guard needsAssetHydration else { return items }
+        guard let repositorySyncActor else { return items }
+        do {
+            return try await repositorySyncActor.hydrateAssets(for: items)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return items
+        }
     }
 
     public func imageData(for item: ClipboardItem) async -> Data? {
         if let imageData = item.payload.imageData {
             return imageData
         }
-        if let snapshotImageData = snapshot.items.first(where: { $0.id == item.id })?.payload.imageData {
+        if let snapshotImageData = cachedItemByID()[item.id]?.payload.imageData {
             return snapshotImageData
         }
         guard let repositorySyncActor else {
@@ -704,6 +1387,31 @@ public final class PasteBuddyStore {
         historyUnlockedAt = date
     }
 
+    internal func configureDeferredRepositoryForTesting(databaseURL: URL) {
+        clipboardRepository = nil
+        repositorySyncActor = nil
+        deferredRepositoryDatabaseURL = databaseURL
+        repositoryDatabaseURLForStandardStorage = databaseURL
+        deferredRepositoryInitializationTask = nil
+        lastDeferredRepositoryInitializationWasOnMainThreadForTesting = nil
+    }
+
+    internal func primeCaptureHotPathIndexesForTesting() {
+        rebuildDedupeIndex()
+        rebuildCaptureHistoryState()
+    }
+
+    internal func resetCaptureHotPathInspectionCountForTesting() {
+        captureHotPathItemInspectionCountForTesting = 0
+    }
+
+    internal func cancelPendingSaveForTesting() {
+        pendingSaveTask?.cancel()
+        pendingSaveTask = nil
+        pendingSaveTaskID = nil
+        clearPendingRepositoryPlan()
+    }
+
     public func quickPasteItem(atOneBasedIndex index: Int, in scope: PasteScope? = nil) -> ClipboardItem? {
         guard (1...9).contains(index) else { return nil }
         let items = scope.map { filteredItems(for: $0) } ?? filteredItems
@@ -865,32 +1573,226 @@ public final class PasteBuddyStore {
 
     @discardableResult
     public func addCapturedItem(_ item: ClipboardItem, maxItems: Int? = nil) -> ClipboardItem {
+        addCapturedItem(item, maxItems: maxItems, refreshSearchDocument: true)
+    }
+
+    /// Stores an item whose search document was built from its current payload.
+    /// Use this for items constructed off MainActor; payload mutations must use
+    /// `addCapturedItem`, which rebuilds the document defensively.
+    @discardableResult
+    public func addCapturedItemWithCurrentSearchDocument(
+        _ item: ClipboardItem,
+        maxItems: Int? = nil
+    ) -> ClipboardItem {
+        addCapturedItem(item, maxItems: maxItems, refreshSearchDocument: false)
+    }
+
+    private func addCapturedItem(
+        _ item: ClipboardItem,
+        maxItems: Int?,
+        refreshSearchDocument: Bool
+    ) -> ClipboardItem {
+        let repositoryWasCurrent = canAppendCaptureMutationToRepositoryJournal()
+        prepareCaptureHistoryState()
         let storedItem: ClipboardItem
+        let repositoryPlacement: ClipboardRepositoryItemPlacement
+        var previousItem: ClipboardItem?
         var preparedItem = item
-        preparedItem.refreshSearchDocument()
-        if dedupeIndex.count != snapshot.items.count {
+        if refreshSearchDocument {
+            preparedItem.refreshSearchDocument()
+        }
+        if dedupeIndexRevision != dataRevision {
             rebuildDedupeIndex()
         }
         let newDeduplicationKey = Self.deduplicationKey(for: preparedItem)
         if let existingID = dedupeIndex[newDeduplicationKey],
            let existingIndex = snapshot.items.firstIndex(where: { $0.id == existingID }) {
-            snapshot.items[existingIndex].updatedAt = Date()
+            previousItem = snapshot.items[existingIndex]
+            let isMetadataReplay = isLinkPreviewMetadataReplay(preparedItem, existingIndex: existingIndex)
+            if !isMetadataReplay {
+                snapshot.items[existingIndex].updatedAt = Date()
+            }
             adoptRicherLinkPreviewMetadata(from: preparedItem, at: existingIndex)
-            snapshot.items[existingIndex].refreshSearchDocument()
-            snapshot.items.move(fromOffsets: IndexSet(integer: existingIndex), toOffset: 0)
-            storedItem = snapshot.items[0]
+            snapshot.items[existingIndex].refreshSearchDocumentPreservingContentHash()
+            if isMetadataReplay {
+                storedItem = snapshot.items[existingIndex]
+                repositoryPlacement = .preserve
+            } else {
+                snapshot.items.move(fromOffsets: IndexSet(integer: existingIndex), toOffset: 0)
+                storedItem = snapshot.items[0]
+                repositoryPlacement = .front
+            }
         } else {
             snapshot.items.insert(preparedItem, at: 0)
             storedItem = preparedItem
+            repositoryPlacement = .front
         }
         dedupeIndex[newDeduplicationKey] = storedItem.id
+        updateCaptureHistoryState(replacing: previousItem, with: storedItem)
         if isPasteStackActive {
             appendToPasteStack(storedItem)
         }
         selectSingleItem(storedItem.id)
-        pruneHistory(maxItems: maxItems)
-        save()
+        let pruneResult = pruneCapturedHistory(
+            maxItems: maxItems,
+            frontMoveCount: repositoryPlacement == .front ? 1 : 0
+        )
+        let pinboardChanges = updateSmartPinboardsAfterCapture(
+            storedItem: storedItem,
+            previousItem: previousItem,
+            placement: repositoryPlacement,
+            deletedItems: pruneResult.deletedItems
+        )
+        dedupeIndexRevision = dataRevision
+        captureHistoryState?.revision = dataRevision
+        saveCaptureMutation(
+            ClipboardRepositoryCaptureMutation(
+                item: storedItem,
+                placement: repositoryPlacement,
+                deletedItemIDs: pruneResult.deletedItemIDs,
+                upsertedPinboards: pinboardChanges.upserts,
+                deletedPinboardIDs: pinboardChanges.deletedIDs,
+                updatedPinboardMetadata: pinboardChanges.metadataUpdates,
+                frontedPinboardItems: pinboardChanges.frontedItems
+            ),
+            repositoryWasCurrent: repositoryWasCurrent
+        )
         return storedItem
+    }
+
+    @discardableResult
+    public func addCapturedItems(
+        _ items: [ClipboardItem],
+        pinboardAssignments: [UUID: UUID] = [:],
+        maxItems: Int? = nil
+    ) -> [ClipboardItem] {
+        addCapturedItems(
+            items,
+            pinboardAssignments: pinboardAssignments,
+            maxItems: maxItems,
+            refreshSearchDocuments: true
+        )
+    }
+
+    @discardableResult
+    func addCapturedItemsWithCurrentSearchDocuments(
+        _ items: [ClipboardItem],
+        pinboardAssignments: [UUID: UUID] = [:],
+        maxItems: Int? = nil
+    ) -> [ClipboardItem] {
+        addCapturedItems(
+            items,
+            pinboardAssignments: pinboardAssignments,
+            maxItems: maxItems,
+            refreshSearchDocuments: false
+        )
+    }
+
+    private func addCapturedItems(
+        _ items: [ClipboardItem],
+        pinboardAssignments: [UUID: UUID],
+        maxItems: Int?,
+        refreshSearchDocuments: Bool
+    ) -> [ClipboardItem] {
+        guard !items.isEmpty else { return [] }
+        let repositoryWasCurrent = canAppendCaptureMutationToRepositoryJournal()
+        prepareCaptureHistoryState()
+        if dedupeIndexRevision != dataRevision {
+            rebuildDedupeIndex()
+        }
+        let pinboardsBeforeCapture = snapshot.pinboards
+        var storedItems: [ClipboardItem] = []
+        storedItems.reserveCapacity(items.count)
+        var mutations: [ClipboardRepositoryCaptureMutation] = []
+        mutations.reserveCapacity(items.count)
+        var frontMoveCount = 0
+
+        for item in items {
+            var preparedItem = item
+            if refreshSearchDocuments {
+                preparedItem.refreshSearchDocument()
+            }
+            let deduplicationKey = Self.deduplicationKey(for: preparedItem)
+            let storedItem: ClipboardItem
+            let placement: ClipboardRepositoryItemPlacement
+            var previousItem: ClipboardItem?
+            if let existingID = dedupeIndex[deduplicationKey],
+               let existingIndex = snapshot.items.firstIndex(where: { $0.id == existingID }) {
+                previousItem = snapshot.items[existingIndex]
+                let isMetadataReplay = isLinkPreviewMetadataReplay(preparedItem, existingIndex: existingIndex)
+                if !isMetadataReplay {
+                    snapshot.items[existingIndex].updatedAt = Date()
+                }
+                adoptRicherLinkPreviewMetadata(from: preparedItem, at: existingIndex)
+                snapshot.items[existingIndex].refreshSearchDocumentPreservingContentHash()
+                if isMetadataReplay {
+                    storedItem = snapshot.items[existingIndex]
+                    placement = .preserve
+                } else {
+                    snapshot.items.move(fromOffsets: IndexSet(integer: existingIndex), toOffset: 0)
+                    storedItem = snapshot.items[0]
+                    placement = .front
+                }
+            } else {
+                snapshot.items.insert(preparedItem, at: 0)
+                storedItem = preparedItem
+                placement = .front
+            }
+            dedupeIndex[deduplicationKey] = storedItem.id
+            updateCaptureHistoryState(replacing: previousItem, with: storedItem)
+            if isPasteStackActive {
+                appendToPasteStack(storedItem)
+            }
+            if placement == .front {
+                frontMoveCount += 1
+            }
+            storedItems.append(storedItem)
+            mutations.append(ClipboardRepositoryCaptureMutation(
+                item: storedItem,
+                placement: placement
+            ))
+        }
+
+        var assignedItemIDsByPinboard: [UUID: [UUID]] = [:]
+        for (inputItem, storedItem) in zip(items, storedItems) {
+            guard let pinboardID = pinboardAssignments[inputItem.id] else { continue }
+            if assignedItemIDsByPinboard[pinboardID]?.contains(storedItem.id) != true {
+                assignedItemIDsByPinboard[pinboardID, default: []].append(storedItem.id)
+            }
+        }
+        let now = Date()
+        for (pinboardID, assignedItemIDs) in assignedItemIDsByPinboard {
+            guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == pinboardID }),
+                  !isSmartPinboard(at: pinboardIndex) else {
+                continue
+            }
+            let assignedIDSet = Set(assignedItemIDs)
+            snapshot.pinboards[pinboardIndex].itemIDs.removeAll { assignedIDSet.contains($0) }
+            // Match sequential capture semantics: each later capture is placed in
+            // front of the previous one in both History and its assigned Pinboard.
+            snapshot.pinboards[pinboardIndex].itemIDs.insert(contentsOf: assignedItemIDs.reversed(), at: 0)
+            snapshot.pinboards[pinboardIndex].updatedAt = now
+            captureHistoryState?.pinnedItemIDs.formUnion(assignedIDSet)
+        }
+
+        selectSingleItem(storedItems.last?.id)
+        let pruneResult = pruneCapturedHistory(
+            maxItems: maxItems,
+            frontMoveCount: frontMoveCount
+        )
+        refreshExistingSmartPinboards(now: now)
+        let pinboardChanges = Self.repositoryPinboardChanges(
+            before: pinboardsBeforeCapture,
+            after: snapshot.pinboards
+        )
+        let lastMutationIndex = mutations.index(before: mutations.endIndex)
+        mutations[lastMutationIndex].deletedItemIDs = pruneResult.deletedItemIDs
+        mutations[lastMutationIndex].upsertedPinboards = pinboardChanges.upserts
+        mutations[lastMutationIndex].deletedPinboardIDs = pinboardChanges.deletedIDs
+        dedupeIndexRevision = dataRevision
+        captureHistoryState?.revision = dataRevision
+        saveCaptureMutations(mutations, repositoryWasCurrent: repositoryWasCurrent)
+        return storedItems
     }
 
     @discardableResult
@@ -924,38 +1826,50 @@ public final class PasteBuddyStore {
         snapshot.items[index].payload.imageAssetID = incoming.payload.imageAssetID
     }
 
+    private func isLinkPreviewMetadataReplay(_ incoming: ClipboardItem, existingIndex: Int) -> Bool {
+        guard incoming.presentationContentType == .url,
+              snapshot.items[existingIndex].presentationContentType == .url,
+              incoming.createdAt == snapshot.items[existingIndex].createdAt,
+              !snapshot.items[existingIndex].payload.hasImageAsset,
+              incoming.payload.hasImageAsset else {
+            return false
+        }
+        return true
+    }
+
     public func updateOCRText(_ text: String, for itemID: UUID) {
-        guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
+        guard !isPersistenceWriteBlocked,
+              let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].payload.ocrText = text
         snapshot.items[index].ocrState = .completed(Date())
-        snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         refreshExistingSmartPinboards()
         save()
     }
 
     public func markOCRPending(for itemID: UUID) {
-        guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
+        guard !isPersistenceWriteBlocked,
+              let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].payload.ocrText = nil
         snapshot.items[index].ocrState = .pending(Date())
-        snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         refreshExistingSmartPinboards()
         save()
     }
 
     public func markOCRFailed(_ message: String, for itemID: UUID) {
-        guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
+        guard !isPersistenceWriteBlocked,
+              let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].ocrState = .failed(Date(), message)
-        snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         refreshExistingSmartPinboards()
         save()
     }
 
     #if os(macOS)
     public func enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem) async {
-        guard snapshot.privacy.captureImages,
+        guard !isPersistenceWriteBlocked,
+              snapshot.privacy.captureImages,
               item.presentationContentType == .url,
               !item.payload.hasImageAsset,
               let urlString = item.payload.presentationURLString,
@@ -967,6 +1881,7 @@ public final class PasteBuddyStore {
         defer { linkPreviewMetadataRequests.remove(item.id) }
 
         guard let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString),
+              !isPersistenceWriteBlocked,
               metadata.title != nil || metadata.imageData != nil,
               let index = snapshot.items.firstIndex(where: { $0.id == item.id }),
               !snapshot.items[index].payload.hasImageAsset else {
@@ -982,8 +1897,7 @@ public final class PasteBuddyStore {
             snapshot.items[index].payload.imageByteCount = imageData.count
             didAdoptImage = true
         }
-        snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         syncPasteStackItem(snapshot.items[index])
         refreshExistingSmartPinboards()
         save()
@@ -1035,6 +1949,40 @@ public final class PasteBuddyStore {
         let normalized = Self.normalizedColorHex(colorHex)
         guard !normalized.isEmpty else { return }
         snapshot.pinboards[pinboardIndex].colorHex = normalized
+        snapshot.pinboards[pinboardIndex].updatedAt = Date()
+        save()
+    }
+
+    public func updatePinboardAppearance(
+        _ id: UUID,
+        name: String,
+        colorHex: String,
+        systemImageName: String?
+    ) {
+        guard let pinboardIndex = snapshot.pinboards.firstIndex(where: { $0.id == id }) else { return }
+        guard !isSmartPinboard(at: pinboardIndex) else {
+            refreshExistingSmartPinboards()
+            save()
+            return
+        }
+        let normalizedIcon = systemImageName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedIcon, !Pinboard.customizableSystemImageNames.contains(normalizedIcon) {
+            return
+        }
+        let normalizedColor = Self.normalizedColorHex(colorHex)
+        guard !normalizedColor.isEmpty else { return }
+        let normalizedName = Self.userPinboardName(
+            for: name,
+            fallback: snapshot.pinboards[pinboardIndex].name
+        )
+        guard snapshot.pinboards[pinboardIndex].name != normalizedName
+            || snapshot.pinboards[pinboardIndex].colorHex != normalizedColor
+            || snapshot.pinboards[pinboardIndex].systemImageName != normalizedIcon else {
+            return
+        }
+        snapshot.pinboards[pinboardIndex].name = normalizedName
+        snapshot.pinboards[pinboardIndex].colorHex = normalizedColor
+        snapshot.pinboards[pinboardIndex].systemImageName = normalizedIcon
         snapshot.pinboards[pinboardIndex].updatedAt = Date()
         save()
     }
@@ -1166,13 +2114,17 @@ public final class PasteBuddyStore {
             seen.insert(id)
             return true
         }
+        let requestedIDs = Set(orderedIDs)
+        let itemByID = cachedItemByID()
+        var userPinboardIDsByItemID: [UUID: [UUID]] = [:]
+        for pinboard in snapshot.pinboards where !SmartPinboardCategory.isSmartPinboardName(pinboard.name) {
+            for itemID in pinboard.itemIDs where requestedIDs.contains(itemID) {
+                userPinboardIDsByItemID[itemID, default: []].append(pinboard.id)
+            }
+        }
         let deletedItems = orderedIDs.compactMap { id -> DeletedClipboardItem? in
-            guard let item = snapshot.items.first(where: { $0.id == id }) else { return nil }
-            let pinboardIDs = snapshot.pinboards
-                .filter { !SmartPinboardCategory.isSmartPinboardName($0.name) }
-                .filter { $0.itemIDs.contains(id) }
-                .map(\.id)
-            return DeletedClipboardItem(item: item, pinboardIDs: pinboardIDs)
+            guard let item = itemByID[id] else { return nil }
+            return DeletedClipboardItem(item: item, pinboardIDs: userPinboardIDsByItemID[id] ?? [])
         }
         guard !deletedItems.isEmpty else { return }
 
@@ -1729,10 +2681,216 @@ public final class PasteBuddyStore {
         save()
     }
 
-    public func setHistoryEncryptionEnabled(_ isEnabled: Bool) {
-        snapshot.security.storageMode = isEnabled ? .encrypted : .standard
-        diskStore.storageMode = snapshot.security.storageMode
-        save()
+    public func setHistoryEncryptionEnabled(_ isEnabled: Bool) async {
+        guard !isHistoryStorageMigrationInProgress else { return }
+        if isEnabled,
+           snapshot.security.storageMode == .encrypted,
+           clipboardRepository == nil,
+           deferredRepositoryDatabaseURL == nil {
+            return
+        }
+        isHistoryStorageMigrationInProgress = true
+        defer {
+            isHistoryStorageMigrationInProgress = false
+        }
+
+        let inFlightSave = pendingSaveTask
+        pendingSaveTask = nil
+        pendingSaveTaskID = nil
+        inFlightSave?.cancel()
+        await inFlightSave?.value
+
+        guard isEnabled else {
+            snapshot.security.storageMode = .standard
+            do {
+                if clipboardRepository == nil,
+                   let databaseURL = repositoryDatabaseURLForStandardStorage {
+                    deferredRepositoryDatabaseURL = databaseURL
+                    try await initializeDeferredRepositoryIfNeeded()
+                }
+                try await persistStandardRepositoryAndSnapshotUntilStable()
+                isPersistenceWriteBlocked = false
+                lastErrorMessage = nil
+            } catch {
+                isPersistenceWriteBlocked = true
+                lastErrorMessage = error.localizedDescription
+            }
+            return
+        }
+        let previousStorageMode = snapshot.security.storageMode
+        var didPersistEncryptedSnapshot = false
+        do {
+            let itemsToHydrate = snapshot.items
+            var hydratedItemByID: [UUID: ClipboardItem] = [:]
+            hydratedItemByID.reserveCapacity(itemsToHydrate.count)
+            if let repositorySyncActor {
+                let hydratedRepositorySnapshot = try await repositorySyncActor.exportSnapshot()
+                hydratedItemByID = Dictionary(
+                    uniqueKeysWithValues: hydratedRepositorySnapshot.items.map { ($0.id, $0) }
+                )
+            }
+            if let beforeCommittingHistoryStorageMigrationForTesting {
+                await beforeCommittingHistoryStorageMigrationForTesting()
+            }
+            var encryptedSnapshot = snapshot
+            for index in encryptedSnapshot.items.indices {
+                guard let hydratedItem = hydratedItemByID[encryptedSnapshot.items[index].id] else { continue }
+                Self.adoptHydratedAssets(from: hydratedItem, into: &encryptedSnapshot.items[index])
+            }
+            encryptedSnapshot.security.storageMode = .encrypted
+            snapshot = encryptedSnapshot
+
+            try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
+            didPersistEncryptedSnapshot = true
+            try await removePlaintextRepositoryForEncryptedStorageAsync()
+            try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
+            isPersistenceWriteBlocked = false
+            lastErrorMessage = nil
+        } catch {
+            if !didPersistEncryptedSnapshot {
+                diskStore.storageMode = previousStorageMode
+            }
+            isPersistenceWriteBlocked = true
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    nonisolated private static func adoptHydratedAssets(
+        from hydratedItem: ClipboardItem,
+        into currentItem: inout ClipboardItem
+    ) {
+        if currentItem.payload.imageData == nil,
+           currentItem.payload.imageAssetID == hydratedItem.payload.imageAssetID {
+            currentItem.payload.imageData = hydratedItem.payload.imageData
+            currentItem.payload.imageByteCount = hydratedItem.payload.imageByteCount
+        }
+        if currentItem.payload.rtfData == nil,
+           currentItem.payload.rtfAssetID == hydratedItem.payload.rtfAssetID {
+            currentItem.payload.rtfData = hydratedItem.payload.rtfData
+            currentItem.payload.rtfByteCount = hydratedItem.payload.rtfByteCount
+        }
+        currentItem.refreshSearchDocumentPreservingContentHash()
+    }
+
+    private func persistCurrentSnapshotUntilStable(storageMode: SnapshotStorageMode) async throws {
+        for _ in 0..<Self.maximumPersistenceStabilityAttempts {
+            let revisionToPersist = dataRevision
+            let persistenceGeneration = nextPersistenceGeneration()
+            var sourceSnapshot = snapshot
+            sourceSnapshot.security.storageMode = storageMode
+            let hasRepository = storageMode == .standard
+                && (repositorySyncActor != nil || clipboardRepository != nil)
+            let externalizationTask = Task.detached(priority: .utility) {
+                try Self.externalizedSnapshotForDiskPersistence(
+                    sourceSnapshot,
+                    hasRepository: hasRepository
+                )
+            }
+            let snapshotToPersist = try await withTaskCancellationHandler {
+                try await externalizationTask.value
+            } onCancel: {
+                externalizationTask.cancel()
+            }
+            guard let commitLease = await persistenceCommitGate.acquire(
+                generation: persistenceGeneration
+            ) else {
+                try Task.checkCancellation()
+                continue
+            }
+            var writeWasAttempted = false
+            do {
+                try Task.checkCancellation()
+                writeWasAttempted = true
+                let didPersist = try await persistenceActor.save(
+                    snapshotToPersist,
+                    storageMode: storageMode,
+                    generation: persistenceGeneration
+                )
+                guard didPersist else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                persistenceCommitGate.release(commitLease, outcome: .committed)
+            } catch {
+                persistenceCommitGate.release(
+                    commitLease,
+                    outcome: writeWasAttempted ? .failedAfterWrite : .abortedBeforeWrite
+                )
+                throw error
+            }
+            guard dataRevision == revisionToPersist else { continue }
+            diskStore.storageMode = storageMode
+            return
+        }
+        throw PasteBuddyPersistenceError.historyUnavailable
+    }
+
+    private func persistStandardRepositoryAndSnapshotUntilStable() async throws {
+        for _ in 0..<Self.maximumPersistenceStabilityAttempts {
+            let revisionToPersist = dataRevision
+            let persistenceGeneration = nextPersistenceGeneration()
+            var sourceSnapshot = snapshot
+            sourceSnapshot.security.storageMode = .standard
+
+            let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
+            let snapshotForExternalization = sourceSnapshot
+            let externalizationTask = Task.detached(
+                priority: .utility
+            ) { [snapshotForExternalization, hasRepository] in
+                try Self.externalizedSnapshotForDiskPersistence(
+                    snapshotForExternalization,
+                    hasRepository: hasRepository
+                )
+            }
+            let snapshotToPersist = try await withTaskCancellationHandler {
+                try await externalizationTask.value
+            } onCancel: {
+                externalizationTask.cancel()
+            }
+            guard let commitLease = await persistenceCommitGate.acquire(
+                generation: persistenceGeneration
+            ) else {
+                try Task.checkCancellation()
+                continue
+            }
+            var crossedWriteBarrier = false
+            do {
+                try Task.checkCancellation()
+                if let repositorySyncActor {
+                    try await repositorySyncActor.synchronize(with: sourceSnapshot)
+                    crossedWriteBarrier = true
+                }
+                if let beforePersistingStandardMigrationSnapshotForTesting {
+                    self.beforePersistingStandardMigrationSnapshotForTesting = nil
+                    await beforePersistingStandardMigrationSnapshotForTesting()
+                }
+                crossedWriteBarrier = true
+                let didPersist = try await persistenceActor.save(
+                    snapshotToPersist,
+                    storageMode: .standard,
+                    generation: persistenceGeneration
+                )
+                guard didPersist else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                persistenceCommitGate.release(commitLease, outcome: .committed)
+            } catch {
+                persistenceCommitGate.release(
+                    commitLease,
+                    outcome: crossedWriteBarrier ? .failedAfterWrite : .abortedBeforeWrite
+                )
+                throw error
+            }
+            guard dataRevision == revisionToPersist else { continue }
+
+            diskStore.storageMode = .standard
+            if hasRepository {
+                repositorySyncedDataRevision = revisionToPersist
+                clearPendingRepositoryPlan()
+                presentationCache = PasteBuddyPresentationCache()
+            }
+            return
+        }
+        throw PasteBuddyPersistenceError.historyUnavailable
     }
 
     public func setBiometricHistoryLockEnabled(_ isEnabled: Bool) {
@@ -1874,11 +3032,28 @@ public final class PasteBuddyStore {
         using service: CloudKitSyncService
     ) async -> CloudSyncDownloadResult? {
         do {
-            guard let result = try await service.downloadLatest(into: snapshot) else {
-                snapshot.sync.lastSyncStatusMessage = "No encrypted CloudKit records found."
+            var mergeBaseRevision = dataRevision
+            guard var result = try await service.downloadLatest(into: snapshot) else {
+                snapshot.sync.lastSyncStatusMessage = PasteBuddyLocalization.string(
+                    "status.cloudkit.no_encrypted_records",
+                    defaultValue: "No encrypted CloudKit records found."
+                )
                 lastErrorMessage = nil
                 save()
                 return nil
+            }
+            while dataRevision != mergeBaseRevision {
+                mergeBaseRevision = dataRevision
+                guard let refreshedResult = try await service.downloadLatest(into: snapshot) else {
+                    snapshot.sync.lastSyncStatusMessage = PasteBuddyLocalization.string(
+                        "status.cloudkit.no_encrypted_records",
+                        defaultValue: "No encrypted CloudKit records found."
+                    )
+                    lastErrorMessage = nil
+                    save()
+                    return nil
+                }
+                result = refreshedResult
             }
             snapshot = result.snapshot
             lastErrorMessage = nil
@@ -2317,7 +3492,7 @@ public final class PasteBuddyStore {
         guard !trimmed.isEmpty else { return }
         snapshot.items[index].title = trimmed
         snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -2326,7 +3501,7 @@ public final class PasteBuddyStore {
         guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].labels = ClipboardItem.normalizedLabels(labels)
         snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -2348,7 +3523,7 @@ public final class PasteBuddyStore {
         guard let index = snapshot.items.firstIndex(where: { $0.id == itemID }) else { return }
         snapshot.items[index].reuseCategory = category
         snapshot.items[index].updatedAt = Date()
-        snapshot.items[index].refreshSearchDocument()
+        snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         syncPasteStackItem(snapshot.items[index])
         save()
     }
@@ -2421,8 +3596,9 @@ public final class PasteBuddyStore {
     public func addItemsToPasteStack(_ itemIDs: [UUID]) -> Bool {
         var seenItemIDs = Set<UUID>()
         var didAddItem = false
+        let itemByID = cachedItemByID()
         for itemID in itemIDs where seenItemIDs.insert(itemID).inserted {
-            guard let item = snapshot.items.first(where: { $0.id == itemID }) else { continue }
+            guard let item = itemByID[itemID] else { continue }
             appendToPasteStack(item)
             didAddItem = true
         }
@@ -2444,7 +3620,7 @@ public final class PasteBuddyStore {
         var changed = false
         for index in snapshot.items.indices {
             let currentDocument = snapshot.items[index].searchDocument
-            snapshot.items[index].refreshSearchDocument()
+            snapshot.items[index].refreshSearchDocumentPreservingContentHash()
             if snapshot.items[index].searchDocument != currentDocument {
                 changed = true
             }
@@ -2455,15 +3631,310 @@ public final class PasteBuddyStore {
     }
 
     private func rebuildDedupeIndex() {
+        dedupeIndexBuildCountForTesting += 1
         var nextIndex: [PasteBuddyDedupeKey: UUID] = [:]
         for item in snapshot.items {
-            nextIndex[Self.deduplicationKey(for: item), default: item.id] = item.id
+            let key = Self.deduplicationKey(for: item)
+            if nextIndex[key] == nil {
+                nextIndex[key] = item.id
+            }
         }
         dedupeIndex = nextIndex
+        dedupeIndexRevision = dataRevision
     }
 
-    private func pruneHistory(now: Date = Date(), maxItems: Int? = nil) {
+    private func rebuildCaptureHistoryState() {
+        let pinnedItemIDs = userPinnedItemIDs()
+        var storageBytesByItemID: [UUID: Int] = [:]
+        storageBytesByItemID.reserveCapacity(snapshot.items.count)
+        var estimatedStorageBytes = 0
+        var retentionSafeUntil: Date?
+        let maxHistoryItems = snapshot.storage.maxHistoryItems
+        var hasUnpinnedMaxCountOverflow = false
+        for (index, item) in snapshot.items.enumerated() {
+            let storageBytes = Self.estimatedStorageBytes(for: item)
+            storageBytesByItemID[item.id] = storageBytes
+            estimatedStorageBytes += storageBytes
+            if index >= maxHistoryItems, !pinnedItemIDs.contains(item.id) {
+                hasUnpinnedMaxCountOverflow = true
+            }
+            guard !pinnedItemIDs.contains(item.id),
+                  let expiration = retentionExpiration(for: item) else {
+                continue
+            }
+            retentionSafeUntil = min(retentionSafeUntil ?? expiration, expiration)
+        }
+        captureHistoryState = PasteBuddyCaptureHistoryState(
+            revision: dataRevision,
+            pinnedItemIDs: pinnedItemIDs,
+            storageBytesByItemID: storageBytesByItemID,
+            estimatedStorageBytes: estimatedStorageBytes,
+            retentionSafeUntil: retentionSafeUntil,
+            normalizedMaxHistoryItems: hasUnpinnedMaxCountOverflow ? nil : maxHistoryItems
+        )
+    }
+
+    private func prepareCaptureHistoryState() {
+        guard captureHistoryState?.revision != dataRevision else { return }
+        rebuildCaptureHistoryState()
+    }
+
+    private func retentionExpiration(for item: ClipboardItem) -> Date? {
+        let retentionDays = snapshot.storage.retentionDays
+        guard retentionDays > 0 else { return nil }
+        return Calendar.current.date(
+            byAdding: .day,
+            value: retentionDays,
+            to: max(item.createdAt, item.updatedAt)
+        )
+    }
+
+    private func updateCaptureHistoryState(
+        replacing previousItem: ClipboardItem?,
+        with storedItem: ClipboardItem
+    ) {
+        guard var state = captureHistoryState else { return }
+        if let previousItem {
+            state.estimatedStorageBytes -= state.storageBytesByItemID.removeValue(forKey: previousItem.id)
+                ?? Self.estimatedStorageBytes(for: previousItem)
+        }
+        let storageBytes = Self.estimatedStorageBytes(for: storedItem)
+        state.storageBytesByItemID[storedItem.id] = storageBytes
+        state.estimatedStorageBytes += storageBytes
+        if !state.pinnedItemIDs.contains(storedItem.id),
+           let expiration = retentionExpiration(for: storedItem) {
+            state.retentionSafeUntil = min(state.retentionSafeUntil ?? expiration, expiration)
+        }
+        captureHistoryState = state
+    }
+
+    private func pruneCapturedHistory(
+        now: Date = Date(),
+        maxItems: Int? = nil,
+        frontMoveCount: Int
+    ) -> PasteBuddyCapturePruneResult {
+        guard var state = captureHistoryState else {
+            let deletedIDs = pruneHistory(now: now, maxItems: maxItems)
+            rebuildCaptureHistoryState()
+            let deletedIDSet = Set(deletedIDs)
+            return PasteBuddyCapturePruneResult(
+                deletedItems: [],
+                deletedItemIDs: Array(deletedIDSet)
+            )
+        }
+
+        let maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(
+            maxItems ?? snapshot.storage.maxHistoryItems
+        )
+        let maxStorageBytes = StorageConfiguration.clampMaxStorageBytes(snapshot.storage.maxStorageBytes)
+        var deletionIndexByID: [UUID: Int] = [:]
+
+        func markForDeletion(_ item: ClipboardItem, at index: Int) {
+            deletionIndexByID[item.id] = index
+        }
+
+        if snapshot.items.count > maxHistoryItems {
+            let indicesToInspect: Range<Int>
+            if state.normalizedMaxHistoryItems == maxHistoryItems, frontMoveCount > 0 {
+                indicesToInspect = maxHistoryItems..<min(
+                    snapshot.items.count,
+                    maxHistoryItems + frontMoveCount
+                )
+            } else if state.normalizedMaxHistoryItems == maxHistoryItems {
+                indicesToInspect = maxHistoryItems..<maxHistoryItems
+            } else {
+                indicesToInspect = maxHistoryItems..<snapshot.items.count
+            }
+            for index in indicesToInspect {
+                captureHotPathItemInspectionCountForTesting += 1
+                let item = snapshot.items[index]
+                if !state.pinnedItemIDs.contains(item.id) {
+                    markForDeletion(item, at: index)
+                }
+            }
+        }
+        state.normalizedMaxHistoryItems = maxHistoryItems
+
+        if snapshot.storage.retentionDays > 0,
+           let retentionSafeUntil = state.retentionSafeUntil,
+           now > retentionSafeUntil {
+            let cutoff = Calendar.current.date(
+                byAdding: .day,
+                value: -snapshot.storage.retentionDays,
+                to: now
+            )
+            var nextRetentionSafeUntil: Date?
+            for (index, item) in snapshot.items.enumerated() {
+                captureHotPathItemInspectionCountForTesting += 1
+                guard !state.pinnedItemIDs.contains(item.id) else { continue }
+                let activityDate = max(item.createdAt, item.updatedAt)
+                if let cutoff, activityDate < cutoff {
+                    markForDeletion(item, at: index)
+                } else if let expiration = retentionExpiration(for: item) {
+                    nextRetentionSafeUntil = min(nextRetentionSafeUntil ?? expiration, expiration)
+                }
+            }
+            state.retentionSafeUntil = nextRetentionSafeUntil
+        }
+
+        var projectedStorageBytes = state.estimatedStorageBytes
+        for itemID in deletionIndexByID.keys {
+            projectedStorageBytes -= state.storageBytesByItemID[itemID] ?? 0
+        }
+        if projectedStorageBytes > maxStorageBytes {
+            for index in snapshot.items.indices.reversed() {
+                captureHotPathItemInspectionCountForTesting += 1
+                let item = snapshot.items[index]
+                guard !state.pinnedItemIDs.contains(item.id),
+                      deletionIndexByID[item.id] == nil else {
+                    continue
+                }
+                markForDeletion(item, at: index)
+                projectedStorageBytes -= state.storageBytesByItemID[item.id]
+                    ?? Self.estimatedStorageBytes(for: item)
+                if projectedStorageBytes <= maxStorageBytes {
+                    break
+                }
+            }
+        }
+
+        guard !deletionIndexByID.isEmpty else {
+            captureHistoryState = state
+            return PasteBuddyCapturePruneResult()
+        }
+
+        let deletedItems = deletionIndexByID.values
+            .sorted()
+            .map { snapshot.items[$0] }
+        for index in deletionIndexByID.values.sorted(by: >) {
+            snapshot.items.remove(at: index)
+        }
+
+        let deletedItemIDs = deletedItems.map(\.id)
+        let deletedIDSet = Set(deletedItemIDs)
+        var didRemoveIndexedDedupeItem = false
+        for item in deletedItems {
+            state.estimatedStorageBytes -= state.storageBytesByItemID.removeValue(forKey: item.id) ?? 0
+            let dedupeKey = Self.deduplicationKey(for: item)
+            if dedupeIndex[dedupeKey] == item.id {
+                dedupeIndex.removeValue(forKey: dedupeKey)
+                didRemoveIndexedDedupeItem = true
+            }
+        }
+        if didRemoveIndexedDedupeItem {
+            rebuildDedupeIndex()
+        }
+        pasteStackItems.removeAll { deletedIDSet.contains($0.id) }
+        selectedItemIDs.subtract(deletedIDSet)
+        if selectedItemID.map(deletedIDSet.contains) == true {
+            selectSingleItem(filteredItems.first?.id)
+        }
+        captureHistoryState = state
+        return PasteBuddyCapturePruneResult(
+            deletedItems: deletedItems,
+            deletedItemIDs: deletedItemIDs
+        )
+    }
+
+    private func updateSmartPinboardsAfterCapture(
+        storedItem: ClipboardItem,
+        previousItem: ClipboardItem?,
+        placement: ClipboardRepositoryItemPlacement,
+        deletedItems: [ClipboardItem],
+        now: Date = Date()
+    ) -> PasteBuddyCapturePinboardChanges {
+        if placement == .preserve {
+            let before = snapshot.pinboards
+            refreshExistingSmartPinboards(now: now)
+            let changes = Self.repositoryPinboardChanges(before: before, after: snapshot.pinboards)
+            return PasteBuddyCapturePinboardChanges(
+                upserts: changes.upserts,
+                deletedIDs: changes.deletedIDs
+            )
+        }
+
+        let deletedObsoleteIDs = snapshot.pinboards.compactMap { pinboard in
+            SmartPinboardCategory.obsoletePinboardNames.contains(
+                pinboard.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) ? pinboard.id : nil
+        }
+        if !deletedObsoleteIDs.isEmpty {
+            let deletedIDSet = Set(deletedObsoleteIDs)
+            snapshot.pinboards.removeAll { deletedIDSet.contains($0.id) }
+        }
+
+        var deletedIDsByCategory: [SmartPinboardCategory: Set<UUID>] = [:]
+        for item in deletedItems {
+            for category in SmartPinboardCategory.allCases where category.matches(item) {
+                deletedIDsByCategory[category, default: []].insert(item.id)
+            }
+        }
+
+        var metadataUpdates: [ClipboardRepositoryPinboardMetadataMutation] = []
+        var frontedItems: [ClipboardRepositoryPinboardItemFrontMutation] = []
+        for index in snapshot.pinboards.indices {
+            guard let category = SmartPinboardCategory.category(
+                forPinboardName: snapshot.pinboards[index].name
+            ) else {
+                continue
+            }
+            var changed = false
+            if var categoryDeletedIDs = deletedIDsByCategory[category], !categoryDeletedIDs.isEmpty {
+                while let lastID = snapshot.pinboards[index].itemIDs.last,
+                      categoryDeletedIDs.remove(lastID) != nil {
+                    snapshot.pinboards[index].itemIDs.removeLast()
+                    changed = true
+                }
+                if !categoryDeletedIDs.isEmpty {
+                    snapshot.pinboards[index].itemIDs.removeAll { itemID in
+                        captureHotPathItemInspectionCountForTesting += 1
+                        if categoryDeletedIDs.contains(itemID) {
+                            changed = true
+                            return true
+                        }
+                        return false
+                    }
+                }
+            }
+
+            if category.matches(storedItem), snapshot.pinboards[index].itemIDs.first != storedItem.id {
+                if previousItem != nil,
+                   let existingIndex = snapshot.pinboards[index].itemIDs.firstIndex(where: { itemID in
+                       captureHotPathItemInspectionCountForTesting += 1
+                       return itemID == storedItem.id
+                   }) {
+                    snapshot.pinboards[index].itemIDs.remove(at: existingIndex)
+                }
+                snapshot.pinboards[index].itemIDs.insert(storedItem.id, at: 0)
+                frontedItems.append(ClipboardRepositoryPinboardItemFrontMutation(
+                    pinboardID: snapshot.pinboards[index].id,
+                    itemID: storedItem.id
+                ))
+                changed = true
+            }
+            if snapshot.pinboards[index].colorHex != category.colorHex {
+                snapshot.pinboards[index].colorHex = category.colorHex
+                changed = true
+            }
+            if changed {
+                snapshot.pinboards[index].updatedAt = now
+                metadataUpdates.append(ClipboardRepositoryPinboardMetadataMutation(
+                    pinboard: snapshot.pinboards[index],
+                    sortOrder: index
+                ))
+            }
+        }
+        return PasteBuddyCapturePinboardChanges(
+            deletedIDs: deletedObsoleteIDs,
+            metadataUpdates: metadataUpdates,
+            frontedItems: frontedItems
+        )
+    }
+
+    @discardableResult
+    private func pruneHistory(now: Date = Date(), maxItems: Int? = nil) -> [UUID] {
         let previousItemCount = snapshot.items.count
+        var deletedItemIDs: [UUID] = []
         let pinnedItemIDs = userPinnedItemIDs()
         let maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(maxItems ?? snapshot.storage.maxHistoryItems)
         let maxStorageBytes = StorageConfiguration.clampMaxStorageBytes(snapshot.storage.maxStorageBytes)
@@ -2476,9 +3947,11 @@ public final class PasteBuddyStore {
                 return true
             }
             if index >= maxHistoryItems {
+                deletedItemIDs.append(item.id)
                 return false
             }
             if let cutoff, max(item.createdAt, item.updatedAt) < cutoff {
+                deletedItemIDs.append(item.id)
                 return false
             }
             return true
@@ -2491,6 +3964,7 @@ public final class PasteBuddyStore {
             for index in snapshot.items.indices.reversed() {
                 guard !pinnedItemIDs.contains(snapshot.items[index].id) else { continue }
                 estimatedBytes -= Self.estimatedStorageBytes(for: snapshot.items[index])
+                deletedItemIDs.append(snapshot.items[index].id)
                 snapshot.items.remove(at: index)
                 if estimatedBytes <= maxStorageBytes {
                     break
@@ -2514,6 +3988,31 @@ public final class PasteBuddyStore {
         if snapshot.items.count != previousItemCount {
             rebuildDedupeIndex()
         }
+        return deletedItemIDs
+    }
+
+    private static func repositoryPinboardChanges(
+        before: [Pinboard],
+        after: [Pinboard]
+    ) -> (upserts: [ClipboardRepositoryPinboardMutation], deletedIDs: [UUID]) {
+        let beforeByID: [UUID: (pinboard: Pinboard, sortOrder: Int)] = Dictionary(
+            uniqueKeysWithValues: before.enumerated().map { index, pinboard in
+                (pinboard.id, (pinboard, index))
+            }
+        )
+        let afterIDs = Set(after.map(\.id))
+        let upserts = after.enumerated().compactMap { index, pinboard -> ClipboardRepositoryPinboardMutation? in
+            if let previous = beforeByID[pinboard.id],
+               previous.sortOrder == index,
+               previous.pinboard == pinboard {
+                return nil
+            }
+            return ClipboardRepositoryPinboardMutation(pinboard: pinboard, sortOrder: index)
+        }
+        let deletedIDs = before.compactMap { pinboard in
+            afterIDs.contains(pinboard.id) ? nil : pinboard.id
+        }
+        return (upserts, deletedIDs)
     }
 
     private static func estimatedStorageBytes(for item: ClipboardItem) -> Int {
@@ -2527,27 +4026,35 @@ public final class PasteBuddyStore {
     nonisolated private static func externalizedSnapshotForDiskPersistence(
         _ source: PasteBuddySnapshot,
         hasRepository: Bool
-    ) -> PasteBuddySnapshot {
+    ) throws -> PasteBuddySnapshot {
+        try Task.checkCancellation()
         guard hasRepository else {
             return source
         }
         var snapshot = source
         for index in snapshot.items.indices {
-            snapshot.items[index].payload = Self.externalizedPayload(snapshot.items[index].payload)
-            snapshot.items[index].refreshSearchDocument()
+            if index.isMultiple(of: 16) {
+                try Task.checkCancellation()
+            }
+            snapshot.items[index].payload = try Self.externalizedPayload(
+                snapshot.items[index].payload
+            )
+            snapshot.items[index].refreshSearchDocumentPreservingContentHash()
         }
         return snapshot
     }
 
-    nonisolated private static func externalizedPayload(_ payload: ClipboardPayload) -> ClipboardPayload {
+    nonisolated private static func externalizedPayload(
+        _ payload: ClipboardPayload
+    ) throws -> ClipboardPayload {
         var externalized = payload
         if let rtfData = payload.rtfData, !rtfData.isEmpty {
-            externalized.rtfAssetID = sha256Hex(rtfData)
+            externalized.rtfAssetID = try sha256HexRespectingCancellation(rtfData)
             externalized.rtfByteCount = rtfData.count
             externalized.rtfData = nil
         }
         if let imageData = payload.imageData, !imageData.isEmpty {
-            externalized.imageAssetID = sha256Hex(imageData)
+            externalized.imageAssetID = try sha256HexRespectingCancellation(imageData)
             externalized.imageByteCount = imageData.count
             externalized.imageData = nil
         }
@@ -2561,8 +4068,23 @@ public final class PasteBuddyStore {
         }
     }
 
-    nonisolated private static func sha256Hex(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    nonisolated private static func sha256HexRespectingCancellation(
+        _ data: Data
+    ) throws -> String {
+        var hasher = SHA256()
+        let chunkSize = 1_048_576
+        var chunkStart = data.startIndex
+        while chunkStart < data.endIndex {
+            try Task.checkCancellation()
+            let chunkEnd = data.index(
+                chunkStart,
+                offsetBy: chunkSize,
+                limitedBy: data.endIndex
+            ) ?? data.endIndex
+            hasher.update(data: data[chunkStart..<chunkEnd])
+            chunkStart = chunkEnd
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     @discardableResult
@@ -2571,35 +4093,13 @@ public final class PasteBuddyStore {
         do {
             try clipboardRepository.synchronize(with: snapshot)
             repositorySyncedDataRevision = dataRevision
+            clearPendingRepositoryPlan()
             presentationCache = PasteBuddyPresentationCache()
             return true
         } catch {
             repositorySyncedDataRevision = nil
             lastErrorMessage = error.localizedDescription
             return false
-        }
-    }
-
-    private func databaseFilteredItems(pinboardID: UUID?) -> [ClipboardItem]? {
-        guard let clipboardRepository,
-              repositorySyncedDataRevision == dataRevision else {
-            return nil
-        }
-        let filters = resolvedSearchFilters()
-        guard !filters.isImpossible else { return [] }
-        do {
-            return try clipboardRepository.fetchPage(ClipboardItemPageRequest(
-                searchQuery: filters.textQuery,
-                contentType: contentTypeFilter,
-                sourceAppName: filters.sourceAppName,
-                deviceName: deviceFilter,
-                dateFilter: dateFilter,
-                pinboardID: pinboardID,
-                limit: Self.defaultHistoryPageLimit
-            ))
-        } catch {
-            lastErrorMessage = error.localizedDescription
-            return nil
         }
     }
 
@@ -2629,6 +4129,7 @@ public final class PasteBuddyStore {
         let index = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
         presentationCache.itemByIDKey = key
         presentationCache.itemByID = index
+        itemByIDIndexBuildCountForTesting += 1
         return index
     }
 
@@ -2643,7 +4144,7 @@ public final class PasteBuddyStore {
     private func availableFilterValues() -> PasteBuddyAvailableFilterValues {
         let cacheKey = PasteBuddyAvailableFilterValuesCacheKey(
             dataRevision: dataRevision,
-            queryRevision: queryRevision,
+            pasteStackRevision: pasteStackContentRevision,
             isHistoryAccessLocked: isHistoryAccessLocked
         )
         if presentationCache.availableFilterValuesKey == cacheKey {
@@ -2659,19 +4160,12 @@ public final class PasteBuddyStore {
 
         var sourceApps = Set<String>()
         var devices = Set<String>()
-        if let clipboardRepository,
-           repositorySyncedDataRevision == dataRevision {
-            do {
-                sourceApps.formUnion(try clipboardRepository.availableSourceApps())
-                devices.formUnion(try clipboardRepository.availableDevices())
-            } catch {
-                lastErrorMessage = error.localizedDescription
-            }
-        } else {
-            for item in snapshot.items {
-                insertNonEmpty(item.sourceAppName, into: &sourceApps)
-                insertNonEmpty(item.deviceName, into: &devices)
-            }
+        // The full in-memory snapshot already contains these small metadata
+        // fields. Reading them through GRDB from a SwiftUI body synchronously
+        // dispatches to the database pool and has produced real UI hangs.
+        for item in snapshot.items {
+            insertNonEmpty(item.sourceAppName, into: &sourceApps)
+            insertNonEmpty(item.deviceName, into: &devices)
         }
         for item in pasteStackItems {
             insertNonEmpty(item.sourceAppName, into: &sourceApps)
@@ -2709,10 +4203,20 @@ public final class PasteBuddyStore {
         let filters = resolvedSearchFilters()
         guard !filters.isImpossible else { return [] }
         let normalizedQuery = ClipboardItem.normalizedSearchQuery(filters.textQuery)
+        let searchTerms = ClipboardItem.searchTerms(inNormalizedQuery: normalizedQuery)
         return items.filter { item in
-            item.matchesNormalizedSearchQuery(normalizedQuery)
+            item.matchesNormalizedSearchQuery(normalizedQuery, terms: searchTerms)
                 && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
         }
+    }
+
+    nonisolated private static func page(
+        _ items: [ClipboardItem],
+        offset: Int,
+        limit: Int
+    ) -> [ClipboardItem] {
+        guard offset < items.count, limit > 0 else { return [] }
+        return Array(items.dropFirst(offset).prefix(limit))
     }
 
     private func matchesStructuredFilters(_ item: ClipboardItem, sourceAppName: String? = nil) -> Bool {
@@ -2916,9 +4420,11 @@ public final class PasteBuddyStore {
             let itemIDs = smartPinboardItemIDs(for: category)
             if let index = snapshot.pinboards.firstIndex(where: { $0.name == category.pinboardName }) {
                 if snapshot.pinboards[index].itemIDs != itemIDs
-                    || snapshot.pinboards[index].colorHex != category.colorHex {
+                    || snapshot.pinboards[index].colorHex != category.colorHex
+                    || snapshot.pinboards[index].systemImageName != nil {
                     snapshot.pinboards[index].itemIDs = itemIDs
                     snapshot.pinboards[index].colorHex = category.colorHex
+                    snapshot.pinboards[index].systemImageName = nil
                     snapshot.pinboards[index].updatedAt = now
                 }
                 result.append(snapshot.pinboards[index])
@@ -2978,10 +4484,88 @@ private struct PasteBuddySearchQueryParts: Equatable {
     }
 }
 
-private struct PasteBuddyResolvedSearchFilters {
+private struct PasteBuddyResolvedSearchFilters: Sendable {
     var textQuery: String
     var sourceAppName: String?
     var isImpossible: Bool
+}
+
+private struct PasteBuddyInMemoryPageQuery: Sendable {
+    var items: [ClipboardItem]
+    var orderedItemIDs: [UUID]?
+    var filters: PasteBuddyResolvedSearchFilters
+    var contentType: ClipboardContentType?
+    var deviceName: String?
+    var dateFilter: ClipboardDateFilter
+    var offset: Int
+    var limit: Int
+
+    func execute() -> PasteBuddyInMemoryPageResult {
+        let orderedItems: [ClipboardItem]
+        if let orderedItemIDs {
+            var itemByID: [UUID: ClipboardItem] = [:]
+            itemByID.reserveCapacity(items.count)
+            for (index, item) in items.enumerated() {
+                if index.isMultiple(of: 64), Task.isCancelled {
+                    return .cancelled(ranOnMainThread: Thread.isMainThread)
+                }
+                itemByID[item.id] = item
+            }
+            var resolvedItems: [ClipboardItem] = []
+            resolvedItems.reserveCapacity(orderedItemIDs.count)
+            for (index, itemID) in orderedItemIDs.enumerated() {
+                if index.isMultiple(of: 64), Task.isCancelled {
+                    return .cancelled(ranOnMainThread: Thread.isMainThread)
+                }
+                if let item = itemByID[itemID] {
+                    resolvedItems.append(item)
+                }
+            }
+            orderedItems = resolvedItems
+        } else {
+            orderedItems = items
+        }
+
+        let normalizedQuery = ClipboardItem.normalizedSearchQuery(filters.textQuery)
+        let searchTerms = ClipboardItem.searchTerms(inNormalizedQuery: normalizedQuery)
+        var pageItems: [ClipboardItem] = []
+        pageItems.reserveCapacity(min(limit, orderedItems.count))
+        var totalCount = 0
+        for (index, item) in orderedItems.enumerated() {
+            if index.isMultiple(of: 64), Task.isCancelled {
+                return .cancelled(ranOnMainThread: Thread.isMainThread)
+            }
+            guard item.matchesNormalizedSearchQuery(normalizedQuery, terms: searchTerms) else { continue }
+            if let contentType, !item.effectiveContentTypes.contains(contentType) { continue }
+            if let sourceAppName = filters.sourceAppName, item.sourceAppName != sourceAppName { continue }
+            if let deviceName, item.deviceName != deviceName { continue }
+            guard dateFilter.contains(item.createdAt) else { continue }
+
+            if totalCount >= offset, pageItems.count < limit {
+                pageItems.append(item)
+            }
+            totalCount += 1
+        }
+        return PasteBuddyInMemoryPageResult(
+            page: PasteBuddyFilteredItemsPage(items: pageItems, totalCount: totalCount),
+            ranOnMainThread: Thread.isMainThread,
+            wasCancelled: false
+        )
+    }
+}
+
+private struct PasteBuddyInMemoryPageResult: Sendable {
+    var page: PasteBuddyFilteredItemsPage
+    var ranOnMainThread: Bool
+    var wasCancelled: Bool
+
+    static func cancelled(ranOnMainThread: Bool) -> PasteBuddyInMemoryPageResult {
+        PasteBuddyInMemoryPageResult(
+            page: PasteBuddyFilteredItemsPage(items: [], totalCount: 0),
+            ranOnMainThread: ranOnMainThread,
+            wasCancelled: true
+        )
+    }
 }
 
 private struct PasteBuddyPresentationCache {
@@ -3024,7 +4608,7 @@ private struct PasteBuddySelectedItemsCacheKey: Equatable {
 
 private struct PasteBuddyAvailableFilterValuesCacheKey: Equatable {
     var dataRevision: Int
-    var queryRevision: Int
+    var pasteStackRevision: Int
     var isHistoryAccessLocked: Bool
 }
 
@@ -3054,6 +4638,27 @@ private struct PasteBuddyDedupeKey: Hashable {
     var hash: String
 }
 
+private struct PasteBuddyCaptureHistoryState {
+    var revision: Int
+    var pinnedItemIDs: Set<UUID>
+    var storageBytesByItemID: [UUID: Int]
+    var estimatedStorageBytes: Int
+    var retentionSafeUntil: Date?
+    var normalizedMaxHistoryItems: Int?
+}
+
+private struct PasteBuddyCapturePruneResult {
+    var deletedItems: [ClipboardItem] = []
+    var deletedItemIDs: [UUID] = []
+}
+
+private struct PasteBuddyCapturePinboardChanges {
+    var upserts: [ClipboardRepositoryPinboardMutation] = []
+    var deletedIDs: [UUID] = []
+    var metadataUpdates: [ClipboardRepositoryPinboardMetadataMutation] = []
+    var frontedItems: [ClipboardRepositoryPinboardItemFrontMutation] = []
+}
+
 public struct DeletedClipboardItem: Equatable, Sendable {
     public var item: ClipboardItem
     public var pinboardIDs: [UUID]
@@ -3066,9 +4671,15 @@ public struct DeletedClipboardItem: Equatable, Sendable {
 
 extension Array {
     fileprivate mutating func move(fromOffsets offsets: IndexSet, toOffset offset: Int) {
+        guard !offsets.isEmpty,
+              offsets.allSatisfy(indices.contains),
+              (0...count).contains(offset) else {
+            return
+        }
         let movingValues = offsets.map { self[$0] }
+        let removedBeforeDestination = offsets.lazy.filter { $0 < offset }.count
         remove(atOffsets: offsets)
-        insert(contentsOf: movingValues, at: offset)
+        insert(contentsOf: movingValues, at: offset - removedBeforeDestination)
     }
 
     fileprivate mutating func remove(atOffsets offsets: IndexSet) {

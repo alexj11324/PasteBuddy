@@ -126,6 +126,7 @@ public struct AutomationItemTransferResult: Codable, Equatable, Sendable {
 public enum AutomationActionError: LocalizedError, Equatable {
     case emptyQuery
     case emptyPinboardName
+    case historyLocked
     case noMatchingItem
     case pinboardNotFound(String)
 
@@ -140,6 +141,11 @@ public enum AutomationActionError: LocalizedError, Equatable {
             PasteBuddyLocalization.string(
                 "automation.error.empty_pinboard_name",
                 defaultValue: "Enter a pinboard name before running this PasteBuddy action."
+            )
+        case .historyLocked:
+            PasteBuddyLocalization.string(
+                "automation.error.history_locked",
+                defaultValue: "Unlock PasteBuddy history before running this action."
             )
         case .noMatchingItem:
             PasteBuddyLocalization.string(
@@ -165,20 +171,20 @@ public final class AutomationActionService {
     }
 
     public func searchClipboard(query: String, limit: Int = 5) throws -> AutomationSearchResult {
+        try store.requirePersistenceReady()
+        guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw AutomationActionError.emptyQuery }
 
         let cappedLimit = min(max(limit, 1), 25)
-        let items = store.snapshot.items
-            .filter { $0.matches(trimmed) }
-            .sorted { $0.createdAt > $1.createdAt }
-            .prefix(cappedLimit)
+        let items = try store.searchItems(query: trimmed, limit: cappedLimit)
             .map(AutomationItemSummary.init(item:))
 
-        return AutomationSearchResult(query: trimmed, items: Array(items))
+        return AutomationSearchResult(query: trimmed, items: items)
     }
 
     public func createPinboard(name: String, colorHex: String? = nil) throws -> AutomationPinboardSummary {
+        try store.requirePersistenceReady()
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { throw AutomationActionError.emptyPinboardName }
         let pinboard = store.createPinboard(

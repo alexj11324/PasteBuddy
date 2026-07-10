@@ -80,8 +80,69 @@ public final class SharedContentImportService {
 
     @discardableResult
     public func importContent(_ input: SharedContentInput, into store: PasteBuddyStore) throws -> ClipboardItem {
-        let item = try makeClipboardItem(from: input, privacy: store.snapshot.privacy)
-        let stored = store.addCapturedItem(item)
+        try store.requirePersistenceReady()
+        let item = try Self.makeClipboardItem(from: input, privacy: store.snapshot.privacy)
+        return storeValidatedItem(item, input: input, into: store)
+    }
+
+    public func importContents(
+        _ inputs: [SharedContentInput],
+        into store: PasteBuddyStore
+    ) throws -> [ClipboardItem] {
+        try store.requirePersistenceReady()
+        let privacy = store.snapshot.privacy
+        let validatedItems = try inputs.map { input in
+            (input, try Self.makeClipboardItem(from: input, privacy: privacy))
+        }
+        return storePreparedItems(validatedItems, in: store)
+    }
+
+    public func importContentsAsync(
+        _ inputs: [SharedContentInput],
+        into store: PasteBuddyStore
+    ) async throws -> [ClipboardItem] {
+        try Task.checkCancellation()
+        try store.requirePersistenceReady()
+        let privacy = store.snapshot.privacy
+        let validationTask = Task.detached(priority: .userInitiated) {
+            try inputs.map { input in
+                try Task.checkCancellation()
+                return (input, try Self.makeClipboardItem(from: input, privacy: privacy))
+            }
+        }
+        let validatedItems = try await withTaskCancellationHandler {
+            try await validationTask.value
+        } onCancel: {
+            validationTask.cancel()
+        }
+        try Task.checkCancellation()
+        try store.requirePersistenceReady()
+        try Task.checkCancellation()
+        return storePreparedItems(validatedItems, in: store)
+    }
+
+    private func storePreparedItems(
+        _ validatedItems: [(SharedContentInput, ClipboardItem)],
+        in store: PasteBuddyStore
+    ) -> [ClipboardItem] {
+        var pinboardAssignments: [UUID: UUID] = [:]
+        for (input, item) in validatedItems {
+            if let pinboardID = input.preferredPinboardID ?? store.snapshot.mobile.preferredSharePinboardID {
+                pinboardAssignments[item.id] = pinboardID
+            }
+        }
+        return store.addCapturedItemsWithCurrentSearchDocuments(
+            validatedItems.map { $0.1 },
+            pinboardAssignments: pinboardAssignments
+        )
+    }
+
+    private func storeValidatedItem(
+        _ item: ClipboardItem,
+        input: SharedContentInput,
+        into store: PasteBuddyStore
+    ) -> ClipboardItem {
+        let stored = store.addCapturedItemWithCurrentSearchDocument(item)
         let pinboardID = input.preferredPinboardID ?? store.snapshot.mobile.preferredSharePinboardID
         if let pinboardID {
             store.pinItem(stored.id, to: pinboardID)
@@ -89,7 +150,7 @@ public final class SharedContentImportService {
         return stored
     }
 
-    private func makeClipboardItem(
+    nonisolated private static func makeClipboardItem(
         from input: SharedContentInput,
         privacy: PrivacyConfiguration
     ) throws -> ClipboardItem {
@@ -150,7 +211,7 @@ public final class SharedContentImportService {
         throw SharedContentImportError.emptyContent
     }
 
-    private func validate(
+    nonisolated private static func validate(
         _ item: ClipboardItem,
         privacy: PrivacyConfiguration,
         sourceBundleIdentifier: String?
@@ -173,7 +234,7 @@ public final class SharedContentImportService {
         }
     }
 
-    private func title(from candidate: String?, fallback: String) -> String {
+    nonisolated private static func title(from candidate: String?, fallback: String) -> String {
         let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed! : fallback
     }

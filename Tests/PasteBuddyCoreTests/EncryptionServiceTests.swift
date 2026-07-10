@@ -1,3 +1,5 @@
+import CryptoKit
+import Security
 import XCTest
 @testable import PasteBuddyCore
 #if canImport(CloudKit)
@@ -16,6 +18,44 @@ final class EncryptionServiceTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         return directory.appendingPathComponent(filename)
+    }
+
+    func testKeychainStoreScopesSharedEncryptionKeyToAccessGroup() {
+        let accessGroup = "72UN4PF4BL.com.alexjiang.PasteBuddy.shared"
+        let store = KeychainKeyMaterialStore(
+            service: "com.pastebuddy.tests.shared",
+            account: "primary-store-key",
+            accessGroup: accessGroup
+        )
+
+        XCTAssertEqual(store.accessGroup, accessGroup)
+        XCTAssertEqual(store.keychainBaseQuery()[kSecAttrAccessGroup as String] as? String, accessGroup)
+        XCTAssertNil(store.legacyKeychainBaseQuery()[kSecAttrAccessGroup as String])
+    }
+
+    func testLegacyKeyIsPromotedOnlyAfterItDecryptsTheExistingEnvelope() throws {
+        let correctKey = Data(repeating: 0x11, count: 32)
+        let wrongExtensionKey = Data(repeating: 0x22, count: 32)
+        let writer = EncryptionService(
+            keyID: "migration-key",
+            keyMaterialStore: FixedEncryptionKeyStore(keyData: correctKey)
+        )
+        let envelope = try writer.encrypt("existing shared snapshot")
+        let migrationStore = ValidatingLegacyKeyStore(primary: nil, legacy: wrongExtensionKey)
+        let reader = EncryptionService(
+            keyID: "migration-key",
+            keyMaterialStore: migrationStore
+        )
+
+        XCTAssertThrowsError(try reader.decrypt(String.self, from: envelope))
+        XCTAssertEqual(migrationStore.persistCallCount, 0)
+        XCTAssertNil(migrationStore.primary)
+
+        migrationStore.legacy = correctKey
+
+        XCTAssertEqual(try reader.decrypt(String.self, from: envelope), "existing shared snapshot")
+        XCTAssertEqual(migrationStore.persistCallCount, 1)
+        XCTAssertEqual(migrationStore.primary, correctKey)
     }
 
     func testEncryptionCoverageAuditCoversEverySensitiveSurfaceWithoutPlaintextFallback() {
@@ -59,6 +99,37 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(decrypted.items[0].title, "Secret title")
         XCTAssertEqual(decrypted.items[0].payload.text, "enterprise secret clipboard payload")
         XCTAssertEqual(decrypted.privacy.excludedApplicationNames, snapshot.privacy.excludedApplicationNames)
+    }
+
+    func testDecryptRejectsUnsupportedEnvelopeHeaderBeforeOpeningCiphertext() throws {
+        let service = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "header-test-key"
+        )
+        defer { try? service.deleteKeyForTesting() }
+        let envelope = try service.encrypt("authenticated payload")
+
+        var futureVersion = envelope
+        futureVersion.version = 2
+        XCTAssertThrowsError(try service.decrypt(String.self, from: futureVersion)) { error in
+            XCTAssertEqual(error as? EncryptionServiceError, .unsupportedEnvelopeVersion(2))
+        }
+
+        var wrongAlgorithm = envelope
+        wrongAlgorithm.algorithm = "AES.CBC.256"
+        XCTAssertThrowsError(try service.decrypt(String.self, from: wrongAlgorithm)) { error in
+            XCTAssertEqual(error as? EncryptionServiceError, .unsupportedAlgorithm("AES.CBC.256"))
+        }
+
+        var wrongKey = envelope
+        wrongKey.keyID = "other-key"
+        XCTAssertThrowsError(try service.decrypt(String.self, from: wrongKey)) { error in
+            XCTAssertEqual(
+                error as? EncryptionServiceError,
+                .keyIdentifierMismatch(expected: "header-test-key", actual: "other-key")
+            )
+        }
     }
 
     func testSnapshotStoreWritesEncryptedPayloadOnly() throws {
@@ -150,9 +221,8 @@ final class EncryptionServiceTests: XCTestCase {
 
     func testSnapshotStoreMigratesLegacyPlaintextSnapshotIntoEncryptedEnvelope() throws {
         let service = EncryptionService(
-            service: "com.pastebuddy.tests",
-            account: UUID().uuidString,
-            keyID: "migration-key"
+            keyID: "migration-key",
+            keyMaterialStore: FixedEncryptionKeyStore(keyData: Data(repeating: 0x33, count: 32))
         )
         defer { try? service.deleteKeyForTesting() }
 
@@ -178,7 +248,8 @@ final class EncryptionServiceTests: XCTestCase {
         let migrated = try store.load()
         let migratedRaw = try Data(contentsOf: fileURL)
         let migratedRawString = String(decoding: migratedRaw, as: UTF8.self)
-        let envelope = try JSONDecoder.pasteBuddy.decode(EncryptedEnvelope.self, from: migratedRaw)
+        let envelopePayload = try EncryptedSnapshotStore.persistedPayloadForTesting(migratedRaw)
+        let envelope = try JSONDecoder.pasteBuddy.decode(EncryptedEnvelope.self, from: envelopePayload)
 
         XCTAssertEqual(migrated.items.first?.title, "Legacy OCR Secret")
         XCTAssertEqual(migrated.items.first?.payload.ocrText, "legacy searchable OCR text")
@@ -240,7 +311,8 @@ final class EncryptionServiceTests: XCTestCase {
 
         let raw = try Data(contentsOf: fileURL)
         let rawString = String(decoding: raw, as: UTF8.self)
-        let envelope = try JSONDecoder.pasteBuddy.decode(EncryptedEnvelope.self, from: raw)
+        let envelopePayload = try EncryptedSnapshotStore.persistedPayloadForTesting(raw)
+        let envelope = try JSONDecoder.pasteBuddy.decode(EncryptedEnvelope.self, from: envelopePayload)
         let newStore = EncryptedSnapshotStore(fileURL: fileURL, encryptionService: newService)
         let reloaded = try newStore.load()
 
@@ -251,7 +323,7 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertThrowsError(try oldStore.load())
     }
 
-    func testSecureEnclaveWrappedKeyStoreRoundTripsKeyMaterialWhenAvailable() throws {
+    func testSecureEnclaveWrappedKeyStoreRoundTripsOneWinningKeyUnderConcurrentCreationWhenAvailable() async throws {
         let keyStore = SecureEnclaveWrappedKeyStore(
             service: "com.pastebuddy.tests.secure-enclave",
             account: UUID().uuidString
@@ -259,10 +331,23 @@ final class EncryptionServiceTests: XCTestCase {
         defer { try? keyStore.deleteStoredKeyMaterial() }
 
         do {
-            let firstKey = try keyStore.loadOrCreateKeyData()
+            let keys = try await withThrowingTaskGroup(of: Data.self) { group in
+                for _ in 0..<8 {
+                    group.addTask {
+                        try keyStore.loadOrCreateKeyData()
+                    }
+                }
+                var keys: [Data] = []
+                for try await key in group {
+                    keys.append(key)
+                }
+                return keys
+            }
+            let firstKey = try XCTUnwrap(keys.first)
             let wrappedKey = try XCTUnwrap(keyStore.loadWrappedKeyDataForTesting())
             let secondKey = try keyStore.loadOrCreateKeyData()
 
+            XCTAssertEqual(Set(keys).count, 1)
             XCTAssertEqual(firstKey.count, 32)
             XCTAssertEqual(secondKey, firstKey)
             XCTAssertNil(wrappedKey.range(of: firstKey))
@@ -733,6 +818,102 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(result.report.addedPinboards, 1)
     }
 
+    func testCloudSyncMergeRemainsLinearForLargeMatchingHistories() throws {
+        let itemCount = 6_000
+        let now = Date(timeIntervalSince1970: 10_000)
+        let items = (0..<itemCount).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Cloud item \(index)",
+                payload: ClipboardPayload(text: "cloud merge body \(index)")
+            )
+        }
+        let sync = readySyncConfiguration()
+        let localSnapshot = PasteBuddySnapshot(items: items, sync: sync)
+        let remoteSnapshot = PasteBuddySnapshot(items: Array(items.reversed()), sync: sync)
+        let importer = CloudSyncPackageImporter(decryptor: SnapshotEnvelopeDecryptor(snapshot: remoteSnapshot))
+        let package = CloudSyncUploadPackage(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            schemaVersion: remoteSnapshot.schemaVersion,
+            encryptedSnapshot: EncryptedEnvelope(keyID: "performance-test", sealedData: Data())
+        )
+
+        let startedAt = ContinuousClock.now
+        let result = try importer.importPackage(package, into: localSnapshot)
+        let elapsed = startedAt.duration(to: .now)
+
+        XCTAssertEqual(result.snapshot.items.count, itemCount)
+        XCTAssertEqual(result.report.addedItems, 0)
+        XCTAssertEqual(result.report.updatedItems, 0)
+        XCTAssertLessThan(elapsed, .seconds(2), "Cloud merge took \(elapsed), indicating repeated linear lookups")
+    }
+
+    func testCloudSyncImportPreservesLocalRecopyOrderAndFrontsRemoteOnlyItemsInRemoteOrder() throws {
+        let recopiedOldItem = ClipboardItem(
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 500),
+            sourceAppName: "Notes",
+            deviceName: "Local Mac",
+            contentType: .text,
+            title: "Recopied old item",
+            payload: ClipboardPayload(text: "recopied old payload")
+        )
+        let newerLocalItem = ClipboardItem(
+            createdAt: Date(timeIntervalSince1970: 400),
+            updatedAt: Date(timeIntervalSince1970: 400),
+            sourceAppName: "Safari",
+            deviceName: "Local Mac",
+            contentType: .text,
+            title: "Newer local item",
+            payload: ClipboardPayload(text: "newer local payload")
+        )
+        let firstRemoteOnlyItem = ClipboardItem(
+            createdAt: Date(timeIntervalSince1970: 600),
+            updatedAt: Date(timeIntervalSince1970: 600),
+            sourceAppName: "Messages",
+            deviceName: "Remote iPhone",
+            contentType: .text,
+            title: "First remote item",
+            payload: ClipboardPayload(text: "first remote payload")
+        )
+        let secondRemoteOnlyItem = ClipboardItem(
+            createdAt: Date(timeIntervalSince1970: 50),
+            updatedAt: Date(timeIntervalSince1970: 50),
+            sourceAppName: "Mail",
+            deviceName: "Remote iPad",
+            contentType: .text,
+            title: "Second remote item",
+            payload: ClipboardPayload(text: "second remote payload")
+        )
+        let sync = readySyncConfiguration()
+        let localSnapshot = PasteBuddySnapshot(items: [recopiedOldItem, newerLocalItem], sync: sync)
+        let remoteSnapshot = PasteBuddySnapshot(
+            items: [firstRemoteOnlyItem, newerLocalItem, recopiedOldItem, secondRemoteOnlyItem],
+            sync: sync
+        )
+        let importer = CloudSyncPackageImporter(decryptor: SnapshotEnvelopeDecryptor(snapshot: remoteSnapshot))
+        let package = CloudSyncUploadPackage(
+            containerIdentifier: "iCloud.com.example.PasteBuddy",
+            keyHierarchyVersion: 1,
+            schemaVersion: remoteSnapshot.schemaVersion,
+            encryptedSnapshot: EncryptedEnvelope(keyID: "order-test", sealedData: Data())
+        )
+
+        let result = try importer.importPackage(package, into: localSnapshot)
+
+        XCTAssertEqual(
+            result.snapshot.items.map(\.id),
+            [firstRemoteOnlyItem.id, secondRemoteOnlyItem.id, recopiedOldItem.id, newerLocalItem.id]
+        )
+        XCTAssertEqual(result.report.addedItems, 2)
+        XCTAssertEqual(result.report.updatedItems, 0)
+    }
+
     func testCloudSyncImportKeepsNewerLocalConflictAndRejectsWrongContainer() throws {
         let service = EncryptionService(
             service: "com.pastebuddy.tests",
@@ -846,6 +1027,70 @@ final class EncryptionServiceTests: XCTestCase {
     #endif
 }
 
+private struct FixedEncryptionKeyStore: EncryptionKeyMaterialStore {
+    let keyData: Data
+
+    func loadOrCreateKeyData() throws -> Data { keyData }
+    func deleteStoredKeyMaterial() throws {}
+}
+
+private final class ValidatingLegacyKeyStore: ValidatingLegacyEncryptionKeyStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedPrimary: Data?
+    private var storedLegacy: Data?
+    private var storedPersistCallCount = 0
+
+    init(primary: Data?, legacy: Data?) {
+        storedPrimary = primary
+        storedLegacy = legacy
+    }
+
+    var requiresValidatedLegacyMigration: Bool { true }
+
+    var primary: Data? {
+        lock.withLock { storedPrimary }
+    }
+
+    var legacy: Data? {
+        get { lock.withLock { storedLegacy } }
+        set { lock.withLock { storedLegacy = newValue } }
+    }
+
+    var persistCallCount: Int {
+        lock.withLock { storedPersistCallCount }
+    }
+
+    func loadOrCreateKeyData() throws -> Data {
+        lock.withLock { storedPrimary ?? storedLegacy ?? Data(repeating: 0xFF, count: 32) }
+    }
+
+    func loadPrimaryKeyData() throws -> Data? {
+        lock.withLock { storedPrimary }
+    }
+
+    func loadLegacyKeyData() throws -> Data? {
+        lock.withLock { storedLegacy }
+    }
+
+    func persistValidatedLegacyKeyData(_ keyData: Data) throws -> Data {
+        lock.withLock {
+            storedPersistCallCount += 1
+            if let storedPrimary {
+                return storedPrimary
+            }
+            storedPrimary = keyData
+            return keyData
+        }
+    }
+
+    func deleteStoredKeyMaterial() throws {
+        lock.withLock {
+            storedPrimary = nil
+            storedLegacy = nil
+        }
+    }
+}
+
 private actor InMemoryCloudSyncRemoteTransport: CloudSyncRemoteRecordTransport {
     private var records: [CloudSyncRemoteRecord] = []
 
@@ -861,6 +1106,17 @@ private actor InMemoryCloudSyncRemoteTransport: CloudSyncRemoteRecordTransport {
 
     func snapshotRecords() -> [CloudSyncRemoteRecord] {
         records
+    }
+}
+
+private struct SnapshotEnvelopeDecryptor: EnvelopeDecrypting {
+    let snapshot: PasteBuddySnapshot
+
+    func decrypt<T>(_ type: T.Type, from envelope: EncryptedEnvelope) throws -> T where T: Decodable {
+        guard let value = snapshot as? T else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return value
     }
 }
 

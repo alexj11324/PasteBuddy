@@ -6,13 +6,25 @@ import LinkPresentation
 @MainActor
 public final class ClipboardMonitor {
     private let store: PasteBuddyStore
-    private let pasteboard: NSPasteboard
+    private let pasteboardReference: PasteboardReference
     private let recognizeText: @Sendable (Data) async throws -> String
     private let onItemCaptured: (@MainActor (ClipboardItem) -> Void)?
     private var timer: Timer?
-    private var lastChangeCount: Int
-    private var pendingCaptureTask: Task<Void, Never>?
+    private var lastChangeCount: Int?
+    private var pasteboardReadTask: Task<Void, Never>?
+    private var needsPasteboardRepoll = false
+    private var pendingCaptures: [PendingCapture?] = []
+    private var nextPendingCaptureIndex = 0
+    private var retainedCaptureCount = 0
+    private var retainedCaptureBytes = 0
+    private var captureWorkerTask: Task<Void, Never>?
+    private var captureWorkerToken: UUID?
     @MainActor static var makeItemOverrideForTesting: (@Sendable () async -> ClipboardItem?)?
+    var pendingCaptureBufferSlotCountForTesting: Int { pendingCaptures.count }
+    var retainedCaptureCountForTesting: Int { retainedCaptureCount }
+    var lastChangeCountForTesting: Int? { lastChangeCount }
+    private static let maximumRetainedCaptureCount = 128
+    private static let maximumRetainedCaptureBytes = 64 * 1_024 * 1_024
 
     public init(
         store: PasteBuddyStore,
@@ -22,16 +34,18 @@ public final class ClipboardMonitor {
         onItemCaptured: (@MainActor (ClipboardItem) -> Void)? = nil
     ) {
         self.store = store
-        self.pasteboard = pasteboard
+        let pasteboardReference = PasteboardReference(pasteboard)
+        self.pasteboardReference = pasteboardReference
         self.recognizeText = recognizeText ?? { imageData in
             try await ocrService.recognizeText(in: imageData)
         }
         self.onItemCaptured = onItemCaptured
-        self.lastChangeCount = pasteboard.changeCount
+        self.lastChangeCount = nil
     }
 
     public func start() {
         guard timer == nil else { return }
+        pollOnce()
         timer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollOnce()
@@ -42,61 +56,233 @@ public final class ClipboardMonitor {
     public func stop() {
         timer?.invalidate()
         timer = nil
-        pendingCaptureTask?.cancel()
-        pendingCaptureTask = nil
+        pasteboardReadTask?.cancel()
+        pasteboardReadTask = nil
+        needsPasteboardRepoll = false
+        captureWorkerTask?.cancel()
+        captureWorkerTask = nil
+        captureWorkerToken = nil
+        pendingCaptures.removeAll()
+        nextPendingCaptureIndex = 0
+        retainedCaptureCount = 0
+        retainedCaptureBytes = 0
     }
 
     func pollOnce() {
-        guard pasteboard.changeCount != lastChangeCount else { return }
-        lastChangeCount = pasteboard.changeCount
-        let privacy = store.snapshot.privacy
-        guard !privacy.isCaptureCurrentlyPaused() else { return }
+        guard pasteboardReadTask == nil else {
+            needsPasteboardRepoll = true
+            return
+        }
 
+        let privacy = store.snapshot.privacy
         let sourceApplication = NSWorkspace.shared.frontmostApplication
         let sourceApp = sourceApplication?.localizedName ?? "Unknown"
         let bundleIdentifier = sourceApplication?.bundleIdentifier
-        guard !privacy.excludesApplication(named: sourceApp, bundleIdentifier: bundleIdentifier) else { return }
+        let shouldCapture = !store.isPersistenceWriteBlocked
+            && !privacy.isCaptureCurrentlyPaused()
+            && !privacy.excludesApplication(named: sourceApp, bundleIdentifier: bundleIdentifier)
 
-        let pasteboardSnapshot = Self.snapshot(from: pasteboard, captureImages: privacy.captureImages)
-
-        let previousTask = pendingCaptureTask
-        pendingCaptureTask = Task { [recognizeText] in
-            await previousTask?.value
+        let pasteboardReference = pasteboardReference
+        let expectedChangeCount = lastChangeCount
+        let captureImages = privacy.captureImages
+        pasteboardReadTask = Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                Self.readPasteboard(
+                    reference: pasteboardReference,
+                    expectedChangeCount: expectedChangeCount,
+                    shouldCapture: shouldCapture,
+                    captureImages: captureImages
+                )
+            }.value
             guard !Task.isCancelled else { return }
 
-            let item = await self.makeCapturedItem(
-                from: pasteboardSnapshot,
+            self?.handlePasteboardReadResult(
+                result,
                 sourceApp: sourceApp,
-                sourceBundleIdentifier: bundleIdentifier,
-                privacy: privacy
+                bundleIdentifier: bundleIdentifier
             )
-            guard let item, !Task.isCancelled else { return }
+        }
+    }
 
-            await MainActor.run {
-                let storedItem = self.store.addCapturedItem(item)
-                self.onItemCaptured?(storedItem)
-                Task {
-                    await self.store.enrichLinkPreviewMetadataIfNeeded(for: storedItem)
-                }
+    private func handlePasteboardReadResult(
+        _ result: PasteboardReadResult,
+        sourceApp: String,
+        bundleIdentifier: String?
+    ) {
+        pasteboardReadTask = nil
+        defer {
+            if needsPasteboardRepoll {
+                needsPasteboardRepoll = false
+                pollOnce()
+            }
+        }
+        guard let previousChangeCount = lastChangeCount else {
+            lastChangeCount = result.changeCount
+            return
+        }
+        lastChangeCount = result.changeCount
+        guard result.changeCount != previousChangeCount,
+              let pasteboardSnapshot = result.snapshot else { return }
 
-                if item.contentType == .image,
-                   self.store.snapshot.privacy.runLocalOCRAfterImageCapture,
-                   let imageData = item.payload.imageData {
-                    Task {
-                        do {
-                            let text = try await recognizeText(imageData)
-                            await MainActor.run {
-                                self.store.updateOCRText(text, for: storedItem.id)
-                            }
-                        } catch {
-                            await MainActor.run {
-                                self.store.markOCRFailed(error.localizedDescription, for: storedItem.id)
-                            }
+        let currentPrivacy = store.snapshot.privacy
+        guard !store.isPersistenceWriteBlocked,
+              !currentPrivacy.isCaptureCurrentlyPaused(),
+              !currentPrivacy.excludesApplication(
+                  named: sourceApp,
+                  bundleIdentifier: bundleIdentifier
+              ) else {
+            return
+        }
+
+        let pendingCapture = PendingCapture(
+            snapshot: pasteboardSnapshot,
+            sourceApp: sourceApp,
+            sourceBundleIdentifier: bundleIdentifier,
+            privacy: currentPrivacy
+        )
+        guard enqueue(pendingCapture) else { return }
+        startCaptureWorkerIfNeeded()
+    }
+
+    private func enqueue(_ capture: PendingCapture) -> Bool {
+        let captureBytes = capture.estimatedByteCount
+        guard captureBytes <= Self.maximumRetainedCaptureBytes else {
+            recordBackpressureError()
+            return false
+        }
+        var droppedCapture = false
+        while retainedCaptureCount >= Self.maximumRetainedCaptureCount
+            || retainedCaptureBytes + captureBytes > Self.maximumRetainedCaptureBytes {
+            guard dropOldestQueuedCapture() else {
+                recordBackpressureError()
+                return false
+            }
+            droppedCapture = true
+        }
+        pendingCaptures.append(capture)
+        retainedCaptureCount += 1
+        retainedCaptureBytes += captureBytes
+        if droppedCapture {
+            recordBackpressureError()
+        }
+        return true
+    }
+
+    private func recordBackpressureError() {
+        guard !store.isPersistenceWriteBlocked else { return }
+        store.lastErrorMessage = PasteBuddyLocalization.string(
+            "message.clipboard_capture_backlog_full",
+            defaultValue: "Clipboard capture paused briefly because incoming content exceeded the safe memory budget."
+        )
+    }
+
+    private func dropOldestQueuedCapture() -> Bool {
+        guard let index = pendingCaptures.indices.first(where: {
+            $0 >= nextPendingCaptureIndex && pendingCaptures[$0] != nil
+        }), let dropped = pendingCaptures[index] else {
+            return false
+        }
+        pendingCaptures[index] = nil
+        retainedCaptureCount = max(retainedCaptureCount - 1, 0)
+        retainedCaptureBytes = max(retainedCaptureBytes - dropped.estimatedByteCount, 0)
+        while nextPendingCaptureIndex < pendingCaptures.count,
+              pendingCaptures[nextPendingCaptureIndex] == nil {
+            nextPendingCaptureIndex += 1
+        }
+        compactProcessedCaptureSlotsIfNeeded()
+        return true
+    }
+
+    private func startCaptureWorkerIfNeeded() {
+        guard captureWorkerTask == nil else { return }
+        let workerToken = UUID()
+        captureWorkerToken = workerToken
+        captureWorkerTask = Task { [weak self] in
+            await self?.drainPendingCaptures(workerToken: workerToken)
+        }
+    }
+
+    private func drainPendingCaptures(workerToken: UUID) async {
+        defer {
+            if captureWorkerToken == workerToken {
+                pendingCaptures.removeAll(keepingCapacity: true)
+                nextPendingCaptureIndex = 0
+                captureWorkerTask = nil
+                captureWorkerToken = nil
+            }
+        }
+
+        while !Task.isCancelled, nextPendingCaptureIndex < pendingCaptures.count {
+            guard let capture = pendingCaptures[nextPendingCaptureIndex] else {
+                nextPendingCaptureIndex += 1
+                compactProcessedCaptureSlotsIfNeeded()
+                continue
+            }
+            // Release potentially large pasteboard Data as soon as this worker
+            // owns the capture instead of retaining every processed snapshot
+            // until a continuously active worker eventually becomes idle.
+            pendingCaptures[nextPendingCaptureIndex] = nil
+            nextPendingCaptureIndex += 1
+            compactProcessedCaptureSlotsIfNeeded()
+            let captureBytes = capture.estimatedByteCount
+            let item = await makeCapturedItem(
+                from: capture.snapshot,
+                sourceApp: capture.sourceApp,
+                sourceBundleIdentifier: capture.sourceBundleIdentifier,
+                privacy: capture.privacy
+            )
+            if captureWorkerToken == workerToken {
+                retainedCaptureCount = max(retainedCaptureCount - 1, 0)
+                retainedCaptureBytes = max(retainedCaptureBytes - captureBytes, 0)
+            }
+            guard !Task.isCancelled, captureWorkerToken == workerToken else { return }
+            guard let item else { continue }
+            let currentPrivacy = store.snapshot.privacy
+            guard !store.isPersistenceWriteBlocked,
+                  !currentPrivacy.isCaptureCurrentlyPaused(),
+                  !currentPrivacy.excludesApplication(
+                      named: capture.sourceApp,
+                      bundleIdentifier: capture.sourceBundleIdentifier
+                  ) else {
+                continue
+            }
+
+            // `makeCapturedItem` constructs the item off the main actor and its
+            // search document already matches the payload. Rebuilding it here
+            // would repeat HTML normalization and SHA256 hashing on MainActor.
+            let storedItem = store.addCapturedItemWithCurrentSearchDocument(item)
+            onItemCaptured?(storedItem)
+            Task {
+                await store.enrichLinkPreviewMetadataIfNeeded(for: storedItem)
+            }
+
+            if item.contentType == .image,
+               store.snapshot.privacy.runLocalOCRAfterImageCapture,
+               let imageData = item.payload.imageData {
+                Task { [recognizeText] in
+                    do {
+                        let text = try await recognizeText(imageData)
+                        await MainActor.run {
+                            self.store.updateOCRText(text, for: storedItem.id)
+                        }
+                    } catch {
+                        await MainActor.run {
+                            self.store.markOCRFailed(error.localizedDescription, for: storedItem.id)
                         }
                     }
                 }
             }
         }
+    }
+
+    private func compactProcessedCaptureSlotsIfNeeded() {
+        let compactionThreshold = 64
+        guard nextPendingCaptureIndex >= compactionThreshold,
+              nextPendingCaptureIndex >= pendingCaptures.count - nextPendingCaptureIndex else {
+            return
+        }
+        pendingCaptures.removeFirst(nextPendingCaptureIndex)
+        nextPendingCaptureIndex = 0
     }
 
     private func makeCapturedItem(
@@ -132,6 +318,33 @@ public final class ClipboardMonitor {
         )
     }
 
+    nonisolated private struct PasteboardReference: Sendable {
+        enum Kind: Sendable {
+            case general
+            case named(String)
+        }
+
+        let kind: Kind
+
+        init(_ pasteboard: NSPasteboard) {
+            kind = pasteboard.name == .general ? .general : .named(pasteboard.name.rawValue)
+        }
+
+        func makePasteboard() -> NSPasteboard {
+            switch kind {
+            case .general:
+                return .general
+            case .named(let name):
+                return NSPasteboard(name: .init(name))
+            }
+        }
+    }
+
+    private struct PasteboardReadResult: Sendable {
+        var changeCount: Int
+        var snapshot: PasteboardSnapshot?
+    }
+
     private struct PasteboardSnapshot: Sendable {
         var urls: [URL]
         var explicitURLString: String?
@@ -141,9 +354,54 @@ public final class ClipboardMonitor {
         var rtfData: Data?
         var imageData: Data?
         var imageDataIsPNG: Bool
+
+        var estimatedByteCount: Int {
+            urls.reduce(0) { $0 + $1.absoluteString.utf8.count }
+                + (explicitURLString?.utf8.count ?? 0)
+                + (explicitFileURLString?.utf8.count ?? 0)
+                + (rawText?.utf8.count ?? 0)
+                + (htmlString?.utf8.count ?? 0)
+                + (rtfData?.count ?? 0)
+                + (imageData?.count ?? 0)
+        }
     }
 
-    private static func snapshot(from pasteboard: NSPasteboard, captureImages: Bool) -> PasteboardSnapshot {
+    private struct PendingCapture {
+        var snapshot: PasteboardSnapshot
+        var sourceApp: String
+        var sourceBundleIdentifier: String?
+        var privacy: PrivacyConfiguration
+
+        var estimatedByteCount: Int {
+            snapshot.estimatedByteCount
+                + sourceApp.utf8.count
+                + (sourceBundleIdentifier?.utf8.count ?? 0)
+        }
+    }
+
+    nonisolated private static func readPasteboard(
+        reference: PasteboardReference,
+        expectedChangeCount: Int?,
+        shouldCapture: Bool,
+        captureImages: Bool
+    ) -> PasteboardReadResult {
+        let pasteboard = reference.makePasteboard()
+        let changeCount = pasteboard.changeCount
+        guard let expectedChangeCount,
+              changeCount != expectedChangeCount,
+              shouldCapture else {
+            return PasteboardReadResult(changeCount: changeCount, snapshot: nil)
+        }
+        return PasteboardReadResult(
+            changeCount: changeCount,
+            snapshot: snapshot(from: pasteboard, captureImages: captureImages)
+        )
+    }
+
+    nonisolated private static func snapshot(
+        from pasteboard: NSPasteboard,
+        captureImages: Bool
+    ) -> PasteboardSnapshot {
         let pngData = captureImages ? pasteboard.data(forType: .png).flatMap { $0.isEmpty ? nil : $0 } : nil
         let tiffData = captureImages && pngData == nil ? pasteboard.data(forType: .tiff).flatMap { $0.isEmpty ? nil : $0 } : nil
         return PasteboardSnapshot(
@@ -355,9 +613,38 @@ public struct ClipboardLinkPreviewMetadata: Sendable {
 public enum ClipboardLinkMetadataFetcher {
     /// Test seam: production always fetches through LinkPresentation.
     @MainActor public static var fetchOverrideForTesting: ((String) async -> ClipboardLinkPreviewMetadata?)?
+    @MainActor private static var inFlightRequests: [String: Task<ClipboardLinkPreviewMetadata?, Never>] = [:]
+    @MainActor private static var failedFetchDates: [String: Date] = [:]
+    private static let failedFetchRetryInterval: TimeInterval = 15 * 60
+    private static let failedFetchCapacity = 256
 
     @MainActor
     public static func fetch(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
+        let now = Date()
+        if let failedAt = failedFetchDates[urlString],
+           now.timeIntervalSince(failedAt) < failedFetchRetryInterval {
+            return nil
+        }
+        if let request = inFlightRequests[urlString] {
+            return await request.value
+        }
+
+        let request = Task { @MainActor in
+            await fetchUncached(for: urlString)
+        }
+        inFlightRequests[urlString] = request
+        let metadata = await request.value
+        inFlightRequests.removeValue(forKey: urlString)
+        if metadata == nil {
+            recordFailedFetch(for: urlString, at: Date())
+        } else {
+            failedFetchDates.removeValue(forKey: urlString)
+        }
+        return metadata
+    }
+
+    @MainActor
+    private static func fetchUncached(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
         if let fetchOverrideForTesting {
             return await fetchOverrideForTesting(urlString)
         }
@@ -372,6 +659,25 @@ public enum ClipboardLinkMetadataFetcher {
         } catch {
             return nil
         }
+    }
+
+    @MainActor
+    private static func recordFailedFetch(for urlString: String, at date: Date) {
+        if failedFetchDates.count >= failedFetchCapacity,
+           failedFetchDates[urlString] == nil,
+           let oldestURL = failedFetchDates.min(by: { $0.value < $1.value })?.key {
+            failedFetchDates.removeValue(forKey: oldestURL)
+        }
+        failedFetchDates[urlString] = date
+    }
+
+    @MainActor
+    static func resetFetchStateForTesting() {
+        for request in inFlightRequests.values {
+            request.cancel()
+        }
+        inFlightRequests.removeAll()
+        failedFetchDates.removeAll()
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

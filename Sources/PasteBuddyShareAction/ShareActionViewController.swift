@@ -10,6 +10,7 @@ final class ShareActionViewController: UIViewController {
     private let doneButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
     private var store: PasteBuddyStore?
+    private var importTask: Task<Void, Never>?
 
     private var source: SharedContentSource {
         if Bundle.main.bundleIdentifier?.localizedCaseInsensitiveContains("Action") == true {
@@ -22,7 +23,7 @@ final class ShareActionViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         configureView()
-        Task { await importSharedContent() }
+        startImport()
     }
 
     private func configureView() {
@@ -77,6 +78,7 @@ final class ShareActionViewController: UIViewController {
     }
 
     private func importSharedContent() async {
+        guard !Task.isCancelled else { return }
         retryButton.isHidden = true
         activityIndicator.startAnimating()
         messageLabel.text = localized("message.saving_shared_content_to_history")
@@ -87,8 +89,25 @@ final class ShareActionViewController: UIViewController {
             return
         }
 
-        let resolvedStore = MobileStoreFactory.makeStore()
-        resolvedStore.load()
+        let resolvedStore: PasteBuddyStore
+        do {
+            resolvedStore = try MobileStoreFactory.makeStore()
+        } catch {
+            showFailure(error.localizedDescription)
+            return
+        }
+        await resolvedStore.loadAsync()
+        guard !Task.isCancelled else { return }
+        guard !resolvedStore.isPersistenceWriteBlocked else {
+            showFailure(
+                resolvedStore.lastErrorMessage
+                    ?? PasteBuddyLocalization.string(
+                        "mobile.error.history_load_failed",
+                        defaultValue: "PasteBuddy could not load encrypted history."
+                    )
+            )
+            return
+        }
         switch source {
         case .shareExtension:
             resolvedStore.setShareExtensionEnabled(true)
@@ -105,9 +124,21 @@ final class ShareActionViewController: UIViewController {
                 into: resolvedStore,
                 configuration: MobileItemProviderImportConfiguration(source: source)
             )
+            guard !Task.isCancelled else { return }
             showSuccess(result.statusMessage)
+        } catch is CancellationError {
+            return
         } catch {
+            guard !Task.isCancelled else { return }
             showFailure(error.localizedDescription)
+        }
+    }
+
+    private func startImport() {
+        importTask?.cancel()
+        importTask = Task { [weak self] in
+            guard let self else { return }
+            await importSharedContent()
         }
     }
 
@@ -126,11 +157,13 @@ final class ShareActionViewController: UIViewController {
     }
 
     @objc private func done() {
+        importTask?.cancel()
+        importTask = nil
         extensionContext?.completeRequest(returningItems: nil)
     }
 
     @objc private func retry() {
-        Task { await importSharedContent() }
+        startImport()
     }
 
     private func localized(_ key: String) -> String {

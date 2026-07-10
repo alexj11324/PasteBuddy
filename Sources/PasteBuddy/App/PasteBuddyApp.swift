@@ -295,7 +295,16 @@ struct PasteBuddyApp: App {
             await store.loadAsync()
         }
         configureStatusItemIfNeeded()
+        guard !store.isPersistenceWriteBlocked else {
+            PasteBuddyDiagnostics.record(
+                .lifecycle,
+                "runtimeStartBlockedByHistoryLoadFailure",
+                detail: store.lastErrorMessage
+            )
+            return
+        }
         irohSync.onItemReceived = { [store] item in
+            guard !store.isPersistenceWriteBlocked else { return }
             _ = store.addSyncedItem(item)
         }
         // Peers (iOS) cannot fetch link previews themselves, so re-send items
@@ -517,11 +526,24 @@ struct PasteBuddyApp: App {
 @MainActor
 final class PasteBuddyRuntimeLoadGate {
     private var didLoadStore = false
+    private var inFlightLoad: Task<Void, Never>?
 
-    func loadIfNeeded(_ loadAsync: () async -> Void) async {
+    func loadIfNeeded(
+        _ loadAsync: @escaping @MainActor @Sendable () async -> Void
+    ) async {
         guard !didLoadStore else { return }
+        if let inFlightLoad {
+            await inFlightLoad.value
+            return
+        }
+
+        let task = Task { @MainActor in
+            await loadAsync()
+        }
+        inFlightLoad = task
+        await task.value
+        inFlightLoad = nil
         didLoadStore = true
-        await loadAsync()
     }
 }
 

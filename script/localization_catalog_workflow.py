@@ -253,6 +253,66 @@ EXTRA_CATALOG_ENTRIES = [
         'Created PasteBuddy item "%@" and saved it to %@.',
         "已创建 PasteBuddy 项目“%@”并保存到 %@。",
     ),
+    semantic_entry(
+        "automation.error.history_locked",
+        "Unlock PasteBuddy history before running this action.",
+        "运行此操作前，请先解锁 PasteBuddy 历史记录。",
+    ),
+    semantic_entry(
+        "mcp.error.history_locked",
+        "Unlock PasteBuddy history before using MCP clipboard tools.",
+        "使用 MCP 剪贴板工具前，请先解锁 PasteBuddy 历史记录。",
+    ),
+    semantic_entry(
+        "mobile.error.image_data_too_large",
+        "The shared image is too large to import safely (limit: %d MB).",
+        "分享的图片过大，无法安全导入（上限：%d MB）。",
+    ),
+    semantic_entry(
+        "mobile.error.invalid_image_data",
+        "The shared image data is invalid.",
+        "分享的图片数据无效。",
+    ),
+    semantic_entry(
+        "mobile.error.image_dimensions_too_large",
+        "The shared image dimensions are too large to process safely.",
+        "分享的图片尺寸过大，无法安全处理。",
+    ),
+    semantic_entry(
+        "mobile.error.image_frame_count_too_large",
+        "The shared image contains too many frames to process safely.",
+        "分享的图片包含的帧数过多，无法安全处理。",
+    ),
+    semantic_entry(
+        "mobile.error.history_load_failed",
+        "PasteBuddy could not load encrypted history.",
+        "PasteBuddy 无法加载加密历史记录。",
+    ),
+    semantic_entry(
+        "mobile.error.history_unavailable_title",
+        "History Unavailable",
+        "历史记录不可用",
+    ),
+    semantic_entry(
+        "message.history_unavailable",
+        "PasteBuddy history is unavailable because it could not be loaded or saved safely.",
+        "PasteBuddy 历史记录不可用，因为无法安全地加载或保存。",
+    ),
+    semantic_entry(
+        "message.clipboard_capture_backlog_full",
+        "Clipboard capture paused briefly because incoming content exceeded the safe memory budget.",
+        "由于传入内容超出安全内存预算，剪贴板捕获已短暂暂停。",
+    ),
+    semantic_entry(
+        "mobile.error.provider_load_timed_out",
+        "The shared content took too long to load.",
+        "分享内容加载时间过长。",
+    ),
+    semantic_entry(
+        "mobile.error.shared_batch_too_large",
+        "The shared content is too large to import safely (limit: %d MB).",
+        "分享内容过大，无法安全导入（上限：%d MB）。",
+    ),
     semantic_entry("automation.destination.clipboard", "Clipboard", "剪贴板"),
     semantic_entry("automation.destination.frontmost_app", "Frontmost App", "最前面的 App"),
     semantic_entry("action.add_app", "Add App", "添加应用"),
