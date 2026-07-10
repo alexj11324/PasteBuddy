@@ -12,6 +12,7 @@ private enum ClipboardSidePanelMetrics {
 struct ClipboardSidePanelView: View {
     private static let pageSize = 100
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openSettings) private var openSettings
     @Bindable var store: PasteBuddyStore
     @Binding var isPinned: Bool
@@ -31,6 +32,9 @@ struct ClipboardSidePanelView: View {
     @State private var sideLoadMoreTask: Task<Void, Never>?
     @State private var sideLoadMoreRequestID: UUID?
     @State private var isLoadingNextSidePage = false
+    @State private var collectionMoveState = ClipboardPanelCollectionMoveState()
+    @State private var collectionDragSession = ClipboardCollectionDragSession()
+    @State private var collectionFrames: [ClipboardCollectionID: CGRect] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,6 +61,7 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
+            collectionDragSession.cancel()
             interaction.dismissPreview()
             sideRefreshTask?.cancel()
             sideRefreshTask = nil
@@ -65,7 +70,8 @@ struct ClipboardSidePanelView: View {
             sideLoadMoreRequestID = nil
             isLoadingNextSidePage = false
         }
-        .onChange(of: queryState) {
+        .onChange(of: queryState) { previous, current in
+            guard collectionMoveState.requiresRefresh(from: previous, to: current) else { return }
             refreshSideItems()
         }
         .onChange(of: store.searchQuery) {
@@ -190,13 +196,15 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        HStack(spacing: 5) {
+        let collectionOrder = collectionDragSession.displayOrder(fallback: store.collectionOrder)
+        return HStack(spacing: 5) {
             ScrollView(.horizontal) {
                 HStack(spacing: 5) {
-                    ForEach(store.collectionOrder) { collection in
-                        collectionChip(for: collection)
+                    ForEach(collectionOrder) { collection in
+                        collectionChip(for: collection, in: collectionOrder)
                     }
                 }
+                .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
                 .padding(.vertical, 1)
             }
             .scrollIndicators(.never, axes: .horizontal)
@@ -219,52 +227,64 @@ struct ClipboardSidePanelView: View {
     }
 
     @ViewBuilder
-    private func collectionChip(for collection: ClipboardCollectionID) -> some View {
+    private func collectionChip(
+        for collection: ClipboardCollectionID,
+        in collectionOrder: [ClipboardCollectionID]
+    ) -> some View {
         switch collection {
         case .history:
             ClipboardSidePanelFilterChip(
                 collection: collection,
+                collectionOrder: collectionOrder,
+                dragSession: $collectionDragSession,
+                collectionFrames: $collectionFrames,
                 title: localized("label.clipboard"),
                 systemImageName: "clock.arrow.circlepath",
                 color: store.isCapturePaused ? .orange : .blue,
                 isSelected: sideScope == .history,
                 onDropPayloads: { dropItems($0, into: .history) },
                 onReorder: reorderCollection,
-                canMoveLeft: store.collectionOrder.first != collection,
-                canMoveRight: store.collectionOrder.last != collection,
-                onMoveLeft: { store.moveCollection(collection, by: -1) },
-                onMoveRight: { store.moveCollection(collection, by: 1) }
+                canMoveLeft: collectionOrder.first != collection,
+                canMoveRight: collectionOrder.last != collection,
+                onMoveLeft: { moveCollection(collection, by: -1) },
+                onMoveRight: { moveCollection(collection, by: 1) }
             ) {
                 setSideScope(.history)
             }
         case .pasteStack:
             ClipboardSidePanelFilterChip(
                 collection: collection,
+                collectionOrder: collectionOrder,
+                dragSession: $collectionDragSession,
+                collectionFrames: $collectionFrames,
                 title: localized("action.paste_stack"),
                 systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
                 color: store.isPasteStackActive ? .green : .secondary,
                 isSelected: sideScope == .pasteStack,
                 onDropPayloads: { dropItems($0, into: .pasteStack) },
                 onReorder: reorderCollection,
-                canMoveLeft: store.collectionOrder.first != collection,
-                canMoveRight: store.collectionOrder.last != collection,
-                onMoveLeft: { store.moveCollection(collection, by: -1) },
-                onMoveRight: { store.moveCollection(collection, by: 1) }
+                canMoveLeft: collectionOrder.first != collection,
+                canMoveRight: collectionOrder.last != collection,
+                onMoveLeft: { moveCollection(collection, by: -1) },
+                onMoveRight: { moveCollection(collection, by: 1) }
             ) {
                 setSideScope(.pasteStack)
             }
         case .smart(let category):
             ClipboardSidePanelFilterChip(
                 collection: collection,
+                collectionOrder: collectionOrder,
+                dragSession: $collectionDragSession,
+                collectionFrames: $collectionFrames,
                 title: localized(category.displayName),
                 systemImageName: category.systemImageName,
                 color: Color(hex: category.colorHex) ?? .accentColor,
                 isSelected: isSmartCategorySelected(category),
                 onReorder: reorderCollection,
-                canMoveLeft: store.collectionOrder.first != collection,
-                canMoveRight: store.collectionOrder.last != collection,
-                onMoveLeft: { store.moveCollection(collection, by: -1) },
-                onMoveRight: { store.moveCollection(collection, by: 1) }
+                canMoveLeft: collectionOrder.first != collection,
+                canMoveRight: collectionOrder.last != collection,
+                onMoveLeft: { moveCollection(collection, by: -1) },
+                onMoveRight: { moveCollection(collection, by: 1) }
             ) {
                 selectSmartCategory(category)
             }
@@ -272,21 +292,28 @@ struct ClipboardSidePanelView: View {
             if let pinboard = store.userPinboards.first(where: { $0.id == id }) {
                 ClipboardSidePanelFilterChip(
                     collection: collection,
+                    collectionOrder: collectionOrder,
+                    dragSession: $collectionDragSession,
+                    collectionFrames: $collectionFrames,
                     title: pinboard.name,
                     systemImageName: pinboard.systemImageName ?? "pin.fill",
                     color: Color(hex: pinboard.colorHex) ?? .blue,
                     isSelected: sideScope == .pinboard(pinboard.id),
                     onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) },
                     onReorder: reorderCollection,
-                    canMoveLeft: store.collectionOrder.first != collection,
-                    canMoveRight: store.collectionOrder.last != collection,
-                    onMoveLeft: { store.moveCollection(collection, by: -1) },
-                    onMoveRight: { store.moveCollection(collection, by: 1) }
+                    canMoveLeft: collectionOrder.first != collection,
+                    canMoveRight: collectionOrder.last != collection,
+                    onMoveLeft: { moveCollection(collection, by: -1) },
+                    onMoveRight: { moveCollection(collection, by: 1) }
                 ) {
                     setSideScope(.pinboard(pinboard.id))
                 }
                 .contextMenu {
-                    CustomPinboardActionsMenu(store: store, pinboard: pinboard)
+                    CustomPinboardActionsMenu(
+                        store: store,
+                        pinboard: pinboard,
+                        onMove: { moveCollection(collection, by: $0) }
+                    )
                 }
             }
         }
@@ -543,7 +570,17 @@ struct ClipboardSidePanelView: View {
         relativeTo target: ClipboardCollectionID,
         afterTarget: Bool
     ) -> Bool {
-        store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)
+        collectionMoveState.recordMove(
+            store.moveCollection(source, relativeTo: target, afterTarget: afterTarget),
+            dataRevision: store.dataRevision
+        )
+    }
+
+    private func moveCollection(_ collection: ClipboardCollectionID, by offset: Int) {
+        collectionMoveState.recordMove(
+            store.moveCollection(collection, by: offset),
+            dataRevision: store.dataRevision
+        )
     }
 
     private func dropItems(
@@ -716,6 +753,12 @@ struct ClipboardSidePanelView: View {
     }
 
     private func handleExitCommand() {
+        if collectionDragSession.isActive {
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.18)) {
+                collectionDragSession.cancel()
+            }
+            return
+        }
         if isSearchFocused {
             if !store.searchQuery.isEmpty {
                 store.searchQuery = ""
@@ -746,7 +789,11 @@ struct ClipboardSidePanelView: View {
 }
 
 private struct ClipboardSidePanelFilterChip: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let collection: ClipboardCollectionID
+    let collectionOrder: [ClipboardCollectionID]
+    @Binding var dragSession: ClipboardCollectionDragSession
+    @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
     let title: String
     let systemImageName: String
     let color: Color
@@ -759,11 +806,12 @@ private struct ClipboardSidePanelFilterChip: View {
     let onMoveRight: () -> Void
     let action: () -> Void
     @State private var isDropTargeted = false
-    @State private var isCollectionDropTargeted = false
-    @State private var dropTargetWidth: CGFloat = 0
 
     init(
         collection: ClipboardCollectionID,
+        collectionOrder: [ClipboardCollectionID],
+        dragSession: Binding<ClipboardCollectionDragSession>,
+        collectionFrames: Binding<[ClipboardCollectionID: CGRect]>,
         title: String,
         systemImageName: String,
         color: Color,
@@ -777,6 +825,9 @@ private struct ClipboardSidePanelFilterChip: View {
         action: @escaping () -> Void
     ) {
         self.collection = collection
+        self.collectionOrder = collectionOrder
+        _dragSession = dragSession
+        _collectionFrames = collectionFrames
         self.title = title
         self.systemImageName = systemImageName
         self.color = color
@@ -805,31 +856,24 @@ private struct ClipboardSidePanelFilterChip: View {
             .frame(height: 30)
             .background {
                 Capsule()
-                    .fill(isSelected || isDropTargeted || isCollectionDropTargeted ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
+                    .fill(isSelected || isDropTargeted ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
             }
             .clipShape(Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) {
-            dropTargetWidth = $0
-        }
-        .draggable(ClipboardCollectionDragPayload(collection: collection))
-        .dropDestination(for: ClipboardCollectionDragPayload.self) { payloads, location in
-            guard let source = payloads.first?.collection, source != collection else { return false }
-            return onReorder(source, collection, location.x >= dropTargetWidth / 2)
-        } isTargeted: {
-            isCollectionDropTargeted = $0
-        }
-        .overlay {
-            if let onDropPayloads {
-                ShelfCollectionChipDropTarget(
-                    isTargeted: $isDropTargeted,
-                    onDropPayloads: onDropPayloads
-                )
-                .clipShape(Capsule())
-            }
-        }
+        .modifier(
+            ClipboardCollectionReorderModifier(
+                collection: collection,
+                collectionOrder: collectionOrder,
+                session: $dragSession,
+                collectionFrames: $collectionFrames,
+                isTargeted: $isDropTargeted,
+                animation: reduceMotion ? nil : .snappy(duration: 0.18),
+                onReorder: onReorder,
+                onDropPayloads: onDropPayloads
+            )
+        )
         .help(title)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)

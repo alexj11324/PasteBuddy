@@ -135,6 +135,7 @@ private enum PinboardEditPrompt {
 struct CustomPinboardActionsMenu: View {
     let store: PasteBuddyStore
     let pinboard: Pinboard
+    let onMove: (Int) -> Void
 
     var body: some View {
         Button {
@@ -175,11 +176,11 @@ struct CustomPinboardActionsMenu: View {
     }
 
     private func moveLeft() {
-        store.moveCollection(.pinboard(pinboard.id), by: -1)
+        onMove(-1)
     }
 
     private func moveRight() {
-        store.moveCollection(.pinboard(pinboard.id), by: 1)
+        onMove(1)
     }
 }
 

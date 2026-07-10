@@ -1,15 +1,6 @@
 import CoreTransferable
 import Foundation
-import PasteBuddyCore
 import UniformTypeIdentifiers
-
-struct ClipboardCollectionDragPayload: Codable, Transferable {
-    let collection: ClipboardCollectionID
-
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .pasteBuddyCollectionID)
-    }
-}
 
 struct PinboardItemDragPayload: Codable, Transferable {
     let ids: [UUID]
@@ -49,6 +40,5 @@ struct PinboardItemDragPayload: Codable, Transferable {
 }
 
 extension UTType {
-    static let pasteBuddyCollectionID = UTType(exportedAs: "app.pastebuddy.collection-id")
     static let pasteBuddyPinboardItemIDs = UTType(exportedAs: "app.pastebuddy.pinboard-item-ids")
 }
