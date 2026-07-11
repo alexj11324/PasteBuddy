@@ -639,6 +639,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     private var _incrementalSyncInvocationCount = 0
     private var _fetchPageInvocationCount = 0
     private var _captureJournalInvocationCount = 0
+    private var _lastAsyncFetchPageRanOnMainThreadForTesting: Bool?
     private var expectedRepositoryRevision: UUID?
     private var hasLoadedRepositoryRevision = false
     private var repositoryBaselineEpoch: UInt64 = 0
@@ -660,6 +661,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         instrumentationLock.lock()
         defer { instrumentationLock.unlock() }
         return _fetchPageInvocationCount
+    }
+
+    internal var lastAsyncFetchPageRanOnMainThreadForTesting: Bool? {
+        instrumentationLock.withLock {
+            _lastAsyncFetchPageRanOnMainThreadForTesting
+        }
     }
 
     internal var captureJournalInvocationCount: Int {
@@ -1017,6 +1024,25 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         return try database.read { db in
             try Self.fetchPage(request, db: db)
         }
+    }
+
+    public func fetchPageAsync(
+        _ request: ClipboardItemPageRequest = ClipboardItemPageRequest()
+    ) async throws -> [ClipboardItem] {
+        instrumentationLock.withLock {
+            _fetchPageInvocationCount += 1
+            _lastAsyncFetchPageRanOnMainThreadForTesting = nil
+        }
+        let result = try await database.read { db in
+            (
+                items: try Self.fetchPage(request, db: db),
+                ranOnMainThread: Thread.isMainThread
+            )
+        }
+        instrumentationLock.withLock {
+            _lastAsyncFetchPageRanOnMainThreadForTesting = result.ranOnMainThread
+        }
+        return result.items
     }
 
     public func fetchPageAndCount(

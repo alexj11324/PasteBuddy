@@ -1115,28 +1115,49 @@ public final class PasteBuddyStore {
         return result.page
     }
 
-    public func searchItems(
+    public func searchItemsPage(
         query: String,
         offset: Int = 0,
         limit: Int
-    ) throws -> [ClipboardItem] {
+    ) async throws -> [ClipboardItem] {
+        lastInMemoryPageQueryRanOnMainThreadForTesting = nil
         guard !isHistoryAccessLocked, limit > 0 else { return [] }
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
         let resolvedOffset = max(offset, 0)
         if let clipboardRepository,
            repositorySyncedDataRevision == dataRevision {
-            return try clipboardRepository.fetchPage(ClipboardItemPageRequest(
+            return try await clipboardRepository.fetchPageAsync(ClipboardItemPageRequest(
                 searchQuery: trimmedQuery,
                 limit: limit,
                 offset: resolvedOffset
             ))
         }
-        return Self.page(
-            snapshot.items.filter { $0.matches(trimmedQuery) },
+        let query = PasteBuddyInMemoryPageQuery(
+            items: snapshot.items,
+            orderedItemIDs: nil,
+            filters: PasteBuddyResolvedSearchFilters(
+                textQuery: trimmedQuery,
+                sourceAppName: nil,
+                isImpossible: false
+            ),
+            contentType: nil,
+            deviceName: nil,
+            dateFilter: .any,
             offset: resolvedOffset,
             limit: limit
         )
+        let queryTask = Task.detached(priority: .userInitiated) {
+            query.execute()
+        }
+        let result = await withTaskCancellationHandler {
+            await queryTask.value
+        } onCancel: {
+            queryTask.cancel()
+        }
+        guard !result.wasCancelled else { throw CancellationError() }
+        lastInMemoryPageQueryRanOnMainThreadForTesting = result.ranOnMainThread
+        return result.page.items
     }
 
     public func filteredItemCount(for scope: PasteScope) -> Int {

@@ -173,7 +173,7 @@ final class PasteBuddyMCPServer {
             let payload: Encodable
             switch tool {
             case .searchHistory:
-                payload = try service.searchHistory(
+                payload = try await service.searchHistory(
                     query: requiredString("query", in: arguments),
                     limit: intValue("limit", in: arguments) ?? 5
                 )
@@ -190,7 +190,7 @@ final class PasteBuddyMCPServer {
                     colorHex: arguments["colorHex"] as? String
                 )
             case .pinFirstMatch:
-                payload = try service.pinFirstMatch(
+                payload = try await service.pinFirstMatch(
                     query: requiredString("query", in: arguments),
                     pinboardID: uuidValue("pinboardID", in: arguments),
                     pinboardName: arguments["pinboardName"] as? String
