@@ -121,12 +121,17 @@ public final class MCPToolService {
 
     public func searchHistory(query: String, limit: Int = 5) async throws -> MCPHistorySearchResponse {
         do {
-            try require(.searchHistory)
-            try requireHistoryUnlocked()
+            try requireAccess(to: .searchHistory)
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
             let cappedLimit = min(max(limit, 1), 25)
-            let items = try await visibleItems(matching: trimmed, limit: cappedLimit)
+            let candidates = try await visibleItems(
+                matching: trimmed,
+                limit: cappedLimit,
+                tool: .searchHistory
+            )
+            try requireAccess(to: .searchHistory)
+            let items = currentVisibleItems(from: candidates, limit: cappedLimit)
                 .map(AutomationItemSummary.init(item:))
             recordAccess(tool: .searchHistory, outcome: .succeeded, resultCount: items.count)
             return MCPHistorySearchResponse(query: trimmed, items: items)
@@ -194,15 +199,27 @@ public final class MCPToolService {
 
     public func pinFirstMatch(query: String, pinboardID: UUID? = nil, pinboardName: String? = nil) async throws -> MCPPinFirstMatchResponse {
         do {
-            try require(.pinFirstMatch)
-            try requireHistoryUnlocked()
-            let item = try await firstVisibleMatchingItem(query: query)
+            try requireAccess(to: .pinFirstMatch)
+            let matchedItem = try await firstVisibleMatchingItem(
+                query: query,
+                tool: .pinFirstMatch
+            )
+            try requireAccess(to: .pinFirstMatch)
+            guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+                throw MCPToolServiceError.noMatchingItem
+            }
+            try requireMCPVisible(item)
             guard let pinboard = resolvePinboard(id: pinboardID, name: pinboardName) else {
                 throw MCPToolServiceError.invalidPinboard
             }
             store.pinItem(item.id, to: pinboard.id)
+            try requireAccess(to: .pinFirstMatch)
+            try requireMCPVisible(item)
             guard let updatedPinboard = store.snapshot.pinboards.first(where: { $0.id == pinboard.id }) else {
                 throw MCPToolServiceError.invalidPinboard
+            }
+            guard updatedPinboard.itemIDs.contains(item.id) else {
+                throw MCPToolServiceError.noMatchingItem
             }
             recordAccess(tool: .pinFirstMatch, outcome: .succeeded, itemID: item.id, pinboardID: pinboard.id)
             return MCPPinFirstMatchResponse(
@@ -231,16 +248,28 @@ public final class MCPToolService {
         }
     }
 
-    private func firstVisibleMatchingItem(query: String) async throws -> ClipboardItem {
+    private func requireAccess(to tool: MCPToolName) throws {
+        try require(tool)
+        try requireHistoryUnlocked()
+    }
+
+    private func firstVisibleMatchingItem(
+        query: String,
+        tool: MCPToolName
+    ) async throws -> ClipboardItem {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
-        guard let item = try await visibleItems(matching: trimmed, limit: 1).first else {
+        guard let item = try await visibleItems(matching: trimmed, limit: 1, tool: tool).first else {
             throw MCPToolServiceError.noMatchingItem
         }
         return item
     }
 
-    private func visibleItems(matching query: String, limit: Int) async throws -> [ClipboardItem] {
+    private func visibleItems(
+        matching query: String,
+        limit: Int,
+        tool: MCPToolName
+    ) async throws -> [ClipboardItem] {
         let resolvedLimit = max(limit, 0)
         guard resolvedLimit > 0 else { return [] }
         let pageSize = max(resolvedLimit, 25)
@@ -248,8 +277,9 @@ public final class MCPToolService {
         var visibleItems: [ClipboardItem] = []
         while visibleItems.count < resolvedLimit {
             let page = try await store.searchItemsPage(query: query, offset: offset, limit: pageSize)
+            try requireAccess(to: tool)
             guard !page.isEmpty else { break }
-            for item in page where isMCPVisible(item) {
+            for item in currentVisibleItems(from: page, limit: page.count) {
                 visibleItems.append(item)
                 if visibleItems.count == resolvedLimit {
                     break
@@ -261,6 +291,22 @@ public final class MCPToolService {
             }
         }
         return visibleItems
+    }
+
+    private func currentVisibleItems(
+        from candidates: [ClipboardItem],
+        limit: Int
+    ) -> [ClipboardItem] {
+        var currentItemsByID: [UUID: ClipboardItem] = [:]
+        currentItemsByID.reserveCapacity(store.snapshot.items.count)
+        for item in store.snapshot.items {
+            currentItemsByID[item.id] = item
+        }
+        return candidates.lazy
+            .compactMap { currentItemsByID[$0.id] }
+            .filter(isMCPVisible)
+            .prefix(max(limit, 0))
+            .map { $0 }
     }
 
     private func isMCPVisible(_ item: ClipboardItem) -> Bool {

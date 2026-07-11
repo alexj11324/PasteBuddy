@@ -171,13 +171,14 @@ public final class AutomationActionService {
     }
 
     public func searchClipboard(query: String, limit: Int = 5) async throws -> AutomationSearchResult {
-        try store.requirePersistenceReady()
-        guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
+        try requireReadableHistory()
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw AutomationActionError.emptyQuery }
 
         let cappedLimit = min(max(limit, 1), 25)
-        let items = try await store.searchItemsPage(query: trimmed, limit: cappedLimit)
+        let page = try await store.searchItemsPage(query: trimmed, limit: cappedLimit)
+        try requireReadableHistory()
+        let items = currentItems(from: page)
             .map(AutomationItemSummary.init(item:))
 
         return AutomationSearchResult(query: trimmed, items: items)
@@ -198,11 +199,19 @@ public final class AutomationActionService {
         query: String,
         toPinboardNamed pinboardName: String
     ) async throws -> AutomationPinboardItemResult {
-        let item = try await firstMatchingItem(query: query)
+        let matchedItem = try await firstMatchingItem(query: query)
+        try requireReadableHistory()
+        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+            throw AutomationActionError.noMatchingItem
+        }
         let pinboard = try pinboard(named: pinboardName)
         store.pinItem(item.id, to: pinboard.id)
+        try requireReadableHistory()
         guard let updatedPinboard = store.snapshot.pinboards.first(where: { $0.id == pinboard.id }) else {
             throw AutomationActionError.pinboardNotFound(pinboard.name)
+        }
+        guard updatedPinboard.itemIDs.contains(item.id) else {
+            throw AutomationActionError.noMatchingItem
         }
         return AutomationPinboardItemResult(item: item, pinboard: updatedPinboard)
     }
@@ -213,7 +222,11 @@ public final class AutomationActionService {
         destination: AutomationItemTransferDestination = .clipboard,
         transfer: (ClipboardItem, PasteFormat) -> Void
     ) async throws -> AutomationItemTransferResult {
-        let item = try await firstMatchingItem(query: query)
+        let matchedItem = try await firstMatchingItem(query: query)
+        try requireReadableHistory()
+        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+            throw AutomationActionError.noMatchingItem
+        }
         transfer(item, format)
         return AutomationItemTransferResult(
             item: item,
@@ -224,11 +237,26 @@ public final class AutomationActionService {
 
     public func firstMatchingItem(query: String) async throws -> ClipboardItem {
         let result = try await searchClipboard(query: query, limit: 1)
+        try requireReadableHistory()
         guard let summary = result.items.first,
               let item = store.snapshot.items.first(where: { $0.id == summary.id }) else {
             throw AutomationActionError.noMatchingItem
         }
         return item
+    }
+
+    private func requireReadableHistory() throws {
+        try store.requirePersistenceReady()
+        guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
+    }
+
+    private func currentItems(from candidates: [ClipboardItem]) -> [ClipboardItem] {
+        var currentItemsByID: [UUID: ClipboardItem] = [:]
+        currentItemsByID.reserveCapacity(store.snapshot.items.count)
+        for item in store.snapshot.items {
+            currentItemsByID[item.id] = item
+        }
+        return candidates.compactMap { currentItemsByID[$0.id] }
     }
 
     private func pinboard(named name: String) throws -> Pinboard {
