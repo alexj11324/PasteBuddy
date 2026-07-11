@@ -1,10 +1,17 @@
 # TestFlight CI
 
-Pushing to `main` runs `.github/workflows/testflight.yml`.
+Pull requests targeting `main`, pushes to `main`, and manual dispatches run `.github/workflows/testflight.yml` on GitHub's `macos-26` image.
 
-The workflow runs on GitHub's `macos-26` image so archives are built with Xcode 26 and the iOS 26 SDK required by App Store Connect.
+Every event starts with a read-only `verify` job that does not receive cloud or App Store Connect credentials. It:
 
-The workflow:
+1. Runs `swift test`.
+2. Checks the localization catalogs.
+3. Compiles the Debug app and all embedded extensions for a generic iOS Simulator with signing disabled.
+4. Compiles the Release app and all embedded extensions for generic iOS with signing disabled.
+
+Both Xcode builds use the checked-in `Package.resolved` file so verification cannot silently update dependencies. The Xcode project uses Swift 6 with complete strict concurrency checking for the iOS app, keyboard, share, and action targets. SwiftPM tests remain a plain `swift test`; do not force third-party package targets into Swift 6 with a global compiler flag.
+
+Only a successful push to `main` or a manual dispatch of `main` unlocks the `upload` job. A manual dispatch from another ref still verifies that ref, but cannot receive GCP or App Store Connect credentials. The upload job alone receives `contents: write` and `id-token: write`, and actual uploads are serialized. It:
 
 1. Authenticates to Google Cloud with GitHub OIDC.
 2. Restores the App Store Connect API key from Google Secret Manager.
