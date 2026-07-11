@@ -558,6 +558,7 @@
 "message.iroh_endpoint_is_not_ready" = "Iroh 端点尚未就绪。";
 "message.items_stay_in_clipboard_history_only_this" = "项目会保留在剪贴板历史中，只移除此收藏板集合。";
 "message.launch_at_login_is_unavailable_in_this" = "此构建版本不支持登录时启动";
+"message.loading_clipboard_history" = "正在加载剪贴板历史…";
 "message.local_only_cloudkit_sync_is_disabled" = "仅本地：CloudKit 同步已关闭。";
 "message.mcp_allows_ai_apps_to_connect" = "允许经你批准的 AI 应用通过 PasteBuddy MCP 读取并整理本地剪贴板历史和收藏板。";
 "message.mcp_server_shut_down" = "MCP 访问已关闭。";

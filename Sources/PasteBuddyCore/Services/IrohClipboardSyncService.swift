@@ -273,6 +273,26 @@ public final class IrohClipboardSyncService {
         }
     }
 
+    public func stop() async {
+        acceptTask?.cancel()
+        acceptTask = nil
+        currentSession?.stop()
+        currentSession = nil
+        onItemReceived = nil
+
+        let activeEndpoint = endpoint
+        endpoint = nil
+        if let activeEndpoint {
+            do {
+                try await activeEndpoint.close()
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+                return
+            }
+        }
+        connectionState = .idle
+    }
+
     private func bindEndpoint() async {
         guard endpoint == nil else { return }
         connectionState = .binding

@@ -17190,6 +17190,22 @@
         }
       }
     },
+    "message.loading_clipboard_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading clipboard history…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载剪贴板历史…"
+          }
+        }
+      }
+    },
     "message.local_only_cloudkit_sync_is_disabled": {
       "localizations": {
         "en": {

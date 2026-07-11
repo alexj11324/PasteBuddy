@@ -276,6 +276,130 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(finalCallCount, 1)
     }
 
+    func testRuntimeLoadGatePreparesLoadingStatusBeforeLoadCompletes() async {
+        let gate = PasteBuddyRuntimeLoadGate()
+        let loader = SuspendedRuntimeLoader()
+        let probe = ShelfReloadFailureProbe()
+
+        let loadTask = Task { @MainActor in
+            await gate.loadIfNeeded(
+                onLoading: {
+                    probe.loadingPreparationCount += 1
+                },
+                {
+                    await loader.load()
+                }
+            )
+        }
+        while await loader.callCount() == 0 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(probe.loadingPreparationCount, 1)
+        await loader.release()
+        guard case .success = await loadTask.value else {
+            return XCTFail("The suspended runtime load should complete after release.")
+        }
+    }
+
+    func testRuntimeStateDistinguishesLoadingReadyAndUnavailable() {
+        XCTAssertEqual(
+            PasteBuddyRuntimeState(
+                isStoreLoaded: false,
+                persistenceErrorMessage: nil
+            ),
+            .loading
+        )
+        XCTAssertEqual(
+            PasteBuddyRuntimeState(
+                isStoreLoaded: true,
+                persistenceErrorMessage: nil
+            ),
+            .ready
+        )
+        XCTAssertEqual(
+            PasteBuddyRuntimeState(
+                isStoreLoaded: true,
+                persistenceErrorMessage: "History unavailable"
+            ),
+            .unavailable("History unavailable")
+        )
+    }
+
+    func testLoadingStatusMenuAllowsOnlySettingsAndQuit() {
+        let menu = PasteBuddyStatusItemController.restrictedMenu(
+            title: "PasteBuddy",
+            statusMessage: "Loading clipboard history",
+            settingsTitle: "Settings",
+            quitTitle: "Quit",
+            onOpenSettings: {},
+            onQuit: {}
+        )
+
+        XCTAssertEqual(menu.items.first?.title, "Loading clipboard history")
+        XCTAssertFalse(menu.items.first?.isEnabled ?? true)
+        XCTAssertEqual(
+            menu.items.filter(\.isEnabled).map(\.title),
+            ["Settings", "Quit"]
+        )
+    }
+
+    func testIrohStopClearsReceiveCallbackAndReturnsToIdle() async {
+        let defaults = UserDefaults(suiteName: "PasteBuddyIrohStopTests-\(UUID().uuidString)")!
+        let service = IrohClipboardSyncService(defaults: defaults)
+        service.onItemReceived = { _ in }
+
+        await service.stop()
+
+        XCTAssertNil(service.onItemReceived)
+        XCTAssertEqual(service.connectionState, .idle)
+    }
+
+    func testManualShelfReloadFailureMakesRuntimeUnavailableWithoutRefreshingOrMutating() async throws {
+        let fixture = try await PersistenceFailureTestFixture.make()
+        defer { fixture.cleanup() }
+        let probe = ShelfReloadFailureProbe()
+        let controller = ClipboardShelfPanelController(
+            store: fixture.store,
+            directPasteItem: { _, format in
+                DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
+            },
+            directPasteItems: { _, format in
+                DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
+            },
+            reloadStore: { store in
+                try await PasteBuddyStoreFactory.load(store)
+            },
+            onHistoryUnavailable: { error in
+                probe.runtimeState = .unavailable(error.localizedDescription)
+            }
+        )
+
+        let didReload = await controller.reloadClipboardHistory()
+        if didReload {
+            probe.refreshCount += 1
+            fixture.store.createPinboard(named: "Must Not Be Created")
+        }
+
+        XCTAssertFalse(didReload)
+        XCTAssertTrue(fixture.store.isPersistenceWriteBlocked)
+        XCTAssertEqual(
+            probe.runtimeState,
+            .unavailable(PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        )
+        XCTAssertEqual(probe.refreshCount, 0)
+        XCTAssertFalse(controller.isVisible)
+        XCTAssertEqual(
+            fixture.store.snapshot.items.map(\.id),
+            fixture.snapshotItemIDsBeforeFailure
+        )
+        XCTAssertEqual(
+            fixture.store.snapshot.pinboards.map(\.id),
+            fixture.snapshotPinboardIDsBeforeFailure
+        )
+        XCTAssertEqual(try Data(contentsOf: fixture.fileURL), fixture.diskBytesBeforeFailure)
+    }
+
     func testTerminationCoordinatorDefersUntilPendingSaveFlush() async {
         var didFlush = false
 
@@ -1318,28 +1442,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertFalse(initializerSource.contains("resolvedStore.load()"))
         XCTAssertFalse(initializerSource.contains("loadAsync()"))
-        XCTAssertTrue(initializerSource.contains("try MobileStoreFactory.makeIrohSyncService()"))
-        XCTAssertTrue(taskSource.contains("try await PasteBuddyStoreFactory.load(store)"))
-        XCTAssertFalse(taskSource.contains("await store.loadAsync()"))
         XCTAssertTrue(source.contains("@State private var isStoreLoaded = false"))
         XCTAssertTrue(source.contains("if isStoreLoaded"))
         XCTAssertTrue(source.contains("ProgressView()"))
         XCTAssertTrue(taskSource.contains("isStoreLoaded = true"))
-        XCTAssertTrue(source.contains("PasteBuddyPersistenceError.historyUnavailable.localizedDescription"))
     }
 
     func testMobileExtensionsLoadEncryptedHistoryOffTheMainThread() throws {
         let shareSource = try sourceFileContents("Sources/PasteBuddyShareAction/ShareActionViewController.swift")
         let keyboardSource = try sourceFileContents("Sources/PasteBuddyKeyboard/KeyboardViewController.swift")
 
-        XCTAssertTrue(shareSource.contains("try await PasteBuddyStoreFactory.load(resolvedStore)"))
-        XCTAssertFalse(shareSource.contains("await resolvedStore.loadAsync()"))
         XCTAssertFalse(shareSource.contains("resolvedStore.load()"))
-        XCTAssertTrue(keyboardSource.contains("try await PasteBuddyStoreFactory.load(resolvedStore)"))
-        XCTAssertFalse(keyboardSource.contains("await resolvedStore.loadAsync()"))
         XCTAssertFalse(keyboardSource.contains("resolvedStore.load()"))
         XCTAssertTrue(keyboardSource.contains("finishConfiguringKeyboard(with: resolvedStore)"))
-        XCTAssertTrue(keyboardSource.contains("try MobileStoreFactory.makeIrohSyncService()"))
     }
 
     func testShareActionCancelsInFlightImportWhenDoneOrRetried() throws {

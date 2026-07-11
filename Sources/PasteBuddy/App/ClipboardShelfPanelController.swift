@@ -67,6 +67,8 @@ final class ClipboardShelfPanelController {
     private let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     private let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     private let shouldIgnoreDismissalAt: @MainActor (CGPoint) -> Bool
+    private let reloadStore: @MainActor @Sendable (PasteBuddyStore) async throws -> Void
+    private let onHistoryUnavailable: @MainActor @Sendable (PasteBuddyPersistenceError) async -> Void
     var displayMode: ClipboardPanelDisplayMode {
         didSet {
             guard oldValue != displayMode, let panel else { return }
@@ -100,7 +102,11 @@ final class ClipboardShelfPanelController {
         displayMode: ClipboardPanelDisplayMode = .sidePanel,
         directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
         directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
-        shouldIgnoreDismissalAt: @escaping @MainActor (CGPoint) -> Bool = { _ in false }
+        shouldIgnoreDismissalAt: @escaping @MainActor (CGPoint) -> Bool = { _ in false },
+        reloadStore: @escaping @MainActor @Sendable (PasteBuddyStore) async throws -> Void = { store in
+            try await PasteBuddyStoreFactory.load(store)
+        },
+        onHistoryUnavailable: @escaping @MainActor @Sendable (PasteBuddyPersistenceError) async -> Void = { _ in }
     ) {
         self.store = store
         self.placement = placement
@@ -108,10 +114,23 @@ final class ClipboardShelfPanelController {
         self.directPasteItem = directPasteItem
         self.directPasteItems = directPasteItems
         self.shouldIgnoreDismissalAt = shouldIgnoreDismissalAt
+        self.reloadStore = reloadStore
+        self.onHistoryUnavailable = onHistoryUnavailable
     }
 
     var isVisible: Bool {
         panel?.isVisible == true
+    }
+
+    func reloadClipboardHistory() async -> Bool {
+        do {
+            try await reloadStore(store)
+            return true
+        } catch {
+            hideImmediately()
+            await onHistoryUnavailable(.historyUnavailable)
+            return false
+        }
     }
 
     func toggle() {
@@ -262,8 +281,9 @@ final class ClipboardShelfPanelController {
                     store: store,
                     directPasteItem: directPasteItem,
                     directPasteItems: directPasteItems,
-                    reloadClipboardHistory: { [store] in
-                        await store.loadAsync()
+                    reloadClipboardHistory: { [weak self] in
+                        guard let self else { return false }
+                        return await self.reloadClipboardHistory()
                     }
                 ) { [weak self] in
                     self?.hide()

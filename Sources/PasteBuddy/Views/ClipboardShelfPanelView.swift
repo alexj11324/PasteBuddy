@@ -246,7 +246,7 @@ struct ClipboardShelfPanelView: View {
     @Bindable var store: PasteBuddyStore
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
-    let reloadClipboardHistory: @MainActor () async -> Void
+    let reloadClipboardHistory: @MainActor () async -> Bool
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
@@ -1069,7 +1069,7 @@ struct ClipboardShelfPanelView: View {
 
     private func reloadHistory() {
         Task { @MainActor in
-            await reloadClipboardHistory()
+            guard await reloadClipboardHistory() else { return }
             refreshShelfItems()
         }
     }

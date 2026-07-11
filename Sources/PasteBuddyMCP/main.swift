@@ -2,13 +2,22 @@ import Foundation
 import PasteBuddyCore
 
 @MainActor
-private final class PasteBuddyMCPServer {
+final class PasteBuddyMCPServer {
+    private let storeLoader: @MainActor @Sendable () async throws -> PasteBuddyStore
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.sortedKeys]
         return encoder
     }()
+
+    init(
+        storeLoader: @escaping @MainActor @Sendable () async throws -> PasteBuddyStore = {
+            try await PasteBuddyStoreFactory.makeLoadedDefault()
+        }
+    ) {
+        self.storeLoader = storeLoader
+    }
 
     func run() async {
         while let line = readLine() {
@@ -24,7 +33,7 @@ private final class PasteBuddyMCPServer {
         }
     }
 
-    private func handle(_ request: [String: Any]) async -> [String: Any] {
+    func handle(_ request: [String: Any]) async -> [String: Any] {
         let id = request["id"] ?? NSNull()
         guard let method = request["method"] as? String else {
             return errorResponse(id: id, code: -32600, message: "Invalid JSON-RPC request.")
@@ -205,7 +214,7 @@ private final class PasteBuddyMCPServer {
     }
 
     private func loadStore() async throws -> PasteBuddyStore {
-        try await PasteBuddyStoreFactory.makeLoadedDefault()
+        try await storeLoader()
     }
 
     private func requiredString(_ name: String, in arguments: [String: Any]) throws -> String {

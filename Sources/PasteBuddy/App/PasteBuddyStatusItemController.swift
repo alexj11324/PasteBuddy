@@ -36,12 +36,51 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func updateUnavailable(message: String) {
+        updateRestricted(message: message)
+    }
+
+    func updateLoading(message: String) {
+        updateRestricted(message: message)
+    }
+
+    private func updateRestricted(message: String) {
         guard let button = statusItem.button else { return }
         button.image = Self.menuBarIcon(accessibilityDescription: message)
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
         button.toolTip = message
         button.setAccessibilityLabel(message)
+    }
+
+    static func restrictedMenu(
+        title: String,
+        statusMessage: String,
+        settingsTitle: String,
+        quitTitle: String,
+        onOpenSettings: @escaping () -> Void,
+        onQuit: @escaping () -> Void
+    ) -> NSMenu {
+        let menu = NSMenu(title: title)
+        menu.addItem(disabledMenuItem(
+            statusMessage,
+            systemImageName: "exclamationmark.triangle"
+        ))
+        menu.addItem(actionMenuItem(
+            settingsTitle,
+            systemImageName: "gearshape",
+            keyEquivalent: ",",
+            keyEquivalentModifierMask: .command,
+            action: onOpenSettings
+        ))
+        menu.addItem(.separator())
+        menu.addItem(actionMenuItem(
+            quitTitle,
+            systemImageName: "power",
+            keyEquivalent: "q",
+            keyEquivalentModifierMask: .command,
+            action: onQuit
+        ))
+        return menu
     }
 
     func containsScreenPoint(_ point: CGPoint) -> Bool {

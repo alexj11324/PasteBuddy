@@ -2,6 +2,23 @@
 import AppIntents
 import PasteBuddyCore
 
+struct PasteBuddyAppIntentStoreLoader: Sendable {
+    private let loadOperation: @MainActor @Sendable () async throws -> PasteBuddyStore
+
+    init(_ loadOperation: @escaping @MainActor @Sendable () async throws -> PasteBuddyStore) {
+        self.loadOperation = loadOperation
+    }
+
+    @MainActor
+    func load() async throws -> PasteBuddyStore {
+        try await loadOperation()
+    }
+
+    static let live = PasteBuddyAppIntentStoreLoader {
+        try await PasteBuddyStoreFactory.makeLoadedDefault()
+    }
+}
+
 struct PasteBuddySearchClipboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Search PasteBuddy Clipboard"
     static let description = IntentDescription("Search local PasteBuddy clipboard history and return matching item titles.")
@@ -12,9 +29,17 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
     @Parameter(title: "Result Limit")
     var limit: Int?
 
+    private var storeLoader: PasteBuddyAppIntentStoreLoader = .live
+
+    init() {}
+
+    init(storeLoader: PasteBuddyAppIntentStoreLoader) {
+        self.storeLoader = storeLoader
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = try await PasteBuddyStoreFactory.makeLoadedDefault()
+        let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         let result = try service.searchClipboard(query: query, limit: limit ?? 5)
         return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
@@ -31,9 +56,17 @@ struct PasteBuddyCopyFirstMatchIntent: AppIntent {
     @Parameter(title: "Plain Text")
     var plainText: Bool?
 
+    private var storeLoader: PasteBuddyAppIntentStoreLoader = .live
+
+    init() {}
+
+    init(storeLoader: PasteBuddyAppIntentStoreLoader) {
+        self.storeLoader = storeLoader
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = try await PasteBuddyStoreFactory.makeLoadedDefault()
+        let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         let result = try service.transferFirstMatchingItem(
             query: query,
@@ -56,9 +89,17 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
     @Parameter(title: "Plain Text")
     var plainText: Bool?
 
+    private var storeLoader: PasteBuddyAppIntentStoreLoader = .live
+
+    init() {}
+
+    init(storeLoader: PasteBuddyAppIntentStoreLoader) {
+        self.storeLoader = storeLoader
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = try await PasteBuddyStoreFactory.makeLoadedDefault()
+        let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
         let item = try service.firstMatchingItem(query: query)
@@ -82,9 +123,17 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
     @Parameter(title: "Color Hex")
     var colorHex: String?
 
+    private var storeLoader: PasteBuddyAppIntentStoreLoader = .live
+
+    init() {}
+
+    init(storeLoader: PasteBuddyAppIntentStoreLoader) {
+        self.storeLoader = storeLoader
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = try await PasteBuddyStoreFactory.makeLoadedDefault()
+        let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         do {
             let pinboard = try service.createPinboard(name: name, colorHex: colorHex)
@@ -107,9 +156,17 @@ struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
     @Parameter(title: "Pinboard Name")
     var pinboardName: String
 
+    private var storeLoader: PasteBuddyAppIntentStoreLoader = .live
+
+    init() {}
+
+    init(storeLoader: PasteBuddyAppIntentStoreLoader) {
+        self.storeLoader = storeLoader
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = try await PasteBuddyStoreFactory.makeLoadedDefault()
+        let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         do {
             let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
