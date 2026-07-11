@@ -141,7 +141,6 @@ final class ClipboardShelfPanelController {
         preparePanelContentForPresentation(panel)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
-        panel.makeKey()
         animatePanelContentIn(panel)
         PasteBuddyDiagnostics.record(.shelf, "orderedFront", detail: NSStringFromRect(panel.frame))
         postVoiceOverAnnouncement(NSLocalizedString("label.clipboard_shelf_opened", comment: ""))
@@ -215,7 +214,7 @@ final class ClipboardShelfPanelController {
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isMovable = false
         panel.isMovableByWindowBackground = false
-        panel.becomesKeyOnlyIfNeeded = false
+        panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -446,7 +445,9 @@ final class ClipboardShelfPanelController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] _ in
             guard let self, let panel, panel.isVisible else { return }
-            self.hideIfOutsideClick(at: NSEvent.mouseLocation)
+            let location = NSEvent.mouseLocation
+            guard NSScreen.screens.contains(where: { $0.frame.contains(location) }) else { return }
+            self.hideIfOutsideClick(at: location)
         }
     }
 
@@ -527,6 +528,7 @@ final class ClipboardShelfPanelController {
         if keyWindow === panel || Self.isShelfAuxiliaryWindow(keyWindow) {
             return
         }
+        PasteBuddyDiagnostics.record(.shelf, "focusLossDismissed")
         hide()
     }
 
@@ -543,6 +545,11 @@ final class ClipboardShelfPanelController {
             isIgnoredDismissalTargetHit: shouldIgnoreDismissalAt(location),
             isPinned: isPinned
         ) {
+            PasteBuddyDiagnostics.record(
+                .shelf,
+                "outsideClickDismissed",
+                detail: "location=\(NSStringFromPoint(location)) panel=\(NSStringFromRect(panel.frame))"
+            )
             hide()
         }
     }
@@ -573,6 +580,7 @@ final class ClipboardShelfPanelController {
         isIgnoredDismissalTargetHit: Bool,
         isPinned: Bool = false
     ) -> Bool {
+        guard location.x != -1 || location.y != -1 else { return false }
         guard !isPinned else { return false }
         guard !isIgnoredDismissalTargetHit else { return false }
         return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
@@ -580,6 +588,7 @@ final class ClipboardShelfPanelController {
 
     private func hideIfAppLostFocus() {
         guard !isPinned else { return }
+        PasteBuddyDiagnostics.record(.shelf, "appDeactivationDismissed")
         hideImmediately()
     }
 

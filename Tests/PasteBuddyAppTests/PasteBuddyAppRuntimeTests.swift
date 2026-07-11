@@ -386,6 +386,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 isIgnoredDismissalTargetHit: false
             )
         )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldDismissForOutsideClick(
+                at: CGPoint(x: -1, y: -1),
+                panelFrame: shelfFrame,
+                isShelfAuxiliaryWindowHit: false,
+                isIgnoredDismissalTargetHit: false
+            )
+        )
     }
 
     func testPinnedSidePanelDoesNotDismissForOutsideClick() {
@@ -601,8 +609,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(collectionSource.contains("var dragItemProvider: ((Item) -> NSItemProvider?)?"))
         XCTAssertFalse(collectionSource.contains(".onDrag { provider }"))
         XCTAssertTrue(collectionSource.contains(".draggable(payload)"))
-        XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
-        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertTrue(collectionSource.contains("TapGesture(count: 2)"))
+        XCTAssertTrue(collectionSource.contains(".exclusively(before: TapGesture())"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         XCTAssertFalse(collectionSource.contains("NSViewRepresentable"))
         XCTAssertFalse(collectionSource.contains("NSCollectionView"))
@@ -661,12 +669,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
         let draggable = try XCTUnwrap(itemSource.range(of: "itemView.draggable(payload)"))
-        let pointerSelection = try XCTUnwrap(itemSource.range(of: ".simultaneousGesture("))
+        let pointerSelection = try XCTUnwrap(itemSource.range(of: ".exclusively(before:"))
+        let doubleClick = try XCTUnwrap(itemSource.range(of: "onDoubleClick(itemID)"))
         let suppressScroll = try XCTUnwrap(itemSource.range(of: "lastScrolledPrimarySelectedID = itemID"))
         let select = try XCTUnwrap(itemSource.range(of: "onSelect(itemID)"))
 
         XCTAssertLessThan(draggable.lowerBound, pointerSelection.lowerBound)
+        XCTAssertLessThan(doubleClick.lowerBound, select.lowerBound)
         XCTAssertLessThan(suppressScroll.lowerBound, select.lowerBound)
+    }
+
+    func testSidePanelPreservesTheExternalKeyWindowUntilKeyboardInputIsRequested() throws {
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertTrue(controllerSource.contains("styleMask: [.borderless, .nonactivatingPanel]"))
+        XCTAssertTrue(controllerSource.contains("panel.becomesKeyOnlyIfNeeded = true"))
+        XCTAssertFalse(controllerSource.contains("panel.makeKey()"))
+
+        let onAppearStart = try XCTUnwrap(sideSource.range(of: ".onAppear {"))
+        let onAppearEnd = try XCTUnwrap(sideSource.range(of: "\n        .onDisappear", range: onAppearStart.lowerBound..<sideSource.endIndex))
+        let onAppearSource = String(sideSource[onAppearStart.lowerBound..<onAppearEnd.lowerBound])
+        XCTAssertTrue(onAppearSource.contains("isSearchFocused = false"))
+        XCTAssertTrue(onAppearSource.contains("isListFocused = false"))
+        XCTAssertFalse(onAppearSource.contains("setSearchFocused(false)"))
+
+        let selectStart = try XCTUnwrap(sideSource.range(of: "private func selectItem"))
+        let selectEnd = try XCTUnwrap(sideSource.range(of: "\n    private func selectSingleItem", range: selectStart.lowerBound..<sideSource.endIndex))
+        let selectSource = String(sideSource[selectStart.lowerBound..<selectEnd.lowerBound])
+        XCTAssertTrue(selectSource.contains("isSearchFocused = false"))
+        XCTAssertTrue(selectSource.contains("isListFocused = false"))
+        XCTAssertFalse(selectSource.contains("setSearchFocused(false)"))
     }
 
     func testSidePanelPreviewFollowsSelectionWithoutDeferredHandoff() throws {
@@ -1896,9 +1929,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
-        XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
-        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
-        XCTAssertTrue(collectionSource.contains("TapGesture().onEnded"))
+        XCTAssertTrue(collectionSource.contains("TapGesture(count: 2)"))
+        XCTAssertTrue(collectionSource.contains(".exclusively(before: TapGesture())"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))

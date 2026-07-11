@@ -125,15 +125,19 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
                 itemView
             }
         }
-            .onTapGesture(count: 2) {
-                guard selectable else { return }
-                onDoubleClick(itemID)
-            }
-            .simultaneousGesture(
-                TapGesture().onEnded {
+            .contentShape(Rectangle())
+            .gesture(
+                TapGesture(count: 2)
+                    .exclusively(before: TapGesture())
+                    .onEnded { gesture in
                     guard selectable else { return }
-                    lastScrolledPrimarySelectedID = itemID
-                    onSelect(itemID)
+                    switch gesture {
+                    case .first:
+                        onDoubleClick(itemID)
+                    case .second:
+                        lastScrolledPrimarySelectedID = itemID
+                        onSelect(itemID)
+                    }
                 }
             )
             .popover(

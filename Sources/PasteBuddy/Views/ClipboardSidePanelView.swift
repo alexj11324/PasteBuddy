@@ -57,7 +57,8 @@ struct ClipboardSidePanelView: View {
             refreshSideItems()
             Task { @MainActor in
                 await Task.yield()
-                setSearchFocused(false)
+                isSearchFocused = false
+                isListFocused = false
             }
         }
         .onDisappear {
@@ -397,6 +398,7 @@ struct ClipboardSidePanelView: View {
                     },
                     onDoubleClick: { id in
                         guard let item = renderedItems.first(where: { $0.id == id }) else { return }
+                        PasteBuddyDiagnostics.record(.directPaste, "sidePanelDoubleClickCallback")
                         pasteItem(item, format: store.defaultPasteFormat)
                     }
                 )
@@ -597,7 +599,8 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
         }
-        setSearchFocused(false)
+        isSearchFocused = false
+        isListFocused = false
     }
 
     private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
