@@ -15,7 +15,8 @@ public enum PasteBuddyStoreFactory {
 
     @MainActor
     public static func makeDefault() throws -> PasteBuddyStore {
-        try makeDefault(
+        let bundleIdentifier = Bundle.main.bundleIdentifier
+        return try makeDefault(
             applicationSupportDirectoryResolver: {
                 guard let directory = FileManager.default.urls(
                     for: .applicationSupportDirectory,
@@ -25,15 +26,30 @@ public enum PasteBuddyStoreFactory {
                 }
                 return directory
             },
-            databaseURLResolver: PasteBuddyDatabase.defaultDatabaseURL,
+            bundleIdentifier: bundleIdentifier,
+            databaseURLResolver: PasteBuddyDatabase.defaultDatabaseURL(in:),
             diagnostics: recordFailure
+        )
+    }
+
+    static func persistenceContainerURL(
+        in applicationSupportDirectory: URL,
+        bundleIdentifier: String?
+    ) -> URL {
+        let directoryName = bundleIdentifier == "com.alexjiang.PasteBuddy.dev"
+            ? "PasteBuddy Dev"
+            : "PasteBuddy"
+        return applicationSupportDirectory.appendingPathComponent(
+            directoryName,
+            isDirectory: true
         )
     }
 
     @MainActor
     static func makeDefault(
         applicationSupportDirectoryResolver: () throws -> URL,
-        databaseURLResolver: () throws -> URL,
+        bundleIdentifier: String? = nil,
+        databaseURLResolver: (URL) throws -> URL,
         diagnostics: (FailureReason) -> Void
     ) throws -> PasteBuddyStore {
         let applicationSupportDirectory: URL
@@ -44,16 +60,21 @@ public enum PasteBuddyStoreFactory {
             throw PasteBuddyPersistenceError.historyUnavailable
         }
 
+        let persistenceContainerURL = persistenceContainerURL(
+            in: applicationSupportDirectory,
+            bundleIdentifier: bundleIdentifier
+        )
+
         let databaseURL: URL
         do {
-            databaseURL = try databaseURLResolver()
+            databaseURL = try databaseURLResolver(persistenceContainerURL)
         } catch {
             diagnostics(.databaseURLUnavailable)
             throw PasteBuddyPersistenceError.historyUnavailable
         }
 
         let diskStore = EncryptedSnapshotStore.defaultStore(
-            in: applicationSupportDirectory.appendingPathComponent("PasteBuddy", isDirectory: true),
+            in: persistenceContainerURL,
             storageMode: .standard
         )
         return PasteBuddyStore(

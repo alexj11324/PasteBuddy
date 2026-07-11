@@ -26,7 +26,7 @@ final class PasteBuddyStoreTests: XCTestCase {
                 applicationSupportDirectoryResolver: {
                     throw StoreFactoryProbeError.sensitive("/Users/example/Library/Application Support")
                 },
-                databaseURLResolver: {
+                databaseURLResolver: { _ in
                     XCTFail("Database resolution must not run after snapshot location failure.")
                     return URL(fileURLWithPath: "/unused/clipboard.sqlite")
                 },
@@ -40,6 +40,51 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(diagnosticReasons, [.applicationSupportDirectoryUnavailable])
     }
 
+    func testDefaultStoreFactoryIsolatesStableDevelopmentIdentityFromProductionStorage() {
+        let applicationSupportRoot = URL(
+            fileURLWithPath: "/Users/example/Library/Application Support",
+            isDirectory: true
+        )
+
+        XCTAssertEqual(
+            PasteBuddyStoreFactory.persistenceContainerURL(
+                in: applicationSupportRoot,
+                bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+            ),
+            applicationSupportRoot.appendingPathComponent("PasteBuddy Dev", isDirectory: true)
+        )
+        XCTAssertEqual(
+            PasteBuddyStoreFactory.persistenceContainerURL(
+                in: applicationSupportRoot,
+                bundleIdentifier: "com.alexjiang.PasteBuddy"
+            ),
+            applicationSupportRoot.appendingPathComponent("PasteBuddy", isDirectory: true)
+        )
+        XCTAssertEqual(
+            PasteBuddyStoreFactory.persistenceContainerURL(
+                in: applicationSupportRoot,
+                bundleIdentifier: "com.alexjiang.PasteBuddy.dev.preview"
+            ),
+            applicationSupportRoot.appendingPathComponent("PasteBuddy", isDirectory: true)
+        )
+        XCTAssertEqual(
+            PasteBuddyStoreFactory.persistenceContainerURL(
+                in: applicationSupportRoot,
+                bundleIdentifier: nil
+            ),
+            applicationSupportRoot.appendingPathComponent("PasteBuddy", isDirectory: true)
+        )
+
+        let developmentContainer = applicationSupportRoot.appendingPathComponent(
+            "PasteBuddy Dev",
+            isDirectory: true
+        )
+        XCTAssertEqual(
+            PasteBuddyDatabase.defaultDatabaseURL(in: developmentContainer),
+            developmentContainer.appendingPathComponent("clipboard.sqlite")
+        )
+    }
+
     func testDefaultStoreFactoryFailsClosedWhenDatabaseURLCannotBeResolved() {
         var diagnosticReasons: [PasteBuddyStoreFactory.FailureReason] = []
 
@@ -48,7 +93,11 @@ final class PasteBuddyStoreTests: XCTestCase {
                 applicationSupportDirectoryResolver: {
                     URL(fileURLWithPath: "/unused/Application Support", isDirectory: true)
                 },
-                databaseURLResolver: {
+                databaseURLResolver: { persistenceContainerURL in
+                    XCTAssertEqual(
+                        persistenceContainerURL,
+                        URL(fileURLWithPath: "/unused/Application Support/PasteBuddy", isDirectory: true)
+                    )
                     throw StoreFactoryProbeError.sensitive("/Users/example/Library/Application Support/PasteBuddy/clipboard.sqlite")
                 },
                 diagnostics: { diagnosticReasons.append($0) }
