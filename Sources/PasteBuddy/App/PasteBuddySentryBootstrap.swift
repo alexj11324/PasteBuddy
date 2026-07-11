@@ -107,6 +107,8 @@ enum PasteBuddySentryBootstrap {
         options.enableAutoBreadcrumbTracking = false
         options.enableNetworkBreadcrumbs = false
         options.enableNetworkTracking = false
+        options.enableCaptureFailedRequests = false
+        options.enableSwizzling = false
         options.enableAutoSessionTracking = false
         options.attachStacktrace = false
         options.enableAutoPerformanceTracing = false
@@ -114,6 +116,7 @@ enum PasteBuddySentryBootstrap {
         options.enableDataSwizzling = false
         options.enableFileManagerSwizzling = false
         options.enableLogs = false
+        options.enableMetrics = false
         options.tracesSampleRate = 0
         options.beforeSend = { event in
             event.extra = nil
