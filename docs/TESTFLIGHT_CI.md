@@ -9,7 +9,7 @@ Every event starts with a read-only `verify` job that does not receive cloud or 
 3. Compiles the Debug app and all embedded extensions for a generic iOS Simulator with signing disabled.
 4. Compiles the Release app and all embedded extensions for generic iOS with signing disabled.
 
-Both Xcode builds use the checked-in `Package.resolved` file so verification cannot silently update dependencies. The Xcode project uses Swift 6 with complete strict concurrency checking for the iOS app, keyboard, share, and action targets. SwiftPM tests remain a plain `swift test`; do not force third-party package targets into Swift 6 with a global compiler flag.
+The Xcode project uses Swift 6 with complete strict concurrency checking for the iOS app, keyboard, share, and action targets. SwiftPM tests remain a plain `swift test`; do not force third-party package targets into Swift 6 with a global compiler flag. Aligning and committing an authoritative Xcode package-resolution file remains Task 9 work; until then, the Xcode verification builds use normal package resolution instead of requiring an untracked workspace file.
 
 Only a successful push to `main` or a manual dispatch of `main` unlocks the `upload` job. A manual dispatch from another ref still verifies that ref, but cannot receive GCP or App Store Connect credentials. The upload job alone receives `contents: write` and `id-token: write`, and actual uploads are serialized. It:
 
