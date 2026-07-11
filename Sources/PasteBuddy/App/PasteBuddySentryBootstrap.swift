@@ -94,20 +94,31 @@ enum PasteBuddySentryBootstrap {
 
     private static func startSentry(configuration: PasteBuddySentryConfiguration) {
         SentrySDK.start { options in
-            options.dsn = configuration.dsn
-            options.environment = configuration.environment
-            options.releaseName = configuration.releaseName
-            options.debug = configuration.debug
-            options.sendDefaultPii = false
-            options.enableAutoBreadcrumbTracking = false
-            options.enableNetworkBreadcrumbs = false
-            options.enableNetworkTracking = false
-            options.enableAutoSessionTracking = false
-            options.attachStacktrace = false
-            options.tracesSampleRate = 0
-            options.beforeSend = { event in
-                event
-            }
+            configure(options: options, configuration: configuration)
+        }
+    }
+
+    static func configure(options: Options, configuration: PasteBuddySentryConfiguration) {
+        options.dsn = configuration.dsn
+        options.environment = configuration.environment
+        options.releaseName = configuration.releaseName
+        options.debug = configuration.debug
+        options.sendDefaultPii = false
+        options.enableAutoBreadcrumbTracking = false
+        options.enableNetworkBreadcrumbs = false
+        options.enableNetworkTracking = false
+        options.enableAutoSessionTracking = false
+        options.attachStacktrace = false
+        options.enableAutoPerformanceTracing = false
+        options.enableFileIOTracing = false
+        options.enableDataSwizzling = false
+        options.enableFileManagerSwizzling = false
+        options.enableLogs = false
+        options.tracesSampleRate = 0
+        options.beforeSend = { event in
+            event.extra = nil
+            event.breadcrumbs = nil
+            return event
         }
     }
 }
