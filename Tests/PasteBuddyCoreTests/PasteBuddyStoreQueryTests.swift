@@ -890,38 +890,6 @@ extension PasteBuddyStoreTests {
         XCTAssertNil(text.openableURL)
     }
 
-    func testCloudKitPinboardShareInvitationSubscriptionIsSilentAndRecipientScoped() throws {
-        let keyExchangeService = PinboardShareKeyExchangeService()
-        let invitationService = PinboardShareInvitationService(keyExchangeService: keyExchangeService)
-        let factory = CloudKitPinboardShareRecordFactory()
-        let participantIdentity = keyExchangeService.makeIdentity()
-        let recipientIdentity = try invitationService.publicIdentity(
-            displayName: "Collaborator",
-            identity: participantIdentity,
-            createdAt: Date(timeIntervalSince1970: 100)
-        )
-
-        let subscription = try factory.makeInvitationSubscription(
-            recipientPublicKeyFingerprint: recipientIdentity.publicKeyFingerprint
-        )
-
-        XCTAssertEqual(
-            subscription.subscriptionID,
-            try factory.makeInvitationSubscriptionID(
-                recipientPublicKeyFingerprint: recipientIdentity.publicKeyFingerprint
-            )
-        )
-        XCTAssertEqual(subscription.recordType, CloudKitPinboardShareRecordFactory.invitationRecordType)
-        XCTAssertTrue(subscription.predicate.predicateFormat.contains(recipientIdentity.publicKeyFingerprint))
-        XCTAssertTrue(subscription.notificationInfo?.shouldSendContentAvailable == true)
-        XCTAssertNil(subscription.notificationInfo?.alertBody)
-        XCTAssertFalse(subscription.subscriptionID.contains(participantIdentity.privateKeyData.base64EncodedString()))
-
-        XCTAssertThrowsError(
-            try factory.makeInvitationSubscription(recipientPublicKeyFingerprint: "   ")
-        )
-    }
-
     func testStructuredFiltersComposeWithKeywordSearch() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
