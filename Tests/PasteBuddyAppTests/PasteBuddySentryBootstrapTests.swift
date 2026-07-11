@@ -117,4 +117,23 @@ final class PasteBuddySentryBootstrapTests: XCTestCase {
         XCTAssertNil(filteredEvent.extra)
         XCTAssertNil(filteredEvent.breadcrumbs)
     }
+
+    func testSDKOptionsDisableDefaultOnV9Integrations() {
+        let options = Options()
+
+        PasteBuddySentryBootstrap.configure(
+            options: options,
+            configuration: PasteBuddySentryConfiguration(
+                dsn: "https://dsn@example.sentry.io/1",
+                environment: "production",
+                releaseName: nil,
+                debug: false
+            )
+        )
+
+        XCTAssertFalse(options.enableCaptureFailedRequests)
+        XCTAssertFalse(options.enableSwizzling)
+        XCTAssertFalse(options.enableMetrics)
+        XCTAssertNil(options.configureProfiling)
+    }
 }
