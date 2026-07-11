@@ -31,6 +31,10 @@
 		A10000000000000000000115 /* PasteBuddyKeyboard InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000132 /* PasteBuddyKeyboard InfoPlist.strings */; };
 		A10000000000000000000116 /* PasteBuddyShare InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000133 /* PasteBuddyShare InfoPlist.strings */; };
 		A10000000000000000000117 /* PasteBuddyAction InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000134 /* PasteBuddyAction InfoPlist.strings */; };
+		A10000000000000000000118 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000141 /* PrivacyInfo.xcprivacy */; };
+		A10000000000000000000119 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000141 /* PrivacyInfo.xcprivacy */; };
+		A1000000000000000000011A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000141 /* PrivacyInfo.xcprivacy */; };
+		A1000000000000000000011B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000141 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +104,7 @@
 		A10000000000000000000128 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyAction/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000129 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Support/InfoPlist/PasteBuddyAction/zh-Hans.lproj/InfoPlist.strings"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000140 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Sources/PasteBuddy/Resources/Localizable.xcstrings; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000141 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Support/Privacy/iOS/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +182,7 @@
 			children = (
 				A10000000000000000000101 /* Assets.xcassets */,
 				A10000000000000000000140 /* Localizable.xcstrings */,
+				A10000000000000000000141 /* PrivacyInfo.xcprivacy */,
 				A10000000000000000000130 /* Localizable.strings */,
 				A10000000000000000000087 /* InfoPlist */,
 				A10000000000000000000088 /* Entitlements */,
@@ -385,6 +391,7 @@
 				A10000000000000000000100 /* Assets.xcassets in Resources */,
 				A10000000000000000000110 /* Localizable.xcstrings in Resources */,
 				A10000000000000000000114 /* PasteBuddyiOS InfoPlist.strings in Resources */,
+				A10000000000000000000118 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -394,6 +401,7 @@
 			files = (
 				A10000000000000000000111 /* Localizable.xcstrings in Resources */,
 				A10000000000000000000115 /* PasteBuddyKeyboard InfoPlist.strings in Resources */,
+				A10000000000000000000119 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -403,6 +411,7 @@
 			files = (
 				A10000000000000000000112 /* Localizable.xcstrings in Resources */,
 				A10000000000000000000116 /* PasteBuddyShare InfoPlist.strings in Resources */,
+				A1000000000000000000011A /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -412,6 +421,7 @@
 			files = (
 				A10000000000000000000113 /* Localizable.xcstrings in Resources */,
 				A10000000000000000000117 /* PasteBuddyAction InfoPlist.strings in Resources */,
+				A1000000000000000000011B /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

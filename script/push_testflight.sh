@@ -150,6 +150,12 @@ if [[ "$SKIP_IOS_BUILD" -eq 0 ]]; then
     -derivedDataPath "$DERIVED_DATA_PATH" \
     CODE_SIGNING_ALLOWED=NO \
     build)
+  case "$DESTINATION" in
+    *Simulator*) ios_sdk_suffix="iphonesimulator" ;;
+    *) ios_sdk_suffix="iphoneos" ;;
+  esac
+  "$VERIFY_DIR/script/verify_app_privacy_artifacts.sh" ios \
+    "$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION-$ios_sdk_suffix/PasteBuddyiOS.app"
 else
   log "Skipping iOS local compile"
 fi
