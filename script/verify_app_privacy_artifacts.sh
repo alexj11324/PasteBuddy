@@ -13,26 +13,51 @@ bundle="$2"
 
 verify_manifest() {
   local manifest="$1"
-  local user_defaults_reason="$2"
+  local profile="$2"
   [[ -f "$manifest" ]] || {
     echo "missing app privacy manifest: $manifest" >&2
     exit 1
   }
 
-  /usr/bin/python3 - "$manifest" "$user_defaults_reason" <<'PY'
+  /usr/bin/python3 - "$manifest" "$profile" <<'PY'
 import plistlib
 import sys
 
-path, user_defaults_reason = sys.argv[1:]
+path, profile = sys.argv[1:]
 with open(path, "rb") as source:
     actual = plistlib.load(source)
 
+accessed_api_types = [{
+    "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+    "NSPrivacyAccessedAPITypeReasons": ["CA92.1" if profile == "macos" else "1C8F.1"],
+}]
+collected_data_types = []
+if profile == "macos":
+    accessed_api_types.extend([{
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+        "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+    }, {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+    }])
+    collected_data_types = [{
+        "NSPrivacyCollectedDataType": data_type,
+        "NSPrivacyCollectedDataTypeLinked": False,
+        "NSPrivacyCollectedDataTypeTracking": False,
+        "NSPrivacyCollectedDataTypePurposes": [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+        ],
+    } for data_type in [
+        "NSPrivacyCollectedDataTypeCrashData",
+        "NSPrivacyCollectedDataTypePerformanceData",
+        "NSPrivacyCollectedDataTypeOtherDiagnosticData",
+    ]]
+elif profile != "ios":
+    raise SystemExit(f"unexpected privacy manifest profile: {profile}")
+
 expected = {
-    "NSPrivacyAccessedAPITypes": [{
-        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
-        "NSPrivacyAccessedAPITypeReasons": [user_defaults_reason],
-    }],
-    "NSPrivacyCollectedDataTypes": [],
+    "NSPrivacyAccessedAPITypes": accessed_api_types,
+    "NSPrivacyCollectedDataTypes": collected_data_types,
     "NSPrivacyTracking": False,
     "NSPrivacyTrackingDomains": [],
 }
@@ -75,17 +100,17 @@ PY
 
 case "$platform" in
   swiftpm)
-    verify_manifest "$bundle/PrivacyInfo.xcprivacy" "CA92.1"
+    verify_manifest "$bundle/PrivacyInfo.xcprivacy" "macos"
     ;;
   macos)
-    verify_manifest "$bundle/Contents/Resources/PrivacyInfo.xcprivacy" "CA92.1"
+    verify_manifest "$bundle/Contents/Resources/PrivacyInfo.xcprivacy" "macos"
     verify_exported_type "$bundle/Contents/Info.plist" "app.pastebuddy.pinboard-item-ids"
     ;;
   ios)
-    verify_manifest "$bundle/PrivacyInfo.xcprivacy" "1C8F.1"
-    verify_manifest "$bundle/PlugIns/PasteBuddyKeyboard.appex/PrivacyInfo.xcprivacy" "1C8F.1"
-    verify_manifest "$bundle/PlugIns/PasteBuddyShareExtension.appex/PrivacyInfo.xcprivacy" "1C8F.1"
-    verify_manifest "$bundle/PlugIns/PasteBuddyActionExtension.appex/PrivacyInfo.xcprivacy" "1C8F.1"
+    verify_manifest "$bundle/PrivacyInfo.xcprivacy" "ios"
+    verify_manifest "$bundle/PlugIns/PasteBuddyKeyboard.appex/PrivacyInfo.xcprivacy" "ios"
+    verify_manifest "$bundle/PlugIns/PasteBuddyShareExtension.appex/PrivacyInfo.xcprivacy" "ios"
+    verify_manifest "$bundle/PlugIns/PasteBuddyActionExtension.appex/PrivacyInfo.xcprivacy" "ios"
     verify_exported_type "$bundle/Info.plist" "app.pastebuddy.mobile-pinboard-item-ids"
     ;;
   *)

@@ -121,7 +121,11 @@ The checked-in local simulator targets use:
 Every shipping bundle receives an app-owned `PrivacyInfo.xcprivacy` at its
 bundle root. The macOS app uses the SwiftPM resource manifest at
 `Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy` and declares UserDefaults
-reason `CA92.1`. The iOS host app and all three extensions use
+reason `CA92.1`. Because the custom macOS bundler statically links Sentry, that
+app-owned manifest also preserves Sentry 9.21.0's System Boot Time (`35F9.1`),
+File Timestamp (`C617.1`), and unlinked, non-tracking diagnostic-data
+declarations from the resolved SDK manifest. The iOS host app and all three
+extensions do not link Sentry; they use
 `Support/Privacy/iOS/PrivacyInfo.xcprivacy` and declare App Group UserDefaults
 reason `1C8F.1`.
 
