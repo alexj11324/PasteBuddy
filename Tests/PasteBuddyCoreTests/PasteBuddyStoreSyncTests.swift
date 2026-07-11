@@ -1147,9 +1147,7 @@ extension PasteBuddyStoreTests {
         XCTAssertEqual(exported.pinboards.first(where: { $0.id == smartText.id })?.itemIDs, [recurring.id, finalNew.id])
         XCTAssertEqual(exported.pinboards.first(where: { $0.id == userPinboard.id })?.itemIDs, [pinned.id])
 
-        let persisted = try harness.snapshotStore.load()
-        XCTAssertEqual(persisted.items.map(\.id), exported.items.map(\.id))
-        XCTAssertEqual(persisted.pinboards, exported.pinboards)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.snapshotStore.fileURL.path))
     }
 
     func testCloudImportMergesCaptureCreatedWhileRemoteFetchIsSuspended() async throws {

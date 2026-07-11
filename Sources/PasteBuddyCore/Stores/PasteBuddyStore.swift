@@ -153,6 +153,7 @@ public final class PasteBuddyStore {
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
     @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor
     @ObservationIgnored private let persistenceCommitGate: PersistenceCommitGate
+    @ObservationIgnored private let authorityStore: HistoryPersistenceAuthorityStore
     @ObservationIgnored private var clipboardRepository: ClipboardItemRepository?
     @ObservationIgnored private var repositorySyncActor: ClipboardRepositorySyncActor?
     @ObservationIgnored private var deferredRepositoryDatabaseURL: URL?
@@ -237,6 +238,7 @@ public final class PasteBuddyStore {
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
         self.persistenceActor = SnapshotPersistenceActor(diskStore: diskStore)
         self.persistenceCommitGate = PersistenceCommitGate()
+        self.authorityStore = HistoryPersistenceAuthorityStore(snapshotURL: diskStore.fileURL)
         self.clipboardRepository = resolvedClipboardRepository
         self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
         self.deferredRepositoryDatabaseURL = resolvedDeferredRepositoryDatabaseURL
@@ -273,6 +275,32 @@ public final class PasteBuddyStore {
 
     public func load() {
         do {
+            if let authority = try authorityStore.load() {
+                guard authority.phase == .stable else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                if authority.authority == .sqlite {
+                    guard let clipboardRepository,
+                          try clipboardRepository.hasStoredSnapshot() else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
+                    snapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
+                    snapshot.security.storageMode = .standard
+                    diskStore.storageMode = .standard
+                    historyUnlockedAt = snapshot.security.requiresBiometricUnlock ? nil : Date()
+                    refreshDerivedDocumentsIfNeeded()
+                    rebuildDedupeIndex()
+                    rebuildCaptureHistoryState()
+                    repositorySyncedDataRevision = dataRevision
+                    clearPendingRepositoryPlan()
+                    presentationCache = PasteBuddyPresentationCache()
+                    isPersistenceWriteBlocked = false
+                    lastErrorMessage = nil
+                    selectedItemID = filteredItems.first?.id
+                    selectedItemIDs = selectedItemID.map { [$0] } ?? []
+                    return
+                }
+            }
             let diskSnapshot = try diskStore.load()
             let diskStorageMode = diskStore.lastLoadedStorageMode ?? diskSnapshot.security.storageMode
             // Once an encrypted snapshot exists it is the committed source of
@@ -363,6 +391,49 @@ public final class PasteBuddyStore {
         let revisionBeforeLoad = dataRevision
         var loadStage = PasteBuddyPersistenceLoadDiagnostic.Stage.snapshotLoad
         do {
+            let authority = try await Task.detached(priority: .userInitiated) { [authorityStore] in
+                try authorityStore.load()
+            }.value
+            if let authority {
+                guard authority.phase == .stable else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                if authority.authority == .sqlite {
+                    loadStage = .repositoryInitialization
+                    try await initializeDeferredRepositoryIfNeeded()
+                    loadStage = .repositoryMetadata
+                    guard try await repositorySyncActor?.hasStoredSnapshot() == true,
+                          let repositorySyncActor else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
+                    loadStage = .repositoryExport
+                    let loadedSnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+                    guard dataRevision == revisionBeforeLoad else {
+                        recordPersistenceLoadFailure(stage: .loadApply, reason: .cancelled)
+                        return false
+                    }
+                    snapshot = loadedSnapshot
+                    snapshot.security.storageMode = .standard
+                    diskStore.storageMode = .standard
+                    if snapshot.security.requiresBiometricUnlock {
+                        lockHistory()
+                    } else {
+                        historyUnlockedAt = Date()
+                    }
+                    refreshDerivedDocumentsIfNeeded()
+                    rebuildDedupeIndex()
+                    rebuildCaptureHistoryState()
+                    repositorySyncedDataRevision = dataRevision
+                    clearPendingRepositoryPlan()
+                    presentationCache = PasteBuddyPresentationCache()
+                    isPersistenceWriteBlocked = false
+                    lastErrorMessage = nil
+                    selectedItemID = filteredItems.first?.id
+                    selectedItemIDs = selectedItemID.map { [$0] } ?? []
+                    lastPersistenceLoadDiagnostic = nil
+                    return true
+                }
+            }
             let diskResult = try await persistenceActor.load()
             let diskStorageMode = diskResult.loadedStorageMode ?? diskResult.snapshot.security.storageMode
             if diskStorageMode == .encrypted {
@@ -696,6 +767,7 @@ public final class PasteBuddyStore {
                     let didPersist = try await persistenceActor.save(
                         snapshotToPersist,
                         storageMode: snapshotToSave.security.storageMode,
+                        hasAuthoritativeRepository: hasRepository,
                         generation: persistenceGeneration
                     )
                     guard didPersist else {
@@ -765,7 +837,9 @@ public final class PasteBuddyStore {
             crossedWriteBarrier = repositoryWritePlanned
             diskStore.storageMode = snapshotToSave.security.storageMode
             crossedWriteBarrier = true
-            try diskStore.save(snapshotToPersist)
+            if snapshotToSave.security.storageMode == .encrypted || !hasRepository {
+                try diskStore.save(snapshotToPersist)
+            }
             persistenceCommitGate.release(commitLease, outcome: .committed)
             completeRepositorySave(dataRevision: dataRevisionToSync)
         } catch is CancellationError {
@@ -867,6 +941,7 @@ public final class PasteBuddyStore {
                 let didPersist = try await persistenceActor.save(
                     snapshotToPersist,
                     storageMode: snapshotToSave.security.storageMode,
+                    hasAuthoritativeRepository: hasRepository,
                     generation: persistenceGeneration
                 )
                 guard didPersist else {
@@ -2949,6 +3024,12 @@ public final class PasteBuddyStore {
                     try await initializeDeferredRepositoryIfNeeded()
                 }
                 try await persistStandardRepositoryAndSnapshotUntilStable()
+                if repositorySyncActor != nil || clipboardRepository != nil {
+                    try diskStore.installRevokedTombstone()
+                    try authorityStore.commitStable(.sqlite)
+                } else {
+                    try authorityStore.clear()
+                }
                 isPersistenceWriteBlocked = false
                 lastErrorMessage = nil
             } catch {
@@ -2982,6 +3063,7 @@ public final class PasteBuddyStore {
 
             try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
             didPersistEncryptedSnapshot = true
+            try authorityStore.commitStable(.encryptedSnapshot)
             try await removePlaintextRepositoryForEncryptedStorageAsync()
             try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
             isPersistenceWriteBlocked = false
@@ -3044,6 +3126,7 @@ public final class PasteBuddyStore {
                 let didPersist = try await persistenceActor.save(
                     snapshotToPersist,
                     storageMode: storageMode,
+                    hasAuthoritativeRepository: hasRepository,
                     generation: persistenceGeneration
                 )
                 guard didPersist else {
@@ -3107,6 +3190,7 @@ public final class PasteBuddyStore {
                 let didPersist = try await persistenceActor.save(
                     snapshotToPersist,
                     storageMode: .standard,
+                    hasAuthoritativeRepository: hasRepository,
                     generation: persistenceGeneration
                 )
                 guard didPersist else {

@@ -30,10 +30,12 @@ public actor SnapshotPersistenceActor {
     public func save(
         _ snapshot: PasteBuddySnapshot,
         storageMode: SnapshotStorageMode,
+        hasAuthoritativeRepository: Bool = false,
         generation: UInt64
     ) throws -> Bool {
         guard generation >= latestAcceptedGeneration else { return false }
         latestAcceptedGeneration = generation
+        guard storageMode == .encrypted || !hasAuthoritativeRepository else { return true }
         diskStore.storageMode = storageMode
         try diskStore.save(snapshot)
         return true

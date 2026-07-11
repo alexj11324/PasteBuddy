@@ -243,6 +243,27 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
         }
     }
 
+    func installRevokedTombstone() throws {
+        let newRevision = UUID()
+        let payload = Data("PBST-REVOKED:1\n".utf8)
+        let temporaryURL = try writeTemporaryPersistedFile(payload: payload, revision: newRevision)
+        do {
+            try withExclusivePersistenceLock {
+                let baseline = currentBaseline()
+                if baseline.hasLoadedBaseline {
+                    guard try readCurrentPersistenceRevision() == baseline.revision else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
+                }
+                try replacePersistedFileAtomically(with: temporaryURL)
+                updateBaseline(revision: newRevision)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
     private func currentBaseline() -> (hasLoadedBaseline: Bool, revision: UUID?) {
         baselineLock.lock()
         defer { baselineLock.unlock() }

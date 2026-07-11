@@ -573,6 +573,21 @@ extension PasteBuddyStoreTests {
 
         XCTAssertFalse(store.isPersistenceWriteBlocked, store.lastErrorMessage ?? "")
         XCTAssertEqual(store.snapshot.security.storageMode, .standard)
+        let authorityStore = HistoryPersistenceAuthorityStore(snapshotURL: harness.snapshotStore.fileURL)
+        XCTAssertEqual(
+            try authorityStore.load(),
+            HistoryPersistenceAuthorityRecord(
+                phase: .stable,
+                authority: .sqlite,
+                epoch: try XCTUnwrap(authorityStore.load()).epoch
+            )
+        )
+        let legacySnapshotReader = EncryptedSnapshotStore(
+            fileURL: harness.snapshotStore.fileURL,
+            encryptionService: harness.encryptionService,
+            storageMode: .standard
+        )
+        XCTAssertThrowsError(try legacySnapshotReader.load())
         let restoredRepository = ClipboardItemRepository(
             database: try PasteBuddyDatabase(fileURL: databaseURL)
         )

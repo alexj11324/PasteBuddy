@@ -498,7 +498,6 @@ extension PasteBuddyStoreTests {
         defer { harness.cleanup() }
 
         harness.snapshotStore.storageMode = .standard
-        try harness.snapshotStore.save(PasteBuddySnapshot())
         let repository = ClipboardItemRepository(
             database: try PasteBuddyDatabase(
                 fileURL: harness.directory.appendingPathComponent("cancelled-flush.sqlite")
@@ -548,7 +547,6 @@ extension PasteBuddyStoreTests {
         defer { harness.cleanup() }
 
         harness.snapshotStore.storageMode = .standard
-        try harness.snapshotStore.save(PasteBuddySnapshot())
         let repository = ClipboardItemRepository(
             database: try PasteBuddyDatabase(
                 fileURL: harness.directory.appendingPathComponent("ordered-flush.sqlite")
@@ -616,7 +614,6 @@ extension PasteBuddyStoreTests {
         defer { harness.cleanup() }
 
         harness.snapshotStore.storageMode = .standard
-        try harness.snapshotStore.save(PasteBuddySnapshot())
         let repository = ClipboardItemRepository(
             database: try PasteBuddyDatabase(
                 fileURL: harness.directory.appendingPathComponent("ordered-sync-save.sqlite")
@@ -668,10 +665,7 @@ extension PasteBuddyStoreTests {
             Set(try repository.exportSnapshot().items.map(\.id)),
             Set([first.id, second.id])
         )
-        XCTAssertEqual(
-            Set(try harness.snapshotStore.load().items.map(\.id)),
-            Set([first.id, second.id])
-        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.snapshotStore.fileURL.path))
     }
 
     func testCancelledSynchronousSaveSchedulesIndependentRetry() async throws {
@@ -679,7 +673,6 @@ extension PasteBuddyStoreTests {
         defer { harness.cleanup() }
 
         harness.snapshotStore.storageMode = .standard
-        try harness.snapshotStore.save(PasteBuddySnapshot())
         let repository = ClipboardItemRepository(
             database: try PasteBuddyDatabase(
                 fileURL: harness.directory.appendingPathComponent("cancelled-sync-save.sqlite")
@@ -716,17 +709,14 @@ extension PasteBuddyStoreTests {
             let repositoryContainsItem = try repository.exportSnapshot().items.contains {
                 $0.id == item.id
             }
-            let snapshotContainsItem = try harness.snapshotStore.load().items.contains {
-                $0.id == item.id
-            }
-            if repositoryContainsItem, snapshotContainsItem {
+            if repositoryContainsItem {
                 break
             }
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
 
         XCTAssertTrue(try repository.exportSnapshot().items.contains { $0.id == item.id })
-        XCTAssertTrue(try harness.snapshotStore.load().items.contains { $0.id == item.id })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.snapshotStore.fileURL.path))
         XCTAssertFalse(store.isPersistenceWriteBlocked)
     }
 
@@ -1428,7 +1418,7 @@ extension PasteBuddyStoreTests {
         )
     }
 
-    func testRepositoryBackedStoreWritesAssetReferencesToDiskSnapshotAndHydratesOnDemandAfterReload() async throws {
+    func testRepositoryBackedStoreHydratesSQLiteAssetsOnDemandAfterReload() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -1459,20 +1449,8 @@ extension PasteBuddyStoreTests {
             ocrState: .completed(Date(timeIntervalSince1970: 300))
         ))
 
-        let persistedData = try Data(contentsOf: standardSnapshotStore.fileURL)
-        let persistedString = String(decoding: persistedData, as: UTF8.self)
-        XCTAssertFalse(persistedString.contains("imageData"))
-        XCTAssertFalse(persistedString.contains("rtfData"))
-        XCTAssertFalse(persistedString.contains(imageData.base64EncodedString()))
-        XCTAssertFalse(persistedString.contains(rtfData.base64EncodedString()))
-
-        let diskSnapshot = try standardSnapshotStore.load()
-        let diskItem = try XCTUnwrap(diskSnapshot.items.first)
-        XCTAssertEqual(diskItem.id, captured.id)
-        XCTAssertNil(diskItem.payload.imageData)
-        XCTAssertNil(diskItem.payload.rtfData)
-        XCTAssertNotNil(diskItem.payload.imageAssetID)
-        XCTAssertNotNil(diskItem.payload.rtfAssetID)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: standardSnapshotStore.fileURL.path))
+        XCTAssertEqual(try repository.exportSnapshot().items.map(\.id), [captured.id])
 
         let reloaded = PasteBuddyStore(
             diskStore: standardSnapshotStore,
@@ -1487,6 +1465,34 @@ extension PasteBuddyStoreTests {
         let hydratedItem = await reloaded.hydratedItem(for: reloadedItem)
         XCTAssertEqual(hydratedItem.payload.imageData, imageData)
         XCTAssertEqual(hydratedItem.payload.rtfData, rtfData)
+    }
+
+    @MainActor
+    func testStandardRepositorySaveDoesNotWriteSnapshotFile() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("sqlite-authority.sqlite")
+        let repository = ClipboardItemRepository(database: try PasteBuddyDatabase(fileURL: databaseURL))
+        let snapshotURL = harness.directory.appendingPathComponent("obsolete-standard.pbstore")
+        let snapshotStore = EncryptedSnapshotStore(fileURL: snapshotURL, storageMode: .standard)
+        let store = PasteBuddyStore(
+            diskStore: snapshotStore,
+            clipboardRepository: repository
+        )
+
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "SQLite Authority",
+            payload: ClipboardPayload(text: "standard mode belongs in SQLite")
+        ))
+        let didFlush = await store.flushPendingSave()
+        XCTAssertTrue(didFlush)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotURL.path))
+        XCTAssertEqual(try repository.exportSnapshot().items.map(\.id), [item.id])
     }
 
     func testGRDBRepositoryMigratesLegacySnapshotInlineAssetsIntoAssetRows() throws {
