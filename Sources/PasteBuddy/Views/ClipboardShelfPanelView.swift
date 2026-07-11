@@ -115,6 +115,19 @@ struct ClipboardCollectionDragSession {
         return translationX + sourceOriginX - currentSourceLayoutMinX
     }
 
+    var pendingMove: ClipboardCollectionMove? {
+        guard let source,
+              let target = pendingTarget,
+              previewOrder != originalOrder else {
+            return nil
+        }
+        return ClipboardCollectionMove(
+            source: source,
+            target: target,
+            afterTarget: pendingAfterTarget
+        )
+    }
+
     func dropTarget(at x: CGFloat) -> (collection: ClipboardCollectionID, afterTarget: Bool)? {
         guard let source, let originalOrder else { return nil }
         return originalOrder
@@ -147,20 +160,6 @@ struct ClipboardCollectionDragSession {
         guard order != previewOrder else { return false }
         previewOrder = order
         return true
-    }
-
-    mutating func complete() -> ClipboardCollectionMove? {
-        defer { cancel() }
-        guard let source,
-              let target = pendingTarget,
-              previewOrder != originalOrder else {
-            return nil
-        }
-        return ClipboardCollectionMove(
-            source: source,
-            target: target,
-            afterTarget: pendingAfterTarget
-        )
     }
 
     mutating func cancel() {
@@ -1532,11 +1531,12 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
     private func handleDragEnded(_ value: DragGesture.Value) {
         guard session.source == collection else { return }
         session.updateTranslation(value.translation.width)
-        let move = withAnimation(animation) {
-            session.complete()
+        if let move = session.pendingMove {
+            _ = onReorder(move.source, move.target, move.afterTarget)
         }
-        guard let move else { return }
-        _ = onReorder(move.source, move.target, move.afterTarget)
+        withAnimation(animation) {
+            session.cancel()
+        }
     }
 }
 

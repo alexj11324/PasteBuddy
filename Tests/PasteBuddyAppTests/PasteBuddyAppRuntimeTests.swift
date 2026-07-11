@@ -928,7 +928,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(chipSource.contains("ClipboardCollectionReorderModifier("))
     }
 
-    func testCollectionDragSessionPreviewsMoveThenCompletesExactlyOnce() {
+    func testCollectionDragSessionExposesPendingMoveUntilCancelled() {
         let text = ClipboardCollectionID.smart(.text)
         let initial: [ClipboardCollectionID] = [.history, .pasteStack, text]
         var session = ClipboardCollectionDragSession()
@@ -942,12 +942,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(session.displayOrder(fallback: initial).contains(text))
         XCTAssertEqual(session.visualOffset(currentSourceLayoutMinX: 160), -20)
         XCTAssertFalse(session.previewMove(relativeTo: .pasteStack, afterTarget: false))
-
         XCTAssertEqual(
-            session.complete(),
+            session.pendingMove,
             ClipboardCollectionMove(source: text, target: .pasteStack, afterTarget: false)
         )
-        XCTAssertNil(session.complete())
+        XCTAssertEqual(session.displayOrder(fallback: initial), [.history, text, .pasteStack])
+
+        session.cancel()
+
+        XCTAssertNil(session.pendingMove)
         XCTAssertEqual(session.displayOrder(fallback: initial), initial)
     }
 
@@ -963,7 +966,24 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         session.cancel()
 
         XCTAssertEqual(session.displayOrder(fallback: initial), initial)
-        XCTAssertNil(session.complete())
+        XCTAssertNil(session.pendingMove)
+    }
+
+    func testCollectionDragCompletionPersistsFinalOrderBeforeClearingPreview() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let handlerStart = try XCTUnwrap(source.range(of: "private func handleDragEnded"))
+        let handlerEnd = try XCTUnwrap(
+            source.range(
+                of: "\n    }\n}\n\nstruct ClipboardCollectionCardDropModifier",
+                range: handlerStart.lowerBound..<source.endIndex
+            )
+        )
+        let handler = String(source[handlerStart.lowerBound..<handlerEnd.upperBound])
+        let reorder = try XCTUnwrap(handler.range(of: "onReorder(move.source, move.target, move.afterTarget)"))
+        let clearPreview = try XCTUnwrap(handler.range(of: "session.cancel()"))
+
+        XCTAssertLessThan(reorder.lowerBound, clearPreview.lowerBound)
+        XCTAssertFalse(handler.contains("session.complete()"))
     }
 
     func testCollectionReorderMeasuresStationarySlotOutsideVisualTransform() throws {
@@ -1049,8 +1069,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("relativeTo: target.collection"))
         XCTAssertTrue(shelfSource.contains("afterTarget: target.afterTarget"))
         XCTAssertTrue(shelfSource.contains("session.updateTranslation(value.translation.width)"))
-        XCTAssertTrue(shelfSource.contains("let move = withAnimation"))
-        XCTAssertTrue(shelfSource.contains("guard let move else { return }"))
+        XCTAssertTrue(shelfSource.contains("if let move = session.pendingMove"))
+        XCTAssertTrue(shelfSource.contains("session.cancel()"))
         XCTAssertTrue(shelfSource.contains("dropDestination(for: PinboardItemDragPayload.self"))
         XCTAssertTrue(shelfSource.contains("if let onDropPayloads"))
         XCTAssertFalse(shelfSource.contains("DropProposal(operation: .move)"))
