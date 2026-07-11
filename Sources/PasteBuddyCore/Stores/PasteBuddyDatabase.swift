@@ -640,6 +640,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     private var _fetchPageInvocationCount = 0
     private var _captureJournalInvocationCount = 0
     private var _lastAsyncFetchPageRanOnMainThreadForTesting: Bool?
+    private var _beforeReturningAsyncFetchPageForTesting: (@Sendable () async -> Void)?
     private var expectedRepositoryRevision: UUID?
     private var hasLoadedRepositoryRevision = false
     private var repositoryBaselineEpoch: UInt64 = 0
@@ -666,6 +667,19 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     internal var lastAsyncFetchPageRanOnMainThreadForTesting: Bool? {
         instrumentationLock.withLock {
             _lastAsyncFetchPageRanOnMainThreadForTesting
+        }
+    }
+
+    internal var beforeReturningAsyncFetchPageForTesting: (@Sendable () async -> Void)? {
+        get {
+            instrumentationLock.withLock {
+                _beforeReturningAsyncFetchPageForTesting
+            }
+        }
+        set {
+            instrumentationLock.withLock {
+                _beforeReturningAsyncFetchPageForTesting = newValue
+            }
         }
     }
 
@@ -1039,6 +1053,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                 ranOnMainThread: Thread.isMainThread
             )
         }
+        let beforeReturning = instrumentationLock.withLock {
+            _beforeReturningAsyncFetchPageForTesting
+        }
+        await beforeReturning?()
         instrumentationLock.withLock {
             _lastAsyncFetchPageRanOnMainThreadForTesting = result.ranOnMainThread
         }

@@ -102,7 +102,12 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
         let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
-        let item = try await service.firstMatchingItem(query: query)
+        let matchedItem = try await service.firstMatchingItem(query: query)
+        try store.requirePersistenceReady()
+        guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
+        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+            throw AutomationActionError.noMatchingItem
+        }
         let result = AutomationItemTransferResult(
             item: item,
             format: format,

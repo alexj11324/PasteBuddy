@@ -316,6 +316,173 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertEqual(store.queryRevision, queryRevision)
     }
 
+    func testSuspendedMCPSearchFailsWhenToolIsRevokedBeforePageReturns() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Revoked Search",
+            payload: ClipboardPayload(text: "revoked race needle")
+        )
+        var snapshot = PasteBuddySnapshot(items: [item])
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.searchHistory])
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = MCPToolService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let searchTask = Task { @MainActor in
+            try await service.searchHistory(query: "needle")
+        }
+        await gate.waitUntilSuspended()
+        store.setMCPTool(.searchHistory, enabled: false)
+        await gate.resume()
+
+        do {
+            _ = try await searchTask.value
+            XCTFail("Expected revoked MCP tool error.")
+        } catch {
+            XCTAssertEqual(error as? MCPToolServiceError, .toolDisabled(.searchHistory))
+        }
+        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.outcome, .denied)
+        XCTAssertFalse(store.snapshot.mcp.accessLog.contains(where: { $0.outcome == .succeeded }))
+    }
+
+    func testMCPSearchRefiltersEarlierPagesWhenPrivacyTightensDuringLaterPage() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let privateItems = (0..<24).map { index in
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Private Needle \(index)",
+                payload: ClipboardPayload(text: "private needle \(index)")
+            )
+        }
+        let formerlyVisible = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Public Needle",
+            payload: ClipboardPayload(text: "public needle")
+        )
+        let laterVisibleItems = (0..<5).map { index in
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Allowed Needle \(index)",
+                payload: ClipboardPayload(text: "allowed needle \(index)")
+            )
+        }
+        var snapshot = PasteBuddySnapshot(items: privateItems + [formerlyVisible] + laterVisibleItems)
+        snapshot.privacy.customCaptureRules = [CaptureRule(
+            name: "Block private",
+            condition: .containsText,
+            pattern: "private",
+            contentTypes: [.text]
+        )]
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.searchHistory])
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = MCPToolService(store: store)
+        let gate = RepositorySearchSuspensionGate(suspendOnInvocation: 2)
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let searchTask = Task { @MainActor in
+            try await service.searchHistory(query: "needle", limit: 3)
+        }
+        await gate.waitUntilSuspended()
+        _ = store.addCaptureRule(
+            name: "Block formerly visible",
+            condition: .containsText,
+            pattern: "public",
+            contentTypes: [.text]
+        )
+        await gate.resume()
+
+        let response = try await searchTask.value
+
+        XCTAssertFalse(response.items.contains(where: { $0.id == formerlyVisible.id }))
+        XCTAssertTrue(response.items.allSatisfy { summary in
+            laterVisibleItems.contains(where: { $0.id == summary.id })
+        })
+    }
+
+    func testSuspendedMCPPinFailsWhenMatchedItemIsDeletedBeforePageReturns() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Delete During Pin",
+            payload: ClipboardPayload(text: "delete race needle")
+        )
+        let pinboard = Pinboard(name: "Race Target", colorHex: "#4EA7FC")
+        var snapshot = PasteBuddySnapshot(items: [item], pinboards: [pinboard])
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.pinFirstMatch])
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = MCPToolService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let pinTask = Task { @MainActor in
+            try await service.pinFirstMatch(query: "needle", pinboardID: pinboard.id)
+        }
+        await gate.waitUntilSuspended()
+        store.removeItem(item.id)
+        await gate.resume()
+
+        do {
+            _ = try await pinTask.value
+            XCTFail("Expected deleted item to invalidate pinning.")
+        } catch {
+            XCTAssertEqual(error as? MCPToolServiceError, .noMatchingItem)
+        }
+        XCTAssertFalse(
+            store.snapshot.pinboards
+                .first(where: { $0.id == pinboard.id })?
+                .itemIDs.contains(item.id) ?? true
+        )
+        XCTAssertFalse(store.snapshot.mcp.accessLog.contains(where: { $0.outcome == .succeeded }))
+    }
+
     func testLockedHistoryRejectsEveryMCPClipboardReadPath() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

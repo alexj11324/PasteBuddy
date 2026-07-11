@@ -6314,6 +6314,43 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(fallbackStore.lastInMemoryPageQueryRanOnMainThreadForTesting, false)
     }
 
+    func testRepositorySearchReturnsNoItemsWhenHistoryLocksWhileReadIsSuspended() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Suspended Search",
+            payload: ClipboardPayload(text: "suspended search needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let searchTask = Task { @MainActor in
+            try await store.searchItemsPage(query: "needle", limit: 5)
+        }
+        await gate.waitUntilSuspended()
+        store.setBiometricHistoryLockEnabled(true)
+        await gate.resume()
+
+        let page = try await searchTask.value
+
+        XCTAssertTrue(page.isEmpty)
+    }
+
     func testRepositoryFallbackPreservesCanonicalSnapshotOrderInsteadOfResortingByDate() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -6797,6 +6834,42 @@ private actor SuspendedStoreLoadGate {
     func resume() {
         continuation?.resume()
         continuation = nil
+    }
+}
+
+actor RepositorySearchSuspensionGate {
+    private let suspendOnInvocation: Int
+    private var invocationCount = 0
+    private var isSuspended = false
+    private var suspensionContinuation: CheckedContinuation<Void, Never>?
+    private var observerContinuations: [CheckedContinuation<Void, Never>] = []
+
+    init(suspendOnInvocation: Int = 1) {
+        self.suspendOnInvocation = suspendOnInvocation
+    }
+
+    func suspendIfNeeded() async {
+        invocationCount += 1
+        guard invocationCount == suspendOnInvocation else { return }
+        isSuspended = true
+        let observers = observerContinuations
+        observerContinuations.removeAll()
+        observers.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            suspensionContinuation = continuation
+        }
+    }
+
+    func waitUntilSuspended() async {
+        guard !isSuspended else { return }
+        await withCheckedContinuation { continuation in
+            observerContinuations.append(continuation)
+        }
+    }
+
+    func resume() {
+        suspensionContinuation?.resume()
+        suspensionContinuation = nil
     }
 }
 

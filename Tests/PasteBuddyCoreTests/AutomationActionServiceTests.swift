@@ -180,6 +180,92 @@ final class AutomationActionServiceTests: XCTestCase {
         XCTAssertFalse(result.displaySummary.contains("secret payload body"))
     }
 
+    func testSuspendedTransferFailsClosedWhenHistoryLocksBeforeSearchReturns() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Lock During Search",
+            payload: ClipboardPayload(text: "lock race needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+        var transferCallCount = 0
+
+        let transferTask = Task { @MainActor in
+            try await service.transferFirstMatchingItem(query: "needle") { _, _ in
+                transferCallCount += 1
+            }
+        }
+        await gate.waitUntilSuspended()
+        store.setBiometricHistoryLockEnabled(true)
+        await gate.resume()
+
+        do {
+            _ = try await transferTask.value
+            XCTFail("Expected locked history error.")
+        } catch {
+            XCTAssertEqual(error as? AutomationActionError, .historyLocked)
+        }
+        XCTAssertEqual(transferCallCount, 0)
+    }
+
+    func testSuspendedSearchFailsClosedWhenPersistenceBecomesUnavailable() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Unavailable During Search",
+            payload: ClipboardPayload(text: "unavailable race needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let searchTask = Task { @MainActor in
+            try await service.searchClipboard(query: "needle")
+        }
+        await gate.waitUntilSuspended()
+        store.markHistoryPersistenceUnavailable()
+        await gate.resume()
+
+        do {
+            _ = try await searchTask.value
+            XCTFail("Expected unavailable history error.")
+        } catch {
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+        }
+    }
+
     func testLockedHistoryRejectsAutomationItemAccessWithoutInvokingTransfer() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

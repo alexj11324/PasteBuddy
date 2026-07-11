@@ -1121,17 +1121,21 @@ public final class PasteBuddyStore {
         limit: Int
     ) async throws -> [ClipboardItem] {
         lastInMemoryPageQueryRanOnMainThreadForTesting = nil
+        try requirePersistenceReady()
         guard !isHistoryAccessLocked, limit > 0 else { return [] }
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
         let resolvedOffset = max(offset, 0)
         if let clipboardRepository,
            repositorySyncedDataRevision == dataRevision {
-            return try await clipboardRepository.fetchPageAsync(ClipboardItemPageRequest(
+            let page = try await clipboardRepository.fetchPageAsync(ClipboardItemPageRequest(
                 searchQuery: trimmedQuery,
                 limit: limit,
                 offset: resolvedOffset
             ))
+            try requirePersistenceReady()
+            guard !isHistoryAccessLocked else { return [] }
+            return page
         }
         let query = PasteBuddyInMemoryPageQuery(
             items: snapshot.items,
@@ -1156,6 +1160,8 @@ public final class PasteBuddyStore {
             queryTask.cancel()
         }
         guard !result.wasCancelled else { throw CancellationError() }
+        try requirePersistenceReady()
+        guard !isHistoryAccessLocked else { return [] }
         lastInMemoryPageQueryRanOnMainThreadForTesting = result.ranOnMainThread
         return result.page.items
     }
