@@ -829,6 +829,32 @@ public final class IrohClipboardIdentityStore: @unchecked Sendable {
     }
 }
 
+enum IrohClipboardReceiveLoop {
+    static func run(
+        readExact: @Sendable (UInt32) async throws -> Data,
+        onEnvelopeReceived: @Sendable (IrohClipboardSyncEnvelope) async -> Void,
+        onClosed: @Sendable () -> Void
+    ) async {
+        while !Task.isCancelled {
+            do {
+                let lengthPrefix = try await readExact(UInt32(MemoryLayout<UInt32>.size))
+                let byteCount = lengthPrefix.withUnsafeBytes { rawBuffer in
+                    UInt32(littleEndian: rawBuffer.loadUnaligned(as: UInt32.self))
+                }
+                guard byteCount <= IrohClipboardWireFormat.maxFrameBytes else {
+                    break
+                }
+                let body = try await readExact(byteCount)
+                let envelope = try IrohClipboardWireFormat.decode(lengthPrefix: lengthPrefix, body: body)
+                await onEnvelopeReceived(envelope)
+            } catch {
+                break
+            }
+        }
+        onClosed()
+    }
+}
+
 private final class IrohClipboardSession: IrohClipboardSessionTransport, @unchecked Sendable {
     private let stream: BiStream
     private let sender: IrohClipboardSender
@@ -863,23 +889,11 @@ private final class IrohClipboardSession: IrohClipboardSessionTransport, @unchec
 
     private func runReceiveLoop() async {
         let receiver = stream.recv()
-        while !Task.isCancelled {
-            do {
-                let lengthPrefix = try await receiver.readExact(size: UInt32(MemoryLayout<UInt32>.size))
-                let byteCount = lengthPrefix.withUnsafeBytes { rawBuffer in
-                    UInt32(littleEndian: rawBuffer.loadUnaligned(as: UInt32.self))
-                }
-                guard byteCount <= IrohClipboardWireFormat.maxFrameBytes else {
-                    break
-                }
-                let body = try await receiver.readExact(size: byteCount)
-                let envelope = try IrohClipboardWireFormat.decode(lengthPrefix: lengthPrefix, body: body)
-                await onEnvelopeReceived(envelope)
-            } catch {
-                break
-            }
-        }
-        onClosed()
+        await IrohClipboardReceiveLoop.run(
+            readExact: { try await receiver.readExact(size: $0) },
+            onEnvelopeReceived: onEnvelopeReceived,
+            onClosed: onClosed
+        )
     }
 }
 

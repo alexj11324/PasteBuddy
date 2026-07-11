@@ -35,6 +35,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Verify repository contracts
+        run: script/verify_repository_contracts.sh
+
       - name: Run Swift tests
         run: swift test
 
