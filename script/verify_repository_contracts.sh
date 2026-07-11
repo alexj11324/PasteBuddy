@@ -60,6 +60,8 @@ require_literal script/build_and_run.sh 'Clipboard monitor verification override
 require_literal script/build_and_run.sh 'PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION must be 0 or 1.'
 require_literal script/build_and_run.sh '"$RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" "$APP_RESOURCES/PrivacyInfo.xcprivacy"'
 require_literal script/build_and_run.sh 'app.pastebuddy.pinboard-item-ids'
+require_literal script/verify_app_privacy_artifacts.sh 'GRDB_GRDB.bundle/PrivacyInfo.xcprivacy'
+require_literal script/verify_app_privacy_artifacts.sh 'Iroh.framework has no PrivacyInfo.xcprivacy'
 require_literal script/build_and_run.sh '"$ROOT_DIR/script/verify_iroh_macos_minimum_os.sh"'
 require_literal script/build_and_run.sh '"$BUILD_DIR/Iroh.framework/Iroh"'
 require_literal script/build_and_run.sh '"$MIN_SYSTEM_VERSION"'

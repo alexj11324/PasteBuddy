@@ -98,6 +98,50 @@ if "public.data" not in declaration.get("UTTypeConformsTo", []):
 PY
 }
 
+verify_grdb_manifest() {
+  local manifest="$1"
+  [[ -f "$manifest" ]] || {
+    echo "missing embedded GRDB privacy manifest: $manifest" >&2
+    exit 1
+  }
+
+  /usr/bin/python3 - "$manifest" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    actual = plistlib.load(source)
+
+expected = {
+    "NSPrivacyAccessedAPITypes": [],
+    "NSPrivacyCollectedDataTypes": [],
+    "NSPrivacyTracking": False,
+    "NSPrivacyTrackingDomains": [],
+}
+if actual != expected:
+    raise SystemExit(f"unexpected embedded GRDB privacy manifest at {sys.argv[1]}: {actual!r}")
+PY
+}
+
+verify_ios_bundle() {
+  local bundle_root="$1"
+  verify_manifest "$bundle_root/PrivacyInfo.xcprivacy" "ios"
+  verify_grdb_manifest "$bundle_root/GRDB_GRDB.bundle/PrivacyInfo.xcprivacy"
+}
+
+report_iroh_manifest_status() {
+  local framework="$1"
+  [[ -d "$framework" ]] || {
+    echo "missing embedded Iroh.framework: $framework" >&2
+    exit 1
+  }
+  if [[ -f "$framework/PrivacyInfo.xcprivacy" ]]; then
+    echo "Iroh.framework now contains a privacy manifest; review its declarations before accepting this new upstream artifact." >&2
+    exit 1
+  fi
+  echo "notice: Iroh.framework has no PrivacyInfo.xcprivacy; this check does not claim Iroh required-reason API coverage." >&2
+}
+
 case "$platform" in
   swiftpm)
     verify_manifest "$bundle/PrivacyInfo.xcprivacy" "macos"
@@ -107,10 +151,11 @@ case "$platform" in
     verify_exported_type "$bundle/Contents/Info.plist" "app.pastebuddy.pinboard-item-ids"
     ;;
   ios)
-    verify_manifest "$bundle/PrivacyInfo.xcprivacy" "ios"
-    verify_manifest "$bundle/PlugIns/PasteBuddyKeyboard.appex/PrivacyInfo.xcprivacy" "ios"
-    verify_manifest "$bundle/PlugIns/PasteBuddyShareExtension.appex/PrivacyInfo.xcprivacy" "ios"
-    verify_manifest "$bundle/PlugIns/PasteBuddyActionExtension.appex/PrivacyInfo.xcprivacy" "ios"
+    verify_ios_bundle "$bundle"
+    verify_ios_bundle "$bundle/PlugIns/PasteBuddyKeyboard.appex"
+    verify_ios_bundle "$bundle/PlugIns/PasteBuddyShareExtension.appex"
+    verify_ios_bundle "$bundle/PlugIns/PasteBuddyActionExtension.appex"
+    report_iroh_manifest_status "$bundle/Frameworks/Iroh.framework"
     verify_exported_type "$bundle/Info.plist" "app.pastebuddy.mobile-pinboard-item-ids"
     ;;
   *)
@@ -118,4 +163,4 @@ case "$platform" in
     ;;
 esac
 
-echo "app privacy artifacts verified for $platform: $bundle"
+echo "declared app and embedded dependency privacy artifacts verified for $platform: $bundle"
