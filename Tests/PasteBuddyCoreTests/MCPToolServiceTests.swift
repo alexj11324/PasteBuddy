@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class MCPToolServiceTests: XCTestCase {
-    func testMCPServerIsDisabledByDefault() throws {
+    func testMCPServerIsDisabledByDefault() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -12,13 +12,16 @@ final class MCPToolServiceTests: XCTestCase {
 
         XCTAssertFalse(store.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(store.snapshot.mcp.enabledTools, MCPToolName.defaultEnabledTools)
-        XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
+        do {
+            _ = try await service.searchHistory(query: "anything")
+            XCTFail("Expected MCP server disabled error.")
+        } catch {
             XCTAssertEqual(error as? MCPToolServiceError, .serverDisabled)
         }
         XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
     }
 
-    func testBlockedPersistenceRejectsMCPBeforeServerOrToolChecks() throws {
+    func testBlockedPersistenceRejectsMCPBeforeServerOrToolChecks() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
         try harness.snapshotStore.save(PasteBuddySnapshot())
@@ -28,7 +31,10 @@ final class MCPToolServiceTests: XCTestCase {
         let service = MCPToolService(store: store)
 
         XCTAssertTrue(store.isPersistenceWriteBlocked)
-        XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
+        do {
+            _ = try await service.searchHistory(query: "anything")
+            XCTFail("Expected unavailable history error.")
+        } catch {
             XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
         }
         XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
@@ -61,7 +67,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(decoded.enabledTools.contains(.retrieveItem))
     }
 
-    func testMCPToolLevelAccessControls() throws {
+    func testMCPToolLevelAccessControls() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -71,7 +77,7 @@ final class MCPToolServiceTests: XCTestCase {
         store.setMCPTool(.listPinboards, enabled: false)
         let service = MCPToolService(store: store)
 
-        XCTAssertNoThrow(try service.searchHistory(query: "anything"))
+        _ = try await service.searchHistory(query: "anything")
         XCTAssertThrowsError(try service.retrieveItem(itemID: UUID())) { error in
             XCTAssertEqual(error as? MCPToolServiceError, .toolDisabled(.retrieveItem))
         }
@@ -82,7 +88,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertEqual(store.snapshot.mcp.accessLog.first?.outcome, .denied)
     }
 
-    func testMCPSearchReturnsSummariesWithoutPayloads() throws {
+    func testMCPSearchReturnsSummariesWithoutPayloads() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -98,7 +104,7 @@ final class MCPToolServiceTests: XCTestCase {
         ))
         let service = MCPToolService(store: store)
 
-        let response = try service.searchHistory(query: "roadmap")
+        let response = try await service.searchHistory(query: "roadmap")
 
         XCTAssertEqual(response.items.map(\.id), [item.id])
         XCTAssertTrue(response.payloadsOmitted)
@@ -177,7 +183,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertTrue(store.snapshot.mcp.accessLog.first?.imageDataIncluded ?? false)
     }
 
-    func testMCPToolsRespectCurrentPrivacyRulesWhenReadingExistingItems() throws {
+    func testMCPToolsRespectCurrentPrivacyRulesWhenReadingExistingItems() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -208,11 +214,11 @@ final class MCPToolServiceTests: XCTestCase {
         )
         let service = MCPToolService(store: store)
 
-        let hiddenSearch = try service.searchHistory(query: "payroll")
+        let hiddenSearch = try await service.searchHistory(query: "payroll")
         XCTAssertTrue(hiddenSearch.items.isEmpty)
         XCTAssertEqual(store.snapshot.mcp.accessLog.first?.resultCount, 0)
 
-        let visibleSearch = try service.searchHistory(query: "notes")
+        let visibleSearch = try await service.searchHistory(query: "notes")
         XCTAssertEqual(visibleSearch.items.map(\.id), [visible.id])
 
         XCTAssertThrowsError(try service.retrieveItem(itemID: hidden.id)) { error in
@@ -226,12 +232,15 @@ final class MCPToolServiceTests: XCTestCase {
         let pinboards = try service.listPinboards()
         XCTAssertEqual(pinboards.pinboards.first(where: { $0.id == pinboard.id })?.itemCount, 1)
 
-        XCTAssertThrowsError(try service.pinFirstMatch(query: "payroll", pinboardID: pinboard.id)) { error in
+        do {
+            _ = try await service.pinFirstMatch(query: "payroll", pinboardID: pinboard.id)
+            XCTFail("Expected no matching item error.")
+        } catch {
             XCTAssertEqual(error as? MCPToolServiceError, .noMatchingItem)
         }
     }
 
-    func testRepositorySearchPagesPastPrivacyBlockedItemsForSearchAndPinWithoutChangingUIState() throws {
+    func testRepositorySearchPagesPastPrivacyBlockedItemsForSearchAndPinWithoutChangingUIState() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
         harness.snapshotStore.storageMode = .standard
@@ -285,7 +294,7 @@ final class MCPToolServiceTests: XCTestCase {
         let service = MCPToolService(store: store)
 
         let searchFetchCount = repository.fetchPageInvocationCount
-        let response = try service.searchHistory(query: "needle", limit: 3)
+        let response = try await service.searchHistory(query: "needle", limit: 3)
 
         XCTAssertEqual(response.items.map(\.id), visibleItems.map(\.id))
         XCTAssertEqual(repository.fetchPageInvocationCount, searchFetchCount + 2)
@@ -294,7 +303,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertEqual(store.queryRevision, queryRevision)
 
         let pinFetchCount = repository.fetchPageInvocationCount
-        let pinned = try service.pinFirstMatch(query: "needle", pinboardID: pinboard.id)
+        let pinned = try await service.pinFirstMatch(query: "needle", pinboardID: pinboard.id)
 
         XCTAssertEqual(pinned.item.id, visibleItems[0].id)
         XCTAssertEqual(repository.fetchPageInvocationCount, pinFetchCount + 2)
@@ -307,7 +316,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertEqual(store.queryRevision, queryRevision)
     }
 
-    func testLockedHistoryRejectsEveryMCPClipboardReadPath() throws {
+    func testLockedHistoryRejectsEveryMCPClipboardReadPath() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -325,14 +334,17 @@ final class MCPToolServiceTests: XCTestCase {
         store.setBiometricHistoryLockEnabled(true)
         let service = MCPToolService(store: store)
 
-        let operations: [() throws -> Void] = [
-            { _ = try service.searchHistory(query: "locked") },
+        let operations: [@MainActor () async throws -> Void] = [
+            { _ = try await service.searchHistory(query: "locked") },
             { _ = try service.retrieveItem(itemID: item.id) },
             { _ = try service.listPinboards() },
-            { _ = try service.pinFirstMatch(query: "locked", pinboardID: pinboard.id) }
+            { _ = try await service.pinFirstMatch(query: "locked", pinboardID: pinboard.id) }
         ]
         for operation in operations {
-            XCTAssertThrowsError(try operation()) { error in
+            do {
+                try await operation()
+                XCTFail("Expected locked history error.")
+            } catch {
                 XCTAssertEqual(error as? MCPToolServiceError, .historyLocked)
             }
         }
@@ -343,7 +355,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertEqual(store.snapshot.mcp.accessLog.prefix(4).map(\.outcome), Array(repeating: .denied, count: 4))
     }
 
-    func testMCPCreatePinboardAndPinFirstMatch() throws {
+    func testMCPCreatePinboardAndPinFirstMatch() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -359,7 +371,7 @@ final class MCPToolServiceTests: XCTestCase {
         let service = MCPToolService(store: store)
 
         let created = try service.createPinboard(name: "Research", colorHex: "70c1b3")
-        let pinned = try service.pinFirstMatch(query: "research", pinboardID: created.pinboard.id)
+        let pinned = try await service.pinFirstMatch(query: "research", pinboardID: created.pinboard.id)
 
         XCTAssertEqual(created.pinboard.name, "Research")
         XCTAssertEqual(created.pinboard.colorHex, "#70C1B3")
@@ -371,7 +383,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertEqual(store.snapshot.mcp.accessLog.first?.pinboardID, created.pinboard.id)
     }
 
-    func testMCPAccessLogPersistsEncryptedAndCanBeCleared() throws {
+    func testMCPAccessLogPersistsEncryptedAndCanBeCleared() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -386,7 +398,7 @@ final class MCPToolServiceTests: XCTestCase {
         ))
         let service = MCPToolService(store: store)
 
-        _ = try service.searchHistory(query: "secret")
+        _ = try await service.searchHistory(query: "secret")
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()

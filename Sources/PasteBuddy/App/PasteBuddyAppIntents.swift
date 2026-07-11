@@ -41,7 +41,7 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
-        let result = try service.searchClipboard(query: query, limit: limit ?? 5)
+        let result = try await service.searchClipboard(query: query, limit: limit ?? 5)
         return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
     }
 }
@@ -68,7 +68,7 @@ struct PasteBuddyCopyFirstMatchIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
-        let result = try service.transferFirstMatchingItem(
+        let result = try await service.transferFirstMatchingItem(
             query: query,
             format: plainText == true ? .plainText : store.defaultPasteFormat,
             destination: .clipboard
@@ -102,7 +102,7 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
         let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
-        let item = try service.firstMatchingItem(query: query)
+        let item = try await service.firstMatchingItem(query: query)
         let result = AutomationItemTransferResult(
             item: item,
             format: format,
@@ -169,7 +169,7 @@ struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
         let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         do {
-            let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
+            let result = try await service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
             try await store.flushPendingSaveOrThrow()
             return .result(dialog: IntentDialog(stringLiteral: "Saved \(result.item.title) to \(result.pinboard.name)."))
         } catch {

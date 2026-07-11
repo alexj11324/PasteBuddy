@@ -6212,7 +6212,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.lastInMemoryPageQueryRanOnMainThreadForTesting, false)
     }
 
-    func testReadOnlyRepositorySearchPagesWithoutMutatingGlobalUIState() throws {
+    func testReadOnlyRepositorySearchPagesOffMainThreadWithoutMutatingGlobalUIState() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
         harness.snapshotStore.storageMode = .standard
@@ -6242,20 +6242,27 @@ final class PasteBuddyStoreTests: XCTestCase {
         let queryRevision = store.queryRevision
         let fetchCount = repository.fetchPageInvocationCount
 
-        let page = try store.searchItems(query: "repository needle", offset: 120, limit: 5)
+        let page = try await store.searchItemsPage(query: "repository needle", offset: 120, limit: 5)
 
         XCTAssertEqual(page.map(\.id), Array(items[120..<125]).map(\.id))
         XCTAssertEqual(repository.fetchPageInvocationCount, fetchCount + 1)
+        XCTAssertEqual(repository.lastAsyncFetchPageRanOnMainThreadForTesting, false)
         XCTAssertEqual(store.searchQuery, "leave this UI query alone")
         XCTAssertEqual(store.selectedScope, .pasteStack)
         XCTAssertEqual(store.queryRevision, queryRevision)
 
         let fallbackStore = PasteBuddyStore(diskStore: harness.snapshotStore)
         fallbackStore.snapshot = PasteBuddySnapshot(items: items)
+        let fallbackPage = try await fallbackStore.searchItemsPage(
+            query: "repository needle",
+            offset: 120,
+            limit: 5
+        )
         XCTAssertEqual(
-            try fallbackStore.searchItems(query: "repository needle", offset: 120, limit: 5).map(\.id),
+            fallbackPage.map(\.id),
             page.map(\.id)
         )
+        XCTAssertEqual(fallbackStore.lastInMemoryPageQueryRanOnMainThreadForTesting, false)
     }
 
     func testRepositoryFallbackPreservesCanonicalSnapshotOrderInsteadOfResortingByDate() async throws {
@@ -6300,11 +6307,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         store.snapshot = PasteBuddySnapshot(items: items)
         let expectedIDs = items.map(\.id)
         let fallbackPage = await store.filteredItemsPageAndCount(for: .history, offset: 0, limit: 10)
+        let searchPage = try await store.searchItemsPage(query: "canonical order", limit: 10)
 
         XCTAssertEqual(store.filteredItems.map(\.id), expectedIDs)
         XCTAssertEqual(store.mainListItemsSnapshot.map(\.id), expectedIDs)
         XCTAssertEqual(fallbackPage.items.map(\.id), expectedIDs)
-        XCTAssertEqual(try store.searchItems(query: "canonical order", limit: 10).map(\.id), expectedIDs)
+        XCTAssertEqual(searchPage.map(\.id), expectedIDs)
     }
 
     func testSyncedRepositoryCaptureBurstAvoidsFullSynchronizeAndPreservesCaptureSemantics() async throws {

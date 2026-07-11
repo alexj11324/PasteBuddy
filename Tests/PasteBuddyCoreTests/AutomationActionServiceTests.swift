@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class AutomationActionServiceTests: XCTestCase {
-    func testSearchReturnsSummariesWithoutClipboardPayload() throws {
+    func testSearchReturnsSummariesWithoutClipboardPayload() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -17,14 +17,14 @@ final class AutomationActionServiceTests: XCTestCase {
         ))
         let service = AutomationActionService(store: store)
 
-        let result = try service.searchClipboard(query: "launch")
+        let result = try await service.searchClipboard(query: "launch")
 
         XCTAssertEqual(result.items.map(\.id), [item.id])
         XCTAssertEqual(result.items.first?.title, "Launch Plan")
         XCTAssertFalse(result.displaySummary.contains("confidential launch payload"))
     }
 
-    func testSearchUsesRepositoryWithoutMutatingGlobalUIQueryState() throws {
+    func testSearchUsesRepositoryWithoutMutatingGlobalUIQueryState() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
         harness.snapshotStore.storageMode = .standard
@@ -50,7 +50,7 @@ final class AutomationActionServiceTests: XCTestCase {
         let fetchCount = repository.fetchPageInvocationCount
         let service = AutomationActionService(store: store)
 
-        let result = try service.searchClipboard(query: "automation needle")
+        let result = try await service.searchClipboard(query: "automation needle")
 
         XCTAssertEqual(result.items.map(\.id), [item.id])
         XCTAssertEqual(repository.fetchPageInvocationCount, fetchCount + 1)
@@ -78,7 +78,7 @@ final class AutomationActionServiceTests: XCTestCase {
         XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.name, "Launch Clips")
     }
 
-    func testPinFirstMatchingItemActionSavesResultToNamedPinboard() throws {
+    func testPinFirstMatchingItemActionSavesResultToNamedPinboard() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -93,7 +93,7 @@ final class AutomationActionServiceTests: XCTestCase {
             payload: ClipboardPayload(urlString: "https://example.com/research")
         ))
 
-        let result = try service.pinFirstMatchingItem(query: "brief", toPinboardNamed: "research")
+        let result = try await service.pinFirstMatchingItem(query: "brief", toPinboardNamed: "research")
 
         XCTAssertEqual(result.item.id, item.id)
         XCTAssertEqual(result.pinboard.id, pinboard.id)
@@ -101,7 +101,7 @@ final class AutomationActionServiceTests: XCTestCase {
         XCTAssertEqual(store.snapshot.pinboards.first(where: { $0.id == pinboard.id })?.itemIDs, [item.id])
     }
 
-    func testPinFirstMatchingItemActionReportsMissingPinboard() throws {
+    func testPinFirstMatchingItemActionReportsMissingPinboard() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -115,12 +115,15 @@ final class AutomationActionServiceTests: XCTestCase {
             payload: ClipboardPayload(text: "Pin this later")
         ))
 
-        XCTAssertThrowsError(try service.pinFirstMatchingItem(query: "meeting", toPinboardNamed: "Missing")) { error in
+        do {
+            _ = try await service.pinFirstMatchingItem(query: "meeting", toPinboardNamed: "Missing")
+            XCTFail("Expected missing pinboard error.")
+        } catch {
             XCTAssertEqual(error as? AutomationActionError, .pinboardNotFound("Missing"))
         }
     }
 
-    func testFirstMatchingItemSupportsCopyIntentLookup() throws {
+    func testFirstMatchingItemSupportsCopyIntentLookup() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -134,13 +137,17 @@ final class AutomationActionServiceTests: XCTestCase {
         ))
         let service = AutomationActionService(store: store)
 
-        XCTAssertEqual(try service.firstMatchingItem(query: "docs").id, item.id)
-        XCTAssertThrowsError(try service.firstMatchingItem(query: "missing")) { error in
+        let matchingItem = try await service.firstMatchingItem(query: "docs")
+        XCTAssertEqual(matchingItem.id, item.id)
+        do {
+            _ = try await service.firstMatchingItem(query: "missing")
+            XCTFail("Expected no matching item error.")
+        } catch {
             XCTAssertEqual(error as? AutomationActionError, .noMatchingItem)
         }
     }
 
-    func testTransferFirstMatchingItemCopiesWithoutReturningPayload() throws {
+    func testTransferFirstMatchingItemCopiesWithoutReturningPayload() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -156,7 +163,7 @@ final class AutomationActionServiceTests: XCTestCase {
         var transferredItemID: UUID?
         var transferredFormat: PasteFormat?
 
-        let result = try service.transferFirstMatchingItem(
+        let result = try await service.transferFirstMatchingItem(
             query: "private",
             format: .plainText,
             destination: .clipboard
@@ -173,7 +180,7 @@ final class AutomationActionServiceTests: XCTestCase {
         XCTAssertFalse(result.displaySummary.contains("secret payload body"))
     }
 
-    func testLockedHistoryRejectsAutomationItemAccessWithoutInvokingTransfer() throws {
+    func testLockedHistoryRejectsAutomationItemAccessWithoutInvokingTransfer() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -190,19 +197,22 @@ final class AutomationActionServiceTests: XCTestCase {
         store.setBiometricHistoryLockEnabled(true)
         var transferCallCount = 0
 
-        let operations: [() throws -> Void] = [
-            { _ = try service.searchClipboard(query: "locked") },
-            { _ = try service.firstMatchingItem(query: "locked") },
-            { _ = try service.pinFirstMatchingItem(query: "locked", toPinboardNamed: "Private") },
+        let operations: [@MainActor () async throws -> Void] = [
+            { _ = try await service.searchClipboard(query: "locked") },
+            { _ = try await service.firstMatchingItem(query: "locked") },
+            { _ = try await service.pinFirstMatchingItem(query: "locked", toPinboardNamed: "Private") },
             {
-                _ = try service.transferFirstMatchingItem(query: "locked") { _, _ in
+                _ = try await service.transferFirstMatchingItem(query: "locked") { _, _ in
                     transferCallCount += 1
                 }
             }
         ]
 
         for operation in operations {
-            XCTAssertThrowsError(try operation()) { error in
+            do {
+                try await operation()
+                XCTFail("Expected locked history error.")
+            } catch {
                 XCTAssertEqual(
                     error.localizedDescription,
                     "Unlock PasteBuddy history before running this action."
@@ -216,7 +226,7 @@ final class AutomationActionServiceTests: XCTestCase {
         )
     }
 
-    func testBlockedPersistenceRejectsAutomationReadsAndMutations() throws {
+    func testBlockedPersistenceRejectsAutomationReadsAndMutations() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
         try harness.snapshotStore.save(PasteBuddySnapshot())
@@ -226,7 +236,10 @@ final class AutomationActionServiceTests: XCTestCase {
         let service = AutomationActionService(store: store)
 
         XCTAssertTrue(store.isPersistenceWriteBlocked)
-        XCTAssertThrowsError(try service.searchClipboard(query: "anything")) { error in
+        do {
+            _ = try await service.searchClipboard(query: "anything")
+            XCTFail("Expected unavailable history error.")
+        } catch {
             XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
         }
         XCTAssertThrowsError(try service.createPinboard(name: "Must Not Succeed")) { error in

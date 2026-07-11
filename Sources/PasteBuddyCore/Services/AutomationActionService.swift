@@ -170,14 +170,14 @@ public final class AutomationActionService {
         self.store = store
     }
 
-    public func searchClipboard(query: String, limit: Int = 5) throws -> AutomationSearchResult {
+    public func searchClipboard(query: String, limit: Int = 5) async throws -> AutomationSearchResult {
         try store.requirePersistenceReady()
         guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw AutomationActionError.emptyQuery }
 
         let cappedLimit = min(max(limit, 1), 25)
-        let items = try store.searchItems(query: trimmed, limit: cappedLimit)
+        let items = try await store.searchItemsPage(query: trimmed, limit: cappedLimit)
             .map(AutomationItemSummary.init(item:))
 
         return AutomationSearchResult(query: trimmed, items: items)
@@ -197,8 +197,8 @@ public final class AutomationActionService {
     public func pinFirstMatchingItem(
         query: String,
         toPinboardNamed pinboardName: String
-    ) throws -> AutomationPinboardItemResult {
-        let item = try firstMatchingItem(query: query)
+    ) async throws -> AutomationPinboardItemResult {
+        let item = try await firstMatchingItem(query: query)
         let pinboard = try pinboard(named: pinboardName)
         store.pinItem(item.id, to: pinboard.id)
         guard let updatedPinboard = store.snapshot.pinboards.first(where: { $0.id == pinboard.id }) else {
@@ -212,8 +212,8 @@ public final class AutomationActionService {
         format: PasteFormat = .original,
         destination: AutomationItemTransferDestination = .clipboard,
         transfer: (ClipboardItem, PasteFormat) -> Void
-    ) throws -> AutomationItemTransferResult {
-        let item = try firstMatchingItem(query: query)
+    ) async throws -> AutomationItemTransferResult {
+        let item = try await firstMatchingItem(query: query)
         transfer(item, format)
         return AutomationItemTransferResult(
             item: item,
@@ -222,8 +222,8 @@ public final class AutomationActionService {
         )
     }
 
-    public func firstMatchingItem(query: String) throws -> ClipboardItem {
-        let result = try searchClipboard(query: query, limit: 1)
+    public func firstMatchingItem(query: String) async throws -> ClipboardItem {
+        let result = try await searchClipboard(query: query, limit: 1)
         guard let summary = result.items.first,
               let item = store.snapshot.items.first(where: { $0.id == summary.id }) else {
             throw AutomationActionError.noMatchingItem
