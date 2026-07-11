@@ -22,14 +22,14 @@ public enum PasteBuddyPerformanceSignposts {
     }
 
     public enum ItemCountBucket: Int, Equatable, Sendable {
-        case unknown = -1
-        case none = 0
-        case single = 1
-        case small = 2
-        case medium = 3
-        case large = 4
-        case veryLarge = 5
-        case oversized = 6
+        case unknown = 0
+        case none = 1
+        case single = 2
+        case small = 3
+        case medium = 4
+        case large = 5
+        case veryLarge = 6
+        case oversized = 7
 
         public init(itemCount: Int?) {
             guard let itemCount, itemCount >= 0 else {
