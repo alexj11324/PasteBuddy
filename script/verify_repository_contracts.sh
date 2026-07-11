@@ -50,6 +50,10 @@ require_literal script/build_and_run.sh '"$BUNDLE_ID" == "com.alexjiang.PasteBud
 require_literal script/build_and_run.sh 'CFBundleURLTypes'
 require_literal script/build_and_run.sh 'pastebuddy-dev'
 require_literal script/build_and_run.sh '<key>LSUIElement</key>'
+require_literal script/build_and_run.sh 'PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION'
+require_literal script/build_and_run.sh 'PasteBuddyDisableClipboardMonitoringForDevelopmentVerification'
+require_literal script/build_and_run.sh 'Clipboard monitor verification override is only supported for development signing.'
+require_literal script/build_and_run.sh 'PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION must be 0 or 1.'
 
 require_literal script/open_dev_panel.sh 'APP_BUNDLE="/Applications/PasteBuddy Dev.app"'
 require_literal script/open_dev_panel.sh 'codesign --verify --deep --strict'

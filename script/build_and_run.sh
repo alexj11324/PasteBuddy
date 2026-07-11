@@ -4,6 +4,8 @@ set -euo pipefail
 MODE="${1:-run}"
 EXECUTABLE_NAME="PasteBuddy"
 SIGNING_CHANNEL="${PASTEBUDDY_SIGNING_CHANNEL:-development}"
+DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION="${PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION-0}"
+DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION_WAS_SET="${PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION+true}"
 case "$SIGNING_CHANNEL" in
   development)
     DEFAULT_APP_NAME="PasteBuddy Dev"
@@ -43,6 +45,16 @@ die() {
   echo "$*" >&2
   exit 1
 }
+
+if [[ "$SIGNING_CHANNEL" == "release" && -n "$DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION_WAS_SET" ]]; then
+  die "Clipboard monitor verification override is only supported for development signing."
+fi
+if [[ "$SIGNING_CHANNEL" == "development" ]]; then
+  case "$DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION" in
+    0|1) ;;
+    *) die "PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION must be 0 or 1." ;;
+  esac
+fi
 
 is_adhoc_sign_identity() {
   local identity="$1"
@@ -287,6 +299,9 @@ PLIST
 
 if [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]]; then
   /usr/bin/plutil -insert CFBundleURLTypes -json '[{"CFBundleURLName":"com.alexjiang.PasteBuddy.dev.panel","CFBundleURLSchemes":["pastebuddy-dev"]}]' "$INFO_PLIST"
+fi
+if [[ "$SIGNING_CHANNEL" == "development" && "$DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION" == "1" ]]; then
+  /usr/bin/plutil -insert PasteBuddyDisableClipboardMonitoringForDevelopmentVerification -bool true "$INFO_PLIST"
 fi
 
 CONFIGURED_SENTRY_DSN="$(resolve_sentry_dsn)"

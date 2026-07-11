@@ -480,16 +480,29 @@ struct PasteBuddyApp: App {
         await irohSync.start()
 
         if monitor == nil {
-            let createdMonitor = ClipboardMonitor(
-                store: store,
-                onItemCaptured: { [irohSync] item in
-                    Task { @MainActor in
-                        await irohSync.sendIfConnected(item)
-                    }
-                }
+            let shouldStartClipboardMonitor = PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: Bundle.main.object(
+                    forInfoDictionaryKey: PasteBuddyClipboardMonitoringPolicy.infoDictionaryKey
+                ) as? Bool == true,
+                identity: PasteBuddyRuntimeIdentityService.current
             )
-            createdMonitor.start()
-            monitor = createdMonitor
+            if shouldStartClipboardMonitor {
+                let createdMonitor = ClipboardMonitor(
+                    store: store,
+                    onItemCaptured: { [irohSync] item in
+                        Task { @MainActor in
+                            await irohSync.sendIfConnected(item)
+                        }
+                    }
+                )
+                createdMonitor.start()
+                monitor = createdMonitor
+            } else {
+                PasteBuddyDiagnostics.record(
+                    .lifecycle,
+                    "clipboardMonitorDisabledForDevelopmentVerification"
+                )
+            }
         }
 
         if shelfPanelController == nil {
