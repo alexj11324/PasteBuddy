@@ -144,9 +144,12 @@ script/verify_app_privacy_artifacts.sh ios \
   /private/tmp/pastebuddy-ios-deriveddata/Build/Products/Debug-iphonesimulator/PasteBuddyiOS.app
 ```
 
-The iOS check verifies the host plus Keyboard, Share, and Action extension
-bundles. The macOS check must run only after the standard stable-identity build;
-the verifier does not replace signing or TCC identity checks.
+The iOS check verifies the host plus Keyboard, Share, and Action app-owned
+manifests and each bundle's embedded GRDB manifest. Iroh 1.0.0 contains no
+`PrivacyInfo.xcprivacy`; the verifier reports that fact and intentionally does
+not turn it into a false aggregate-compliance claim. The macOS check must run
+only after the standard stable-identity build; the verifier does not replace
+signing, TCC identity checks, or an App Store archive privacy report.
 
 ## Shared Core Verification
 

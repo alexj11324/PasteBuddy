@@ -8,8 +8,10 @@ Every event starts with a read-only `verify` job that does not receive cloud or 
 2. Verifies the macOS SwiftPM app privacy resource bundle.
 3. Checks the localization catalogs.
 4. Compiles the Debug app and all embedded extensions for a generic iOS
-   Simulator with signing disabled, then verifies every bundle's privacy
-   manifest and the host app's exported UTI.
+   Simulator with signing disabled, then verifies each bundle's app-owned and
+   embedded GRDB privacy manifests plus the host app's exported UTI. The check
+   explicitly reports that Iroh 1.0.0 ships no privacy manifest; it does not
+   claim required-reason API coverage for that binary.
 5. Compiles the Release app and all embedded extensions for generic iOS with
    signing disabled, then repeats the built-artifact checks.
 
@@ -22,7 +24,8 @@ Only a successful push to `main` or a manual dispatch of `main` unlocks the `upl
 3. Queries App Store Connect for the latest uploaded build on app `6780560937`.
 4. Compares that number with the highest `ios-build-*` git tag.
 5. Archives `PasteBuddyiOS` with `CURRENT_PROJECT_VERSION` set to the next integer.
-6. Verifies the archived host app and all embedded extensions before export.
+6. Repeats the same scoped privacy checks against the archived host app and all
+   embedded extensions before export.
 7. Uploads the archive to App Store Connect for TestFlight processing.
 8. Persists the uploaded build number as an `ios-build-<number>` git tag.
 

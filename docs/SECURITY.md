@@ -147,6 +147,9 @@ This inventory was reviewed against the source and resolved dependencies on
   package and lockfile include QUIC/TLS cryptography through `rustls` and other
   non-Apple cryptographic dependencies. It therefore cannot be classified as
   "encryption limited to the Apple operating system" from this code review.
+- The resolved Iroh 1.0.0 framework has no `PrivacyInfo.xcprivacy`. The artifact
+  verifier reports this absence and does not represent app-owned or GRDB
+  manifests as proof of Iroh required-reason API coverage.
 - The host app, keyboard, Share, and Action Info.plists currently set
   `ITSAppUsesNonExemptEncryption` to `false`. This review intentionally leaves
   those declarations unchanged, but does not revalidate them as correct.
