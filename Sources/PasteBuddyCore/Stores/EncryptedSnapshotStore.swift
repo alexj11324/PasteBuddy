@@ -264,6 +264,12 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
         }
     }
 
+    func currentRevisionForAuthority() throws -> UUID? {
+        try withExclusivePersistenceLock {
+            try readCurrentPersistenceRevision()
+        }
+    }
+
     private func currentBaseline() -> (hasLoadedBaseline: Bool, revision: UUID?) {
         baselineLock.lock()
         defer { baselineLock.unlock() }

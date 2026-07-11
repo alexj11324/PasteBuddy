@@ -182,6 +182,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored private var pendingRepositoryCaptureJournal = ClipboardRepositoryCaptureJournal()
     @ObservationIgnored private var pendingRepositoryJournalRevision: Int?
     @ObservationIgnored private var pendingRepositoryRequiresFullSync = false
+    @ObservationIgnored private var pendingRepositoryMetadataOnly = false
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
@@ -275,6 +276,8 @@ public final class PasteBuddyStore {
 
     public func load() {
         do {
+            let persistenceLease = try authorityStore.acquireLease(.shared)
+            defer { persistenceLease?.release() }
             if let authority = try authorityStore.load() {
                 guard authority.phase == .stable else {
                     throw PasteBuddyPersistenceError.historyUnavailable
@@ -391,6 +394,10 @@ public final class PasteBuddyStore {
         let revisionBeforeLoad = dataRevision
         var loadStage = PasteBuddyPersistenceLoadDiagnostic.Stage.snapshotLoad
         do {
+            let persistenceLease = try await Task.detached(priority: .userInitiated) { [authorityStore] in
+                try authorityStore.acquireLease(.shared)
+            }.value
+            defer { persistenceLease?.release() }
             let authority = try await Task.detached(priority: .userInitiated) { [authorityStore] in
                 try authorityStore.load()
             }.value
@@ -661,6 +668,34 @@ public final class PasteBuddyStore {
         scheduleSave(delayNanoseconds: saveDebounceNanoseconds)
     }
 
+    private func saveMetadataOnly() {
+        guard !isPersistenceWriteBlocked else { return }
+        guard !isHistoryStorageMigrationInProgress else { return }
+        if clipboardRepository != nil, !pendingRepositoryRequiresFullSync {
+            pendingRepositoryMetadataOnly = true
+            pendingRepositoryJournalRevision = dataRevision
+        }
+        guard let saveDebounceNanoseconds else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(delayNanoseconds: saveDebounceNanoseconds)
+    }
+
+    private func saveMetadataAndFlush() {
+        guard !isPersistenceWriteBlocked else { return }
+        guard !isHistoryStorageMigrationInProgress else { return }
+        if clipboardRepository != nil, !pendingRepositoryRequiresFullSync {
+            pendingRepositoryMetadataOnly = true
+            pendingRepositoryJournalRevision = dataRevision
+        }
+        guard saveDebounceNanoseconds != nil else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(delayNanoseconds: 0)
+    }
+
     private func saveAndFlush() {
         guard !isPersistenceWriteBlocked else { return }
         guard !isHistoryStorageMigrationInProgress else { return }
@@ -715,6 +750,7 @@ public final class PasteBuddyStore {
             let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
             let repositoryRequiresFullSync = pendingRepositoryRequiresFullSync
             let captureJournal = pendingRepositoryCaptureJournal
+            let repositoryMetadataOnly = pendingRepositoryMetadataOnly
             let externalizationTask = Task.detached(priority: .utility) {
                 try Task.checkCancellation()
                 return try Self.externalizedSnapshotForDiskPersistence(
@@ -751,7 +787,9 @@ public final class PasteBuddyStore {
             // repository transaction starts, finish the matching snapshot write
             // as one shielded unit so cancellation cannot leave the two stores
             // at different revisions.
-            let commitTask = Task {
+            let commitTask = Task { [authorityStore] in
+                let persistenceLease = try authorityStore.acquireLease(.shared)
+                defer { persistenceLease?.release() }
                 var crossedWriteBarrier = false
                 do {
                     if let repositorySyncActor {
@@ -759,7 +797,13 @@ public final class PasteBuddyStore {
                             try await repositorySyncActor.synchronize(with: snapshotToSave)
                             crossedWriteBarrier = true
                         } else if !captureJournal.isEmpty {
-                            try await repositorySyncActor.applyCaptureJournal(captureJournal)
+                            try await repositorySyncActor.applyCaptureJournal(
+                                captureJournal,
+                                metadataFrom: repositoryMetadataOnly ? snapshotToSave : nil
+                            )
+                            crossedWriteBarrier = true
+                        } else if repositoryMetadataOnly {
+                            try await repositorySyncActor.updateMetadata(from: snapshotToSave)
                             crossedWriteBarrier = true
                         }
                     }
@@ -822,9 +866,12 @@ public final class PasteBuddyStore {
         let repositoryWritePlanned = clipboardRepository != nil
             && (pendingRepositoryRequiresFullSync
                 || !pendingRepositoryCaptureJournal.isEmpty
+                || pendingRepositoryMetadataOnly
                 || repositorySyncedDataRevision != dataRevisionToSync)
         var crossedWriteBarrier = false
         do {
+            let persistenceLease = try authorityStore.acquireLease(.shared)
+            defer { persistenceLease?.release() }
             let snapshotToPersist = try Self.externalizedSnapshotForDiskPersistence(
                 snapshotToSave,
                 hasRepository: hasRepository
@@ -868,12 +915,13 @@ public final class PasteBuddyStore {
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
         let repositoryRequiresFullSync = pendingRepositoryRequiresFullSync
         let captureJournal = pendingRepositoryCaptureJournal
+        let repositoryMetadataOnly = pendingRepositoryMetadataOnly
         let precedingSaveTask = pendingSaveTask
         precedingSaveTask?.cancel()
         let saveTaskID = UUID()
         let persistenceGeneration = nextPersistenceGeneration()
         pendingSaveTaskID = saveTaskID
-        pendingSaveTask = Task { [persistenceActor, persistenceCommitGate, repositorySyncActor] in
+        pendingSaveTask = Task { [authorityStore, persistenceActor, persistenceCommitGate, repositorySyncActor] in
             // Cancellation is cooperative and an older writer may already be
             // inside repository I/O. Chain writers so a replacement can never
             // finish before (and then be overwritten by) its predecessor.
@@ -928,12 +976,20 @@ public final class PasteBuddyStore {
             }
             var crossedWriteBarrier = false
             do {
+                let persistenceLease = try authorityStore.acquireLease(.shared)
+                defer { persistenceLease?.release() }
                 if let repositorySyncActor {
                     if repositoryRequiresFullSync {
                         try await repositorySyncActor.synchronize(with: snapshotToSave)
                         crossedWriteBarrier = true
                     } else if !captureJournal.isEmpty {
-                        try await repositorySyncActor.applyCaptureJournal(captureJournal)
+                        try await repositorySyncActor.applyCaptureJournal(
+                            captureJournal,
+                            metadataFrom: repositoryMetadataOnly ? snapshotToSave : nil
+                        )
+                        crossedWriteBarrier = true
+                    } else if repositoryMetadataOnly {
+                        try await repositorySyncActor.updateMetadata(from: snapshotToSave)
                         crossedWriteBarrier = true
                     }
                 }
@@ -1014,12 +1070,14 @@ public final class PasteBuddyStore {
         guard clipboardRepository != nil else { return }
         pendingRepositoryRequiresFullSync = true
         pendingRepositoryCaptureJournal.mutations.removeAll()
+        pendingRepositoryMetadataOnly = false
         pendingRepositoryJournalRevision = dataRevision
     }
 
     private func clearPendingRepositoryPlan() {
         pendingRepositoryRequiresFullSync = false
         pendingRepositoryCaptureJournal.mutations.removeAll()
+        pendingRepositoryMetadataOnly = false
         pendingRepositoryJournalRevision = nil
     }
 
@@ -1036,7 +1094,12 @@ public final class PasteBuddyStore {
             if pendingRepositoryRequiresFullSync {
                 try clipboardRepository.synchronize(with: snapshotToSave)
             } else if !pendingRepositoryCaptureJournal.isEmpty {
-                try clipboardRepository.applyCaptureJournal(pendingRepositoryCaptureJournal)
+                try clipboardRepository.applyCaptureJournal(
+                    pendingRepositoryCaptureJournal,
+                    metadataFrom: pendingRepositoryMetadataOnly ? snapshotToSave : nil
+                )
+            } else if pendingRepositoryMetadataOnly {
+                try clipboardRepository.updateMetadata(from: snapshotToSave)
             } else if repositorySyncedDataRevision != dataRevision {
                 try clipboardRepository.synchronize(with: snapshotToSave)
             }
@@ -2511,49 +2574,49 @@ public final class PasteBuddyStore {
     public func pauseCaptureIndefinitely() {
         snapshot.privacy.isCapturePaused = true
         snapshot.privacy.capturePauseUntil = nil
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func pauseCapture(for interval: TimeInterval, now: Date = Date()) {
         snapshot.privacy.isCapturePaused = false
         snapshot.privacy.capturePauseUntil = now.addingTimeInterval(max(0, interval))
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func resumeCapture() {
         snapshot.privacy.isCapturePaused = false
         snapshot.privacy.capturePauseUntil = nil
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func toggleOCR() {
         snapshot.privacy.runLocalOCRAfterImageCapture.toggle()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func toggleTextCapture() {
         snapshot.privacy.captureText.toggle()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func toggleURLCapture() {
         snapshot.privacy.captureURLs.toggle()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func toggleFileCapture() {
         snapshot.privacy.captureFiles.toggle()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func toggleImageCapture() {
         snapshot.privacy.captureImages.toggle()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func toggleSensitiveTextBlocking() {
         snapshot.privacy.blockLikelySensitiveText.toggle()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func excludeCurrentApplication(named appName: String, bundleIdentifier: String? = nil) {
@@ -2571,18 +2634,18 @@ public final class PasteBuddyStore {
             changed = snapshot.privacy.excludedBundleIdentifiers.insert(trimmedBundleIdentifier).inserted || changed
         }
         if changed {
-            saveAndFlush()
+            saveMetadataAndFlush()
         }
     }
 
     public func removeExcludedApplication(_ appName: String) {
         snapshot.privacy.excludedApplicationNames.remove(appName)
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func removeExcludedBundleIdentifier(_ bundleIdentifier: String) {
         snapshot.privacy.excludedBundleIdentifiers.remove(bundleIdentifier)
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     @discardableResult
@@ -2601,7 +2664,7 @@ public final class PasteBuddyStore {
             contentTypes: contentTypes
         )
         snapshot.privacy.customCaptureRules.append(rule)
-        saveAndFlush()
+        saveMetadataAndFlush()
         return rule
     }
 
@@ -2631,24 +2694,24 @@ public final class PasteBuddyStore {
             snapshot.privacy.customCaptureRules[index].contentTypes = contentTypes
         }
         snapshot.privacy.customCaptureRules[index].updatedAt = Date()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func setCaptureRule(_ id: UUID, enabled isEnabled: Bool) {
         guard let index = snapshot.privacy.customCaptureRules.firstIndex(where: { $0.id == id }) else { return }
         snapshot.privacy.customCaptureRules[index].isEnabled = isEnabled
         snapshot.privacy.customCaptureRules[index].updatedAt = Date()
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func removeCaptureRule(_ id: UUID) {
         snapshot.privacy.customCaptureRules.removeAll { $0.id == id }
-        saveAndFlush()
+        saveMetadataAndFlush()
     }
 
     public func setAlwaysPasteAsPlainText(_ isEnabled: Bool) {
         snapshot.paste.alwaysPasteAsPlainText = isEnabled
-        save()
+        saveMetadataOnly()
     }
 
     public func setLaunchAtLoginEnabled(_ isEnabled: Bool, applySystemRegistration: Bool = true) {
@@ -2662,7 +2725,7 @@ public final class PasteBuddyStore {
         }
 
         snapshot.general.launchAtLoginEnabled = isEnabled
-        save()
+        saveMetadataOnly()
     }
 
     public func setIOSPastePermissionState(_ state: IOSPastePermissionState, guidanceShownAt date: Date? = nil) {
@@ -2670,7 +2733,7 @@ public final class PasteBuddyStore {
         if let date {
             snapshot.mobile.lastPermissionGuidanceAt = date
         }
-        save()
+        saveMetadataOnly()
     }
 
     public func setKeyboardExtensionEnabled(_ isEnabled: Bool, fullAccess: Bool? = nil) {
@@ -2681,28 +2744,28 @@ public final class PasteBuddyStore {
         if !isEnabled {
             snapshot.mobile.hasKeyboardFullAccess = false
         }
-        save()
+        saveMetadataOnly()
     }
 
     public func setShareExtensionEnabled(_ isEnabled: Bool) {
         snapshot.mobile.isShareExtensionEnabled = isEnabled
-        save()
+        saveMetadataOnly()
     }
 
     public func setActionExtensionEnabled(_ isEnabled: Bool) {
         snapshot.mobile.isActionExtensionEnabled = isEnabled
-        save()
+        saveMetadataOnly()
     }
 
     public func setPreferredMobileSharePinboard(_ pinboardID: UUID?) {
         guard let pinboardID else {
             snapshot.mobile.preferredSharePinboardID = nil
-            save()
+            saveMetadataOnly()
             return
         }
         guard snapshot.pinboards.contains(where: { $0.id == pinboardID }) else { return }
         snapshot.mobile.preferredSharePinboardID = pinboardID
-        save()
+        saveMetadataOnly()
     }
 
     public func startFreeTrial(days: Int = 14, now: Date = Date()) {
@@ -3015,6 +3078,22 @@ public final class PasteBuddyStore {
         inFlightSave?.cancel()
         await inFlightSave?.value
 
+        let cutoverLease: HistoryPersistenceLease
+        do {
+            let leaseTask = Task.detached(priority: .userInitiated) { [authorityStore] in
+                try authorityStore.acquireLease(.exclusive)
+            }
+            guard let acquiredLease = try await leaseTask.value else {
+                throw PasteBuddyPersistenceError.historyUnavailable
+            }
+            cutoverLease = acquiredLease
+        } catch {
+            isPersistenceWriteBlocked = true
+            lastErrorMessage = error.localizedDescription
+            return
+        }
+        defer { cutoverLease.release() }
+
         guard isEnabled else {
             snapshot.security.storageMode = .standard
             do {
@@ -3023,10 +3102,26 @@ public final class PasteBuddyStore {
                     deferredRepositoryDatabaseURL = databaseURL
                     try await initializeDeferredRepositoryIfNeeded()
                 }
+                guard let sourceRevision = try diskStore.currentRevisionForAuthority() else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                let epoch = try authorityStore.beginCutover(
+                    source: .encryptedSnapshot,
+                    target: .sqlite,
+                    sourceRevision: sourceRevision
+                )
                 try await persistStandardRepositoryAndSnapshotUntilStable()
                 if repositorySyncActor != nil || clipboardRepository != nil {
+                    guard let targetRevision = try await repositorySyncActor?.currentRevisionForAuthority() else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
+                    try authorityStore.recordTargetValidated(
+                        epoch: epoch,
+                        targetRevision: targetRevision
+                    )
                     try diskStore.installRevokedTombstone()
-                    try authorityStore.commitStable(.sqlite)
+                    try authorityStore.recordSourceRevoked(epoch: epoch)
+                    try authorityStore.commitStable(epoch: epoch)
                 } else {
                     try authorityStore.clear()
                 }
@@ -3041,6 +3136,16 @@ public final class PasteBuddyStore {
         let previousStorageMode = snapshot.security.storageMode
         var didPersistEncryptedSnapshot = false
         do {
+            let epoch: UUID?
+            if let sourceRevision = try await repositorySyncActor?.currentRevisionForAuthority() {
+                epoch = try authorityStore.beginCutover(
+                    source: .sqlite,
+                    target: .encryptedSnapshot,
+                    sourceRevision: sourceRevision
+                )
+            } else {
+                epoch = nil
+            }
             let itemsToHydrate = snapshot.items
             var hydratedItemByID: [UUID: ClipboardItem] = [:]
             hydratedItemByID.reserveCapacity(itemsToHydrate.count)
@@ -3063,9 +3168,22 @@ public final class PasteBuddyStore {
 
             try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
             didPersistEncryptedSnapshot = true
-            try authorityStore.commitStable(.encryptedSnapshot)
+            if let epoch {
+                guard let targetRevision = try diskStore.currentRevisionForAuthority() else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                try authorityStore.recordTargetValidated(
+                    epoch: epoch,
+                    targetRevision: targetRevision
+                )
+            }
             try await removePlaintextRepositoryForEncryptedStorageAsync()
-            try await persistCurrentSnapshotUntilStable(storageMode: .encrypted)
+            if let epoch {
+                try authorityStore.recordSourceRevoked(epoch: epoch)
+                try authorityStore.commitStable(epoch: epoch)
+            } else {
+                try authorityStore.clear()
+            }
             isPersistenceWriteBlocked = false
             lastErrorMessage = nil
         } catch {

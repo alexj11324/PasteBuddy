@@ -1495,6 +1495,92 @@ extension PasteBuddyStoreTests {
         XCTAssertEqual(try repository.exportSnapshot().items.map(\.id), [item.id])
     }
 
+    func testHistoryAuthorityLeaseSerializesCutoverAgainstNormalPersistence() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let first = HistoryPersistenceAuthorityStore(snapshotURL: harness.snapshotStore.fileURL)
+        let second = HistoryPersistenceAuthorityStore(snapshotURL: harness.snapshotStore.fileURL)
+
+        let exclusive = try XCTUnwrap(first.acquireLease(.exclusive, wait: false))
+        XCTAssertNil(try second.acquireLease(.shared, wait: false))
+        XCTAssertNil(try second.acquireLease(.exclusive, wait: false))
+        exclusive.release()
+
+        let shared = try XCTUnwrap(second.acquireLease(.shared, wait: false))
+        shared.release()
+    }
+
+    func testHistoryAuthorityCutoverRequiresOrderedEpochTransitions() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let authority = HistoryPersistenceAuthorityStore(snapshotURL: harness.snapshotStore.fileURL)
+        let sourceRevision = UUID()
+        let targetRevision = UUID()
+
+        let epoch = try authority.beginCutover(
+            source: .encryptedSnapshot,
+            target: .sqlite,
+            sourceRevision: sourceRevision
+        )
+        XCTAssertEqual(try authority.load()?.phase, .preparing)
+        XCTAssertThrowsError(
+            try authority.recordTargetValidated(epoch: UUID(), targetRevision: targetRevision)
+        )
+
+        try authority.recordTargetValidated(epoch: epoch, targetRevision: targetRevision)
+        XCTAssertEqual(try authority.load()?.phase, .targetValidated)
+        try authority.recordSourceRevoked(epoch: epoch)
+        XCTAssertEqual(try authority.load()?.phase, .sourceRevoked)
+        try authority.commitStable(epoch: epoch)
+        XCTAssertEqual(
+            try authority.load(),
+            HistoryPersistenceAuthorityRecord(
+                phase: .stable,
+                authority: .sqlite,
+                source: nil,
+                target: nil,
+                sourceRevision: nil,
+                targetRevision: targetRevision,
+                epoch: epoch
+            )
+        )
+    }
+
+    @MainActor
+    func testStandardSettingsOnlySaveUpdatesMetadataWithoutItemSynchronization() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+        let repository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(
+                fileURL: harness.directory.appendingPathComponent("metadata-only.sqlite")
+            )
+        )
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Keep",
+            payload: ClipboardPayload(text: "do not rescan me")
+        ))
+        let didFlushCapture = await store.flushPendingSave()
+        XCTAssertTrue(didFlushCapture)
+        let baselineSyncCount = repository.incrementalSyncInvocationCount
+
+        store.setAlwaysPasteAsPlainText(true)
+        let didFlushSetting = await store.flushPendingSave()
+        XCTAssertTrue(didFlushSetting)
+
+        XCTAssertEqual(repository.incrementalSyncInvocationCount, baselineSyncCount)
+        XCTAssertTrue(try repository.exportSnapshot().paste.alwaysPasteAsPlainText)
+        XCTAssertEqual(try repository.exportSnapshot().items.count, 1)
+    }
+
     func testGRDBRepositoryMigratesLegacySnapshotInlineAssetsIntoAssetRows() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

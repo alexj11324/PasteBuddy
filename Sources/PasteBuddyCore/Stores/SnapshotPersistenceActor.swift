@@ -201,8 +201,15 @@ public actor ClipboardRepositorySyncActor {
         try repository.synchronize(with: snapshot)
     }
 
-    func applyCaptureJournal(_ journal: ClipboardRepositoryCaptureJournal) throws {
-        try repository.applyCaptureJournal(journal)
+    func updateMetadata(from snapshot: PasteBuddySnapshot) throws {
+        try repository.updateMetadata(from: snapshot)
+    }
+
+    func applyCaptureJournal(
+        _ journal: ClipboardRepositoryCaptureJournal,
+        metadataFrom snapshot: PasteBuddySnapshot? = nil
+    ) throws {
+        try repository.applyCaptureJournal(journal, metadataFrom: snapshot)
     }
 
     @discardableResult
@@ -244,6 +251,10 @@ public actor ClipboardRepositorySyncActor {
 
     public func hasStoredSnapshot() throws -> Bool {
         try repository.hasStoredSnapshot()
+    }
+
+    func currentRevisionForAuthority() throws -> UUID? {
+        try repository.currentRevisionForAuthority()
     }
 
     func eraseSensitiveContent() throws {

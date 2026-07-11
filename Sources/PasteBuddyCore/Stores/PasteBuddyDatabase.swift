@@ -715,6 +715,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         updateExpectedRepositoryRevision(newRevision)
     }
 
+    func currentRevisionForAuthority() throws -> UUID? {
+        try database.read { db in
+            try Self.fetchMetadata(db: db).repositoryRevision
+        }
+    }
+
     public func replaceAll(with snapshot: PasteBuddySnapshot) throws {
         incrementReplaceAllInvocationCount()
         let expectedRevision = repositoryRevisionBaseline()
@@ -802,7 +808,23 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         return summary
     }
 
-    func applyCaptureJournal(_ journal: ClipboardRepositoryCaptureJournal) throws {
+    func updateMetadata(from snapshot: PasteBuddySnapshot) throws {
+        let expectedRevision = repositoryRevisionBaseline()
+        let newRevision = UUID()
+        try database.write { db in
+            try Self.validateRepositoryRevision(expectedRevision, db: db)
+            try Self.saveMetadata(
+                StoredSnapshotMetadata(snapshot: snapshot, repositoryRevision: newRevision),
+                db: db
+            )
+        }
+        updateExpectedRepositoryRevision(newRevision)
+    }
+
+    func applyCaptureJournal(
+        _ journal: ClipboardRepositoryCaptureJournal,
+        metadataFrom snapshot: PasteBuddySnapshot? = nil
+    ) throws {
         guard !journal.isEmpty else { return }
         instrumentationLock.lock()
         _captureJournalInvocationCount += 1
@@ -841,7 +863,15 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                     )
                 }
             }
-            var metadata = try Self.fetchMetadata(db: db)
+            var metadata: StoredSnapshotMetadata
+            if let snapshot {
+                metadata = StoredSnapshotMetadata(
+                    snapshot: snapshot,
+                    repositoryRevision: newRevision
+                )
+            } else {
+                metadata = try Self.fetchMetadata(db: db)
+            }
             metadata.repositoryRevision = newRevision
             try Self.saveMetadata(metadata, db: db)
         }
