@@ -392,6 +392,9 @@ public final class ClipboardMonitor {
               shouldCapture else {
             return PasteboardReadResult(changeCount: changeCount, snapshot: nil)
         }
+        guard pasteboard.availableType(from: [PasteboardWriter.internalWriteMarkerType]) == nil else {
+            return PasteboardReadResult(changeCount: changeCount, snapshot: nil)
+        }
         return PasteboardReadResult(
             changeCount: changeCount,
             snapshot: snapshot(from: pasteboard, captureImages: captureImages)

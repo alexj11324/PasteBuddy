@@ -4,6 +4,8 @@ import Foundation
 
 @MainActor
 public enum PasteboardWriter {
+    nonisolated static let internalWriteMarkerType = NSPasteboard.PasteboardType("app.pastebuddy.internal-write")
+
     public enum DirectPasteFallbackBehavior: Equatable, Sendable {
         case copyOnly
         case failWithoutCopying
@@ -51,7 +53,7 @@ public enum PasteboardWriter {
     }
 
     public static func copy(_ item: ClipboardItem, format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
-        pasteboard.clearContents()
+        prepareForInternalWrite(pasteboard)
         if format == .plainText {
             pasteboard.setString(plainText(for: item), forType: .string)
             return
@@ -110,8 +112,13 @@ public enum PasteboardWriter {
             return
         }
 
-        pasteboard.clearContents()
+        prepareForInternalWrite(pasteboard)
         pasteboard.setString(plainText(for: items), forType: .string)
+    }
+
+    private static func prepareForInternalWrite(_ pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        pasteboard.setData(Data(), forType: internalWriteMarkerType)
     }
 
     @discardableResult

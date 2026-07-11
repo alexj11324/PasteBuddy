@@ -259,6 +259,31 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(store.snapshot.items.first?.id, firstCapture.id)
     }
 
+    func testPasteBuddyPasteboardWritesAreNotCapturedAsUserRecopies() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteBuddyInternalWrite-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
+        try await prime(monitor)
+        let item = ClipboardItem(
+            sourceAppName: "PasteBuddy",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Existing history item",
+            payload: ClipboardPayload(text: "must not be recaptured")
+        )
+
+        PasteboardWriter.copy(item, to: pasteboard)
+        monitor.pollOnce()
+        try await waitUntil { monitor.lastChangeCountForTesting == pasteboard.changeCount }
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+    }
+
     func testDistinctSlowCapturesSerializeInsteadOfDroppingEarlierCopy() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

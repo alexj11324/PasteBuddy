@@ -163,6 +163,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(commandSource.contains("osascript"))
     }
 
+    func testDevelopmentPanelShowRefreshesTheCurrentPasteTargetBeforePresentation() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let functionStart = try XCTUnwrap(source.range(of: "private func showClipboardPanelMode"))
+        let functionEnd = try XCTUnwrap(
+            source.range(of: "\n    private func startRuntimeIfNeeded", range: functionStart.lowerBound..<source.endIndex)
+        )
+        let functionSource = String(source[functionStart.lowerBound..<functionEnd.lowerBound])
+        let refreshTarget = try XCTUnwrap(functionSource.range(of: "frontmostApplicationTracker.recordCurrentFrontmostApplication()"))
+        let showPanel = try XCTUnwrap(functionSource.range(of: "shelfPanelController?.show()"))
+
+        XCTAssertLessThan(refreshTarget.lowerBound, showPanel.lowerBound)
+    }
+
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
@@ -640,6 +653,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PinboardItemDragPayload.self, from: encoded)
         XCTAssertEqual(decoded.ids, [item.id])
         XCTAssertEqual(decoded.plainText, "")
+    }
+
+    func testPointerSelectionDoesNotScrollTheCardBeforeDoubleClickAndDragRecognition() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
+        let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
+        let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
+        let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
+        let draggable = try XCTUnwrap(itemSource.range(of: "itemView.draggable(payload)"))
+        let pointerSelection = try XCTUnwrap(itemSource.range(of: ".simultaneousGesture("))
+        let suppressScroll = try XCTUnwrap(itemSource.range(of: "lastScrolledPrimarySelectedID = itemID"))
+        let select = try XCTUnwrap(itemSource.range(of: "onSelect(itemID)"))
+
+        XCTAssertLessThan(draggable.lowerBound, pointerSelection.lowerBound)
+        XCTAssertLessThan(suppressScroll.lowerBound, select.lowerBound)
     }
 
     func testSidePanelPreviewFollowsSelectionWithoutDeferredHandoff() throws {

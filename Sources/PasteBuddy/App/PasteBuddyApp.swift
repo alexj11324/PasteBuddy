@@ -279,6 +279,7 @@ struct PasteBuddyApp: App {
 
     private func showClipboardPanelMode(_ mode: ClipboardPanelDisplayMode) async {
         await startRuntimeIfNeeded()
+        frontmostApplicationTracker.recordCurrentFrontmostApplication()
         PasteBuddyDiagnostics.record(.hotKey, "\(mode.rawValue)ModeRequested")
         panelDisplayMode = mode
         shelfPanelController?.placement = shelfPlacement
