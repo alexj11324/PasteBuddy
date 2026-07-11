@@ -497,13 +497,10 @@ extension PasteBuddyStoreTests {
 
         XCTAssertFalse(store.isPersistenceWriteBlocked, store.lastErrorMessage ?? "")
         XCTAssertEqual(store.snapshot.security.storageMode, .encrypted)
-        for url in [
-            databaseURL,
-            URL(fileURLWithPath: databaseURL.path + "-wal"),
-            URL(fileURLWithPath: databaseURL.path + "-shm")
-        ] {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "Plaintext repository residue: \(url.path)")
-        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: databaseURL.path))
+        XCTAssertThrowsError(try ClipboardItemRepository(
+            database: PasteBuddyDatabase(fileURL: databaseURL)
+        ).exportSnapshot())
         let rawEnvelope = String(decoding: try Data(contentsOf: harness.snapshotStore.fileURL), as: UTF8.self)
         XCTAssertFalse(rawEnvelope.contains("Repository Plaintext Secret"))
         XCTAssertFalse(rawEnvelope.contains("repository plaintext body"))
@@ -643,7 +640,10 @@ extension PasteBuddyStoreTests {
         XCTAssertFalse(store.isPersistenceWriteBlocked, store.lastErrorMessage ?? "")
         XCTAssertEqual(store.snapshot.security.storageMode, .encrypted)
         XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == concurrentCapture.id }))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: databaseURL.path))
+        XCTAssertThrowsError(try ClipboardItemRepository(
+            database: PasteBuddyDatabase(fileURL: databaseURL)
+        ).exportSnapshot())
         let encryptedRaw = String(
             decoding: try Data(contentsOf: harness.snapshotStore.fileURL),
             as: UTF8.self

@@ -204,6 +204,26 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         }
     }
 
+    func hasRevokedTombstone() throws -> Bool {
+        try pool.read { db in
+            let value = try String.fetchOne(
+                db,
+                sql: "SELECT value_json FROM snapshot_metadata WHERE key = ?",
+                arguments: ["snapshot"]
+            )
+            return value == "PBDB-REVOKED:1"
+        }
+    }
+
+    func clearRevokedTombstoneForCutover() throws {
+        try pool.write { db in
+            try db.execute(
+                sql: "DELETE FROM snapshot_metadata WHERE key = ? AND value_json = ?",
+                arguments: ["snapshot", "PBDB-REVOKED:1"]
+            )
+        }
+    }
+
     func eraseSensitiveContent(
         validating validation: (Database) throws -> Void,
         preservingRevision preserveRevision: (Database) throws -> Void
@@ -768,6 +788,15 @@ public final class ClipboardItemRepository: @unchecked Sendable {
 
     func compactIfNeeded() throws -> PasteBuddyDatabase.CompactionResult {
         try database.compactIfNeeded()
+    }
+
+    func hasRevokedTombstone() throws -> Bool {
+        try database.hasRevokedTombstone()
+    }
+
+    func clearRevokedTombstoneForCutover() throws {
+        try database.clearRevokedTombstoneForCutover()
+        updateExpectedRepositoryRevision(nil)
     }
 
     public func replaceAll(with snapshot: PasteBuddySnapshot) throws {

@@ -703,21 +703,20 @@ public final class PasteBuddyStore {
     }
 
     private func removePlaintextRepositoryForEncryptedStorage() throws {
-        let databaseURL = clipboardRepository?.fileURL ?? deferredRepositoryDatabaseURL
-        try clipboardRepository?.eraseSensitiveContent()
+        if let clipboardRepository,
+           !(try clipboardRepository.hasRevokedTombstone()) {
+            try clipboardRepository.eraseSensitiveContent()
+        }
         repositorySyncActor = nil
         clipboardRepository = nil
         deferredRepositoryDatabaseURL = nil
         repositorySyncedDataRevision = nil
         clearPendingRepositoryPlan()
-        if let databaseURL {
-            try Self.removeSQLiteFiles(at: databaseURL)
-        }
     }
 
     private func removePlaintextRepositoryForEncryptedStorageAsync() async throws {
-        let databaseURL = clipboardRepository?.fileURL ?? deferredRepositoryDatabaseURL
-        if let repositorySyncActor {
+        if let repositorySyncActor,
+           !(try await repositorySyncActor.hasRevokedTombstone()) {
             try await repositorySyncActor.eraseSensitiveContent()
         }
         self.repositorySyncActor = nil
@@ -725,22 +724,6 @@ public final class PasteBuddyStore {
         deferredRepositoryDatabaseURL = nil
         repositorySyncedDataRevision = nil
         clearPendingRepositoryPlan()
-        if let databaseURL {
-            try await Task.detached(priority: .utility) {
-                try Self.removeSQLiteFiles(at: databaseURL)
-            }.value
-        }
-    }
-
-    nonisolated private static func removeSQLiteFiles(at databaseURL: URL) throws {
-        let fileManager = FileManager.default
-        for url in [
-            databaseURL,
-            URL(fileURLWithPath: databaseURL.path + "-wal"),
-            URL(fileURLWithPath: databaseURL.path + "-shm")
-        ] where fileManager.fileExists(atPath: url.path) {
-            try fileManager.removeItem(at: url)
-        }
     }
 
     public func save() {
@@ -3207,6 +3190,10 @@ public final class PasteBuddyStore {
                    let databaseURL = repositoryDatabaseURLForStandardStorage {
                     deferredRepositoryDatabaseURL = databaseURL
                     try await initializeDeferredRepositoryIfNeeded()
+                }
+                if let repositorySyncActor,
+                   try await repositorySyncActor.hasRevokedTombstone() {
+                    try await repositorySyncActor.clearRevokedTombstoneForCutover()
                 }
                 guard let sourceRevision = try diskStore.currentRevisionForAuthority() else {
                     throw PasteBuddyPersistenceError.historyUnavailable

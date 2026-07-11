@@ -60,6 +60,8 @@ actor StandardHistoryBackend: HistoryPersistenceBackend {
     func hasStoredSnapshot() throws -> Bool { try repository.hasStoredSnapshot() }
     func currentRevisionForAuthority() throws -> UUID? { try repository.currentRevisionForAuthority() }
     func compactIfNeeded() throws -> PasteBuddyDatabase.CompactionResult { try repository.compactIfNeeded() }
+    func hasRevokedTombstone() throws -> Bool { try repository.hasRevokedTombstone() }
+    func clearRevokedTombstoneForCutover() throws { try repository.clearRevokedTombstoneForCutover() }
     func eraseSensitiveContent() throws { try repository.eraseSensitiveContent() }
     func exportSnapshot(hydrateAssets: Bool = true) throws -> PasteBuddySnapshot { try repository.exportSnapshot(hydrateAssets: hydrateAssets) }
 }

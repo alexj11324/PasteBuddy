@@ -816,7 +816,10 @@ extension PasteBuddyStoreTests {
         XCTAssertFalse(store.isPersistenceWriteBlocked, store.lastErrorMessage ?? "")
         XCTAssertEqual(store.snapshot.items.map(\.id), [concurrentCapture.id, committedEncryptedItem.id])
         XCTAssertFalse(store.snapshot.items.contains(where: { $0.id == stalePlaintextItem.id }))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: databaseURL.path))
+        XCTAssertThrowsError(try ClipboardItemRepository(
+            database: PasteBuddyDatabase(fileURL: databaseURL)
+        ).exportSnapshot())
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
         XCTAssertEqual(reloaded.snapshot.items.map(\.id), [concurrentCapture.id, committedEncryptedItem.id])
