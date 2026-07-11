@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Observation
+import OSLog
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -13,6 +14,75 @@ public enum PasteBuddyPersistenceError: LocalizedError, Equatable {
             "message.history_unavailable",
             defaultValue: "PasteBuddy history is unavailable because it could not be loaded or saved safely."
         )
+    }
+}
+
+public struct PasteBuddyPersistenceLoadDiagnostic: Equatable, Sendable {
+    public enum Stage: String, CaseIterable, Equatable, Sendable {
+        case snapshotLoad
+        case repositoryInitialization
+        case repositoryMetadata
+        case repositoryExport
+        case loadApply
+        case storageMigration
+        case repositoryImport
+    }
+
+    public enum Reason: String, CaseIterable, Equatable, Sendable {
+        case permissionDenied
+        case snapshotUnreadable
+        case snapshotMigration
+        case database
+        case staleWriter
+        case cancelled
+        case unknown
+    }
+
+    public let stage: Stage
+    public let reason: Reason
+
+    public init(stage: Stage, reason: Reason) {
+        self.stage = stage
+        self.reason = reason
+    }
+
+    static func reason(for error: Error, at stage: Stage) -> Reason {
+        if error is CancellationError {
+            return .cancelled
+        }
+        if isPermissionDenied(error) {
+            return .permissionDenied
+        }
+        if let snapshotError = error as? SnapshotStoreError {
+            switch snapshotError {
+            case .unreadableStore(let underlyingError):
+                return isPermissionDenied(underlyingError) ? .permissionDenied : .snapshotUnreadable
+            case .legacyMigrationFailed(let underlyingError):
+                return isPermissionDenied(underlyingError) ? .permissionDenied : .snapshotMigration
+            case .missingApplicationSupportDirectory, .missingAppGroupContainer:
+                return .unknown
+            }
+        }
+        if let persistenceError = error as? PasteBuddyPersistenceError,
+           persistenceError == .historyUnavailable {
+            return .staleWriter
+        }
+        if error is PasteBuddyDatabaseError
+            || error is PasteBuddySnapshotDatabaseMigrationError {
+            return .database
+        }
+        switch stage {
+        case .repositoryInitialization, .repositoryMetadata, .repositoryExport, .repositoryImport:
+            return .database
+        case .snapshotLoad, .loadApply, .storageMigration:
+            return .unknown
+        }
+    }
+
+    private static func isPermissionDenied(_ error: Error) -> Bool {
+        guard let cocoaError = error as? CocoaError else { return false }
+        return cocoaError.code == .fileReadNoPermission
+            || cocoaError.code == .fileWriteNoPermission
     }
 }
 
@@ -41,6 +111,7 @@ public final class PasteBuddyStore {
         didSet { bumpQueryRevision() }
     }
     public var lastErrorMessage: String?
+    public private(set) var lastPersistenceLoadDiagnostic: PasteBuddyPersistenceLoadDiagnostic?
     public private(set) var isPersistenceWriteBlocked: Bool
     public var isPasteStackActive: Bool {
         didSet { bumpQueryRevision() }
@@ -117,6 +188,10 @@ public final class PasteBuddyStore {
     private static let defaultHistoryPageLimit = 100
     static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
     private static let maximumPersistenceStabilityAttempts = 8
+    private static let persistenceLogger = Logger(
+        subsystem: "com.alexjiang.PasteBuddy",
+        category: "Persistence"
+    )
 
     public nonisolated static var defaultDeviceName: String {
         #if os(macOS)
@@ -174,6 +249,7 @@ public final class PasteBuddyStore {
         self.selectedItemID = nil
         self.selectedItemIDs = []
         self.searchQuery = ""
+        self.lastPersistenceLoadDiagnostic = nil
         self.isPersistenceWriteBlocked = false
         self.isPasteStackActive = false
         self.pasteStackItems = []
@@ -266,13 +342,26 @@ public final class PasteBuddyStore {
 
     @discardableResult
     public func loadAsync() async -> Bool {
-        guard !isHistoryStorageMigrationInProgress else { return false }
+        guard !isHistoryStorageMigrationInProgress else {
+            recordPersistenceLoadFailure(stage: .storageMigration, reason: .cancelled)
+            return false
+        }
         let revisionBeforePendingFlush = dataRevision
         if pendingSaveTask != nil {
-            guard await flushPendingSave() else { return false }
-            guard dataRevision == revisionBeforePendingFlush else { return false }
+            guard await flushPendingSave() else {
+                recordPersistenceLoadFailure(
+                    stage: .loadApply,
+                    reason: Task.isCancelled ? .cancelled : .unknown
+                )
+                return false
+            }
+            guard dataRevision == revisionBeforePendingFlush else {
+                recordPersistenceLoadFailure(stage: .loadApply, reason: .cancelled)
+                return false
+            }
         }
         let revisionBeforeLoad = dataRevision
+        var loadStage = PasteBuddyPersistenceLoadDiagnostic.Stage.snapshotLoad
         do {
             let diskResult = try await persistenceActor.load()
             let diskStorageMode = diskResult.loadedStorageMode ?? diskResult.snapshot.security.storageMode
@@ -285,16 +374,19 @@ public final class PasteBuddyStore {
                     deferredRepositoryDatabaseURL = nil
                 }
             } else {
+                loadStage = .repositoryInitialization
                 try await initializeDeferredRepositoryIfNeeded()
             }
             let loadedFromRepository: Bool
             if diskStorageMode == .encrypted {
                 loadedFromRepository = false
             } else {
+                loadStage = .repositoryMetadata
                 loadedFromRepository = try await repositorySyncActor?.hasStoredSnapshot() == true
             }
             var loadedSnapshot: PasteBuddySnapshot
             if loadedFromRepository, let repositorySyncActor {
+                loadStage = .repositoryExport
                 loadedSnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
             } else {
                 loadedSnapshot = diskResult.snapshot
@@ -303,13 +395,16 @@ public final class PasteBuddyStore {
                 diskStorageMode == .encrypted || loadedSnapshot.security.storageMode == .encrypted
             ) ? .encrypted : .standard
             if resolvedStorageMode == .encrypted, loadedFromRepository, let repositorySyncActor {
+                loadStage = .repositoryExport
                 loadedSnapshot = try await repositorySyncActor.exportSnapshot()
             }
 
+            loadStage = .loadApply
             if let beforeApplyingAsyncLoadForTesting {
                 await beforeApplyingAsyncLoadForTesting()
             }
             guard dataRevision == revisionBeforeLoad else {
+                recordPersistenceLoadFailure(stage: .loadApply, reason: .cancelled)
                 return false
             }
 
@@ -328,6 +423,7 @@ public final class PasteBuddyStore {
             lastErrorMessage = nil
 
             if resolvedStorageMode == .encrypted {
+                loadStage = .storageMigration
                 if repositorySyncActor != nil || clipboardRepository != nil || deferredRepositoryDatabaseURL != nil {
                     isHistoryStorageMigrationInProgress = true
                     if let beforeCommittingHistoryStorageMigrationForTesting {
@@ -341,10 +437,12 @@ public final class PasteBuddyStore {
                 repositorySyncedDataRevision = nil
                 clearPendingRepositoryPlan()
             } else if !loadedFromRepository, let repositorySyncActor {
+                loadStage = .repositoryImport
                 let revisionToSync = dataRevision
                 let snapshotToSync = snapshot
                 try await repositorySyncActor.synchronize(with: snapshotToSync)
                 if dataRevision == revisionToSync {
+                    loadStage = .repositoryExport
                     var lightweightSnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
                     if dataRevision == revisionToSync {
                         lightweightSnapshot.security.storageMode = resolvedStorageMode
@@ -368,11 +466,27 @@ public final class PasteBuddyStore {
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            lastPersistenceLoadDiagnostic = nil
             return true
         } catch {
+            recordPersistenceLoadFailure(
+                stage: loadStage,
+                reason: PasteBuddyPersistenceLoadDiagnostic.reason(for: error, at: loadStage)
+            )
             markHistoryPersistenceUnavailable()
             return false
         }
+    }
+
+    private func recordPersistenceLoadFailure(
+        stage: PasteBuddyPersistenceLoadDiagnostic.Stage,
+        reason: PasteBuddyPersistenceLoadDiagnostic.Reason
+    ) {
+        let diagnostic = PasteBuddyPersistenceLoadDiagnostic(stage: stage, reason: reason)
+        lastPersistenceLoadDiagnostic = diagnostic
+        Self.persistenceLogger.error(
+            "History load failed: stage=\(diagnostic.stage.rawValue, privacy: .public) reason=\(diagnostic.reason.rawValue, privacy: .public)"
+        )
     }
 
     func markHistoryPersistenceUnavailable() {

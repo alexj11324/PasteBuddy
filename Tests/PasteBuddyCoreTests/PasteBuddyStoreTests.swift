@@ -88,6 +88,127 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(diagnosticReasons, [.historyLoadFailed])
     }
 
+    func testAsyncLoadClassifiesCorruptedSnapshotWithoutExposingErrorDetails() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try FileManager.default.createDirectory(
+            at: harness.snapshotStore.fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("synthetic corrupted snapshot".utf8).write(to: harness.snapshotStore.fileURL)
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+
+        let didLoad = await store.loadAsync()
+
+        XCTAssertFalse(didLoad)
+        XCTAssertEqual(
+            store.lastPersistenceLoadDiagnostic,
+            PasteBuddyPersistenceLoadDiagnostic(
+                stage: .snapshotLoad,
+                reason: .snapshotUnreadable
+            )
+        )
+        XCTAssertTrue(store.isPersistenceWriteBlocked)
+        XCTAssertEqual(
+            store.lastErrorMessage,
+            PasteBuddyPersistenceError.historyUnavailable.localizedDescription
+        )
+    }
+
+    func testPersistenceLoadDiagnosticsExposeOnlyFixedStageAndReasonVocabulary() {
+        let requiredStages: [PasteBuddyPersistenceLoadDiagnostic.Stage] = [
+            .snapshotLoad,
+            .repositoryInitialization,
+            .repositoryMetadata,
+            .repositoryExport,
+            .loadApply,
+            .storageMigration,
+            .repositoryImport,
+        ]
+        let requiredReasons: [PasteBuddyPersistenceLoadDiagnostic.Reason] = [
+            .permissionDenied,
+            .snapshotUnreadable,
+            .snapshotMigration,
+            .database,
+            .staleWriter,
+            .cancelled,
+            .unknown,
+        ]
+
+        for stage in requiredStages {
+            XCTAssertTrue(PasteBuddyPersistenceLoadDiagnostic.Stage.allCases.contains(stage))
+        }
+        for reason in requiredReasons {
+            XCTAssertTrue(PasteBuddyPersistenceLoadDiagnostic.Reason.allCases.contains(reason))
+        }
+    }
+
+    func testPersistenceLoadDiagnosticClassifiesWrappedCocoaNoPermissionError() {
+        let error = SnapshotStoreError.unreadableStore(
+            CocoaError(.fileReadNoPermission)
+        )
+
+        XCTAssertEqual(
+            PasteBuddyPersistenceLoadDiagnostic.reason(for: error, at: .snapshotLoad),
+            .permissionDenied
+        )
+    }
+
+    func testPersistenceLoadDiagnosticClassifiesOnlyFixedFailureReasons() {
+        let genericError = NSError(domain: "PasteBuddySyntheticTestError", code: 1)
+
+        XCTAssertEqual(
+            PasteBuddyPersistenceLoadDiagnostic.reason(
+                for: SnapshotStoreError.legacyMigrationFailed(genericError),
+                at: .snapshotLoad
+            ),
+            .snapshotMigration
+        )
+        XCTAssertEqual(
+            PasteBuddyPersistenceLoadDiagnostic.reason(for: CancellationError(), at: .loadApply),
+            .cancelled
+        )
+        XCTAssertEqual(
+            PasteBuddyPersistenceLoadDiagnostic.reason(
+                for: PasteBuddyPersistenceError.historyUnavailable,
+                at: .storageMigration
+            ),
+            .staleWriter
+        )
+        XCTAssertEqual(
+            PasteBuddyPersistenceLoadDiagnostic.reason(for: genericError, at: .repositoryMetadata),
+            .database
+        )
+        XCTAssertEqual(
+            PasteBuddyPersistenceLoadDiagnostic.reason(for: genericError, at: .loadApply),
+            .unknown
+        )
+    }
+
+    func testSuccessfulAsyncLoadClearsPreviousPersistenceLoadDiagnostic() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try FileManager.default.createDirectory(
+            at: harness.snapshotStore.fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("synthetic corrupted snapshot".utf8).write(to: harness.snapshotStore.fileURL)
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+
+        let failedLoad = await store.loadAsync()
+        XCTAssertFalse(failedLoad)
+        XCTAssertNotNil(store.lastPersistenceLoadDiagnostic)
+
+        try FileManager.default.removeItem(at: harness.snapshotStore.fileURL)
+        try harness.snapshotStore.save(PasteBuddySnapshot())
+        let successfulLoad = await store.loadAsync()
+
+        XCTAssertTrue(successfulLoad)
+        XCTAssertNil(store.lastPersistenceLoadDiagnostic)
+        XCTAssertFalse(store.isPersistenceWriteBlocked)
+        XCTAssertNil(store.lastErrorMessage)
+    }
+
     func testLoadedStoreFactoryFailsClosedWhenInitialLoadIsAbortedByConcurrentMutation() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -128,6 +249,10 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(diagnosticReasons, [.historyLoadFailed])
         XCTAssertTrue(store.isPersistenceWriteBlocked)
         XCTAssertEqual(store.lastErrorMessage, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        XCTAssertEqual(
+            store.lastPersistenceLoadDiagnostic,
+            PasteBuddyPersistenceLoadDiagnostic(stage: .loadApply, reason: .cancelled)
+        )
         XCTAssertTrue(store.snapshot.items.isEmpty, "An aborted initial load must not masquerade as loaded history.")
         XCTAssertEqual(try harness.snapshotStore.load().items.map(\.id), [persistedItem.id])
     }
@@ -430,12 +555,55 @@ final class PasteBuddyStoreTests: XCTestCase {
             payload: ClipboardPayload(text: "capture created during flush")
         ))
         await flushGate.resume()
-        _ = await reloadTask.value
+        let didReload = await reloadTask.value
 
+        XCTAssertFalse(didReload)
+        XCTAssertEqual(
+            store.lastPersistenceLoadDiagnostic,
+            PasteBuddyPersistenceLoadDiagnostic(stage: .loadApply, reason: .cancelled)
+        )
         XCTAssertEqual(store.snapshot.items.map(\.id), [concurrentCapture.id, firstCapture.id, existing.id])
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
         XCTAssertEqual(reloaded.snapshot.items.map(\.id), [concurrentCapture.id, firstCapture.id, existing.id])
+    }
+
+    func testAsyncLoadRecordsCancelledDiagnosticWhenPendingFlushIsCancelled() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try harness.snapshotStore.save(PasteBuddySnapshot())
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        store.load()
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Tests",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pending Before Cancelled Load",
+            payload: ClipboardPayload(text: "synthetic pending capture")
+        ))
+        let flushGate = SuspendedStoreLoadGate()
+        store.beforePersistingFlushSnapshotForTesting = {
+            await flushGate.suspend()
+        }
+
+        let loadTask = Task { @MainActor in
+            await store.loadAsync()
+        }
+        while await !flushGate.hasSuspended() {
+            await Task.yield()
+        }
+        loadTask.cancel()
+        await flushGate.resume()
+        let didLoad = await loadTask.value
+
+        XCTAssertFalse(didLoad)
+        XCTAssertEqual(
+            store.lastPersistenceLoadDiagnostic,
+            PasteBuddyPersistenceLoadDiagnostic(stage: .loadApply, reason: .cancelled)
+        )
     }
 
     func testCancellingFlushBeforeCommitDoesNotPersistPendingCapture() async throws {
@@ -751,6 +919,13 @@ final class PasteBuddyStoreTests: XCTestCase {
         while await !cleanupGate.hasSuspended() {
             await Task.yield()
         }
+        let overlappingLoad = await store.loadAsync()
+
+        XCTAssertFalse(overlappingLoad)
+        XCTAssertEqual(
+            store.lastPersistenceLoadDiagnostic,
+            PasteBuddyPersistenceLoadDiagnostic(stage: .storageMigration, reason: .cancelled)
+        )
         let concurrentCapture = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Messages",
             deviceName: "Test Mac",
