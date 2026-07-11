@@ -345,7 +345,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testIrohStopClearsReceiveCallbackAndReturnsToIdle() async {
-        let defaults = UserDefaults(suiteName: "PasteBuddyIrohStopTests-\(UUID().uuidString)")!
+        let defaultsSuite = "PasteBuddyIrohStopTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
         let service = IrohClipboardSyncService(defaults: defaults)
         service.onItemReceived = { _ in }
 
@@ -353,6 +355,21 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertNil(service.onItemReceived)
         XCTAssertEqual(service.connectionState, .idle)
+    }
+
+    func testFrontmostApplicationTrackerStopsAndCanRestartObservation() {
+        let tracker = FrontmostApplicationTracker()
+
+        tracker.start()
+        XCTAssertTrue(tracker.isTracking)
+
+        tracker.stop()
+        XCTAssertFalse(tracker.isTracking)
+
+        tracker.start()
+        XCTAssertTrue(tracker.isTracking)
+        tracker.stop()
+        XCTAssertFalse(tracker.isTracking)
     }
 
     func testManualShelfReloadFailureMakesRuntimeUnavailableWithoutRefreshingOrMutating() async throws {

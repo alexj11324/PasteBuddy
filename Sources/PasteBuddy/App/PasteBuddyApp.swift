@@ -496,6 +496,7 @@ struct PasteBuddyApp: App {
         persistenceErrorMessage = error.localizedDescription
         monitor?.stop()
         monitor = nil
+        frontmostApplicationTracker.stop()
         shelfPanelController?.hideImmediately()
         shelfPanelController = nil
         panelHotKeyController = nil

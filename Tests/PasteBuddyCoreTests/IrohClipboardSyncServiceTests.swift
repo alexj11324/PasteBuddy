@@ -274,6 +274,189 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
         XCTAssertEqual(completionsAfterRelease, 2)
     }
 
+    func testStopInvalidatesEndpointThatFinishesBindingLater() async {
+        let defaultsSuite = "PasteBuddyIrohStopBind-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let binder = SuspendedEndpointBinder()
+        let endpointProbe = IrohEndpointProbe()
+        let service = IrohClipboardSyncService(
+            defaults: defaults,
+            endpointBinder: { await binder.bind() }
+        )
+
+        let startTask = Task { @MainActor in
+            await service.start()
+        }
+        await binder.waitUntilStarted()
+
+        await service.stop()
+
+        XCTAssertEqual(service.connectionState, .idle)
+        XCTAssertFalse(service.hasBoundEndpointForTesting)
+
+        await binder.finish(with: endpointProbe.makeEndpoint())
+        await startTask.value
+
+        let closeCount = await endpointProbe.closeCount()
+        XCTAssertEqual(closeCount, 1)
+        XCTAssertEqual(service.connectionState, .idle)
+        XCTAssertFalse(service.hasBoundEndpointForTesting)
+    }
+
+    func testStartAfterStopDuringBindRunsFreshGenerationBinding() async {
+        let defaultsSuite = "PasteBuddyIrohRestartBind-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let binder = SequencedEndpointBinder()
+        let staleEndpoint = IrohEndpointProbe(endpointID: "stale-endpoint")
+        let freshEndpoint = IrohEndpointProbe(endpointID: "fresh-endpoint")
+        let service = IrohClipboardSyncService(
+            defaults: defaults,
+            endpointBinder: { await binder.bind() }
+        )
+
+        let firstStart = Task { @MainActor in await service.start() }
+        await binder.waitUntilCallCount(1)
+        await service.stop()
+        let secondStart = Task { @MainActor in await service.start() }
+
+        await binder.finishCall(0, with: staleEndpoint.makeEndpoint())
+        let didRequestFreshBind = await waitUntil {
+            await binder.callCount() == 2
+        }
+        XCTAssertTrue(didRequestFreshBind)
+        if didRequestFreshBind {
+            await binder.finishCall(1, with: freshEndpoint.makeEndpoint())
+        }
+        await firstStart.value
+        await secondStart.value
+
+        let staleCloseCount = await staleEndpoint.closeCount()
+        let freshCloseCount = await freshEndpoint.closeCount()
+        XCTAssertEqual(staleCloseCount, 1)
+        XCTAssertEqual(freshCloseCount, 0)
+        XCTAssertEqual(service.endpointId, "fresh-endpoint")
+        XCTAssertEqual(service.connectionState, .ready)
+        XCTAssertTrue(service.hasBoundEndpointForTesting)
+
+        await service.stop()
+    }
+
+    func testStopClosesEndpointAndAwaitsCanceledAcceptBeforeReturning() async {
+        let defaultsSuite = "PasteBuddyIrohStopAccept-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let acceptProbe = SuspendedPendingSessionOperation()
+        let endpointProbe = IrohEndpointProbe(acceptOperation: acceptProbe)
+        let sessionProbe = IrohSessionProbe()
+        let stopCompletion = AsyncCompletionProbe()
+        let service = IrohClipboardSyncService(
+            defaults: defaults,
+            endpointBinder: { endpointProbe.makeEndpoint() }
+        )
+
+        await service.start()
+        await acceptProbe.waitUntilStarted()
+        let stopTask = Task { @MainActor in
+            await service.stop()
+            await stopCompletion.record()
+        }
+        await endpointProbe.waitUntilClosed()
+        await Task.yield()
+
+        let completedBeforeAcceptReturns = await stopCompletion.didComplete()
+        XCTAssertFalse(completedBeforeAcceptReturns)
+
+        await acceptProbe.finish(
+            with: IrohClipboardPendingSession(
+                remoteEndpointID: SecretKey.generate().public().description,
+                openTransport: { _, _ in await sessionProbe.makeTransport() }
+            )
+        )
+        await stopTask.value
+
+        let completedAfterAcceptReturns = await stopCompletion.didComplete()
+        let sessionMakeCount = await sessionProbe.makeCount()
+        XCTAssertTrue(completedAfterAcceptReturns)
+        XCTAssertEqual(sessionMakeCount, 0)
+        XCTAssertEqual(service.connectionState, .idle)
+        XCTAssertFalse(service.hasBoundEndpointForTesting)
+        XCTAssertFalse(service.hasActiveSessionForTesting)
+    }
+
+    func testStopPreventsSuspendedConnectFromOpeningSession() async {
+        let defaultsSuite = "PasteBuddyIrohStopConnect-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let connectProbe = SuspendedPendingSessionOperation()
+        let endpointProbe = IrohEndpointProbe(connectOperation: connectProbe)
+        let sessionProbe = IrohSessionProbe()
+        let service = IrohClipboardSyncService(
+            defaults: defaults,
+            endpointBinder: { endpointProbe.makeEndpoint() }
+        )
+        service.peerEndpointId = SecretKey.generate().public().description
+
+        await service.start()
+        let connectTask = Task { @MainActor in
+            await service.connectToPeer()
+        }
+        await connectProbe.waitUntilStarted()
+
+        await service.stop()
+        await connectProbe.finish(
+            with: IrohClipboardPendingSession(
+                remoteEndpointID: service.peerEndpointId,
+                openTransport: { _, _ in await sessionProbe.makeTransport() }
+            )
+        )
+        await connectTask.value
+
+        let sessionMakeCount = await sessionProbe.makeCount()
+        XCTAssertEqual(sessionMakeCount, 0)
+        XCTAssertEqual(service.connectionState, .idle)
+        XCTAssertFalse(service.hasBoundEndpointForTesting)
+        XCTAssertFalse(service.hasActiveSessionForTesting)
+    }
+
+    func testStopPreventsSuspendedSessionOpenFromBeingAdopted() async {
+        let defaultsSuite = "PasteBuddyIrohStopOpen-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let openProbe = SuspendedSessionTransportOperation()
+        let endpointProbe = IrohEndpointProbe(
+            immediateConnectSession: IrohClipboardPendingSession(
+                remoteEndpointID: SecretKey.generate().public().description,
+                openTransport: { receive, closed in
+                    await openProbe.open(receive: receive, closed: closed)
+                }
+            )
+        )
+        let service = IrohClipboardSyncService(
+            defaults: defaults,
+            endpointBinder: { endpointProbe.makeEndpoint() }
+        )
+        service.peerEndpointId = SecretKey.generate().public().description
+
+        await service.start()
+        let connectTask = Task { @MainActor in
+            await service.connectToPeer()
+        }
+        await openProbe.waitUntilStarted()
+
+        await service.stop()
+        let staleTransport = IrohTestSessionTransport()
+        await openProbe.finish(with: staleTransport)
+        await connectTask.value
+
+        XCTAssertEqual(staleTransport.startCount, 0)
+        XCTAssertEqual(staleTransport.stopCount, 1)
+        XCTAssertEqual(service.connectionState, .idle)
+        XCTAssertFalse(service.hasBoundEndpointForTesting)
+        XCTAssertFalse(service.hasActiveSessionForTesting)
+    }
+
     func testIdentityStoreBaseQueryIncludesOptionalAccessGroup() {
         let accessGroup = "TEAMID.com.alexjiang.PasteBuddy.shared"
         let sharedStore = IrohClipboardIdentityStore(
@@ -512,6 +695,212 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
         }
         throw XCTSkip("Could not locate \(relativePath) from \(FileManager.default.currentDirectoryPath)")
     }
+}
+
+@MainActor
+private func waitUntil(
+    maximumYields: Int = 1_000,
+    _ condition: () async -> Bool
+) async -> Bool {
+    for _ in 0..<maximumYields {
+        if await condition() {
+            return true
+        }
+        await Task.yield()
+    }
+    return await condition()
+}
+
+private actor SequencedEndpointBinder {
+    private var continuations: [CheckedContinuation<IrohClipboardBoundEndpoint, Never>?] = []
+
+    func bind() async -> IrohClipboardBoundEndpoint {
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func waitUntilCallCount(_ expectedCount: Int) async {
+        while continuations.count < expectedCount {
+            await Task.yield()
+        }
+    }
+
+    func finishCall(_ index: Int, with endpoint: IrohClipboardBoundEndpoint) {
+        guard continuations.indices.contains(index), let continuation = continuations[index] else {
+            return
+        }
+        continuations[index] = nil
+        continuation.resume(returning: endpoint)
+    }
+
+    func callCount() -> Int { continuations.count }
+}
+
+private actor SuspendedEndpointBinder {
+    private var didStart = false
+    private var continuation: CheckedContinuation<IrohClipboardBoundEndpoint, Never>?
+
+    func bind() async -> IrohClipboardBoundEndpoint {
+        didStart = true
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        while !didStart {
+            await Task.yield()
+        }
+    }
+
+    func finish(with endpoint: IrohClipboardBoundEndpoint) {
+        continuation?.resume(returning: endpoint)
+        continuation = nil
+    }
+}
+
+private actor SuspendedPendingSessionOperation {
+    private var didStart = false
+    private var continuation: CheckedContinuation<IrohClipboardPendingSession?, Never>?
+
+    func next() async -> IrohClipboardPendingSession? {
+        didStart = true
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        while !didStart {
+            await Task.yield()
+        }
+    }
+
+    func finish(with session: IrohClipboardPendingSession?) {
+        continuation?.resume(returning: session)
+        continuation = nil
+    }
+}
+
+private actor SuspendedSessionTransportOperation {
+    private var didStart = false
+    private var continuation: CheckedContinuation<any IrohClipboardSessionTransport, Never>?
+
+    func open(
+        receive: @escaping @Sendable (IrohClipboardSyncEnvelope) async -> Void,
+        closed: @escaping @Sendable () -> Void
+    ) async -> any IrohClipboardSessionTransport {
+        _ = receive
+        _ = closed
+        didStart = true
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        while !didStart {
+            await Task.yield()
+        }
+    }
+
+    func finish(with transport: any IrohClipboardSessionTransport) {
+        continuation?.resume(returning: transport)
+        continuation = nil
+    }
+}
+
+private actor IrohEndpointProbe {
+    nonisolated let endpointID: String
+    nonisolated let acceptOperation: SuspendedPendingSessionOperation?
+    nonisolated let connectOperation: SuspendedPendingSessionOperation?
+    nonisolated let immediateConnectSession: IrohClipboardPendingSession?
+    private var closes = 0
+
+    init(
+        endpointID: String = "test-endpoint",
+        acceptOperation: SuspendedPendingSessionOperation? = nil,
+        connectOperation: SuspendedPendingSessionOperation? = nil,
+        immediateConnectSession: IrohClipboardPendingSession? = nil
+    ) {
+        self.endpointID = endpointID
+        self.acceptOperation = acceptOperation
+        self.connectOperation = connectOperation
+        self.immediateConnectSession = immediateConnectSession
+    }
+
+    nonisolated func makeEndpoint() -> IrohClipboardBoundEndpoint {
+        IrohClipboardBoundEndpoint(
+            endpointID: endpointID,
+            acceptPendingSession: { [acceptOperation] in
+                guard let acceptOperation else { return nil }
+                return await acceptOperation.next()
+            },
+            connectPendingSession: { [connectOperation, immediateConnectSession] _ in
+                if let connectOperation,
+                   let session = await connectOperation.next() {
+                    return session
+                }
+                if let immediateConnectSession {
+                    return immediateConnectSession
+                }
+                throw IrohLifecycleProbeError.missingConnectSession
+            },
+            close: { [weak self] in
+                await self?.recordClose()
+            }
+        )
+    }
+
+    func recordClose() {
+        closes += 1
+    }
+
+    func waitUntilClosed() async {
+        while closes == 0 {
+            await Task.yield()
+        }
+    }
+
+    func closeCount() -> Int { closes }
+}
+
+private actor IrohSessionProbe {
+    private var makes = 0
+
+    func makeTransport() -> any IrohClipboardSessionTransport {
+        makes += 1
+        return IrohTestSessionTransport()
+    }
+
+    func makeCount() -> Int { makes }
+}
+
+private final class IrohTestSessionTransport: IrohClipboardSessionTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var starts = 0
+    private var stops = 0
+
+    var startCount: Int { lock.withLock { starts } }
+    var stopCount: Int { lock.withLock { stops } }
+
+    func start() {
+        lock.withLock { starts += 1 }
+    }
+
+    func stop() {
+        lock.withLock { stops += 1 }
+    }
+
+    func send(_ envelope: IrohClipboardSyncEnvelope) async throws {
+        _ = envelope
+    }
+}
+
+private actor AsyncCompletionProbe {
+    private var completed = false
+
+    func record() { completed = true }
+    func didComplete() -> Bool { completed }
+}
+
+private enum IrohLifecycleProbeError: Error {
+    case missingConnectSession
 }
 
 private final class IrohClipboardKeychainHarness: @unchecked Sendable {

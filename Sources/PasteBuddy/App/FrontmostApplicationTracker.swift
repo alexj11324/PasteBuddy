@@ -14,11 +14,11 @@ final class FrontmostApplicationTracker {
         [Bundle.main.bundleIdentifier, "com.pastebuddy.app"].compactMap(\.self)
     )
 
+    var isTracking: Bool { activationObserver != nil }
+
     deinit {
         MainActor.assumeIsolated {
-            if let activationObserver {
-                NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
-            }
+            stop()
         }
     }
 
@@ -37,6 +37,14 @@ final class FrontmostApplicationTracker {
                 self?.recordIfExternal(application)
             }
         }
+    }
+
+    func stop() {
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+            self.activationObserver = nil
+        }
+        lastExternalApplication = nil
     }
 
     func recordCurrentFrontmostApplication() {
