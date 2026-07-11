@@ -35,7 +35,10 @@ reject_literal() {
 require_file script/build_and_run.sh
 require_executable script/open_dev_panel.sh
 require_file script/push_testflight.sh
+require_executable script/verify_app_privacy_artifacts.sh
 require_file .github/workflows/testflight.yml
+require_file Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy
+require_file Support/Privacy/iOS/PrivacyInfo.xcprivacy
 
 require_literal script/build_and_run.sh 'PASTEBUDDY_CODESIGN_KEYCHAIN'
 require_literal script/build_and_run.sh 'security default-keychain -d user'
@@ -54,6 +57,8 @@ require_literal script/build_and_run.sh 'PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FO
 require_literal script/build_and_run.sh 'PasteBuddyDisableClipboardMonitoringForDevelopmentVerification'
 require_literal script/build_and_run.sh 'Clipboard monitor verification override is only supported for development signing.'
 require_literal script/build_and_run.sh 'PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION must be 0 or 1.'
+require_literal script/build_and_run.sh '"$RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" "$APP_RESOURCES/PrivacyInfo.xcprivacy"'
+require_literal script/build_and_run.sh 'app.pastebuddy.pinboard-item-ids'
 
 require_literal script/open_dev_panel.sh 'APP_BUNDLE="/Applications/PasteBuddy Dev.app"'
 require_literal script/open_dev_panel.sh 'codesign --verify --deep --strict'
@@ -62,9 +67,18 @@ require_literal script/open_dev_panel.sh '/usr/bin/open -g -a "$APP_BUNDLE" "$ur
 reject_literal script/open_dev_panel.sh 'osascript'
 
 require_literal script/push_testflight.sh 'git fetch "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" --tags'
+require_literal script/push_testflight.sh 'verify_app_privacy_artifacts.sh'
 reject_literal script/push_testflight.sh 'git fetch "$REMOTE" "$BRANCH" --tags'
 
 require_literal .github/workflows/testflight.yml 'script/verify_repository_contracts.sh'
+require_literal .github/workflows/testflight.yml 'script/verify_app_privacy_artifacts.sh'
 require_literal .github/workflows/testflight.yml 'python3 script/localization_catalog_workflow.py check'
+require_literal Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy 'NSPrivacyAccessedAPICategoryUserDefaults'
+require_literal Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy 'CA92.1'
+reject_literal Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy '1C8F.1'
+require_literal Support/Privacy/iOS/PrivacyInfo.xcprivacy 'NSPrivacyAccessedAPICategoryUserDefaults'
+require_literal Support/Privacy/iOS/PrivacyInfo.xcprivacy '1C8F.1'
+reject_literal Support/Privacy/iOS/PrivacyInfo.xcprivacy 'CA92.1'
+require_literal Support/InfoPlist/PasteBuddyiOS-Info.plist 'app.pastebuddy.mobile-pinboard-item-ids'
 
 echo "repository contracts verified"

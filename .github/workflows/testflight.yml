@@ -41,6 +41,11 @@ jobs:
       - name: Run Swift tests
         run: swift test
 
+      - name: Verify macOS app privacy resources
+        run: |
+          bin_path="$(swift build --show-bin-path)"
+          script/verify_app_privacy_artifacts.sh swiftpm "$bin_path/PasteBuddy_PasteBuddy.bundle"
+
       - name: Check localization catalogs
         run: python3 script/localization_catalog_workflow.py check
 
@@ -55,6 +60,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Verify iOS Simulator privacy artifacts
+        env:
+          SIMULATOR_APP: ${{ runner.temp }}/Verify-Simulator/Build/Products/Debug-iphonesimulator/PasteBuddyiOS.app
+        run: script/verify_app_privacy_artifacts.sh ios "$SIMULATOR_APP"
+
       - name: Compile generic iOS app
         run: |
           xcodebuild \
@@ -65,6 +75,11 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/Verify-Device" \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Verify generic iOS privacy artifacts
+        env:
+          DEVICE_APP: ${{ runner.temp }}/Verify-Device/Build/Products/Release-iphoneos/PasteBuddyiOS.app
+        run: script/verify_app_privacy_artifacts.sh ios "$DEVICE_APP"
 
   upload:
     name: Build and Upload
@@ -150,6 +165,11 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             CURRENT_PROJECT_VERSION="$PB_BUILD_NUMBER" \
             archive
+
+      - name: Verify archived privacy artifacts
+        env:
+          ARCHIVED_APP: ${{ runner.temp }}/PasteBuddyiOS.xcarchive/Products/Applications/PasteBuddyiOS.app
+        run: script/verify_app_privacy_artifacts.sh ios "$ARCHIVED_APP"
 
       - name: Write export options
         run: |

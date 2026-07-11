@@ -260,6 +260,8 @@ if [[ -d "$RESOURCE_BUNDLE" ]]; then
     /usr/bin/ditto --norsrc --noextattr "$localization_dir" "$APP_RESOURCES/$(basename "$localization_dir")"
   done
 fi
+[[ -f "$RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" ]] || die "App privacy manifest is missing from the SwiftPM resource bundle."
+/usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" "$APP_RESOURCES/PrivacyInfo.xcprivacy"
 if [[ -f "$APP_ICON_SOURCE" ]]; then
   /usr/bin/ditto --norsrc --noextattr "$APP_ICON_SOURCE" "$APP_RESOURCES/$APP_ICON_NAME"
 fi
@@ -293,6 +295,19 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$CODESIGN_IDENTITY</string>
   <key>PasteBuddyStableAppPath</key>
   <string>$INSTALL_BUNDLE</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeDescription</key>
+      <string>PasteBuddy Pinboard Item IDs</string>
+      <key>UTTypeIdentifier</key>
+      <string>app.pastebuddy.pinboard-item-ids</string>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
