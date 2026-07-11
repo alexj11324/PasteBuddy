@@ -81,3 +81,52 @@ PASTEBUDDY_SIGNING_CHANNEL=release script/build_and_run.sh --verify
 
 Release signing requires a `Developer ID Application` identity. The script must
 fail rather than falling back to ad-hoc signing.
+
+### Iroh macOS 14.5 Release Blocker
+
+The upstream Iroh 1.0.0 release xcframework is not currently compatible with
+PasteBuddy's macOS 14.5 deployment floor. Object-level inspection of the
+published macOS archive on 2026-07-11 found:
+
+- 366 objects with minOS 11.0;
+- 25 objects with minOS 14.5;
+- `a1edd97dd51cd48d-blake3_neon.o` with minOS 26.5.
+
+That last object is the source of the linker warning and makes a macOS 14.5
+release claim unverifiable. The issue is consistent with the BLAKE3 Apple
+cross-compilation failure documented in
+[BLAKE3 issue 437](https://github.com/BLAKE3-team/BLAKE3/issues/437).
+
+A clean build from the official Iroh tag `v1.0.0` (`afcb46d`) using its locked
+dependencies and `MACOSX_DEPLOYMENT_TARGET=14.5` produced a macOS archive with
+375 objects at minOS 11.0 and 26 at minOS 14.5. Its 350 exported UniFFI symbols
+matched the published archive exactly. This proves the source can produce a
+compatible slice, but it is not a distributable replacement: the tag does not
+pin the Rust toolchain, the locally rebuilt archive is not covered by the
+published xcframework checksum, and no upstream release contains that rebuilt
+full Apple artifact. PasteBuddy therefore does not vendor or copy the local
+binary into `.build`.
+
+Release packaging runs this mandatory gate after SwiftPM resolution:
+
+```bash
+script/verify_iroh_macos_minimum_os.sh \
+  "$(swift build --show-bin-path)/Iroh.framework/Iroh" 14.5
+```
+
+Development builds remain available, but
+`PASTEBUDDY_SIGNING_CHANNEL=release script/build_and_run.sh --verify` must fail
+until the resolved upstream archive passes. Do not hide the warning or raise
+PasteBuddy's deployment target to match the accidental object version.
+
+To clear the blocker:
+
+1. Upgrade to an official Iroh release whose published checksum covers a fixed
+   xcframework.
+2. Resolve from a clean SwiftPM cache and run the gate above.
+3. Confirm the UniFFI export set still matches the generated Swift bindings.
+4. Run macOS 14.5 launch and peer-sync verification on the signed release app.
+5. Keep the gate in place after removing this blocker note.
+
+The currently published upstream version remains
+[Iroh 1.0.0](https://github.com/n0-computer/iroh-ffi/releases/tag/v1.0.0).
