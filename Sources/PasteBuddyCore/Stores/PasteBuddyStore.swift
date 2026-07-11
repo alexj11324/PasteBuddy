@@ -276,9 +276,26 @@ public final class PasteBuddyStore {
 
     public func load() {
         do {
-            let persistenceLease = try authorityStore.acquireLease(.shared)
+            let preliminaryAuthority = try authorityStore.load()
+            let needsInterruptedCutoverRecovery = preliminaryAuthority?.phase != nil
+                && preliminaryAuthority?.phase != .stable
+            let needsLegacyCutover = preliminaryAuthority == nil
+                && FileManager.default.fileExists(atPath: diskStore.fileURL.path)
+            let persistenceLease = try authorityStore.acquireLease(
+                needsLegacyCutover || needsInterruptedCutoverRecovery ? .exclusive : .shared
+            )
             defer { persistenceLease?.release() }
-            if let authority = try authorityStore.load() {
+            var authority = try authorityStore.load()
+            if authority?.phase != nil, authority?.phase != .stable {
+                guard let clipboardRepository else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                authority = try PasteBuddySnapshotDatabaseMigrator(
+                    snapshotStore: diskStore,
+                    repository: clipboardRepository
+                ).recoverInterruptedCutover()
+            }
+            if let authority {
                 guard authority.phase == .stable else {
                     throw PasteBuddyPersistenceError.historyUnavailable
                 }
@@ -359,6 +376,9 @@ public final class PasteBuddyStore {
                     rebuildCaptureHistoryState()
                     repositorySyncedDataRevision = dataRevision
                     presentationCache = PasteBuddyPresentationCache()
+                    if needsLegacyCutover {
+                        try finalizeLegacyStandardSnapshotCutover(repository: clipboardRepository)
+                    }
                 }
             }
             clearPendingRepositoryPlan()
@@ -394,13 +414,36 @@ public final class PasteBuddyStore {
         let revisionBeforeLoad = dataRevision
         var loadStage = PasteBuddyPersistenceLoadDiagnostic.Stage.snapshotLoad
         do {
+            let cutoverNeeds = try await Task.detached(priority: .userInitiated) { [authorityStore, diskStore] in
+                let authority = try authorityStore.load()
+                return (
+                    legacy: authority == nil
+                        && FileManager.default.fileExists(atPath: diskStore.fileURL.path),
+                    recovery: authority?.phase != nil && authority?.phase != .stable
+                )
+            }.value
             let persistenceLease = try await Task.detached(priority: .userInitiated) { [authorityStore] in
-                try authorityStore.acquireLease(.shared)
+                try authorityStore.acquireLease(
+                    cutoverNeeds.legacy || cutoverNeeds.recovery ? .exclusive : .shared
+                )
             }.value
             defer { persistenceLease?.release() }
-            let authority = try await Task.detached(priority: .userInitiated) { [authorityStore] in
+            var authority = try await Task.detached(priority: .userInitiated) { [authorityStore] in
                 try authorityStore.load()
             }.value
+            if authority?.phase != nil, authority?.phase != .stable {
+                loadStage = .repositoryInitialization
+                try await initializeDeferredRepositoryIfNeeded()
+                guard let clipboardRepository else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                authority = try await Task.detached(priority: .userInitiated) { [diskStore] in
+                    try PasteBuddySnapshotDatabaseMigrator(
+                        snapshotStore: diskStore,
+                        repository: clipboardRepository
+                    ).recoverInterruptedCutover()
+                }.value
+            }
             if let authority {
                 guard authority.phase == .stable else {
                     throw PasteBuddyPersistenceError.historyUnavailable
@@ -531,6 +574,11 @@ public final class PasteBuddyStore {
                         repositorySyncedDataRevision = dataRevision
                         clearPendingRepositoryPlan()
                         presentationCache = PasteBuddyPresentationCache()
+                        if cutoverNeeds.legacy {
+                            try await finalizeLegacyStandardSnapshotCutover(
+                                repositorySyncActor: repositorySyncActor
+                            )
+                        }
                     } else {
                         repositorySyncedDataRevision = nil
                     }
@@ -614,6 +662,44 @@ public final class PasteBuddyStore {
         repositorySyncActor = ClipboardRepositorySyncActor(repository: repository)
         deferredRepositoryDatabaseURL = nil
         lastDeferredRepositoryInitializationWasOnMainThreadForTesting = initializedOnMainThread
+    }
+
+    private func finalizeLegacyStandardSnapshotCutover(
+        repository: ClipboardItemRepository
+    ) throws {
+        guard let sourceRevision = try diskStore.currentRevisionForAuthority(),
+              let targetRevision = try repository.currentRevisionForAuthority() else {
+            throw PasteBuddyPersistenceError.historyUnavailable
+        }
+        let epoch = try authorityStore.beginCutover(
+            source: .standardSnapshot,
+            target: .sqlite,
+            sourceRevision: sourceRevision
+        )
+        try authorityStore.recordTargetValidated(epoch: epoch, targetRevision: targetRevision)
+        try diskStore.installRevokedTombstone()
+        try authorityStore.recordSourceRevoked(epoch: epoch)
+        try authorityStore.commitStable(epoch: epoch)
+        _ = try repository.compactIfNeeded()
+    }
+
+    private func finalizeLegacyStandardSnapshotCutover(
+        repositorySyncActor: ClipboardRepositorySyncActor
+    ) async throws {
+        guard let sourceRevision = try diskStore.currentRevisionForAuthority(),
+              let targetRevision = try await repositorySyncActor.currentRevisionForAuthority() else {
+            throw PasteBuddyPersistenceError.historyUnavailable
+        }
+        let epoch = try authorityStore.beginCutover(
+            source: .standardSnapshot,
+            target: .sqlite,
+            sourceRevision: sourceRevision
+        )
+        try authorityStore.recordTargetValidated(epoch: epoch, targetRevision: targetRevision)
+        try diskStore.installRevokedTombstone()
+        try authorityStore.recordSourceRevoked(epoch: epoch)
+        try authorityStore.commitStable(epoch: epoch)
+        _ = try await repositorySyncActor.compactIfNeeded()
     }
 
     private func removePlaintextRepositoryForEncryptedStorage() throws {

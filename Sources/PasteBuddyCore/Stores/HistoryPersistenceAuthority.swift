@@ -5,6 +5,7 @@ import Darwin
 
 enum HistoryPersistenceAuthority: String, Codable, Sendable {
     case sqlite
+    case standardSnapshot
     case encryptedSnapshot
 }
 

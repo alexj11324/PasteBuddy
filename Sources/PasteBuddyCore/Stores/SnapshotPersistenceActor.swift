@@ -257,6 +257,10 @@ public actor ClipboardRepositorySyncActor {
         try repository.currentRevisionForAuthority()
     }
 
+    func compactIfNeeded() throws -> PasteBuddyDatabase.CompactionResult {
+        try repository.compactIfNeeded()
+    }
+
     func eraseSensitiveContent() throws {
         try repository.eraseSensitiveContent()
     }

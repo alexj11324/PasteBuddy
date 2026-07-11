@@ -1397,6 +1397,18 @@ extension PasteBuddyStoreTests {
         )
         store.load()
 
+        let authority = try XCTUnwrap(
+            HistoryPersistenceAuthorityStore(snapshotURL: harness.snapshotStore.fileURL).load()
+        )
+        XCTAssertEqual(authority.phase, .stable)
+        XCTAssertEqual(authority.authority, .sqlite)
+        let legacyReader = EncryptedSnapshotStore(
+            fileURL: harness.snapshotStore.fileURL,
+            encryptionService: harness.encryptionService,
+            storageMode: .standard
+        )
+        XCTAssertThrowsError(try legacyReader.load())
+
         let lightweightItem = try XCTUnwrap(store.filteredItems.first)
         XCTAssertNil(lightweightItem.payload.imageData)
         XCTAssertNil(lightweightItem.payload.rtfData)
@@ -1579,6 +1591,48 @@ extension PasteBuddyStoreTests {
         XCTAssertEqual(repository.incrementalSyncInvocationCount, baselineSyncCount)
         XCTAssertTrue(try repository.exportSnapshot().paste.alwaysPasteAsPlainText)
         XCTAssertEqual(try repository.exportSnapshot().items.count, 1)
+    }
+
+    func testLoadRecoversPreparingLegacySnapshotCutoverForward() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Recover Me",
+            payload: ClipboardPayload(text: "complete source state")
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: [item]))
+        let sourceRevision = try XCTUnwrap(harness.snapshotStore.currentRevisionForAuthority())
+        let authority = HistoryPersistenceAuthorityStore(snapshotURL: harness.snapshotStore.fileURL)
+        _ = try authority.beginCutover(
+            source: .standardSnapshot,
+            target: .sqlite,
+            sourceRevision: sourceRevision
+        )
+        let repository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(
+                fileURL: harness.directory.appendingPathComponent("recover-preparing.sqlite")
+            )
+        )
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        XCTAssertFalse(store.isPersistenceWriteBlocked)
+        XCTAssertEqual(store.snapshot.items.map(\.id), [item.id])
+        XCTAssertEqual(try authority.load()?.phase, .stable)
+        XCTAssertEqual(try authority.load()?.authority, .sqlite)
+        XCTAssertThrowsError(try EncryptedSnapshotStore(
+            fileURL: harness.snapshotStore.fileURL,
+            encryptionService: harness.encryptionService,
+            storageMode: .standard
+        ).load())
     }
 
     func testGRDBRepositoryMigratesLegacySnapshotInlineAssetsIntoAssetRows() throws {

@@ -297,10 +297,11 @@ final class MobileIntegrationTests: XCTestCase {
         XCTAssertEqual(repository.incrementalSyncInvocationCount, synchronizeCount)
         XCTAssertEqual(repository.captureJournalInvocationCount, journalCount + 1)
         XCTAssertEqual(
-            Set(try harness.snapshotStore.load().items.map(\.id)),
+            Set(try repository.exportSnapshot().items.map(\.id)),
             Set(result.importedItems.map(\.id)),
             "The extension service must flush its debounced batch before reporting success."
         )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.snapshotStore.fileURL.path))
     }
 
     func testShareActionBatchValidatesEveryInputBeforeMutatingStore() async throws {

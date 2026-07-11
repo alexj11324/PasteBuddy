@@ -4,6 +4,35 @@ import XCTest
 @testable import PasteBuddyCore
 
 final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
+    func testConditionalCompactionVacuumRunsOnlyWhenThresholdsAreMet() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("conditional-vacuum.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Large disposable asset",
+            payload: ClipboardPayload(imageData: Data(repeating: 0xA5, count: 2_000_000))
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        try repository.replaceAll(with: PasteBuddySnapshot())
+        let before = try database.storagePageDiagnostics()
+        XCTAssertGreaterThan(before.freelistBytes, 0)
+
+        XCTAssertEqual(
+            try database.compactIfNeeded(minimumFreelistBytes: Int64.max, minimumFreelistRatio: 1),
+            .notNeeded
+        )
+        XCTAssertEqual(
+            try database.compactIfNeeded(minimumFreelistBytes: 1, minimumFreelistRatio: 0),
+            .compacted
+        )
+        XCTAssertEqual(try database.storagePageDiagnostics().freelistCount, 0)
+    }
     func testRepositoryPersistsOptionalCustomPinboardIcon() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -936,7 +965,7 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         XCTAssertEqual(try firstRepository.exportSnapshot().items.map(\.id), [current.id, seed.id])
     }
 
-    func testRepositoryErasePreservesRevisionTombstoneAgainstEmptyBaselineWriter() throws {
+    func testRepositoryEraseInstallsIncompatibleTombstoneAgainstLegacyWriters() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -964,7 +993,7 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         let verifier = ClipboardItemRepository(
             database: try PasteBuddyDatabase(fileURL: databaseURL)
         )
-        XCTAssertTrue(try verifier.exportSnapshot().items.isEmpty)
+        XCTAssertThrowsError(try verifier.exportSnapshot())
     }
 
     func testRepositoryNoOpMutationsDoNotInvalidateIndependentBaseline() throws {

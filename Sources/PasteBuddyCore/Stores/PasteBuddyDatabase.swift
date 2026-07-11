@@ -114,6 +114,24 @@ struct ClipboardRepositoryCaptureJournal: Sendable {
 }
 
 public final class PasteBuddyDatabase: @unchecked Sendable {
+    struct StoragePageDiagnostics: Equatable, Sendable {
+        var pageCount: Int64
+        var freelistCount: Int64
+        var pageSize: Int64
+
+        var freelistBytes: Int64 { freelistCount * pageSize }
+        var freelistRatio: Double {
+            guard pageCount > 0 else { return 0 }
+            return Double(freelistCount) / Double(pageCount)
+        }
+    }
+
+    enum CompactionResult: Equatable, Sendable {
+        case notNeeded
+        case compacted
+        case deferred
+    }
+
     public let fileURL: URL
     private let pool: DatabasePool
 
@@ -152,6 +170,37 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
     public func journalMode() throws -> String {
         try pool.read { db in
             try String.fetchOne(db, sql: "PRAGMA journal_mode") ?? ""
+        }
+    }
+
+    func storagePageDiagnostics() throws -> StoragePageDiagnostics {
+        try pool.read { db in
+            StoragePageDiagnostics(
+                pageCount: try Int64.fetchOne(db, sql: "PRAGMA page_count") ?? 0,
+                freelistCount: try Int64.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0,
+                pageSize: try Int64.fetchOne(db, sql: "PRAGMA page_size") ?? 0
+            )
+        }
+    }
+
+    func compactIfNeeded(
+        minimumFreelistBytes: Int64 = 32 * 1_024 * 1_024,
+        minimumFreelistRatio: Double = 0.20
+    ) throws -> CompactionResult {
+        let diagnostics = try storagePageDiagnostics()
+        guard diagnostics.freelistBytes > minimumFreelistBytes,
+              diagnostics.freelistRatio >= minimumFreelistRatio else {
+            return .notNeeded
+        }
+        do {
+            try pool.writeWithoutTransaction { db in
+                try db.execute(sql: "VACUUM")
+                _ = try Row.fetchAll(db, sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+            }
+            return .compacted
+        } catch let error as DatabaseError
+            where error.resultCode == .SQLITE_BUSY || error.resultCode == .SQLITE_LOCKED {
+            return .deferred
         }
     }
 
@@ -697,28 +746,28 @@ public final class ClipboardItemRepository: @unchecked Sendable {
 
     func eraseSensitiveContent() throws {
         let expectedRevision = repositoryRevisionBaseline()
-        let newRevision = UUID()
         try database.eraseSensitiveContent(
             validating: { db in
                 try Self.validateRepositoryRevision(expectedRevision, db: db)
             },
             preservingRevision: { db in
-                try Self.saveMetadata(
-                    StoredSnapshotMetadata(
-                        snapshot: PasteBuddySnapshot(),
-                        repositoryRevision: newRevision
-                    ),
-                    db: db
+                try db.execute(
+                    sql: "INSERT INTO snapshot_metadata (key, value_json) VALUES (?, ?)",
+                    arguments: ["snapshot", "PBDB-REVOKED:1"]
                 )
             }
         )
-        updateExpectedRepositoryRevision(newRevision)
+        updateExpectedRepositoryRevision(nil)
     }
 
     func currentRevisionForAuthority() throws -> UUID? {
         try database.read { db in
             try Self.fetchMetadata(db: db).repositoryRevision
         }
+    }
+
+    func compactIfNeeded() throws -> PasteBuddyDatabase.CompactionResult {
+        try database.compactIfNeeded()
     }
 
     public func replaceAll(with snapshot: PasteBuddySnapshot) throws {
@@ -2125,6 +2174,7 @@ public enum PasteBuddySnapshotDatabaseMigrationError: LocalizedError, Equatable 
 public final class PasteBuddySnapshotDatabaseMigrator: @unchecked Sendable {
     private let snapshotStore: EncryptedSnapshotStore
     private let repository: ClipboardItemRepository
+    private let authorityStore: HistoryPersistenceAuthorityStore
     private let fileManager: FileManager
 
     public init(
@@ -2134,7 +2184,75 @@ public final class PasteBuddySnapshotDatabaseMigrator: @unchecked Sendable {
     ) {
         self.snapshotStore = snapshotStore
         self.repository = repository
+        self.authorityStore = HistoryPersistenceAuthorityStore(snapshotURL: snapshotStore.fileURL)
         self.fileManager = fileManager
+    }
+
+    func recoverInterruptedCutover() throws -> HistoryPersistenceAuthorityRecord? {
+        guard var record = try authorityStore.load(), record.phase != .stable else {
+            return try authorityStore.load()
+        }
+        switch record.phase {
+        case .preparing:
+            guard let source = record.source, let target = record.target else {
+                throw PasteBuddyPersistenceError.historyUnavailable
+            }
+            if target == .sqlite,
+               source == .standardSnapshot || source == .encryptedSnapshot {
+                guard try snapshotStore.currentRevisionForAuthority() == record.sourceRevision else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                let snapshot = try snapshotStore.load()
+                _ = try repository.hasStoredSnapshot()
+                try repository.replaceAll(with: snapshot)
+                guard let targetRevision = try repository.currentRevisionForAuthority() else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                try authorityStore.recordTargetValidated(
+                    epoch: record.epoch,
+                    targetRevision: targetRevision
+                )
+                try snapshotStore.installRevokedTombstone()
+                try authorityStore.recordSourceRevoked(epoch: record.epoch)
+                try authorityStore.commitStable(epoch: record.epoch)
+            } else if source == .sqlite, target == .encryptedSnapshot {
+                _ = try repository.exportSnapshot(hydrateAssets: false)
+                guard try repository.currentRevisionForAuthority() == record.sourceRevision else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                try snapshotStore.installRevokedTombstone()
+                try authorityStore.commitStable(.sqlite)
+            } else {
+                throw PasteBuddyPersistenceError.historyUnavailable
+            }
+        case .targetValidated:
+            guard let source = record.source, let target = record.target else {
+                throw PasteBuddyPersistenceError.historyUnavailable
+            }
+            if target == .sqlite,
+               source == .standardSnapshot || source == .encryptedSnapshot {
+                guard try snapshotStore.currentRevisionForAuthority() == record.sourceRevision else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                try snapshotStore.installRevokedTombstone()
+            } else if source == .sqlite, target == .encryptedSnapshot {
+                _ = try repository.exportSnapshot(hydrateAssets: false)
+                guard try repository.currentRevisionForAuthority() == record.sourceRevision else {
+                    throw PasteBuddyPersistenceError.historyUnavailable
+                }
+                try repository.eraseSensitiveContent()
+            } else {
+                throw PasteBuddyPersistenceError.historyUnavailable
+            }
+            try authorityStore.recordSourceRevoked(epoch: record.epoch)
+            try authorityStore.commitStable(epoch: record.epoch)
+        case .sourceRevoked:
+            try authorityStore.commitStable(epoch: record.epoch)
+        case .stable:
+            break
+        }
+        record = try authorityStore.load() ?? record
+        return record
     }
 
     @discardableResult
