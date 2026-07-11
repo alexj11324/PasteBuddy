@@ -6,20 +6,24 @@ import SwiftUI
 struct PasteBuddyiOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var store: PasteBuddyStore?
-    @State private var irohSync: IrohClipboardSyncService
+    @State private var irohSync: IrohClipboardSyncService?
     @State private var isStoreLoaded = false
     @State private var storeLoadErrorMessage: String?
 
     init() {
         do {
             let resolvedStore = try MobileStoreFactory.makeStore()
+            let resolvedIrohSync = try MobileStoreFactory.makeIrohSyncService()
             _store = State(initialValue: resolvedStore)
+            _irohSync = State(initialValue: resolvedIrohSync)
             _storeLoadErrorMessage = State(initialValue: nil)
         } catch {
             _store = State(initialValue: nil)
-            _storeLoadErrorMessage = State(initialValue: error.localizedDescription)
+            _irohSync = State(initialValue: nil)
+            _storeLoadErrorMessage = State(
+                initialValue: PasteBuddyPersistenceError.historyUnavailable.localizedDescription
+            )
         }
-        _irohSync = State(initialValue: MobileStoreFactory.makeIrohSyncService())
     }
 
     var body: some Scene {
@@ -31,21 +35,21 @@ struct PasteBuddyiOSApp: App {
                         systemImage: "exclamationmark.lock",
                         description: Text(storeLoadErrorMessage)
                     )
-                } else if isStoreLoaded, let store {
+                } else if isStoreLoaded, let store, let irohSync {
                     MobileClipboardBrowserView(store: store, irohSync: irohSync)
                 } else {
                     ProgressView()
                 }
             }
             .task {
-                guard !isStoreLoaded, storeLoadErrorMessage == nil, let store else { return }
-                await store.loadAsync()
-                guard !store.isPersistenceWriteBlocked else {
-                    storeLoadErrorMessage = store.lastErrorMessage
-                        ?? PasteBuddyLocalization.string(
-                            "mobile.error.history_load_failed",
-                            defaultValue: "PasteBuddy could not load encrypted history."
-                        )
+                guard !isStoreLoaded,
+                      storeLoadErrorMessage == nil,
+                      let store,
+                      let irohSync else { return }
+                do {
+                    try await PasteBuddyStoreFactory.load(store)
+                } catch {
+                    storeLoadErrorMessage = PasteBuddyPersistenceError.historyUnavailable.localizedDescription
                     return
                 }
                 irohSync.onItemReceived = { [store, weak irohSync] item in
@@ -55,7 +59,7 @@ struct PasteBuddyiOSApp: App {
                         try await store.flushPendingSaveOrThrow()
                     } catch {
                         irohSync?.reportReceivePersistenceFailure(error)
-                        storeLoadErrorMessage = error.localizedDescription
+                        storeLoadErrorMessage = PasteBuddyPersistenceError.historyUnavailable.localizedDescription
                         return
                     }
                     MobilePasteboardWriter.copy(storedItem)
@@ -69,7 +73,7 @@ struct PasteBuddyiOSApp: App {
                     do {
                         try await store.flushPendingSaveOrThrow()
                     } catch {
-                        storeLoadErrorMessage = error.localizedDescription
+                        storeLoadErrorMessage = PasteBuddyPersistenceError.historyUnavailable.localizedDescription
                     }
                 }
             }

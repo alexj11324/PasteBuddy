@@ -83,29 +83,19 @@ final class ShareActionViewController: UIViewController {
         activityIndicator.startAnimating()
         messageLabel.text = localized("message.saving_shared_content_to_history")
 
-        let providers = providersFromExtensionContext()
-        guard !providers.isEmpty else {
-            showFailure(MobileItemProviderAdapterError.emptyProviders.localizedDescription)
-            return
-        }
-
         let resolvedStore: PasteBuddyStore
         do {
             resolvedStore = try MobileStoreFactory.makeStore()
+            try await PasteBuddyStoreFactory.load(resolvedStore)
         } catch {
-            showFailure(error.localizedDescription)
+            showFailure(PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
             return
         }
-        await resolvedStore.loadAsync()
         guard !Task.isCancelled else { return }
-        guard !resolvedStore.isPersistenceWriteBlocked else {
-            showFailure(
-                resolvedStore.lastErrorMessage
-                    ?? PasteBuddyLocalization.string(
-                        "mobile.error.history_load_failed",
-                        defaultValue: "PasteBuddy could not load encrypted history."
-                    )
-            )
+
+        let providers = providersFromExtensionContext()
+        guard !providers.isEmpty else {
+            showFailure(MobileItemProviderAdapterError.emptyProviders.localizedDescription)
             return
         }
         switch source {

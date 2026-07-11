@@ -7,6 +7,120 @@ import CloudKit
 
 @MainActor
 final class PasteBuddyStoreTests: XCTestCase {
+    func testDefaultStoreFactoryFailsClosedWhenApplicationSupportCannotBeResolved() {
+        var diagnosticReasons: [PasteBuddyStoreFactory.FailureReason] = []
+
+        XCTAssertThrowsError(
+            try PasteBuddyStoreFactory.makeDefault(
+                applicationSupportDirectoryResolver: {
+                    throw StoreFactoryProbeError.sensitive("/Users/example/Library/Application Support")
+                },
+                databaseURLResolver: {
+                    XCTFail("Database resolution must not run after snapshot location failure.")
+                    return URL(fileURLWithPath: "/unused/clipboard.sqlite")
+                },
+                diagnostics: { diagnosticReasons.append($0) }
+            )
+        ) { error in
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+            XCTAssertEqual(error.localizedDescription, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+            XCTAssertFalse(error.localizedDescription.contains("/Users/example"))
+        }
+        XCTAssertEqual(diagnosticReasons, [.applicationSupportDirectoryUnavailable])
+    }
+
+    func testDefaultStoreFactoryFailsClosedWhenDatabaseURLCannotBeResolved() {
+        var diagnosticReasons: [PasteBuddyStoreFactory.FailureReason] = []
+
+        XCTAssertThrowsError(
+            try PasteBuddyStoreFactory.makeDefault(
+                applicationSupportDirectoryResolver: {
+                    URL(fileURLWithPath: "/unused/Application Support", isDirectory: true)
+                },
+                databaseURLResolver: {
+                    throw StoreFactoryProbeError.sensitive("/Users/example/Library/Application Support/PasteBuddy/clipboard.sqlite")
+                },
+                diagnostics: { diagnosticReasons.append($0) }
+            )
+        ) { error in
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+            XCTAssertEqual(error.localizedDescription, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+            XCTAssertFalse(error.localizedDescription.contains("clipboard.sqlite"))
+        }
+        XCTAssertEqual(diagnosticReasons, [.databaseURLUnavailable])
+    }
+
+    func testLoadedStoreFactoryFailsClosedWhenAsyncLoadFails() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try FileManager.default.createDirectory(
+            at: harness.snapshotStore.fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("sensitive clipboard payload".utf8).write(to: harness.snapshotStore.fileURL)
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var diagnosticReasons: [PasteBuddyStoreFactory.FailureReason] = []
+
+        do {
+            try await PasteBuddyStoreFactory.load(
+                store,
+                diagnostics: { diagnosticReasons.append($0) }
+            )
+            XCTFail("A failed history load must not be treated as an empty store.")
+        } catch {
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+            XCTAssertEqual(error.localizedDescription, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        }
+
+        XCTAssertTrue(store.isPersistenceWriteBlocked)
+        XCTAssertEqual(store.lastErrorMessage, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        XCTAssertEqual(diagnosticReasons, [.historyLoadFailed])
+    }
+
+    func testLoadedStoreFactoryFailsClosedWhenInitialLoadIsAbortedByConcurrentMutation() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let persistedItem = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Persisted history",
+            payload: ClipboardPayload(text: "must not be replaced")
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: [persistedItem]))
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let loadGate = SuspendedStoreLoadGate()
+        store.beforeApplyingAsyncLoadForTesting = {
+            await loadGate.suspend()
+        }
+        var diagnosticReasons: [PasteBuddyStoreFactory.FailureReason] = []
+
+        let loadTask = Task { @MainActor () -> Error? in
+            do {
+                try await PasteBuddyStoreFactory.load(
+                    store,
+                    diagnostics: { diagnosticReasons.append($0) }
+                )
+                return nil
+            } catch {
+                return error
+            }
+        }
+        while await !loadGate.hasSuspended() {
+            await Task.yield()
+        }
+        store.snapshot.general.launchAtLoginEnabled = true
+        await loadGate.resume()
+
+        let error = await loadTask.value
+        XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+        XCTAssertEqual(diagnosticReasons, [.historyLoadFailed])
+        XCTAssertTrue(store.isPersistenceWriteBlocked)
+        XCTAssertEqual(store.lastErrorMessage, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        XCTAssertTrue(store.snapshot.items.isEmpty, "An aborted initial load must not masquerade as loaded history.")
+        XCTAssertEqual(try harness.snapshotStore.load().items.map(\.id), [persistedItem.id])
+    }
+
     func testPreparedCapturePathDoesNotRebuildCurrentSearchDocumentOnMainActor() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -217,7 +331,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         ))
 
         await loadGate.resume()
-        await reloadTask.value
+        _ = await reloadTask.value
         store.beforeApplyingAsyncLoadForTesting = nil
 
         XCTAssertEqual(store.snapshot.items.map(\.id), [concurrentCapture.id, existing.id])
@@ -305,7 +419,7 @@ final class PasteBuddyStoreTests: XCTestCase {
             payload: ClipboardPayload(text: "capture created during flush")
         ))
         await flushGate.resume()
-        await reloadTask.value
+        _ = await reloadTask.value
 
         XCTAssertEqual(store.snapshot.items.map(\.id), [concurrentCapture.id, firstCapture.id, existing.id])
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
@@ -634,7 +748,7 @@ final class PasteBuddyStoreTests: XCTestCase {
             payload: ClipboardPayload(text: "must survive encrypted cleanup")
         ))
         await cleanupGate.resume()
-        await loadTask.value
+        _ = await loadTask.value
 
         XCTAssertFalse(store.isPersistenceWriteBlocked, store.lastErrorMessage ?? "")
         XCTAssertEqual(store.snapshot.items.map(\.id), [concurrentCapture.id, committedEncryptedItem.id])
@@ -6318,6 +6432,16 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 1)?.id, items[0].id)
         XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 9)?.id, items[8].id)
         XCTAssertNil(store.quickPasteItem(atOneBasedIndex: 10))
+    }
+}
+
+private enum StoreFactoryProbeError: LocalizedError {
+    case sensitive(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .sensitive(let value): value
+        }
     }
 }
 

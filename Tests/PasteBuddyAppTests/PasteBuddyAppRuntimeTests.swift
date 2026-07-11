@@ -196,14 +196,49 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let gate = PasteBuddyRuntimeLoadGate()
         var loadAsyncCallCount = 0
 
-        await gate.loadIfNeeded {
+        _ = await gate.loadIfNeeded {
             loadAsyncCallCount += 1
         }
-        await gate.loadIfNeeded {
+        _ = await gate.loadIfNeeded {
             loadAsyncCallCount += 1
         }
 
         XCTAssertEqual(loadAsyncCallCount, 1)
+    }
+
+    func testRuntimeLoadGateSurfacesAndCachesSanitizedHistoryFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PasteBuddyRuntimeLoadGateTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("clipboard.pbstore")
+        try Data("private clipboard contents".utf8).write(to: fileURL)
+        let store = PasteBuddyStore(
+            diskStore: EncryptedSnapshotStore(fileURL: fileURL, storageMode: .standard)
+        )
+        let gate = PasteBuddyRuntimeLoadGate()
+
+        let result = await gate.loadIfNeeded {
+            try await PasteBuddyStoreFactory.load(store)
+        }
+
+        guard case .failure(let error) = result else {
+            return XCTFail("The host lifecycle gate must surface a failed history load.")
+        }
+        XCTAssertEqual(error, .historyUnavailable)
+        XCTAssertEqual(error.localizedDescription, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        XCTAssertTrue(store.isPersistenceWriteBlocked)
+        XCTAssertEqual(store.lastErrorMessage, error.localizedDescription)
+
+        var secondLoadCallCount = 0
+        let cachedResult = await gate.loadIfNeeded {
+            secondLoadCallCount += 1
+        }
+        guard case .failure(let cachedError) = cachedResult else {
+            return XCTFail("A failed lifecycle attempt must stay fail closed.")
+        }
+        XCTAssertEqual(cachedError, .historyUnavailable)
+        XCTAssertEqual(secondLoadCallCount, 0)
     }
 
     func testRuntimeLoadGateMakesConcurrentCallersAwaitTheSameLoad() async {
@@ -221,7 +256,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
 
         let secondCaller = Task { @MainActor in
-            await gate.loadIfNeeded {
+            _ = await gate.loadIfNeeded {
                 await loader.load()
             }
             secondCallerCompleted = true
@@ -233,7 +268,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(callCountBeforeRelease, 1)
 
         await loader.release()
-        await firstCaller.value
+        _ = await firstCaller.value
         await secondCaller.value
 
         XCTAssertTrue(secondCallerCompleted)
@@ -1283,22 +1318,28 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertFalse(initializerSource.contains("resolvedStore.load()"))
         XCTAssertFalse(initializerSource.contains("loadAsync()"))
-        XCTAssertTrue(taskSource.contains("await store.loadAsync()"))
+        XCTAssertTrue(initializerSource.contains("try MobileStoreFactory.makeIrohSyncService()"))
+        XCTAssertTrue(taskSource.contains("try await PasteBuddyStoreFactory.load(store)"))
+        XCTAssertFalse(taskSource.contains("await store.loadAsync()"))
         XCTAssertTrue(source.contains("@State private var isStoreLoaded = false"))
         XCTAssertTrue(source.contains("if isStoreLoaded"))
         XCTAssertTrue(source.contains("ProgressView()"))
         XCTAssertTrue(taskSource.contains("isStoreLoaded = true"))
+        XCTAssertTrue(source.contains("PasteBuddyPersistenceError.historyUnavailable.localizedDescription"))
     }
 
     func testMobileExtensionsLoadEncryptedHistoryOffTheMainThread() throws {
         let shareSource = try sourceFileContents("Sources/PasteBuddyShareAction/ShareActionViewController.swift")
         let keyboardSource = try sourceFileContents("Sources/PasteBuddyKeyboard/KeyboardViewController.swift")
 
-        XCTAssertTrue(shareSource.contains("await resolvedStore.loadAsync()"))
+        XCTAssertTrue(shareSource.contains("try await PasteBuddyStoreFactory.load(resolvedStore)"))
+        XCTAssertFalse(shareSource.contains("await resolvedStore.loadAsync()"))
         XCTAssertFalse(shareSource.contains("resolvedStore.load()"))
-        XCTAssertTrue(keyboardSource.contains("await resolvedStore.loadAsync()"))
+        XCTAssertTrue(keyboardSource.contains("try await PasteBuddyStoreFactory.load(resolvedStore)"))
+        XCTAssertFalse(keyboardSource.contains("await resolvedStore.loadAsync()"))
         XCTAssertFalse(keyboardSource.contains("resolvedStore.load()"))
         XCTAssertTrue(keyboardSource.contains("finishConfiguringKeyboard(with: resolvedStore)"))
+        XCTAssertTrue(keyboardSource.contains("try MobileStoreFactory.makeIrohSyncService()"))
     }
 
     func testShareActionCancelsInFlightImportWhenDoneOrRetried() throws {

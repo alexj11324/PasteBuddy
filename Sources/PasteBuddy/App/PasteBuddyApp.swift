@@ -68,7 +68,9 @@ struct PasteBuddyApp: App {
     @Environment(\.openSettings) private var openSettings
     @AppStorage("clipboardPanelDisplayMode") private var panelDisplayModeRawValue = ClipboardPanelDisplayMode.sidePanel.rawValue
     @AppStorage("clipboardShelfPlacement") private var shelfPlacementRawValue = ClipboardShelfPlacement.top.rawValue
-    @State private var store = PasteBuddyStore()
+    @State private var store: PasteBuddyStore?
+    @State private var isStoreLoaded = false
+    @State private var persistenceErrorMessage: String?
     @State private var monitor: ClipboardMonitor?
     @State private var storeLoadGate = PasteBuddyRuntimeLoadGate()
     @State private var shelfPanelController: ClipboardShelfPanelController?
@@ -78,6 +80,15 @@ struct PasteBuddyApp: App {
     @State private var irohSync = IrohClipboardSyncService()
 
     init() {
+        do {
+            _store = State(initialValue: try PasteBuddyStoreFactory.makeDefault())
+            _persistenceErrorMessage = State(initialValue: nil)
+        } catch {
+            _store = State(initialValue: nil)
+            _persistenceErrorMessage = State(
+                initialValue: PasteBuddyPersistenceError.historyUnavailable.localizedDescription
+            )
+        }
         Self.printRuntimeDiagnosticsIfNeeded()
         _ = PasteBuddySentryBootstrap.startIfConfigured()
         #if canImport(AppIntents)
@@ -88,7 +99,16 @@ struct PasteBuddyApp: App {
     var body: some Scene {
         let _ = configureAppDelegate()
         Settings {
-            SettingsView(store: store, irohSync: irohSync)
+            if let persistenceErrorMessage {
+                PasteBuddyHistoryUnavailableView(
+                    message: persistenceErrorMessage
+                )
+            } else if isStoreLoaded, let store {
+                SettingsView(store: store, irohSync: irohSync)
+            } else {
+                ProgressView()
+                    .frame(minWidth: 520, minHeight: 320)
+            }
         }
     }
 
@@ -138,7 +158,12 @@ struct PasteBuddyApp: App {
                 },
                 primaryAction: {
                     Task { @MainActor in
-                        await toggleClipboardShelf()
+                        if !isStoreLoaded || store == nil || persistenceErrorMessage != nil {
+                            openSettings()
+                            NSApp.activate(ignoringOtherApps: true)
+                        } else {
+                            await toggleClipboardShelf()
+                        }
                     }
                 }
             )
@@ -147,10 +172,48 @@ struct PasteBuddyApp: App {
     }
 
     private func updateStatusItem() {
-        statusItemController?.update(status: store.macMenuBarStatus)
+        if isStoreLoaded, let store, persistenceErrorMessage == nil {
+            statusItemController?.update(status: store.macMenuBarStatus)
+        } else {
+            statusItemController?.updateUnavailable(
+                message: persistenceErrorMessage
+                    ?? PasteBuddyPersistenceError.historyUnavailable.localizedDescription
+            )
+        }
+    }
+
+    private func makeHistoryUnavailableStatusItemMenu() -> NSMenu {
+        let menu = NSMenu(title: localized("brand.pastebuddy"))
+        menu.addItem(PasteBuddyStatusItemController.disabledMenuItem(
+            persistenceErrorMessage
+                ?? PasteBuddyPersistenceError.historyUnavailable.localizedDescription,
+            systemImageName: "exclamationmark.triangle"
+        ))
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.open_settings"),
+            systemImageName: "gearshape",
+            keyEquivalent: ",",
+            keyEquivalentModifierMask: .command
+        ) {
+            openSettings()
+            NSApp.activate(ignoringOtherApps: true)
+        })
+        menu.addItem(.separator())
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.quit_app"),
+            systemImageName: "power",
+            keyEquivalent: "q",
+            keyEquivalentModifierMask: .command
+        ) {
+            NSApp.terminate(nil)
+        })
+        return menu
     }
 
     private func makeStatusItemMenu() -> NSMenu {
+        guard isStoreLoaded, let store, persistenceErrorMessage == nil else {
+            return makeHistoryUnavailableStatusItemMenu()
+        }
         let menu = NSMenu(title: localized("brand.pastebuddy"))
         menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
             localized(store.snapshot.general.launchAtLoginEnabled ? "action.disable_launch_at_login" : "action.enable_launch_at_login"),
@@ -236,6 +299,7 @@ struct PasteBuddyApp: App {
 
     private func toggleClipboardShelf() async {
         await startRuntimeIfNeeded()
+        guard isStoreLoaded, persistenceErrorMessage == nil else { return }
         PasteBuddyDiagnostics.recordAccessibilityTrust(
             .shelf,
             "accessibilityTrustCheckedBeforeShelfToggle"
@@ -279,6 +343,7 @@ struct PasteBuddyApp: App {
 
     private func showClipboardPanelMode(_ mode: ClipboardPanelDisplayMode) async {
         await startRuntimeIfNeeded()
+        guard isStoreLoaded, persistenceErrorMessage == nil else { return }
         frontmostApplicationTracker.recordCurrentFrontmostApplication()
         PasteBuddyDiagnostics.record(.hotKey, "\(mode.rawValue)ModeRequested")
         panelDisplayMode = mode
@@ -287,22 +352,34 @@ struct PasteBuddyApp: App {
     }
 
     private func startRuntimeIfNeeded() async {
-        frontmostApplicationTracker.start()
-        appDelegate.flushPendingSave = { [store] in
-            await store.flushPendingSave()
+        guard let store else {
+            configureStatusItemIfNeeded()
+            PasteBuddyDiagnostics.record(
+                .lifecycle,
+                "runtimeStartBlockedByHistoryConstructionFailure"
+            )
+            return
         }
-
-        await storeLoadGate.loadIfNeeded {
-            await store.loadAsync()
+        let loadResult = await storeLoadGate.loadIfNeeded {
+            try await PasteBuddyStoreFactory.load(store)
+        }
+        if case .failure(let error) = loadResult {
+            persistenceErrorMessage = error.localizedDescription
+        } else {
+            isStoreLoaded = true
         }
         configureStatusItemIfNeeded()
-        guard !store.isPersistenceWriteBlocked else {
+        guard case .success = loadResult else {
             PasteBuddyDiagnostics.record(
                 .lifecycle,
                 "runtimeStartBlockedByHistoryLoadFailure",
-                detail: store.lastErrorMessage
+                detail: "historyLoadFailed"
             )
             return
+        }
+        frontmostApplicationTracker.start()
+        appDelegate.flushPendingSave = { [store] in
+            await store.flushPendingSave()
         }
         irohSync.onItemReceived = { [store] item in
             guard !store.isPersistenceWriteBlocked else { return }
@@ -524,27 +601,51 @@ struct PasteBuddyApp: App {
     }
 }
 
+private struct PasteBuddyHistoryUnavailableView: View {
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.lock")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .padding(40)
+        .frame(minWidth: 520, minHeight: 320)
+    }
+}
+
 @MainActor
 final class PasteBuddyRuntimeLoadGate {
-    private var didLoadStore = false
-    private var inFlightLoad: Task<Void, Never>?
+    private var completedResult: Result<Void, PasteBuddyPersistenceError>?
+    private var inFlightLoad: Task<Result<Void, PasteBuddyPersistenceError>, Never>?
 
     func loadIfNeeded(
-        _ loadAsync: @escaping @MainActor @Sendable () async -> Void
-    ) async {
-        guard !didLoadStore else { return }
+        _ loadAsync: @escaping @MainActor @Sendable () async throws -> Void
+    ) async -> Result<Void, PasteBuddyPersistenceError> {
+        if let completedResult {
+            return completedResult
+        }
         if let inFlightLoad {
-            await inFlightLoad.value
-            return
+            return await inFlightLoad.value
         }
 
-        let task = Task { @MainActor in
-            await loadAsync()
+        let task = Task { @MainActor () -> Result<Void, PasteBuddyPersistenceError> in
+            do {
+                try await loadAsync()
+                return .success(())
+            } catch {
+                return .failure(.historyUnavailable)
+            }
         }
         inFlightLoad = task
-        await task.value
+        let result = await task.value
         inFlightLoad = nil
-        didLoadStore = true
+        completedResult = result
+        return result
     }
 }
 

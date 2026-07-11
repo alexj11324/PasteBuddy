@@ -115,7 +115,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
 
     private static let defaultHistoryPageLimit = 100
-    private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
+    static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
     private static let maximumPersistenceStabilityAttempts = 8
 
     public nonisolated static var defaultDeviceName: String {
@@ -146,47 +146,29 @@ public final class PasteBuddyStore {
     }
 
     public init(
-        diskStore: EncryptedSnapshotStore? = nil,
+        diskStore: EncryptedSnapshotStore,
         clipboardRepository: ClipboardItemRepository? = nil,
+        deferredRepositoryDatabaseURL: URL? = nil,
         saveDebounceNanoseconds: UInt64? = nil,
         historyUnlockAuthenticator: any HistoryUnlockAuthenticating = SystemHistoryUnlockAuthenticator()
     ) {
-        let usesDefaultDiskStore = diskStore == nil
-        let resolvedDiskStore: EncryptedSnapshotStore
-        if let diskStore {
-            resolvedDiskStore = diskStore
-        } else {
-            do {
-                resolvedDiskStore = try EncryptedSnapshotStore.defaultStore(storageMode: .standard)
-            } catch {
-                resolvedDiskStore = EncryptedSnapshotStore(
-                    fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
-                        .appendingPathComponent("PasteBuddy")
-                        .appendingPathComponent("clipboard.pbstore"),
-                    storageMode: .standard
-                )
-            }
-        }
         let resolvedClipboardRepository = clipboardRepository
-        let deferredRepositoryDatabaseURL: URL?
-        if clipboardRepository == nil, usesDefaultDiskStore {
-            deferredRepositoryDatabaseURL = try? PasteBuddyDatabase.defaultDatabaseURL()
-        } else {
-            deferredRepositoryDatabaseURL = nil
-        }
+        let resolvedDeferredRepositoryDatabaseURL = clipboardRepository == nil
+            ? deferredRepositoryDatabaseURL
+            : nil
         var initialSnapshot = PasteBuddySnapshot()
-        initialSnapshot.security.storageMode = resolvedDiskStore.storageMode
-        self.diskStore = resolvedDiskStore
+        initialSnapshot.security.storageMode = diskStore.storageMode
+        self.diskStore = diskStore
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
-        self.persistenceActor = SnapshotPersistenceActor(diskStore: resolvedDiskStore)
+        self.persistenceActor = SnapshotPersistenceActor(diskStore: diskStore)
         self.persistenceCommitGate = PersistenceCommitGate()
         self.clipboardRepository = resolvedClipboardRepository
         self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
-        self.deferredRepositoryDatabaseURL = deferredRepositoryDatabaseURL
-        self.repositoryDatabaseURLForStandardStorage = resolvedClipboardRepository?.fileURL ?? deferredRepositoryDatabaseURL
+        self.deferredRepositoryDatabaseURL = resolvedDeferredRepositoryDatabaseURL
+        self.repositoryDatabaseURLForStandardStorage = resolvedClipboardRepository?.fileURL ?? resolvedDeferredRepositoryDatabaseURL
         self.deferredRepositoryInitializationTask = nil
         self.lastDeferredRepositoryInitializationWasOnMainThreadForTesting = nil
-        self.saveDebounceNanoseconds = saveDebounceNanoseconds ?? (usesDefaultDiskStore ? Self.defaultSaveDebounceNanoseconds : nil)
+        self.saveDebounceNanoseconds = saveDebounceNanoseconds
         self.snapshot = initialSnapshot
         self.selectedScope = .history
         self.selectedItemID = nil
@@ -278,21 +260,17 @@ public final class PasteBuddyStore {
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
-            pendingSaveTask?.cancel()
-            pendingSaveTask = nil
-            pendingSaveTaskID = nil
-            repositorySyncedDataRevision = nil
-            isPersistenceWriteBlocked = true
-            lastErrorMessage = error.localizedDescription
+            markHistoryPersistenceUnavailable()
         }
     }
 
-    public func loadAsync() async {
-        guard !isHistoryStorageMigrationInProgress else { return }
+    @discardableResult
+    public func loadAsync() async -> Bool {
+        guard !isHistoryStorageMigrationInProgress else { return false }
         let revisionBeforePendingFlush = dataRevision
         if pendingSaveTask != nil {
-            guard await flushPendingSave() else { return }
-            guard dataRevision == revisionBeforePendingFlush else { return }
+            guard await flushPendingSave() else { return false }
+            guard dataRevision == revisionBeforePendingFlush else { return false }
         }
         let revisionBeforeLoad = dataRevision
         do {
@@ -332,7 +310,7 @@ public final class PasteBuddyStore {
                 await beforeApplyingAsyncLoadForTesting()
             }
             guard dataRevision == revisionBeforeLoad else {
-                return
+                return false
             }
 
             loadedSnapshot.security.storageMode = resolvedStorageMode
@@ -390,15 +368,21 @@ public final class PasteBuddyStore {
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            return true
         } catch {
-            isHistoryStorageMigrationInProgress = false
-            pendingSaveTask?.cancel()
-            pendingSaveTask = nil
-            pendingSaveTaskID = nil
-            repositorySyncedDataRevision = nil
-            isPersistenceWriteBlocked = true
-            lastErrorMessage = error.localizedDescription
+            markHistoryPersistenceUnavailable()
+            return false
         }
+    }
+
+    func markHistoryPersistenceUnavailable() {
+        isHistoryStorageMigrationInProgress = false
+        pendingSaveTask?.cancel()
+        pendingSaveTask = nil
+        pendingSaveTaskID = nil
+        repositorySyncedDataRevision = nil
+        isPersistenceWriteBlocked = true
+        lastErrorMessage = PasteBuddyPersistenceError.historyUnavailable.localizedDescription
     }
 
     nonisolated private static func sqliteFilesExist(at databaseURL: URL) -> Bool {

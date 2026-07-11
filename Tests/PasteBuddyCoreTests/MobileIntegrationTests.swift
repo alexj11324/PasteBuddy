@@ -5,6 +5,49 @@ import XCTest
 
 @MainActor
 final class MobileIntegrationTests: XCTestCase {
+    func testAppGroupDefaultsFailsInsteadOfFallingBackToStandardDefaults() {
+        var resolvedSuiteNames: [String] = []
+
+        XCTAssertThrowsError(
+            try MobileStoreFactory.appGroupDefaults(
+                appGroupIdentifier: "group.com.example.missing",
+                suiteResolver: { suiteName in
+                    resolvedSuiteNames.append(suiteName)
+                    return nil
+                }
+            )
+        ) { error in
+            XCTAssertEqual(error as? MobileStoreFactoryError, .appGroupDefaultsUnavailable)
+            XCTAssertEqual(error.localizedDescription, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        }
+        XCTAssertEqual(resolvedSuiteNames, ["group.com.example.missing"])
+    }
+
+    func testMobileStoreFactoryPropagatesAppGroupStoreFailure() {
+        XCTAssertThrowsError(
+            try MobileStoreFactory.makeStore(
+                appGroupIdentifier: "group.com.example.missing",
+                appGroupStore: { _, _ in
+                    throw MobileStoreFactoryProbeError.containerUnavailable
+                }
+            )
+        ) { error in
+            XCTAssertEqual(error as? MobileStoreFactoryProbeError, .containerUnavailable)
+        }
+    }
+
+    func testIrohFactoryFailsWhenAppGroupDefaultsSuiteIsUnavailable() {
+        XCTAssertThrowsError(
+            try MobileStoreFactory.makeIrohSyncService(
+                appGroupIdentifier: "group.com.example.missing",
+                suiteResolver: { _ in nil }
+            )
+        ) { error in
+            XCTAssertEqual(error as? MobileStoreFactoryError, .appGroupDefaultsUnavailable)
+            XCTAssertEqual(error.localizedDescription, PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+        }
+    }
+
     func testMobileIntegrationConfigurationPersistsAndBuildsOnboardingSteps() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -918,6 +961,10 @@ final class MobileIntegrationTests: XCTestCase {
             )
         }
     }
+}
+
+private enum MobileStoreFactoryProbeError: Error, Equatable {
+    case containerUnavailable
 }
 
 private final class OrderedProviderLoadCoordinator: @unchecked Sendable {

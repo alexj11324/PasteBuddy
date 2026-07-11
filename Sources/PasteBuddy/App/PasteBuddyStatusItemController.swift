@@ -35,6 +35,15 @@ final class PasteBuddyStatusItemController: NSObject, NSMenuDelegate {
         button.setAccessibilityLabel(NSLocalizedString("label.pastebuddy_menu_bar_item", comment: ""))
     }
 
+    func updateUnavailable(message: String) {
+        guard let button = statusItem.button else { return }
+        button.image = Self.menuBarIcon(accessibilityDescription: message)
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.toolTip = message
+        button.setAccessibilityLabel(message)
+    }
+
     func containsScreenPoint(_ point: CGPoint) -> Bool {
         guard let button = statusItem.button, let window = button.window else {
             return false

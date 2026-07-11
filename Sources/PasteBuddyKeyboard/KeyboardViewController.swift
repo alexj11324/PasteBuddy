@@ -21,26 +21,23 @@ final class KeyboardViewController: UIInputViewController {
 
     private func configureKeyboard() {
         let resolvedStore: PasteBuddyStore
+        let syncService: IrohClipboardSyncService
         do {
             resolvedStore = try MobileStoreFactory.makeStore()
+            syncService = try MobileStoreFactory.makeIrohSyncService()
         } catch {
-            showStoreLoadFailure(error.localizedDescription)
+            showStoreLoadFailure(PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
             return
         }
         Task { [weak self] in
-            await resolvedStore.loadAsync()
-            guard let self else { return }
-            guard !resolvedStore.isPersistenceWriteBlocked else {
-                showStoreLoadFailure(
-                    resolvedStore.lastErrorMessage
-                        ?? PasteBuddyLocalization.string(
-                            "mobile.error.history_load_failed",
-                            defaultValue: "PasteBuddy could not load encrypted history."
-                        )
-                )
+            do {
+                try await PasteBuddyStoreFactory.load(resolvedStore)
+            } catch {
+                self?.showStoreLoadFailure(PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
                 return
             }
-            finishConfiguringKeyboard(with: resolvedStore)
+            self?.irohSync = syncService
+            self?.finishConfiguringKeyboard(with: resolvedStore)
         }
     }
 
@@ -61,13 +58,16 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func finishConfiguringKeyboard(with resolvedStore: PasteBuddyStore) {
+        guard let syncService = irohSync else {
+            showStoreLoadFailure(PasteBuddyPersistenceError.historyUnavailable.localizedDescription)
+            return
+        }
         resolvedStore.setKeyboardExtensionEnabled(true, fullAccess: hasFullAccess)
         Task { @MainActor in
             _ = await resolvedStore.flushPendingSave()
         }
         store = resolvedStore
 
-        let syncService = MobileStoreFactory.makeIrohSyncService()
         syncService.onItemReceived = { [resolvedStore, weak syncService] item in
             guard !resolvedStore.isPersistenceWriteBlocked else { return }
             _ = resolvedStore.addSyncedItem(item)

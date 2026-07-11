@@ -66,7 +66,7 @@ private final class PasteBuddyMCPServer {
     }
 
     private func toolDefinitions() async throws -> [[String: Any]] {
-        let store = await loadStore()
+        let store = try await loadStore()
         guard store.snapshot.mcp.isServerEnabled else { return [] }
 
         return MCPToolName.allCases
@@ -157,7 +157,7 @@ private final class PasteBuddyMCPServer {
             throw MCPToolServiceError.missingArgument("name")
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
-        let store = await loadStore()
+        let store = try await loadStore()
         let service = MCPToolService(store: store)
 
         do {
@@ -204,10 +204,8 @@ private final class PasteBuddyMCPServer {
         }
     }
 
-    private func loadStore() async -> PasteBuddyStore {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
-        return store
+    private func loadStore() async throws -> PasteBuddyStore {
+        try await PasteBuddyStoreFactory.makeLoadedDefault()
     }
 
     private func requiredString(_ name: String, in arguments: [String: Any]) throws -> String {
