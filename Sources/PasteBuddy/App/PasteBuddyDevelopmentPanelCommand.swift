@@ -1,6 +1,21 @@
 import Foundation
 import PasteBuddyCore
 
+enum PasteBuddyClipboardMonitoringPolicy {
+    static let infoDictionaryKey = "PasteBuddyDisableClipboardMonitoringForDevelopmentVerification"
+
+    static func shouldStartMonitor(
+        disableForDevelopmentVerification: Bool,
+        identity: PasteBuddyRuntimeIdentity
+    ) -> Bool {
+        !(disableForDevelopmentVerification
+            && identity.bundleIdentifier == "com.alexjiang.PasteBuddy.dev"
+            && identity.signingChannel == "development"
+            && identity.bundlePath == "/Applications/PasteBuddy Dev.app"
+            && identity.stableAppPath == "/Applications/PasteBuddy Dev.app")
+    }
+}
+
 enum PasteBuddyDevelopmentPanelCommand: Equatable {
     case show(ClipboardPanelDisplayMode)
     case toggle

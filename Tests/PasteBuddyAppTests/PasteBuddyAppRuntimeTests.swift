@@ -123,6 +123,68 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
+    func testClipboardMonitoringPolicyDisablesStableDevelopmentVerificationApp() {
+        XCTAssertFalse(
+            PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: true,
+                identity: stableDevelopmentIdentity()
+            )
+        )
+    }
+
+    func testClipboardMonitoringPolicyRequiresExplicitVerificationFlag() {
+        XCTAssertTrue(
+            PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: false,
+                identity: stableDevelopmentIdentity()
+            )
+        )
+    }
+
+    func testClipboardMonitoringPolicyRejectsNonDevelopmentBundle() {
+        var identity = stableDevelopmentIdentity()
+        identity.bundleIdentifier = "com.alexjiang.PasteBuddy"
+
+        XCTAssertTrue(
+            PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: true,
+                identity: identity
+            )
+        )
+    }
+
+    func testClipboardMonitoringPolicyRejectsNonDevelopmentSigningChannel() {
+        var identity = stableDevelopmentIdentity()
+        identity.signingChannel = "release"
+
+        XCTAssertTrue(
+            PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: true,
+                identity: identity
+            )
+        )
+    }
+
+    func testClipboardMonitoringPolicyRequiresExactActualAndStablePaths() {
+        var unexpectedActualPath = stableDevelopmentIdentity()
+        unexpectedActualPath.bundlePath = "/private/tmp/PasteBuddy Dev.app"
+        var unexpectedStablePath = stableDevelopmentIdentity()
+        unexpectedStablePath.stableAppPath = "/private/tmp/PasteBuddy Dev.app"
+
+        XCTAssertTrue(
+            PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: true,
+                identity: unexpectedActualPath
+            )
+        )
+        XCTAssertTrue(
+            PasteBuddyClipboardMonitoringPolicy.shouldStartMonitor(
+                disableForDevelopmentVerification: true,
+                identity: unexpectedStablePath
+            )
+        )
+    }
+
     func testAppDelegateQueuesOpenURLsUntilHandlerIsInstalled() throws {
         let delegate = AppDelegate()
         let first = try XCTUnwrap(URL(string: "pastebuddy-dev://panel/side"))
@@ -137,6 +199,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         delegate.handleOpenURLs = { delivered.append(contentsOf: $0) }
         XCTAssertEqual(delivered, [first, second])
+    }
+
+    private func stableDevelopmentIdentity() -> PasteBuddyRuntimeIdentity {
+        PasteBuddyRuntimeIdentity(
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev",
+            bundlePath: "/Applications/PasteBuddy Dev.app",
+            executablePath: "/Applications/PasteBuddy Dev.app/Contents/MacOS/PasteBuddy",
+            stableAppPath: "/Applications/PasteBuddy Dev.app",
+            signingChannel: "development",
+            codeSigningIdentity: "APPLE-DEVELOPMENT"
+        )
     }
 
 
