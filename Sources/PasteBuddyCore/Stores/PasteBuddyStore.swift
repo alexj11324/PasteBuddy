@@ -889,14 +889,27 @@ public final class PasteBuddyStore {
         offset: Int,
         limit: Int = 100
     ) async -> PasteBuddyFilteredItemsPage {
+        let interval = PasteBuddyPerformanceSignposts.begin(.pageAndCountQuery)
+        var resultBucket = PasteBuddyPerformanceSignposts.ItemCountBucket.unknown
+        var resultCode = PasteBuddyPerformanceSignposts.ResultCode.noChange
+        defer {
+            PasteBuddyPerformanceSignposts.end(
+                interval,
+                itemCount: resultBucket,
+                result: resultCode
+            )
+        }
         lastInMemoryPageQueryRanOnMainThreadForTesting = nil
         guard !isHistoryAccessLocked, limit > 0 else {
+            resultBucket = .none
+            resultCode = .blocked
             return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
         }
 
         let resolvedOffset = max(offset, 0)
         let filters = resolvedSearchFilters()
         guard !filters.isImpossible else {
+            resultBucket = .none
             return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
         }
 
@@ -924,14 +937,20 @@ public final class PasteBuddyStore {
             )
             do {
                 let result = try await clipboardRepository.fetchPageAndCount(request)
+                resultBucket = .init(itemCount: result.totalCount)
+                resultCode = .succeeded
                 return PasteBuddyFilteredItemsPage(
                     items: result.items,
                     totalCount: result.totalCount
                 )
             } catch is CancellationError {
+                resultBucket = .none
+                resultCode = .cancelled
                 return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
             } catch {
                 lastErrorMessage = error.localizedDescription
+                resultBucket = .none
+                resultCode = .failed
                 return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
             }
         }
@@ -947,6 +966,7 @@ public final class PasteBuddyStore {
             orderedItemIDs = nil
         case .pinboard(let id):
             guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
+                resultBucket = .none
                 return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
             }
             sourceItems = snapshot.items
@@ -971,9 +991,13 @@ public final class PasteBuddyStore {
             queryTask.cancel()
         }
         guard !result.wasCancelled else {
+            resultBucket = .none
+            resultCode = .cancelled
             return PasteBuddyFilteredItemsPage(items: [], totalCount: 0)
         }
         lastInMemoryPageQueryRanOnMainThreadForTesting = result.ranOnMainThread
+        resultBucket = .init(itemCount: result.page.totalCount)
+        resultCode = .succeeded
         return result.page
     }
 
@@ -1623,6 +1647,17 @@ public final class PasteBuddyStore {
         maxItems: Int?,
         refreshSearchDocument: Bool
     ) -> ClipboardItem {
+        let interval = PasteBuddyPerformanceSignposts.begin(
+            .captureApply,
+            itemCount: .single
+        )
+        defer {
+            PasteBuddyPerformanceSignposts.end(
+                interval,
+                itemCount: .single,
+                result: .succeeded
+            )
+        }
         let repositoryWasCurrent = canAppendCaptureMutationToRepositoryJournal()
         prepareCaptureHistoryState()
         let storedItem: ClipboardItem
@@ -1726,6 +1761,20 @@ public final class PasteBuddyStore {
         refreshSearchDocuments: Bool
     ) -> [ClipboardItem] {
         guard !items.isEmpty else { return [] }
+        let itemCount = PasteBuddyPerformanceSignposts.ItemCountBucket(
+            itemCount: items.count
+        )
+        let interval = PasteBuddyPerformanceSignposts.begin(
+            .captureApply,
+            itemCount: itemCount
+        )
+        defer {
+            PasteBuddyPerformanceSignposts.end(
+                interval,
+                itemCount: itemCount,
+                result: .succeeded
+            )
+        }
         let repositoryWasCurrent = canAppendCaptureMutationToRepositoryJournal()
         prepareCaptureHistoryState()
         if dedupeIndexRevision != dataRevision {
@@ -1909,10 +1958,26 @@ public final class PasteBuddyStore {
         }
 
         linkPreviewMetadataRequests.insert(item.id)
-        defer { linkPreviewMetadataRequests.remove(item.id) }
+        let interval = PasteBuddyPerformanceSignposts.begin(
+            .linkEnrichment,
+            itemCount: .single
+        )
+        var resultCode = PasteBuddyPerformanceSignposts.ResultCode.noChange
+        defer {
+            linkPreviewMetadataRequests.remove(item.id)
+            PasteBuddyPerformanceSignposts.end(
+                interval,
+                itemCount: .single,
+                result: resultCode
+            )
+        }
 
-        guard let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString),
-              !isPersistenceWriteBlocked,
+        let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString)
+        guard !isPersistenceWriteBlocked else {
+            resultCode = .blocked
+            return
+        }
+        guard let metadata,
               metadata.title != nil || metadata.imageData != nil,
               let index = snapshot.items.firstIndex(where: { $0.id == item.id }),
               !snapshot.items[index].payload.hasImageAsset else {
@@ -1932,6 +1997,7 @@ public final class PasteBuddyStore {
         syncPasteStackItem(snapshot.items[index])
         refreshExistingSmartPinboards()
         save()
+        resultCode = .succeeded
         if didAdoptImage {
             onLinkPreviewMetadataEnriched?(snapshot.items[index])
         }

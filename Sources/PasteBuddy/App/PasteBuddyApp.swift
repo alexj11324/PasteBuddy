@@ -82,8 +82,42 @@ enum PasteBuddyRuntimeState: Equatable {
     }
 }
 
+@MainActor
+final class PasteBuddyLaunchPerformanceTracker {
+    private var didStart = false
+    private var didFinish = false
+    private var interval: PasteBuddyPerformanceSignposts.Interval?
+
+    @discardableResult
+    func begin() -> Bool {
+        guard !didStart else { return false }
+        didStart = true
+        interval = PasteBuddyPerformanceSignposts.begin(.appLaunchToStoreReady)
+        return true
+    }
+
+    @discardableResult
+    func finish(
+        itemCount: PasteBuddyPerformanceSignposts.ItemCountBucket = .unknown,
+        result: PasteBuddyPerformanceSignposts.ResultCode
+    ) -> Bool {
+        guard didStart, !didFinish else { return false }
+        didFinish = true
+        let interval = interval
+        self.interval = nil
+        PasteBuddyPerformanceSignposts.end(
+            interval,
+            itemCount: itemCount,
+            result: result
+        )
+        return true
+    }
+}
+
 @main
 struct PasteBuddyApp: App {
+    private static let launchPerformanceTracker = PasteBuddyLaunchPerformanceTracker()
+
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openSettings) private var openSettings
     @AppStorage("clipboardPanelDisplayMode") private var panelDisplayModeRawValue = ClipboardPanelDisplayMode.sidePanel.rawValue
@@ -100,6 +134,7 @@ struct PasteBuddyApp: App {
     @State private var irohSync = IrohClipboardSyncService()
 
     init() {
+        Self.launchPerformanceTracker.begin()
         do {
             _store = State(initialValue: try PasteBuddyStoreFactory.makeDefault())
             _persistenceErrorMessage = State(initialValue: nil)
@@ -382,6 +417,7 @@ struct PasteBuddyApp: App {
 
     private func startRuntimeIfNeeded() async {
         if case .unavailable = runtimeState {
+            finishLaunchPerformanceSignpost(result: .failed)
             configureStatusItemIfNeeded()
             PasteBuddyDiagnostics.record(
                 .lifecycle,
@@ -390,6 +426,7 @@ struct PasteBuddyApp: App {
             return
         }
         guard let store else {
+            finishLaunchPerformanceSignpost(result: .failed)
             configureStatusItemIfNeeded()
             PasteBuddyDiagnostics.record(
                 .lifecycle,
@@ -411,8 +448,13 @@ struct PasteBuddyApp: App {
             isStoreLoaded = true
             persistenceErrorMessage = nil
             updateStatusItem()
+            finishLaunchPerformanceSignpost(
+                itemCount: .init(itemCount: store.snapshot.items.count),
+                result: .succeeded
+            )
         }
         guard case .success = loadResult else {
+            finishLaunchPerformanceSignpost(result: .failed)
             PasteBuddyDiagnostics.record(
                 .lifecycle,
                 "runtimeStartBlockedByHistoryLoadFailure",
@@ -489,6 +531,16 @@ struct PasteBuddyApp: App {
                 }
             )
         }
+    }
+
+    private func finishLaunchPerformanceSignpost(
+        itemCount: PasteBuddyPerformanceSignposts.ItemCountBucket = .unknown,
+        result: PasteBuddyPerformanceSignposts.ResultCode
+    ) {
+        Self.launchPerformanceTracker.finish(
+            itemCount: itemCount,
+            result: result
+        )
     }
 
     private func transitionToHistoryUnavailable(_ error: PasteBuddyPersistenceError) async {

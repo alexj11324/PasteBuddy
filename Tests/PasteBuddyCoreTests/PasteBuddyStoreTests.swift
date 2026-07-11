@@ -7,6 +7,17 @@ import CloudKit
 
 @MainActor
 final class PasteBuddyStoreTests: XCTestCase {
+    func testPerformanceSignpostItemCountBucketsAreBounded() {
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: nil), .unknown)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 0), .none)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 1), .single)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 100), .small)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 1_000), .medium)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 5_000), .large)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 10_000), .veryLarge)
+        XCTAssertEqual(PasteBuddyPerformanceSignposts.ItemCountBucket(itemCount: 10_001), .oversized)
+    }
+
     func testDefaultStoreFactoryFailsClosedWhenApplicationSupportCannotBeResolved() {
         var diagnosticReasons: [PasteBuddyStoreFactory.FailureReason] = []
 

@@ -366,11 +366,13 @@ public final class IrohClipboardSyncService {
 
     private func bindEndpoint(generation: UInt64) async {
         guard isCurrent(generation), endpoint == nil else { return }
+        let interval = PasteBuddyPerformanceSignposts.begin(.irohEndpointBind)
         connectionState = .binding
         do {
             let boundEndpoint = try await endpointBinder()
             guard isCurrent(generation), !Task.isCancelled else {
                 await closeStaleEndpoint(boundEndpoint)
+                PasteBuddyPerformanceSignposts.end(interval, result: .cancelled)
                 return
             }
             endpointId = boundEndpoint.endpointID
@@ -384,9 +386,14 @@ public final class IrohClipboardSyncService {
                 )
             }
             acceptTask = task
+            PasteBuddyPerformanceSignposts.end(interval, result: .succeeded)
         } catch {
-            guard isCurrent(generation), !Task.isCancelled else { return }
+            guard isCurrent(generation), !Task.isCancelled else {
+                PasteBuddyPerformanceSignposts.end(interval, result: .cancelled)
+                return
+            }
             connectionState = .failed(error.localizedDescription)
+            PasteBuddyPerformanceSignposts.end(interval, result: .failed)
         }
     }
 
@@ -586,7 +593,15 @@ public final class IrohClipboardSyncService {
     private static func makeLiveEndpoint(
         identityStore: IrohClipboardIdentityStore
     ) async throws -> IrohClipboardBoundEndpoint {
-        let identity = try identityStore.loadOrCreate()
+        let identityInterval = PasteBuddyPerformanceSignposts.begin(.irohIdentityLoad)
+        let identity: IrohClipboardIdentity
+        do {
+            identity = try identityStore.loadOrCreate()
+            PasteBuddyPerformanceSignposts.end(identityInterval, result: .succeeded)
+        } catch {
+            PasteBuddyPerformanceSignposts.end(identityInterval, result: .failed)
+            throw error
+        }
         let endpoint = try await Endpoint.bind(options: EndpointOptions(
             preset: presetN0(),
             secretKey: identity.secretKey.toBytes(),

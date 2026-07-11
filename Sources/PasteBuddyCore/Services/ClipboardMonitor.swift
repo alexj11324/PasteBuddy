@@ -87,12 +87,19 @@ public final class ClipboardMonitor {
         let captureImages = privacy.captureImages
         pasteboardReadTask = Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
-                Self.readPasteboard(
+                let interval = PasteBuddyPerformanceSignposts.begin(.pasteboardRead)
+                let result = Self.readPasteboard(
                     reference: pasteboardReference,
                     expectedChangeCount: expectedChangeCount,
                     shouldCapture: shouldCapture,
                     captureImages: captureImages
                 )
+                PasteBuddyPerformanceSignposts.end(
+                    interval,
+                    itemCount: .init(itemCount: result.snapshot == nil ? 0 : 1),
+                    result: result.snapshot == nil ? .noChange : .succeeded
+                )
+                return result
             }.value
             guard !Task.isCancelled else { return }
 
@@ -260,15 +267,29 @@ public final class ClipboardMonitor {
                store.snapshot.privacy.runLocalOCRAfterImageCapture,
                let imageData = item.payload.imageData {
                 Task { [recognizeText] in
+                    let interval = PasteBuddyPerformanceSignposts.begin(
+                        .ocrEnrichment,
+                        itemCount: .single
+                    )
                     do {
                         let text = try await recognizeText(imageData)
                         await MainActor.run {
                             self.store.updateOCRText(text, for: storedItem.id)
                         }
+                        PasteBuddyPerformanceSignposts.end(
+                            interval,
+                            itemCount: .single,
+                            result: .succeeded
+                        )
                     } catch {
                         await MainActor.run {
                             self.store.markOCRFailed(error.localizedDescription, for: storedItem.id)
                         }
+                        PasteBuddyPerformanceSignposts.end(
+                            interval,
+                            itemCount: .single,
+                            result: error is CancellationError ? .cancelled : .failed
+                        )
                     }
                 }
             }

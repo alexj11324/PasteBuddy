@@ -170,37 +170,77 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
         let persistedStorageMode = storageMode
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let itemCount = PasteBuddyPerformanceSignposts.ItemCountBucket(
+            itemCount: snapshot.items.count
+        )
+        let encodeInterval = PasteBuddyPerformanceSignposts.begin(
+            .snapshotEncode,
+            itemCount: itemCount
+        )
         let payload: Data
-        if persistedStorageMode == .encrypted {
-            var encryptedSnapshot = snapshot
-            encryptedSnapshot.security.storageMode = .encrypted
-            let envelope = try encryptionService.encrypt(encryptedSnapshot)
-            payload = try JSONEncoder.pasteBuddy.encode(envelope)
-        } else {
-            var standardSnapshot = snapshot
-            standardSnapshot.security.storageMode = .standard
-            payload = try JSONEncoder.pasteBuddy.encode(standardSnapshot)
-        }
-        let newRevision = UUID()
-        let temporaryURL = try writeTemporaryPersistedFile(payload: payload, revision: newRevision)
         do {
-            try withExclusivePersistenceLock {
-                let baseline = currentBaseline()
-                if baseline.hasLoadedBaseline {
-                    guard try readCurrentPersistenceRevision() == baseline.revision else {
-                        throw PasteBuddyPersistenceError.historyUnavailable
-                    }
-                } else if FileManager.default.fileExists(atPath: fileURL.path) {
-                    throw PasteBuddyPersistenceError.historyUnavailable
-                }
-                try replacePersistedFileAtomically(with: temporaryURL)
-                updateBaseline(revision: newRevision)
+            if persistedStorageMode == .encrypted {
+                var encryptedSnapshot = snapshot
+                encryptedSnapshot.security.storageMode = .encrypted
+                let envelope = try encryptionService.encrypt(encryptedSnapshot)
+                payload = try JSONEncoder.pasteBuddy.encode(envelope)
+            } else {
+                var standardSnapshot = snapshot
+                standardSnapshot.security.storageMode = .standard
+                payload = try JSONEncoder.pasteBuddy.encode(standardSnapshot)
             }
+            PasteBuddyPerformanceSignposts.end(
+                encodeInterval,
+                itemCount: itemCount,
+                result: .succeeded
+            )
         } catch {
-            try? FileManager.default.removeItem(at: temporaryURL)
+            PasteBuddyPerformanceSignposts.end(
+                encodeInterval,
+                itemCount: itemCount,
+                result: .failed
+            )
             throw error
         }
-        updateLastLoadedStorageMode(persistedStorageMode)
+
+        let persistenceInterval = PasteBuddyPerformanceSignposts.begin(
+            .snapshotFsyncRename,
+            itemCount: itemCount
+        )
+        let newRevision = UUID()
+        do {
+            let temporaryURL = try writeTemporaryPersistedFile(payload: payload, revision: newRevision)
+            do {
+                try withExclusivePersistenceLock {
+                    let baseline = currentBaseline()
+                    if baseline.hasLoadedBaseline {
+                        guard try readCurrentPersistenceRevision() == baseline.revision else {
+                            throw PasteBuddyPersistenceError.historyUnavailable
+                        }
+                    } else if FileManager.default.fileExists(atPath: fileURL.path) {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
+                    try replacePersistedFileAtomically(with: temporaryURL)
+                    updateBaseline(revision: newRevision)
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: temporaryURL)
+                throw error
+            }
+            updateLastLoadedStorageMode(persistedStorageMode)
+            PasteBuddyPerformanceSignposts.end(
+                persistenceInterval,
+                itemCount: itemCount,
+                result: .succeeded
+            )
+        } catch {
+            PasteBuddyPerformanceSignposts.end(
+                persistenceInterval,
+                itemCount: itemCount,
+                result: .failed
+            )
+            throw error
+        }
     }
 
     private func currentBaseline() -> (hasLoadedBaseline: Bool, revision: UUID?) {

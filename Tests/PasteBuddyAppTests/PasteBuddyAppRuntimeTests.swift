@@ -2133,6 +2133,29 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("RunLoop.main.perform"))
     }
 
+    func testPanelFirstPagePerformanceTrackerRejectsStaleAndDuplicateCompletion() {
+        var tracker = ClipboardPanelFirstPagePerformanceTracker()
+        let stalePresentation = tracker.begin()
+        let activePresentation = tracker.begin()
+
+        XCTAssertFalse(tracker.finish(presentationID: stalePresentation, itemCount: .small))
+        XCTAssertTrue(tracker.finish(presentationID: activePresentation, itemCount: .medium))
+        XCTAssertFalse(tracker.finish(presentationID: activePresentation, itemCount: .medium))
+
+        let cancelledPresentation = tracker.begin()
+        tracker.cancel()
+        XCTAssertFalse(tracker.finish(presentationID: cancelledPresentation, itemCount: .large))
+    }
+
+    func testLaunchPerformanceTrackerStartsAndFinishesOnlyOnce() {
+        let tracker = PasteBuddyLaunchPerformanceTracker()
+
+        XCTAssertTrue(tracker.begin())
+        XCTAssertFalse(tracker.begin())
+        XCTAssertTrue(tracker.finish(itemCount: .medium, result: .succeeded))
+        XCTAssertFalse(tracker.finish(itemCount: .medium, result: .succeeded))
+    }
+
     func testPanelHotKeyTriggerGateRecordsSourceAndDeduplicates() {
         var events: [PasteBuddyDiagnosticEvent] = []
         PasteBuddyDiagnostics.installTestSink { event in

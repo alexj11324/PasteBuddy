@@ -22,6 +22,8 @@ enum PasteBuddyDiagnostics {
     )
     private static let store = PasteBuddyDiagnosticsStore()
 
+    // `detail` is emitted publicly. Performance spans must instead use
+    // PasteBuddyPerformanceSignposts, whose API admits only fixed metadata.
     static func record(_ category: PasteBuddyDiagnosticCategory, _ name: String, detail: String? = nil) {
         let event = PasteBuddyDiagnosticEvent(category: category, name: name, detail: detail)
         if let detail {

@@ -247,6 +247,7 @@ struct ClipboardShelfPanelView: View {
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let reloadClipboardHistory: @MainActor () async -> Bool
+    let onFirstPageApplied: @MainActor (PasteBuddyPerformanceSignposts.ItemCountBucket) -> Void
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
@@ -1229,6 +1230,7 @@ struct ClipboardShelfPanelView: View {
                 storeSelectedIDs: store.selectedItemIDs,
                 storePrimarySelectedID: store.selectedItemID
             )
+            onFirstPageApplied(.init(itemCount: page.totalCount))
         }
     }
 

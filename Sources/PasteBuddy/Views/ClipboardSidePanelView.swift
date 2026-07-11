@@ -18,6 +18,7 @@ struct ClipboardSidePanelView: View {
     @Binding var isPinned: Bool
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
+    let onFirstPageApplied: @MainActor (PasteBuddyPerformanceSignposts.ItemCountBucket) -> Void
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
@@ -511,6 +512,7 @@ struct ClipboardSidePanelView: View {
                 storeSelectedIDs: store.selectedItemIDs,
                 storePrimarySelectedID: store.selectedItemID
             )
+            onFirstPageApplied(.init(itemCount: page.totalCount))
         }
     }
 

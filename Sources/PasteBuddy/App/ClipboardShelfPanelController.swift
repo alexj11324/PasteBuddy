@@ -54,6 +54,44 @@ enum ClipboardPanelDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+struct ClipboardPanelFirstPagePerformanceTracker {
+    private var activePresentationID: UUID?
+    private var interval: PasteBuddyPerformanceSignposts.Interval?
+
+    mutating func begin() -> UUID {
+        cancel()
+        let presentationID = UUID()
+        activePresentationID = presentationID
+        interval = PasteBuddyPerformanceSignposts.begin(.shelfShowToFirstPage)
+        return presentationID
+    }
+
+    @discardableResult
+    mutating func finish(
+        presentationID: UUID,
+        itemCount: PasteBuddyPerformanceSignposts.ItemCountBucket
+    ) -> Bool {
+        guard activePresentationID == presentationID else { return false }
+        activePresentationID = nil
+        let interval = interval
+        self.interval = nil
+        PasteBuddyPerformanceSignposts.end(
+            interval,
+            itemCount: itemCount,
+            result: .succeeded
+        )
+        return true
+    }
+
+    mutating func cancel() {
+        guard activePresentationID != nil else { return }
+        activePresentationID = nil
+        let interval = interval
+        self.interval = nil
+        PasteBuddyPerformanceSignposts.end(interval, result: .cancelled)
+    }
+}
+
 @MainActor
 final class ClipboardShelfPanelController {
     private static let panelCornerRadius: CGFloat = 28
@@ -74,6 +112,9 @@ final class ClipboardShelfPanelController {
             guard oldValue != displayMode, let panel else { return }
             closeShelfAuxiliaryWindows()
             configurePanelForCurrentMode(panel)
+            if panel.isVisible {
+                firstPageTrackingID = firstPagePerformanceTracker.begin()
+            }
             reloadPanelContent(panel)
             positionVisiblePanel(panel)
         }
@@ -95,6 +136,8 @@ final class ClipboardShelfPanelController {
     private var isPinned = false
     private var panelAnimationGeneration = 0
     private var panelPresentationID = UUID()
+    private var firstPageTrackingID = UUID()
+    private var firstPagePerformanceTracker = ClipboardPanelFirstPagePerformanceTracker()
 
     init(
         store: PasteBuddyStore,
@@ -149,6 +192,7 @@ final class ClipboardShelfPanelController {
         closeShelfAuxiliaryWindows()
         resetPanelPresentationState()
         panelPresentationID = UUID()
+        firstPageTrackingID = firstPagePerformanceTracker.begin()
         reloadPanelContent(panel)
         ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = attachedFrame(for: panel)
@@ -167,6 +211,7 @@ final class ClipboardShelfPanelController {
     }
 
     func hideImmediately() {
+        firstPagePerformanceTracker.cancel()
         guard let panel, panel.isVisible else { return }
         PasteBuddyDiagnostics.record(.shelf, "hideImmediate")
         stopOutsideClickMonitoring()
@@ -182,6 +227,7 @@ final class ClipboardShelfPanelController {
     }
 
     func hide() {
+        firstPagePerformanceTracker.cancel()
         guard let panel, panel.isVisible else { return }
         guard !isAnimatingPanelOut else { return }
         PasteBuddyDiagnostics.record(.shelf, "hideRequested")
@@ -274,7 +320,14 @@ final class ClipboardShelfPanelController {
     }
 
     private func panelContentView() -> AnyView {
-        switch displayMode {
+        let firstPageTrackingID = firstPageTrackingID
+        let onFirstPageApplied: @MainActor (PasteBuddyPerformanceSignposts.ItemCountBucket) -> Void = { [weak self] itemCount in
+            self?.firstPagePerformanceTracker.finish(
+                presentationID: firstPageTrackingID,
+                itemCount: itemCount
+            )
+        }
+        return switch displayMode {
         case .shelf:
             AnyView(
                 ClipboardShelfPanelView(
@@ -284,7 +337,8 @@ final class ClipboardShelfPanelController {
                     reloadClipboardHistory: { [weak self] in
                         guard let self else { return false }
                         return await self.reloadClipboardHistory()
-                    }
+                    },
+                    onFirstPageApplied: onFirstPageApplied
                 ) { [weak self] in
                     self?.hide()
                 } onDismissImmediately: { [weak self] in
@@ -298,7 +352,8 @@ final class ClipboardShelfPanelController {
                     store: store,
                     isPinned: sidePanelPinnedBinding(),
                     directPasteItem: directPasteItem,
-                    directPasteItems: directPasteItems
+                    directPasteItems: directPasteItems,
+                    onFirstPageApplied: onFirstPageApplied
                 ) { [weak self] in
                     self?.hide()
                 } onDismissImmediately: { [weak self] in

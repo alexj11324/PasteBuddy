@@ -184,7 +184,15 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
     }
 
     fileprivate func write<T>(_ block: (Database) throws -> T) throws -> T {
-        try pool.write(block)
+        let interval = PasteBuddyPerformanceSignposts.begin(.repositoryCommit)
+        do {
+            let result = try pool.write(block)
+            PasteBuddyPerformanceSignposts.end(interval, result: .succeeded)
+            return result
+        } catch {
+            PasteBuddyPerformanceSignposts.end(interval, result: .failed)
+            throw error
+        }
     }
 
     private static var migrator: DatabaseMigrator {
