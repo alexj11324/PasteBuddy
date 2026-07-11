@@ -850,7 +850,7 @@ extension PasteBuddyStoreTests {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
-        let actor = SnapshotPersistenceActor(diskStore: harness.snapshotStore)
+        let actor = EncryptedHistoryBackend(diskStore: harness.snapshotStore)
         let older = ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Test Mac",
@@ -866,14 +866,14 @@ extension PasteBuddyStoreTests {
             payload: ClipboardPayload(text: "newer generation")
         )
 
-        let didSaveNewer = try await actor.save(
+        let didSaveNewer = try await actor.commit(
             PasteBuddySnapshot(items: [newer]),
-            storageMode: .encrypted,
+            plan: .none,
             generation: 2
         )
-        let didSaveOlder = try await actor.save(
+        let didSaveOlder = try await actor.commit(
             PasteBuddySnapshot(items: [older]),
-            storageMode: .encrypted,
+            plan: .none,
             generation: 1
         )
         XCTAssertTrue(didSaveNewer)

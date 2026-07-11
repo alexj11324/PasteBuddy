@@ -151,11 +151,11 @@ public final class PasteBuddyStore {
 
     private var diskStore: EncryptedSnapshotStore
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
-    @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor
+    @ObservationIgnored private let persistenceActor: EncryptedHistoryBackend
     @ObservationIgnored private let persistenceCommitGate: PersistenceCommitGate
     @ObservationIgnored private let authorityStore: HistoryPersistenceAuthorityStore
     @ObservationIgnored private var clipboardRepository: ClipboardItemRepository?
-    @ObservationIgnored private var repositorySyncActor: ClipboardRepositorySyncActor?
+    @ObservationIgnored private var repositorySyncActor: StandardHistoryBackend?
     @ObservationIgnored private var deferredRepositoryDatabaseURL: URL?
     @ObservationIgnored private var repositoryDatabaseURLForStandardStorage: URL?
     @ObservationIgnored private var deferredRepositoryInitializationTask: Task<(ClipboardItemRepository, Bool), Error>?
@@ -237,11 +237,11 @@ public final class PasteBuddyStore {
         initialSnapshot.security.storageMode = diskStore.storageMode
         self.diskStore = diskStore
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
-        self.persistenceActor = SnapshotPersistenceActor(diskStore: diskStore)
+        self.persistenceActor = EncryptedHistoryBackend(diskStore: diskStore)
         self.persistenceCommitGate = PersistenceCommitGate()
         self.authorityStore = HistoryPersistenceAuthorityStore(snapshotURL: diskStore.fileURL)
         self.clipboardRepository = resolvedClipboardRepository
-        self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
+        self.repositorySyncActor = resolvedClipboardRepository.map(StandardHistoryBackend.init(repository:))
         self.deferredRepositoryDatabaseURL = resolvedDeferredRepositoryDatabaseURL
         self.repositoryDatabaseURLForStandardStorage = resolvedClipboardRepository?.fileURL ?? resolvedDeferredRepositoryDatabaseURL
         self.deferredRepositoryInitializationTask = nil
@@ -485,7 +485,7 @@ public final class PasteBuddyStore {
                 }
             }
             let diskResult = try await persistenceActor.load()
-            let diskStorageMode = diskResult.loadedStorageMode ?? diskResult.snapshot.security.storageMode
+            let diskStorageMode = diskResult.loadedStorageMode
             if diskStorageMode == .encrypted {
                 // Do not open plaintext residue after an encrypted commit. Keep
                 // an existing deferred URL only long enough to remove it below.
@@ -659,7 +659,7 @@ public final class PasteBuddyStore {
         defer { deferredRepositoryInitializationTask = nil }
         let (repository, initializedOnMainThread) = try await task.value
         clipboardRepository = repository
-        repositorySyncActor = ClipboardRepositorySyncActor(repository: repository)
+        repositorySyncActor = StandardHistoryBackend(repository: repository)
         deferredRepositoryDatabaseURL = nil
         lastDeferredRepositoryInitializationWasOnMainThreadForTesting = initializedOnMainThread
     }
@@ -684,7 +684,7 @@ public final class PasteBuddyStore {
     }
 
     private func finalizeLegacyStandardSnapshotCutover(
-        repositorySyncActor: ClipboardRepositorySyncActor
+        repositorySyncActor: StandardHistoryBackend
     ) async throws {
         guard let sourceRevision = try diskStore.currentRevisionForAuthority(),
               let targetRevision = try await repositorySyncActor.currentRevisionForAuthority() else {
@@ -837,6 +837,15 @@ public final class PasteBuddyStore {
             let repositoryRequiresFullSync = pendingRepositoryRequiresFullSync
             let captureJournal = pendingRepositoryCaptureJournal
             let repositoryMetadataOnly = pendingRepositoryMetadataOnly
+            let repositoryPlan: HistoryPersistenceMutationPlan = if repositoryRequiresFullSync {
+                .synchronize
+            } else if !captureJournal.isEmpty {
+                .capture(captureJournal, includeMetadata: repositoryMetadataOnly)
+            } else if repositoryMetadataOnly {
+                .metadata
+            } else {
+                .none
+            }
             let externalizationTask = Task.detached(priority: .utility) {
                 try Task.checkCancellation()
                 return try Self.externalizedSnapshotForDiskPersistence(
@@ -879,27 +888,28 @@ public final class PasteBuddyStore {
                 var crossedWriteBarrier = false
                 do {
                     if let repositorySyncActor {
-                        if repositoryRequiresFullSync {
-                            try await repositorySyncActor.synchronize(with: snapshotToSave)
-                            crossedWriteBarrier = true
-                        } else if !captureJournal.isEmpty {
-                            try await repositorySyncActor.applyCaptureJournal(
-                                captureJournal,
-                                metadataFrom: repositoryMetadataOnly ? snapshotToSave : nil
-                            )
-                            crossedWriteBarrier = true
-                        } else if repositoryMetadataOnly {
-                            try await repositorySyncActor.updateMetadata(from: snapshotToSave)
-                            crossedWriteBarrier = true
+                        guard try await repositorySyncActor.commit(
+                            snapshotToSave,
+                            plan: repositoryPlan,
+                            generation: persistenceGeneration
+                        ) else {
+                            throw PasteBuddyPersistenceError.historyUnavailable
                         }
+                        crossedWriteBarrier = repositoryRequiresFullSync
+                            || !captureJournal.isEmpty
+                            || repositoryMetadataOnly
                     }
                     crossedWriteBarrier = true
-                    let didPersist = try await persistenceActor.save(
-                        snapshotToPersist,
-                        storageMode: snapshotToSave.security.storageMode,
-                        hasAuthoritativeRepository: hasRepository,
-                        generation: persistenceGeneration
-                    )
+                    let didPersist = if snapshotToSave.security.storageMode == .standard,
+                                        hasRepository {
+                        true
+                    } else {
+                        try await persistenceActor.commit(
+                            snapshotToPersist,
+                            plan: .none,
+                            generation: persistenceGeneration
+                        )
+                    }
                     guard didPersist else {
                         throw PasteBuddyPersistenceError.historyUnavailable
                     }
@@ -1002,6 +1012,15 @@ public final class PasteBuddyStore {
         let repositoryRequiresFullSync = pendingRepositoryRequiresFullSync
         let captureJournal = pendingRepositoryCaptureJournal
         let repositoryMetadataOnly = pendingRepositoryMetadataOnly
+        let repositoryPlan: HistoryPersistenceMutationPlan = if repositoryRequiresFullSync {
+            .synchronize
+        } else if !captureJournal.isEmpty {
+            .capture(captureJournal, includeMetadata: repositoryMetadataOnly)
+        } else if repositoryMetadataOnly {
+            .metadata
+        } else {
+            .none
+        }
         let precedingSaveTask = pendingSaveTask
         precedingSaveTask?.cancel()
         let saveTaskID = UUID()
@@ -1065,27 +1084,28 @@ public final class PasteBuddyStore {
                 let persistenceLease = try authorityStore.acquireLease(.shared)
                 defer { persistenceLease?.release() }
                 if let repositorySyncActor {
-                    if repositoryRequiresFullSync {
-                        try await repositorySyncActor.synchronize(with: snapshotToSave)
-                        crossedWriteBarrier = true
-                    } else if !captureJournal.isEmpty {
-                        try await repositorySyncActor.applyCaptureJournal(
-                            captureJournal,
-                            metadataFrom: repositoryMetadataOnly ? snapshotToSave : nil
-                        )
-                        crossedWriteBarrier = true
-                    } else if repositoryMetadataOnly {
-                        try await repositorySyncActor.updateMetadata(from: snapshotToSave)
-                        crossedWriteBarrier = true
+                    guard try await repositorySyncActor.commit(
+                        snapshotToSave,
+                        plan: repositoryPlan,
+                        generation: persistenceGeneration
+                    ) else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
                     }
+                    crossedWriteBarrier = repositoryRequiresFullSync
+                        || !captureJournal.isEmpty
+                        || repositoryMetadataOnly
                 }
                 crossedWriteBarrier = true
-                let didPersist = try await persistenceActor.save(
-                    snapshotToPersist,
-                    storageMode: snapshotToSave.security.storageMode,
-                    hasAuthoritativeRepository: hasRepository,
-                    generation: persistenceGeneration
-                )
+                let didPersist = if snapshotToSave.security.storageMode == .standard,
+                                    hasRepository {
+                    true
+                } else {
+                    try await persistenceActor.commit(
+                        snapshotToPersist,
+                        plan: .none,
+                        generation: persistenceGeneration
+                    )
+                }
                 guard didPersist else {
                     throw PasteBuddyPersistenceError.historyUnavailable
                 }
@@ -3327,12 +3347,15 @@ public final class PasteBuddyStore {
             do {
                 try Task.checkCancellation()
                 writeWasAttempted = true
-                let didPersist = try await persistenceActor.save(
-                    snapshotToPersist,
-                    storageMode: storageMode,
-                    hasAuthoritativeRepository: hasRepository,
-                    generation: persistenceGeneration
-                )
+                let didPersist = if storageMode == .standard, hasRepository {
+                    true
+                } else {
+                    try await persistenceActor.commit(
+                        snapshotToPersist,
+                        plan: .none,
+                        generation: persistenceGeneration
+                    )
+                }
                 guard didPersist else {
                     throw PasteBuddyPersistenceError.historyUnavailable
                 }
@@ -3383,7 +3406,13 @@ public final class PasteBuddyStore {
             do {
                 try Task.checkCancellation()
                 if let repositorySyncActor {
-                    try await repositorySyncActor.synchronize(with: sourceSnapshot)
+                    guard try await repositorySyncActor.commit(
+                        sourceSnapshot,
+                        plan: .synchronize,
+                        generation: persistenceGeneration
+                    ) else {
+                        throw PasteBuddyPersistenceError.historyUnavailable
+                    }
                     crossedWriteBarrier = true
                 }
                 if let beforePersistingStandardMigrationSnapshotForTesting {
@@ -3391,12 +3420,15 @@ public final class PasteBuddyStore {
                     await beforePersistingStandardMigrationSnapshotForTesting()
                 }
                 crossedWriteBarrier = true
-                let didPersist = try await persistenceActor.save(
-                    snapshotToPersist,
-                    storageMode: .standard,
-                    hasAuthoritativeRepository: hasRepository,
-                    generation: persistenceGeneration
-                )
+                let didPersist = if hasRepository {
+                    true
+                } else {
+                    try await persistenceActor.commit(
+                        snapshotToPersist,
+                        plan: .none,
+                        generation: persistenceGeneration
+                    )
+                }
                 guard didPersist else {
                     throw PasteBuddyPersistenceError.historyUnavailable
                 }
