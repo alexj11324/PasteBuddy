@@ -78,7 +78,7 @@ public enum PasteBuddyPerformanceSignposts {
 
     private static let signposter = OSSignposter(
         subsystem: "com.alexjiang.PasteBuddy",
-        category: "Performance"
+        category: .pointsOfInterest
     )
 
     public static func begin(
