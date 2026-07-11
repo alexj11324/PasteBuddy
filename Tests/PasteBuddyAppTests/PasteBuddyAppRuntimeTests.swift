@@ -623,7 +623,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfExpandedPreviewKeepsKeyboardSelectionAndOmitsChrome() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
         let previewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
         let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
         let previewSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
@@ -679,7 +679,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfAndMobileLongTextPreviewsRequireExplicitExpansion() throws {
-        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
         let mobileSource = try sourceFileContents("Sources/PasteBuddyMobile/MobileClipboardBrowserView.swift")
         let shelfPreviewStart = try XCTUnwrap(shelfSource.range(of: "struct ShelfExpandedPreview"))
         let shelfImageStart = try XCTUnwrap(shelfSource.range(of: "private struct ShelfExpandedImagePreview"))
@@ -729,8 +729,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let dragSource = try sourceFileContents("Sources/PasteBuddy/Models/PinboardItemDragPayload.swift")
 
         let shelfCardStart = try XCTUnwrap(shelfSource.range(of: "private struct ClipboardShelfCard: View"))
-        let shelfPreviewStart = try XCTUnwrap(shelfSource.range(of: "struct ShelfExpandedPreview"))
-        let shelfCardSource = String(shelfSource[shelfCardStart.lowerBound..<shelfPreviewStart.lowerBound])
+        let shelfVisualStart = try XCTUnwrap(shelfSource.range(of: "private struct ClipboardShelfCardVisual"))
+        let shelfCardSource = String(shelfSource[shelfCardStart.lowerBound..<shelfVisualStart.lowerBound])
 
         let sideRowStart = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelListRow: View"))
         let sidePreviewStart = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelContentPreview"))
@@ -891,6 +891,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testPanelModesShareDefaultSelectionAndTypeToSearchScaffold() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let interactionSource = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
+        let sharedSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
 
         for source in [shelfSource, sideSource] {
@@ -922,28 +924,28 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(sideSource.contains("scheduleStoreSelectionSync"))
         XCTAssertFalse(shelfSource.contains("selectionSyncTask"))
         XCTAssertFalse(sideSource.contains("selectionSyncTask"))
-        XCTAssertTrue(shelfSource.contains("refreshShelfItems()"))
-        XCTAssertTrue(sideSource.contains("refreshSideItems()"))
-        XCTAssertTrue(shelfSource.contains("struct SourceAppSuggestionPanelPresenter"))
-        XCTAssertFalse(shelfSource.contains("private struct SourceAppSuggestionPanelPresenter"))
+        XCTAssertTrue(shelfSource.contains("refreshPanel()"))
+        XCTAssertTrue(sideSource.contains("refreshSidePanel()"))
+        XCTAssertTrue(sharedSource.contains("struct SourceAppSuggestionPanelPresenter"))
+        XCTAssertFalse(sharedSource.contains("private struct SourceAppSuggestionPanelPresenter"))
         XCTAssertTrue(shelfSource.contains("SourceAppSuggestionPanelPresenter("))
         XCTAssertFalse(shelfSource.contains("guard nextIndex != currentIndex else { return }"))
         XCTAssertFalse(sideSource.contains("guard nextIndex != currentIndex else { return }"))
         XCTAssertTrue(sideSource.contains("SourceAppSuggestionPanelPresenter("))
         XCTAssertTrue(sideSource.contains("sourceAppSuggestions(matching: store.searchQuery, limit: 3)"))
         XCTAssertTrue(sideSource.contains("store.applySourceAppSuggestion(appName)"))
-        XCTAssertTrue(shelfSource.contains("enum ClipboardPanelSearchInput"))
-        XCTAssertTrue(shelfSource.contains("modifiers.subtracting([.shift, .capsLock]).isEmpty"))
-        XCTAssertTrue(shelfSource.contains("characters.rangeOfCharacter(from: .controlCharacters) == nil"))
-        XCTAssertTrue(shelfSource.contains("let onTextInput: (String) -> Bool"))
-        XCTAssertTrue(shelfSource.contains(".onKeyPress(phases: .down)"))
-        XCTAssertTrue(shelfSource.contains("ClipboardPanelSearchInput.accepts(keyPress.modifiers)"))
-        XCTAssertTrue(shelfSource.contains("onTextInput(keyPress.characters)"))
-        XCTAssertFalse(shelfSource.contains("ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)"))
-        XCTAssertFalse(shelfSource.contains("ClipboardPanelSearchInput.accepts(event.modifierFlags)"))
-        XCTAssertFalse(shelfSource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
-        XCTAssertFalse(shelfSource.contains("event.window === self.window"))
-        XCTAssertFalse(shelfSource.contains("NSEvent.removeMonitor(keyMonitor)"))
+        XCTAssertTrue(interactionSource.contains("enum ClipboardPanelSearchInput"))
+        XCTAssertTrue(interactionSource.contains("modifiers.subtracting([.shift, .capsLock]).isEmpty"))
+        XCTAssertTrue(interactionSource.contains("characters.rangeOfCharacter(from: .controlCharacters) == nil"))
+        XCTAssertTrue(sharedSource.contains("let onTextInput: (String) -> Bool"))
+        XCTAssertTrue(sharedSource.contains(".onKeyPress(phases: .down, action: handlePreviewKeyPress)"))
+        XCTAssertTrue(sharedSource.contains("ClipboardPanelSearchInput.accepts(keyPress.modifiers)"))
+        XCTAssertTrue(sharedSource.contains("onTextInput(keyPress.characters)"))
+        XCTAssertFalse(sharedSource.contains("ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)"))
+        XCTAssertFalse(interactionSource.contains("ClipboardPanelSearchInput.accepts(event.modifierFlags)"))
+        XCTAssertFalse(sharedSource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
+        XCTAssertFalse(sharedSource.contains("event.window === self.window"))
+        XCTAssertFalse(sharedSource.contains("NSEvent.removeMonitor(keyMonitor)"))
         XCTAssertTrue(controllerSource.contains("reloadPanelContent(panel)"))
         XCTAssertTrue(controllerSource.contains("hostingView.rootView = panelContentView()"))
         XCTAssertTrue(controllerSource.contains("panelPresentationID = UUID()"))
@@ -955,10 +957,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfExpandedImagePreviewUsesAppleLiveTextInsteadOfOCRTextBox() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
         let previewStart = try XCTUnwrap(source.range(of: "private var previewContent"))
         let imageStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
-        let nextViewStart = try XCTUnwrap(source.range(of: "private struct ClipboardShelfCardVisual"))
+        let nextViewStart = try XCTUnwrap(source.range(of: "struct ClipboardImageThumbnailView"))
         let expandedPreviewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
         let expandedPreviewSource = String(source[expandedPreviewStart.lowerBound..<imageStart.lowerBound])
         let previewContentSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
@@ -976,7 +978,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("private var previewFrameWidth: CGFloat"))
         XCTAssertTrue(source.contains("private static let textPreviewHeight: CGFloat = 420"))
         XCTAssertTrue(source.contains(".frame(width: previewFrameWidth, height: previewFrameHeight, alignment: .topLeading)"))
-        XCTAssertTrue(source.contains(".background(.regularMaterial)"))
+        XCTAssertFalse(expandedPreviewSource.contains(".background(.regularMaterial)"))
         XCTAssertTrue(source.contains("var maxWidth: CGFloat = 640"))
         XCTAssertTrue(source.contains("max(320, min(maxWidth, 640))"))
         XCTAssertTrue(source.contains("private var imagePreviewBounds: CGSize"))
@@ -1091,14 +1093,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testCollectionReorderDoesNotUseCopyPasteboardPayload() throws {
         let payloadSource = try sourceFileContents("Sources/PasteBuddy/Models/PinboardItemDragPayload.swift")
-        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let interactionSource = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
 
         XCTAssertFalse(payloadSource.contains("ClipboardCollectionDragPayload"))
         XCTAssertFalse(payloadSource.contains("pasteBuddyCollectionID"))
-        XCTAssertTrue(shelfSource.contains("DragGesture("))
-        XCTAssertTrue(shelfSource.contains("minimumDistance: 4"))
-        XCTAssertTrue(shelfSource.contains(".highPriorityGesture("))
-        XCTAssertFalse(shelfSource.contains(".simultaneousGesture(\n                DragGesture("))
+        XCTAssertTrue(interactionSource.contains("DragGesture("))
+        XCTAssertTrue(interactionSource.contains("minimumDistance: 4"))
+        XCTAssertTrue(interactionSource.contains(".highPriorityGesture("))
+        XCTAssertFalse(interactionSource.contains(".simultaneousGesture(\n                DragGesture("))
     }
 
     func testShelfAndSidePanelRenderSharedCollectionOrder() throws {
@@ -1124,6 +1126,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testShelfCollectionChipsAcceptDraggedClipboardItems() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let interactionSource = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
         let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
         let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
         let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
@@ -1131,20 +1134,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
         let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
 
-        XCTAssertTrue(source.contains("enum ClipboardCollectionDropTarget"))
+        XCTAssertTrue(interactionSource.contains("enum ClipboardCollectionDropTarget"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .history) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
         XCTAssertFalse(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
         XCTAssertTrue(chipSource.contains("ClipboardCollectionReorderModifier("))
-        XCTAssertTrue(source.contains("struct ClipboardCollectionCardDropModifier: ViewModifier"))
-        XCTAssertTrue(source.contains("if let onDropPayloads"))
-        XCTAssertTrue(source.contains("dropDestination(for: PinboardItemDragPayload.self"))
+        XCTAssertTrue(interactionSource.contains("struct ClipboardCollectionCardDropModifier: ViewModifier"))
+        XCTAssertTrue(interactionSource.contains("if let onDropPayloads"))
+        XCTAssertTrue(interactionSource.contains("dropDestination(for: PinboardItemDragPayload.self"))
         XCTAssertFalse(source.contains("struct ShelfCollectionChipDropTarget"))
         XCTAssertFalse(source.contains("registerForDraggedTypes"))
-        XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
-        XCTAssertTrue(source.contains("store.addItemsToPasteStack(ids)"))
-        XCTAssertFalse(source.contains("case smartCategory(SmartPinboardCategory)"))
+        XCTAssertTrue(interactionSource.contains("store.pinItems(ids, to: pinboardID)"))
+        XCTAssertTrue(interactionSource.contains("store.addItemsToPasteStack(ids)"))
+        XCTAssertFalse(interactionSource.contains("case smartCategory(SmartPinboardCategory)"))
     }
 
     func testSidePanelCollectionChipsAcceptDraggedClipboardItemsWithCompactSpacing() throws {
@@ -1206,15 +1209,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testCollectionDragCompletionPersistsFinalOrderBeforeClearingPreview() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let source = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
         let handlerStart = try XCTUnwrap(source.range(of: "private func handleDragEnded"))
-        let handlerEnd = try XCTUnwrap(
-            source.range(
-                of: "\n    }\n}\n\nstruct ClipboardCollectionCardDropModifier",
-                range: handlerStart.lowerBound..<source.endIndex
-            )
-        )
-        let handler = String(source[handlerStart.lowerBound..<handlerEnd.upperBound])
+        let handlerEnd = try XCTUnwrap(source.range(of: "struct ClipboardCollectionCardDropModifier"))
+        let handler = String(source[handlerStart.lowerBound..<handlerEnd.lowerBound])
         let reorder = try XCTUnwrap(handler.range(of: "onReorder(move.source, move.target, move.afterTarget)"))
         let clearPreview = try XCTUnwrap(handler.range(of: "session.cancel()"))
 
@@ -1223,11 +1221,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testCollectionReorderMeasuresStationarySlotOutsideVisualTransform() throws {
+        let interactionSource = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
-        let modifierStart = try XCTUnwrap(shelfSource.range(of: "struct ClipboardCollectionReorderModifier"))
-        let modifierEnd = try XCTUnwrap(shelfSource.range(of: "struct ClipboardCollectionCardDropModifier"))
-        let modifierSource = String(shelfSource[modifierStart.lowerBound..<modifierEnd.lowerBound])
+        let modifierStart = try XCTUnwrap(interactionSource.range(of: "struct ClipboardCollectionReorderModifier"))
+        let modifierEnd = try XCTUnwrap(interactionSource.range(of: "struct ClipboardCollectionCardDropModifier"))
+        let modifierSource = String(interactionSource[modifierStart.lowerBound..<modifierEnd.lowerBound])
         let visualEffect = try XCTUnwrap(modifierSource.range(of: ".visualEffect { content, geometry in"))
         let geometry = try XCTUnwrap(modifierSource.range(of: ".onGeometryChange("))
 
@@ -1240,7 +1239,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testDraggedCollectionVisualOffsetUsesCurrentRenderGeometry() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let source = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
         let modifierStart = try XCTUnwrap(source.range(of: "struct ClipboardCollectionReorderModifier"))
         let modifierEnd = try XCTUnwrap(source.range(of: "struct ClipboardCollectionCardDropModifier"))
         let modifierSource = String(source[modifierStart.lowerBound..<modifierEnd.lowerBound])
@@ -1278,6 +1277,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testShelfAndSideCollectionChipsUseSwiftUIAnimatedMoveReordering() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let interactionSource = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardCollectionInteraction.swift")
         let shelfChipStart = try XCTUnwrap(shelfSource.range(of: "private struct ShelfCollectionChip"))
         let shelfChipEnd = try XCTUnwrap(shelfSource.range(of: "private struct ShelfSelectedCountChip"))
         let sideChipStart = try XCTUnwrap(sideSource.range(of: "private struct ClipboardSidePanelFilterChip"))
@@ -1298,20 +1298,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertTrue(chipSource.contains("action.move_right"))
         }
 
-        XCTAssertTrue(shelfSource.contains("DragGesture("))
-        XCTAssertTrue(shelfSource.contains("minimumDistance: 4"))
-        XCTAssertTrue(shelfSource.contains("session.dropTarget(at: value.location.x)"))
-        XCTAssertTrue(shelfSource.contains("withAnimation"))
-        XCTAssertTrue(shelfSource.contains("relativeTo: target.collection"))
-        XCTAssertTrue(shelfSource.contains("afterTarget: target.afterTarget"))
-        XCTAssertTrue(shelfSource.contains("session.updateTranslation(value.translation.width)"))
-        XCTAssertTrue(shelfSource.contains("if let move = session.pendingMove"))
-        XCTAssertTrue(shelfSource.contains("session.cancel()"))
-        XCTAssertTrue(shelfSource.contains("dropDestination(for: PinboardItemDragPayload.self"))
-        XCTAssertTrue(shelfSource.contains("if let onDropPayloads"))
-        XCTAssertFalse(shelfSource.contains("DropProposal(operation: .move)"))
-        XCTAssertFalse(shelfSource.contains("dragConfiguration(.init(allowMove: true))"))
-        XCTAssertFalse(shelfSource.contains("ClipboardCollectionDragPayload"))
+        XCTAssertTrue(interactionSource.contains("DragGesture("))
+        XCTAssertTrue(interactionSource.contains("minimumDistance: 4"))
+        XCTAssertTrue(interactionSource.contains("session.dropTarget(at: value.location.x)"))
+        XCTAssertTrue(interactionSource.contains("withAnimation"))
+        XCTAssertTrue(interactionSource.contains("relativeTo: target.collection"))
+        XCTAssertTrue(interactionSource.contains("afterTarget: target.afterTarget"))
+        XCTAssertTrue(interactionSource.contains("session.updateTranslation(value.translation.width)"))
+        XCTAssertTrue(interactionSource.contains("if let move = session.pendingMove"))
+        XCTAssertTrue(interactionSource.contains("session.cancel()"))
+        XCTAssertTrue(interactionSource.contains("dropDestination(for: PinboardItemDragPayload.self"))
+        XCTAssertTrue(interactionSource.contains("if let onDropPayloads"))
+        XCTAssertFalse(interactionSource.contains("DropProposal(operation: .move)"))
+        XCTAssertFalse(interactionSource.contains("dragConfiguration(.init(allowMove: true))"))
+        XCTAssertFalse(interactionSource.contains("ClipboardCollectionDragPayload"))
         XCTAssertFalse(shelfSource.contains("struct ShelfCollectionChipDropTarget"))
         XCTAssertFalse(shelfSource.contains("registerForDraggedTypes"))
     }
@@ -1417,7 +1417,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfLiveTextUsesOriginalImageDataEvenWhenThumbnailIsCached() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
         let previewStart = try XCTUnwrap(source.range(of: "private struct ShelfExpandedImagePreview"))
         let liveTextStart = try XCTUnwrap(source.range(of: "private struct ShelfLiveTextImagePreview"))
         let previewSource = String(source[previewStart.lowerBound..<liveTextStart.lowerBound])
@@ -1893,7 +1893,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfGlassSurfacesUseNativeTintWithoutStackedBase() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
         let bottomSheetStart = try XCTUnwrap(source.range(of: "func pasteBuddyBottomSheetSurface"))
         let glassSurfaceStart = try XCTUnwrap(source.range(of: "func pasteBuddyGlassSurface"))
         let bottomSheetSurface = String(source[bottomSheetStart.lowerBound..<glassSurfaceStart.lowerBound])
@@ -1927,6 +1927,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sharedSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelSharedViews.swift")
 
         XCTAssertTrue(source.contains("struct ClipboardSidePanelView"))
         XCTAssertTrue(source.contains(".pasteBuddyBottomSheetSurface(cornerRadius: 28"))
@@ -1987,18 +1988,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("square.grid.2x2"))
         XCTAssertFalse(source.contains("onTapGesture(count: 2)"))
         XCTAssertTrue(controllerSource.contains("ClipboardSidePanelView("))
-        XCTAssertTrue(shelfSource.contains("enum ClipboardShelfGlass"))
-        XCTAssertTrue(shelfSource.contains("struct ShelfToolbarCircleIcon"))
+        XCTAssertTrue(sharedSource.contains("enum ClipboardShelfGlass"))
+        XCTAssertTrue(sharedSource.contains("struct ShelfToolbarCircleIcon"))
         XCTAssertTrue(shelfSource.contains("NewPinboardNamePrompt.run()"))
         XCTAssertFalse(shelfSource.contains("NewPinboardSheet"))
         XCTAssertFalse(shelfSource.contains("NewTextItemSheet"))
         XCTAssertFalse(shelfSource.contains("label.new_text_item"))
-        XCTAssertTrue(shelfSource.contains("struct ClipboardImageThumbnailView"))
-        XCTAssertTrue(shelfSource.contains("private var placeholderFill: Color"))
-        XCTAssertTrue(shelfSource.contains("Color(nsColor: .controlBackgroundColor).opacity(0.42)"))
-        XCTAssertTrue(shelfSource.contains("private var placeholderIconTint: Color"))
-        XCTAssertTrue(shelfSource.contains("Color(nsColor: .secondaryLabelColor)"))
-        XCTAssertTrue(shelfSource.contains("extension View"))
+        XCTAssertTrue(sharedSource.contains("struct ClipboardImageThumbnailView"))
+        XCTAssertTrue(sharedSource.contains("private var placeholderFill: Color"))
+        XCTAssertTrue(sharedSource.contains("Color(nsColor: .controlBackgroundColor).opacity(0.42)"))
+        XCTAssertTrue(sharedSource.contains("private var placeholderIconTint: Color"))
+        XCTAssertTrue(sharedSource.contains("Color(nsColor: .secondaryLabelColor)"))
+        XCTAssertTrue(sharedSource.contains("extension View"))
 
         let quickFilterStart = try XCTUnwrap(source.range(of: "private var quickFilterStrip"))
         let itemListStart = try XCTUnwrap(source.range(of: "private var itemList"))
@@ -2050,20 +2051,23 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testShelfAndSidePanelCanLoadAdditionalFilteredPages() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let modelSource = try sourceFileContents("Sources/PasteBuddy/Models/ClipboardPanelDataModel.swift")
         let storeSource = try sourceFileContents("Sources/PasteBuddyCore/Stores/PasteBuddyStore.swift")
 
-        XCTAssertTrue(shelfSource.contains("private static let pageSize = 100"))
-        XCTAssertTrue(shelfSource.contains("@State private var shelfItemTotalCount = 0"))
-        XCTAssertTrue(shelfSource.contains("await store.filteredItemsPageAndCount("))
-        XCTAssertTrue(shelfSource.contains("offset: requestedOffset"))
-        XCTAssertTrue(shelfSource.contains("shelfItems.count < shelfItemTotalCount"))
-        XCTAssertTrue(shelfSource.contains("Button(action: loadNextShelfPage)"))
+        XCTAssertTrue(modelSource.contains("pageSize: Int = 100"))
+        XCTAssertTrue(modelSource.contains("await store.filteredItemsPageAndCount("))
+        XCTAssertTrue(modelSource.contains("offset: requestedOffset"))
+        XCTAssertTrue(modelSource.contains("loadNextPageTask == nil"))
+        XCTAssertTrue(modelSource.contains("nextOffset = requestedOffset + page.items.count"))
+        XCTAssertTrue(modelSource.contains("var canLoadNextPage: Bool"))
 
-        XCTAssertTrue(sideSource.contains("private static let pageSize = 100"))
-        XCTAssertTrue(sideSource.contains("await store.filteredItemsPageAndCount("))
-        XCTAssertTrue(sideSource.contains("offset: requestedOffset"))
-        XCTAssertTrue(sideSource.contains("sideItems.count < sideItemTotalCount"))
-        XCTAssertTrue(sideSource.contains("Button(action: loadNextSidePage)"))
+        XCTAssertTrue(shelfSource.contains("@State private var panelData: ClipboardPanelDataModel"))
+        XCTAssertTrue(shelfSource.contains("Button(action: loadNextPanelPage)"))
+        XCTAssertTrue(shelfSource.contains("panelData.loadNextPage"))
+        XCTAssertTrue(sideSource.contains("@State private var panelData: ClipboardPanelDataModel"))
+        XCTAssertTrue(sideSource.contains("Button(action: loadNextSidePanelPage)"))
+        XCTAssertTrue(sideSource.contains("panelData.loadNextPage"))
+        XCTAssertFalse(modelSource.contains("ShelfInteractionModel"))
         XCTAssertFalse(shelfSource.contains("store.filteredItemsPage(for:"))
         XCTAssertFalse(sideSource.contains("store.filteredItemsPage(for:"))
         XCTAssertFalse(sideSource.contains("store.filteredItemCount(for:"))

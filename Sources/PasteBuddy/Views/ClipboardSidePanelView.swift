@@ -10,8 +10,6 @@ private enum ClipboardSidePanelMetrics {
 }
 
 struct ClipboardSidePanelView: View {
-    private static let pageSize = 100
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openSettings) private var openSettings
     @Bindable var store: PasteBuddyStore
@@ -24,18 +22,31 @@ struct ClipboardSidePanelView: View {
 
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
-    @State private var sideScope: PasteScope = .history
-    @State private var sideItems: [ClipboardItem] = []
-    @State private var sideItemTotalCount = 0
+    @State private var panelData: ClipboardPanelDataModel
     @State private var interaction = ShelfInteractionModel()
     @State private var pinnedState: Bool?
-    @State private var sideRefreshTask: Task<Void, Never>?
-    @State private var sideLoadMoreTask: Task<Void, Never>?
-    @State private var sideLoadMoreRequestID: UUID?
-    @State private var isLoadingNextSidePage = false
     @State private var collectionMoveState = ClipboardPanelCollectionMoveState()
     @State private var collectionDragSession = ClipboardCollectionDragSession()
     @State private var collectionFrames: [ClipboardCollectionID: CGRect] = [:]
+
+    init(
+        store: PasteBuddyStore,
+        isPinned: Binding<Bool>,
+        directPasteItem: @escaping @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult,
+        directPasteItems: @escaping @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult,
+        onFirstPageApplied: @escaping @MainActor (PasteBuddyPerformanceSignposts.ItemCountBucket) -> Void,
+        onDismiss: @escaping () -> Void,
+        onDismissImmediately: @escaping () -> Void
+    ) {
+        _store = Bindable(wrappedValue: store)
+        _isPinned = isPinned
+        self.directPasteItem = directPasteItem
+        self.directPasteItems = directPasteItems
+        self.onFirstPageApplied = onFirstPageApplied
+        self.onDismiss = onDismiss
+        self.onDismissImmediately = onDismissImmediately
+        _panelData = State(initialValue: ClipboardPanelDataModel(store: store))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,8 +65,7 @@ struct ClipboardSidePanelView: View {
         .onAppear {
             store.searchQuery = ""
             store.clearFilters()
-            sideScope = store.selectedScope
-            refreshSideItems()
+            refreshSidePanel(scope: store.selectedScope)
             Task { @MainActor in
                 await Task.yield()
                 isSearchFocused = false
@@ -65,16 +75,11 @@ struct ClipboardSidePanelView: View {
         .onDisappear {
             collectionDragSession.cancel()
             interaction.dismissPreview()
-            sideRefreshTask?.cancel()
-            sideRefreshTask = nil
-            sideLoadMoreTask?.cancel()
-            sideLoadMoreTask = nil
-            sideLoadMoreRequestID = nil
-            isLoadingNextSidePage = false
+            panelData.cancel()
         }
         .onChange(of: queryState) { previous, current in
             guard collectionMoveState.requiresRefresh(from: previous, to: current) else { return }
-            refreshSideItems()
+            refreshSidePanel()
         }
         .onChange(of: store.searchQuery) {
             interaction.dismissPreview()
@@ -191,7 +196,7 @@ struct ClipboardSidePanelView: View {
                 width: ClipboardSidePanelMetrics.sourceAppSuggestionWidth,
                 onSelect: { appName in
                     store.applySourceAppSuggestion(appName)
-                    refreshSideItems()
+                    refreshSidePanel()
                 }
             )
         }
@@ -415,8 +420,8 @@ struct ClipboardSidePanelView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            if sideItems.count < sideItemTotalCount {
-                Button(action: loadNextSidePage) {
+            if panelData.canLoadNextPage {
+                Button(action: loadNextSidePanelPage) {
                     Label("label.more", systemImage: "ellipsis")
                 }
                 .buttonStyle(.plain)
@@ -428,21 +433,16 @@ struct ClipboardSidePanelView: View {
     }
 
     private var queryState: ClipboardPanelQueryState {
-        ClipboardPanelQueryState(
-            dataRevision: store.dataRevision,
-            queryRevision: store.queryRevision,
-            scope: sideScope,
-            searchQuery: store.searchQuery,
-            contentTypeFilter: store.contentTypeFilter,
-            sourceAppFilter: store.sourceAppFilter,
-            deviceFilter: store.deviceFilter,
-            dateFilter: store.dateFilter
-        )
+        panelData.queryState
     }
 
     private var renderedItems: [ClipboardItem] {
-        sideItems
+        panelData.items
     }
+
+    private var sideItems: [ClipboardItem] { panelData.items }
+    private var sideItemTotalCount: Int { panelData.totalCount }
+    private var sideScope: PasteScope { panelData.scope }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
         let ids = interaction.selectedIDs
@@ -491,59 +491,26 @@ struct ClipboardSidePanelView: View {
         return localized("message.copy_text_links_screenshots_or_files_to")
     }
 
-    private func refreshSideItems() {
-        sideRefreshTask?.cancel()
-        sideLoadMoreTask?.cancel()
-        sideLoadMoreTask = nil
-        sideLoadMoreRequestID = nil
-        isLoadingNextSidePage = false
-        let requestedState = queryState
-        sideRefreshTask = Task { @MainActor in
-            let page = await store.filteredItemsPageAndCount(
-                for: requestedState.scope,
-                offset: 0,
-                limit: Self.pageSize
-            )
-            guard !Task.isCancelled, queryState == requestedState else { return }
-            sideItems = page.items
-            sideItemTotalCount = page.totalCount
+    private func refreshSidePanel(scope: PasteScope? = nil) {
+        let interaction = interaction
+        let store = store
+        let onFirstPageApplied = onFirstPageApplied
+        panelData.refresh(scope: scope) { items, totalCount in
             interaction.replaceItems(
-                page.items,
+                items,
                 storeSelectedIDs: store.selectedItemIDs,
                 storePrimarySelectedID: store.selectedItemID
             )
-            onFirstPageApplied(.init(itemCount: page.totalCount))
+            onFirstPageApplied(.init(itemCount: totalCount))
         }
     }
 
-    private func loadNextSidePage() {
-        guard !isLoadingNextSidePage, sideItems.count < sideItemTotalCount else { return }
-        isLoadingNextSidePage = true
-        let requestID = UUID()
-        sideLoadMoreRequestID = requestID
-        let requestedState = queryState
-        let requestedOffset = sideItems.count
-        sideLoadMoreTask = Task { @MainActor in
-            let page = await store.filteredItemsPageAndCount(
-                for: requestedState.scope,
-                offset: requestedOffset,
-                limit: Self.pageSize
-            )
-            defer {
-                if sideLoadMoreRequestID == requestID {
-                    isLoadingNextSidePage = false
-                    sideLoadMoreTask = nil
-                    sideLoadMoreRequestID = nil
-                }
-            }
-            guard !Task.isCancelled,
-                  queryState == requestedState,
-                  sideItems.count == requestedOffset else { return }
-            let existingIDs = Set(sideItems.map(\.id))
-            sideItems.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
-            sideItemTotalCount = page.totalCount
+    private func loadNextSidePanelPage() {
+        let interaction = interaction
+        let store = store
+        panelData.loadNextPage { items, _ in
             interaction.replaceItems(
-                sideItems,
+                items,
                 storeSelectedIDs: store.selectedItemIDs,
                 storePrimarySelectedID: store.selectedItemID
             )
@@ -553,7 +520,7 @@ struct ClipboardSidePanelView: View {
     private func setSideScope(_ scope: PasteScope) {
         if sideScope != scope {
             interaction.dismissPreview()
-            sideScope = scope
+            refreshSidePanel(scope: scope)
         }
         if store.hasActiveFilters {
             store.clearFilters()
@@ -768,7 +735,7 @@ struct ClipboardSidePanelView: View {
         if isSearchFocused {
             if !store.searchQuery.isEmpty {
                 store.searchQuery = ""
-                refreshSideItems()
+                refreshSidePanel()
             }
             setSearchFocused(false)
             return
