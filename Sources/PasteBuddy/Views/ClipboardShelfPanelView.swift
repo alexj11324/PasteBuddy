@@ -1473,9 +1473,17 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
     let onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
 
     func body(content: Content) -> some View {
-        ZStack {
+        let currentSession = session
+        let isDraggedCollection = currentSession.source == collection
+        return ZStack {
             content
-                .offset(x: dragOffset)
+                .visualEffect { content, geometry in
+                    content.offset(x: isDraggedCollection
+                        ? currentSession.visualOffset(
+                            currentSourceLayoutMinX: geometry.frame(in: .named(ClipboardCollectionDragCoordinateSpace.name)).minX
+                        )
+                        : 0)
+                }
                 .scaleEffect(session.source == collection ? 1.03 : 1)
         }
         .onGeometryChange(
@@ -1498,14 +1506,6 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
             onDropPayloads: onDropPayloads,
             isTargeted: $isTargeted
         ))
-    }
-
-    private var dragOffset: CGFloat {
-        guard session.source == collection,
-              let currentFrame = collectionFrames[collection] else {
-            return 0
-        }
-        return session.visualOffset(currentSourceLayoutMinX: currentFrame.minX)
     }
 
     private func handleDragChanged(_ value: DragGesture.Value) {

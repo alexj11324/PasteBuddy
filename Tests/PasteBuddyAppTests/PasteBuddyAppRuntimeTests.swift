@@ -972,15 +972,26 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let modifierStart = try XCTUnwrap(shelfSource.range(of: "struct ClipboardCollectionReorderModifier"))
         let modifierEnd = try XCTUnwrap(shelfSource.range(of: "struct ClipboardCollectionCardDropModifier"))
         let modifierSource = String(shelfSource[modifierStart.lowerBound..<modifierEnd.lowerBound])
-        let offset = try XCTUnwrap(modifierSource.range(of: ".offset(x: dragOffset)"))
+        let visualEffect = try XCTUnwrap(modifierSource.range(of: ".visualEffect { content, geometry in"))
         let geometry = try XCTUnwrap(modifierSource.range(of: ".onGeometryChange("))
 
         XCTAssertTrue(modifierSource.contains("ZStack {"))
-        XCTAssertLessThan(offset.lowerBound, geometry.lowerBound)
+        XCTAssertLessThan(visualEffect.lowerBound, geometry.lowerBound)
         XCTAssertTrue(modifierSource.contains("currentSourceLayoutMinX"))
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".scrollDisabled(collectionDragSession.isActive)"))
         }
+    }
+
+    func testDraggedCollectionVisualOffsetUsesCurrentRenderGeometry() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let modifierStart = try XCTUnwrap(source.range(of: "struct ClipboardCollectionReorderModifier"))
+        let modifierEnd = try XCTUnwrap(source.range(of: "struct ClipboardCollectionCardDropModifier"))
+        let modifierSource = String(source[modifierStart.lowerBound..<modifierEnd.lowerBound])
+
+        XCTAssertTrue(modifierSource.contains(".visualEffect { content, geometry in"))
+        XCTAssertTrue(modifierSource.contains("geometry.frame(in: .named(ClipboardCollectionDragCoordinateSpace.name)).minX"))
+        XCTAssertFalse(modifierSource.contains("private var dragOffset"))
     }
 
     func testCollectionDragTargetsUseGestureStartFramesInsteadOfAnimatedLiveFrames() throws {
