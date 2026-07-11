@@ -90,6 +90,17 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
     var plainText: Bool?
 
     private var storeLoader: PasteBuddyAppIntentStoreLoader = .live
+    private var pasteOperation: @MainActor @Sendable (
+        ClipboardItem,
+        PasteFormat,
+        @MainActor @Sendable () throws -> ClipboardItem
+    ) async throws -> DirectPasteResult = { item, format, resolveCurrentItem in
+        try await PasteboardWriter.pasteToFrontmostAppAsync(
+            item,
+            format: format,
+            resolvingItemBeforeCopy: resolveCurrentItem
+        )
+    }
 
     init() {}
 
@@ -97,23 +108,42 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
         self.storeLoader = storeLoader
     }
 
+    init(
+        storeLoader: PasteBuddyAppIntentStoreLoader,
+        pasteOperation: @escaping @MainActor @Sendable (
+            ClipboardItem,
+            PasteFormat,
+            @MainActor @Sendable () throws -> ClipboardItem
+        ) async throws -> DirectPasteResult
+    ) {
+        self.storeLoader = storeLoader
+        self.pasteOperation = pasteOperation
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = try await storeLoader.load()
         let service = AutomationActionService(store: store)
         let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let matchedItem = try await service.firstMatchingItem(query: query)
-        try store.requirePersistenceReady()
-        guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
-        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
-            throw AutomationActionError.noMatchingItem
+        var resolvedItem = matchedItem
+        let pasteResult = try await pasteOperation(matchedItem, format) {
+            try store.requirePersistenceReady()
+            guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
+            guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }),
+                  item.matches(trimmedQuery)
+            else {
+                throw AutomationActionError.noMatchingItem
+            }
+            resolvedItem = item
+            return item
         }
         let result = AutomationItemTransferResult(
-            item: item,
+            item: resolvedItem,
             format: format,
             destination: .frontmostApp
         )
-        let pasteResult = await PasteboardWriter.pasteToFrontmostAppAsync(item, format: format)
         return .result(dialog: IntentDialog(stringLiteral: pasteResult.statusMessage.isEmpty ? result.displaySummary : pasteResult.statusMessage))
     }
 }

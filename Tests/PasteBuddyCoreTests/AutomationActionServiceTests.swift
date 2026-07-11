@@ -266,6 +266,212 @@ final class AutomationActionServiceTests: XCTestCase {
         }
     }
 
+    func testSuspendedSearchDropsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original",
+            payload: ClipboardPayload(text: "automation replacement needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, clipboardRepository: repository)
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let searchTask = Task { @MainActor in
+            try await service.searchClipboard(query: "needle")
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        let result = try await searchTask.value
+
+        XCTAssertTrue(result.items.isEmpty)
+    }
+
+    func testSuspendedTransferRejectsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original",
+            payload: ClipboardPayload(text: "automation transfer needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, clipboardRepository: repository)
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+        var transferCallCount = 0
+
+        let transferTask = Task { @MainActor in
+            try await service.transferFirstMatchingItem(query: "needle") { _, _ in
+                transferCallCount += 1
+            }
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        do {
+            _ = try await transferTask.value
+            XCTFail("Expected nonmatching replacement to invalidate transfer.")
+        } catch {
+            XCTAssertEqual(error as? AutomationActionError, .noMatchingItem)
+        }
+        XCTAssertEqual(transferCallCount, 0)
+    }
+
+    func testFirstMatchFinalResolutionRejectsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original First Match",
+            payload: ClipboardPayload(text: "first match final boundary needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, clipboardRepository: repository)
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        service.beforeFinalMatchingItemResolutionForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let matchTask = Task { @MainActor in
+            try await service.firstMatchingItem(query: "needle")
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        do {
+            _ = try await matchTask.value
+            XCTFail("Expected the final first-match resolution to reject the replacement.")
+        } catch {
+            XCTAssertEqual(error as? AutomationActionError, .noMatchingItem)
+        }
+    }
+
+    func testTransferFinalResolutionRejectsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original Transfer Boundary",
+            payload: ClipboardPayload(text: "transfer final boundary needle")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, clipboardRepository: repository)
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate(suspendOnInvocation: 2)
+        service.beforeFinalMatchingItemResolutionForTesting = {
+            await gate.suspendIfNeeded()
+        }
+        var transferCallCount = 0
+
+        let transferTask = Task { @MainActor in
+            try await service.transferFirstMatchingItem(query: "needle") { _, _ in
+                transferCallCount += 1
+            }
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        do {
+            _ = try await transferTask.value
+            XCTFail("Expected the final transfer resolution to reject the replacement.")
+        } catch {
+            XCTAssertEqual(error as? AutomationActionError, .noMatchingItem)
+        }
+        XCTAssertEqual(transferCallCount, 0)
+    }
+
+    func testPinFinalResolutionRejectsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original Pin Boundary",
+            payload: ClipboardPayload(text: "pin final boundary needle")
+        )
+        let pinboard = Pinboard(name: "Boundary Target", colorHex: "#4EA7FC")
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item], pinboards: [pinboard]))
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, clipboardRepository: repository)
+        store.load()
+        let service = AutomationActionService(store: store)
+        let gate = RepositorySearchSuspensionGate(suspendOnInvocation: 2)
+        service.beforeFinalMatchingItemResolutionForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let pinTask = Task { @MainActor in
+            try await service.pinFirstMatchingItem(query: "needle", toPinboardNamed: pinboard.name)
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        do {
+            _ = try await pinTask.value
+            XCTFail("Expected the final pin resolution to reject the replacement.")
+        } catch {
+            XCTAssertEqual(error as? AutomationActionError, .noMatchingItem)
+        }
+        XCTAssertFalse(
+            store.snapshot.pinboards
+                .first(where: { $0.id == pinboard.id })?
+                .itemIDs.contains(item.id) ?? true
+        )
+    }
+
     func testLockedHistoryRejectsAutomationItemAccessWithoutInvokingTransfer() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

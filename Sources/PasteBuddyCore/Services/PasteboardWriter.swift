@@ -178,12 +178,84 @@ public enum PasteboardWriter {
         prepareForPaste: (() -> Void)? = nil,
         sendPasteEvent: (() -> Void)? = nil
     ) async -> DirectPasteResult {
+        await pasteToFrontmostAppAsync(
+            item,
+            format: format,
+            to: pasteboard,
+            isAccessibilityTrusted: isAccessibilityTrusted,
+            options: options,
+            prepareForPaste: prepareForPaste,
+            waitForTargetApplication: {
+                await waitForTargetApplicationIfNeededAsync(
+                    targetBundleIdentifier: targetBundleIdentifier,
+                    activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+                    timeout: options.activationWaitTimeout
+                )
+            },
+            resolvingItemBeforeCopy: { item },
+            sendPasteEvent: sendPasteEvent
+        )
+    }
+
+    @discardableResult
+    public static func pasteToFrontmostAppAsync(
+        _ item: ClipboardItem,
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general,
+        isAccessibilityTrusted: Bool = AccessibilityPermissionService.isTrusted,
+        targetBundleIdentifier: String? = nil,
+        activeApplicationBundleIdentifier: (() -> String?)? = nil,
+        options: DirectPasteOptions = .default,
+        prepareForPaste: (() -> Void)? = nil,
+        resolvingItemBeforeCopy: () throws -> ClipboardItem,
+        sendPasteEvent: (() -> Void)? = nil
+    ) async throws -> DirectPasteResult {
+        try await pasteToFrontmostAppAsync(
+            item,
+            format: format,
+            to: pasteboard,
+            isAccessibilityTrusted: isAccessibilityTrusted,
+            options: options,
+            prepareForPaste: prepareForPaste,
+            waitForTargetApplication: {
+                await waitForTargetApplicationIfNeededAsync(
+                    targetBundleIdentifier: targetBundleIdentifier,
+                    activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
+                    timeout: options.activationWaitTimeout
+                )
+            },
+            resolvingItemBeforeCopy: resolvingItemBeforeCopy,
+            sendPasteEvent: sendPasteEvent
+        )
+    }
+
+    @discardableResult
+    static func pasteToFrontmostAppAsync(
+        _ item: ClipboardItem,
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general,
+        isAccessibilityTrusted: Bool = AccessibilityPermissionService.isTrusted,
+        options: DirectPasteOptions = .default,
+        prepareForPaste: (() -> Void)? = nil,
+        waitForTargetApplication: () async -> Bool,
+        resolvingItemBeforeCopy: () throws -> ClipboardItem,
+        sendPasteEvent: (() -> Void)? = nil
+    ) async rethrows -> DirectPasteResult {
         guard !Task.isCancelled else {
             return cancelledPasteResult(itemCount: 1, format: format)
         }
         guard isAccessibilityTrusted else {
+            guard options.fallbackBehavior == .copyOnly else {
+                return copyFallbackResult(
+                    item,
+                    format: format,
+                    to: pasteboard,
+                    outcome: .copiedOnlyAccessibilityRequired,
+                    options: options
+                )
+            }
             return copyFallbackResult(
-                item,
+                try resolvingItemBeforeCopy(),
                 format: format,
                 to: pasteboard,
                 outcome: .copiedOnlyAccessibilityRequired,
@@ -191,23 +263,31 @@ public enum PasteboardWriter {
             )
         }
         prepareForPaste?()
-        guard await waitForTargetApplicationIfNeededAsync(
-            targetBundleIdentifier: targetBundleIdentifier,
-            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier,
-            timeout: options.activationWaitTimeout
-        ) else {
+        guard await waitForTargetApplication() else {
             guard !Task.isCancelled else {
                 return cancelledPasteResult(itemCount: 1, format: format)
             }
+            guard options.fallbackBehavior == .copyOnly else {
+                return copyFallbackResult(
+                    item,
+                    format: format,
+                    to: pasteboard,
+                    outcome: .copiedOnlyNoTargetApplication,
+                    options: options
+                )
+            }
             return copyFallbackResult(
-                item,
+                try resolvingItemBeforeCopy(),
                 format: format,
                 to: pasteboard,
                 outcome: .copiedOnlyNoTargetApplication,
                 options: options
             )
         }
-        copy(item, format: format, to: pasteboard)
+        guard !Task.isCancelled else {
+            return cancelledPasteResult(itemCount: 1, format: format)
+        }
+        copy(try resolvingItemBeforeCopy(), format: format, to: pasteboard)
         guard await waitBeforePasteEventAsync(options.pasteDispatchDelay) else {
             return cancelledPasteResult(itemCount: 1, format: format)
         }

@@ -114,6 +114,7 @@ public enum MCPToolServiceError: LocalizedError, Equatable {
 @MainActor
 public final class MCPToolService {
     private let store: PasteBuddyStore
+    internal var beforeFinalMatchingItemResolutionForTesting: (@MainActor @Sendable () async -> Void)?
 
     public init(store: PasteBuddyStore) {
         self.store = store
@@ -131,7 +132,7 @@ public final class MCPToolService {
                 tool: .searchHistory
             )
             try requireAccess(to: .searchHistory)
-            let items = currentVisibleItems(from: candidates, limit: cappedLimit)
+            let items = currentVisibleItems(from: candidates, matching: trimmed, limit: cappedLimit)
                 .map(AutomationItemSummary.init(item:))
             recordAccess(tool: .searchHistory, outcome: .succeeded, resultCount: items.count)
             return MCPHistorySearchResponse(query: trimmed, items: items)
@@ -200,12 +201,18 @@ public final class MCPToolService {
     public func pinFirstMatch(query: String, pinboardID: UUID? = nil, pinboardName: String? = nil) async throws -> MCPPinFirstMatchResponse {
         do {
             try requireAccess(to: .pinFirstMatch)
+            let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
             let matchedItem = try await firstVisibleMatchingItem(
-                query: query,
+                query: trimmedQuery,
                 tool: .pinFirstMatch
             )
+            if let beforeFinalMatchingItemResolutionForTesting {
+                await beforeFinalMatchingItemResolutionForTesting()
+            }
             try requireAccess(to: .pinFirstMatch)
-            guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+            guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }),
+                  item.matches(trimmedQuery)
+            else {
                 throw MCPToolServiceError.noMatchingItem
             }
             try requireMCPVisible(item)
@@ -259,9 +266,18 @@ public final class MCPToolService {
     ) async throws -> ClipboardItem {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
-        guard let item = try await visibleItems(matching: trimmed, limit: 1, tool: tool).first else {
+        let candidates = try await visibleItems(matching: trimmed, limit: 1, tool: tool)
+        if let beforeFinalMatchingItemResolutionForTesting {
+            await beforeFinalMatchingItemResolutionForTesting()
+        }
+        try requireAccess(to: tool)
+        guard let candidate = candidates.first,
+              let item = store.snapshot.items.first(where: { $0.id == candidate.id }),
+              item.matches(trimmed)
+        else {
             throw MCPToolServiceError.noMatchingItem
         }
+        try requireMCPVisible(item)
         return item
     }
 
@@ -279,7 +295,7 @@ public final class MCPToolService {
             let page = try await store.searchItemsPage(query: query, offset: offset, limit: pageSize)
             try requireAccess(to: tool)
             guard !page.isEmpty else { break }
-            for item in currentVisibleItems(from: page, limit: page.count) {
+            for item in currentVisibleItems(from: page, matching: query, limit: page.count) {
                 visibleItems.append(item)
                 if visibleItems.count == resolvedLimit {
                     break
@@ -295,6 +311,7 @@ public final class MCPToolService {
 
     private func currentVisibleItems(
         from candidates: [ClipboardItem],
+        matching query: String,
         limit: Int
     ) -> [ClipboardItem] {
         var currentItemsByID: [UUID: ClipboardItem] = [:]
@@ -304,6 +321,7 @@ public final class MCPToolService {
         }
         return candidates.lazy
             .compactMap { currentItemsByID[$0.id] }
+            .filter { $0.matches(query) }
             .filter(isMCPVisible)
             .prefix(max(limit, 0))
             .map { $0 }

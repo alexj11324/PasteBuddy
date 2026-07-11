@@ -165,6 +165,7 @@ public enum AutomationActionError: LocalizedError, Equatable {
 @MainActor
 public final class AutomationActionService {
     private let store: PasteBuddyStore
+    internal var beforeFinalMatchingItemResolutionForTesting: (@MainActor @Sendable () async -> Void)?
 
     public init(store: PasteBuddyStore) {
         self.store = store
@@ -178,7 +179,7 @@ public final class AutomationActionService {
         let cappedLimit = min(max(limit, 1), 25)
         let page = try await store.searchItemsPage(query: trimmed, limit: cappedLimit)
         try requireReadableHistory()
-        let items = currentItems(from: page)
+        let items = currentItems(from: page, matching: trimmed)
             .map(AutomationItemSummary.init(item:))
 
         return AutomationSearchResult(query: trimmed, items: items)
@@ -199,9 +200,15 @@ public final class AutomationActionService {
         query: String,
         toPinboardNamed pinboardName: String
     ) async throws -> AutomationPinboardItemResult {
-        let matchedItem = try await firstMatchingItem(query: query)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matchedItem = try await firstMatchingItem(query: trimmedQuery)
+        if let beforeFinalMatchingItemResolutionForTesting {
+            await beforeFinalMatchingItemResolutionForTesting()
+        }
         try requireReadableHistory()
-        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }),
+              item.matches(trimmedQuery)
+        else {
             throw AutomationActionError.noMatchingItem
         }
         let pinboard = try pinboard(named: pinboardName)
@@ -222,9 +229,15 @@ public final class AutomationActionService {
         destination: AutomationItemTransferDestination = .clipboard,
         transfer: (ClipboardItem, PasteFormat) -> Void
     ) async throws -> AutomationItemTransferResult {
-        let matchedItem = try await firstMatchingItem(query: query)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matchedItem = try await firstMatchingItem(query: trimmedQuery)
+        if let beforeFinalMatchingItemResolutionForTesting {
+            await beforeFinalMatchingItemResolutionForTesting()
+        }
         try requireReadableHistory()
-        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }) else {
+        guard let item = store.snapshot.items.first(where: { $0.id == matchedItem.id }),
+              item.matches(trimmedQuery)
+        else {
             throw AutomationActionError.noMatchingItem
         }
         transfer(item, format)
@@ -237,9 +250,14 @@ public final class AutomationActionService {
 
     public func firstMatchingItem(query: String) async throws -> ClipboardItem {
         let result = try await searchClipboard(query: query, limit: 1)
+        if let beforeFinalMatchingItemResolutionForTesting {
+            await beforeFinalMatchingItemResolutionForTesting()
+        }
         try requireReadableHistory()
         guard let summary = result.items.first,
-              let item = store.snapshot.items.first(where: { $0.id == summary.id }) else {
+              let item = store.snapshot.items.first(where: { $0.id == summary.id }),
+              item.matches(result.query)
+        else {
             throw AutomationActionError.noMatchingItem
         }
         return item
@@ -250,13 +268,23 @@ public final class AutomationActionService {
         guard !store.isHistoryAccessLocked else { throw AutomationActionError.historyLocked }
     }
 
-    private func currentItems(from candidates: [ClipboardItem]) -> [ClipboardItem] {
+    private func currentItems(
+        from candidates: [ClipboardItem],
+        matching query: String
+    ) -> [ClipboardItem] {
         var currentItemsByID: [UUID: ClipboardItem] = [:]
         currentItemsByID.reserveCapacity(store.snapshot.items.count)
         for item in store.snapshot.items {
             currentItemsByID[item.id] = item
         }
-        return candidates.compactMap { currentItemsByID[$0.id] }
+        return candidates.compactMap { candidate in
+            guard let currentItem = currentItemsByID[candidate.id],
+                  currentItem.matches(query)
+            else {
+                return nil
+            }
+            return currentItem
+        }
     }
 
     private func pinboard(named name: String) throws -> Pinboard {

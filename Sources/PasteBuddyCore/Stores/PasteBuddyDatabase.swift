@@ -1053,6 +1053,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             _beforeReturningAsyncFetchPageForTesting
         }
         await beforeReturning?()
+        try Task.checkCancellation()
         instrumentationLock.withLock {
             _lastAsyncFetchPageRanOnMainThreadForTesting = result.ranOnMainThread
         }

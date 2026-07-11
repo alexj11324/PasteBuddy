@@ -999,6 +999,45 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         XCTAssertNoThrow(try secondRepository.synchronize(with: snapshot))
     }
 
+    func testAsyncRepositoryPageReadPropagatesCancellationAfterSuspension() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let repository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(
+                fileURL: harness.directory.appendingPathComponent("cancelled-page.sqlite")
+            )
+        )
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Cancellation Needle",
+            payload: ClipboardPayload(text: "cancelled asynchronous repository page")
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let fetchTask = Task {
+            try await repository.fetchPageAsync(
+                ClipboardItemPageRequest(searchQuery: "needle")
+            )
+        }
+        await gate.waitUntilSuspended()
+        fetchTask.cancel()
+        await gate.resume()
+
+        do {
+            _ = try await fetchTask.value
+            XCTFail("Expected cancellation after the repository read completed.")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "Unexpected error: \(error)")
+        }
+    }
+
     func testConcurrentOlderExportCannotRegressRepositoryBaseline() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
