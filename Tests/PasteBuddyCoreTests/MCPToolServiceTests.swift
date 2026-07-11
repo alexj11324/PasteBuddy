@@ -483,6 +483,151 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(store.snapshot.mcp.accessLog.contains(where: { $0.outcome == .succeeded }))
     }
 
+    func testSuspendedMCPSearchDropsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original MCP Search",
+            payload: ClipboardPayload(text: "mcp replacement needle")
+        )
+        var snapshot = PasteBuddySnapshot(items: [item])
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.searchHistory])
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = MCPToolService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let searchTask = Task { @MainActor in
+            try await service.searchHistory(query: "needle")
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        let response = try await searchTask.value
+
+        XCTAssertTrue(response.items.isEmpty)
+        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.outcome, .succeeded)
+        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.resultCount, 0)
+    }
+
+    func testSuspendedMCPPinRejectsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original MCP Pin",
+            payload: ClipboardPayload(text: "mcp pin replacement needle")
+        )
+        let pinboard = Pinboard(name: "Replacement Race", colorHex: "#4EA7FC")
+        var snapshot = PasteBuddySnapshot(items: [item], pinboards: [pinboard])
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.pinFirstMatch])
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = MCPToolService(store: store)
+        let gate = RepositorySearchSuspensionGate()
+        repository.beforeReturningAsyncFetchPageForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let pinTask = Task { @MainActor in
+            try await service.pinFirstMatch(query: "needle", pinboardID: pinboard.id)
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        do {
+            _ = try await pinTask.value
+            XCTFail("Expected nonmatching replacement to invalidate pinning.")
+        } catch {
+            XCTAssertEqual(error as? MCPToolServiceError, .noMatchingItem)
+        }
+        XCTAssertFalse(
+            store.snapshot.pinboards
+                .first(where: { $0.id == pinboard.id })?
+                .itemIDs.contains(item.id) ?? true
+        )
+        XCTAssertFalse(store.snapshot.mcp.accessLog.contains(where: { $0.outcome == .succeeded }))
+    }
+
+    func testMCPPinFinalResolutionRejectsSameIDReplacementThatNoLongerMatches() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        harness.snapshotStore.storageMode = .standard
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Original MCP Final Pin",
+            payload: ClipboardPayload(text: "mcp final pin boundary needle")
+        )
+        let pinboard = Pinboard(name: "MCP Boundary", colorHex: "#4EA7FC")
+        var snapshot = PasteBuddySnapshot(items: [item], pinboards: [pinboard])
+        snapshot.mcp = MCPConfiguration(isServerEnabled: true, enabledTools: [.pinFirstMatch])
+        try repository.replaceAll(with: snapshot)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        let service = MCPToolService(store: store)
+        let gate = RepositorySearchSuspensionGate(suspendOnInvocation: 2)
+        service.beforeFinalMatchingItemResolutionForTesting = {
+            await gate.suspendIfNeeded()
+        }
+
+        let pinTask = Task { @MainActor in
+            try await service.pinFirstMatch(query: "needle", pinboardID: pinboard.id)
+        }
+        await gate.waitUntilSuspended()
+        store.snapshot.items = [nonmatchingReplacement(for: item)]
+        store.save()
+        await gate.resume()
+
+        do {
+            _ = try await pinTask.value
+            XCTFail("Expected the final MCP pin resolution to reject the replacement.")
+        } catch {
+            XCTAssertEqual(error as? MCPToolServiceError, .noMatchingItem)
+        }
+        XCTAssertFalse(
+            store.snapshot.pinboards
+                .first(where: { $0.id == pinboard.id })?
+                .itemIDs.contains(item.id) ?? true
+        )
+        XCTAssertFalse(store.snapshot.mcp.accessLog.contains(where: { $0.outcome == .succeeded }))
+    }
+
     func testLockedHistoryRejectsEveryMCPClipboardReadPath() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

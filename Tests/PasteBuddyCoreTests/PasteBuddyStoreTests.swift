@@ -6873,6 +6873,17 @@ actor RepositorySearchSuspensionGate {
     }
 }
 
+func nonmatchingReplacement(for item: ClipboardItem) -> ClipboardItem {
+    ClipboardItem(
+        id: item.id,
+        sourceAppName: "Notes",
+        deviceName: "Test Mac",
+        contentType: .text,
+        title: "Unrelated replacement",
+        payload: ClipboardPayload(text: "current content no longer matches")
+    )
+}
+
 private final class FixedEncryptionKeyMaterialStore: EncryptionKeyMaterialStore, @unchecked Sendable {
     private let keyData: Data
 

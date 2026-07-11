@@ -616,6 +616,52 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "async wait for active target")
     }
 
+    func testAsyncDirectPasteValidatesAfterTargetWaitBeforeCopyingOrSending() async throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyAsyncValidation-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("existing clipboard", forType: .string)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Validate After Wait",
+            payload: ClipboardPayload(text: "must never be copied")
+        )
+        let gate = PasteTargetWaitGate()
+        var sentPasteEvent = false
+
+        let pasteTask = Task { @MainActor in
+            try await PasteboardWriter.pasteToFrontmostAppAsync(
+                item,
+                to: pasteboard,
+                isAccessibilityTrusted: true,
+                options: .default,
+                waitForTargetApplication: {
+                    await gate.suspend()
+                    return true
+                },
+                resolvingItemBeforeCopy: {
+                    throw PasteValidationProbeError.denied
+                },
+                sendPasteEvent: {
+                    sentPasteEvent = true
+                }
+            )
+        }
+        await gate.waitUntilSuspended()
+        await gate.resume()
+
+        do {
+            _ = try await pasteTask.value
+            XCTFail("Expected paste validation to fail.")
+        } catch {
+            XCTAssertEqual(error as? PasteValidationProbeError, .denied)
+        }
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing clipboard")
+        XCTAssertFalse(sentPasteEvent)
+    }
+
     func testDirectPasteCopiesOnlyWhenTargetDoesNotBecomeActive() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectNoTarget-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }
@@ -940,6 +986,38 @@ final class PasteboardWriterTests: XCTestCase {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         return try XCTUnwrap(store.snapshot.items.first(where: predicate))
+    }
+}
+
+private enum PasteValidationProbeError: Error, Equatable {
+    case denied
+}
+
+private actor PasteTargetWaitGate {
+    private var isSuspended = false
+    private var suspensionContinuation: CheckedContinuation<Void, Never>?
+    private var observerContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func suspend() async {
+        isSuspended = true
+        let observers = observerContinuations
+        observerContinuations.removeAll()
+        observers.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            suspensionContinuation = continuation
+        }
+    }
+
+    func waitUntilSuspended() async {
+        guard !isSuspended else { return }
+        await withCheckedContinuation { continuation in
+            observerContinuations.append(continuation)
+        }
+    }
+
+    func resume() {
+        suspensionContinuation?.resume()
+        suspensionContinuation = nil
     }
 }
 
