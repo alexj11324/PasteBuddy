@@ -248,6 +248,11 @@ swift build
 BUILD_DIR="$(swift build --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$EXECUTABLE_NAME"
 RESOURCE_BUNDLE="$BUILD_DIR/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle"
+if [[ "$SIGNING_CHANNEL" == "release" ]]; then
+  "$ROOT_DIR/script/verify_iroh_macos_minimum_os.sh" \
+    "$BUILD_DIR/Iroh.framework/Iroh" \
+    "$MIN_SYSTEM_VERSION"
+fi
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"

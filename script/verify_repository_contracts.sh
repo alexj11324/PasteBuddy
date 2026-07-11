@@ -36,6 +36,7 @@ require_file script/build_and_run.sh
 require_executable script/open_dev_panel.sh
 require_file script/push_testflight.sh
 require_executable script/verify_app_privacy_artifacts.sh
+require_executable script/verify_iroh_macos_minimum_os.sh
 require_file .github/workflows/testflight.yml
 require_file Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy
 require_file Support/Privacy/iOS/PrivacyInfo.xcprivacy
@@ -59,6 +60,9 @@ require_literal script/build_and_run.sh 'Clipboard monitor verification override
 require_literal script/build_and_run.sh 'PASTEBUDDY_DISABLE_CLIPBOARD_MONITOR_FOR_VERIFICATION must be 0 or 1.'
 require_literal script/build_and_run.sh '"$RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" "$APP_RESOURCES/PrivacyInfo.xcprivacy"'
 require_literal script/build_and_run.sh 'app.pastebuddy.pinboard-item-ids'
+require_literal script/build_and_run.sh '"$ROOT_DIR/script/verify_iroh_macos_minimum_os.sh"'
+require_literal script/build_and_run.sh '"$BUILD_DIR/Iroh.framework/Iroh"'
+require_literal script/build_and_run.sh '"$MIN_SYSTEM_VERSION"'
 
 require_literal script/open_dev_panel.sh 'APP_BUNDLE="/Applications/PasteBuddy Dev.app"'
 require_literal script/open_dev_panel.sh 'codesign --verify --deep --strict'
