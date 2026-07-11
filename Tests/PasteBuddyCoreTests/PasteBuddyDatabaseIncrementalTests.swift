@@ -474,6 +474,158 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         XCTAssertTrue(try database.assetRowsForTesting().isEmpty)
     }
 
+    func testOrphanAssetMigrationDeletesOnlyUnreferencedAssetsAndIsIdempotent() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("orphan-assets.sqlite")
+        let database = try PasteBuddyDatabase(fileURL: databaseURL)
+        let repository = ClipboardItemRepository(database: database)
+        let sharedImage = Data(repeating: 0x41, count: 256)
+        let sharedRTF = Data("{\\rtf1 shared}".utf8)
+        let firstImage = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Shared image one",
+            payload: ClipboardPayload(imageData: sharedImage)
+        )
+        let secondImage = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Shared image two",
+            payload: ClipboardPayload(imageData: sharedImage)
+        )
+        let rtfItem = ClipboardItem(
+            sourceAppName: "TextEdit",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Shared RTF",
+            payload: ClipboardPayload(text: "shared", rtfData: sharedRTF)
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [firstImage, secondImage, rtfItem]))
+        let storedItems = Dictionary(uniqueKeysWithValues: try repository.fetchPage().map { ($0.id, $0) })
+        let sharedImageAssetID = try XCTUnwrap(storedItems[firstImage.id]?.payload.imageAssetID)
+        let rtfAssetID = try XCTUnwrap(storedItems[rtfItem.id]?.payload.rtfAssetID)
+        XCTAssertEqual(storedItems[secondImage.id]?.payload.imageAssetID, sharedImageAssetID)
+
+        try executeSQLite(
+            """
+            INSERT INTO assets (id, sha256, kind, path, data, byte_count, encrypted, created_at)
+            VALUES
+                ('legacy-thumbnail', 'legacy-thumbnail-sha', 'image', '', X'0102', 2, 0, 0),
+                ('legacy-full', 'legacy-full-sha', 'image', '', X'0304', 2, 0, 0),
+                ('orphan-image', 'orphan-image-sha', 'image', '', X'0506', 2, 0, 0),
+                ('orphan-rtf', 'orphan-rtf-sha', 'rtf', '', X'0708', 2, 0, 0);
+            UPDATE clipboard_items
+            SET thumbnail_asset_id = 'legacy-thumbnail'
+            WHERE id = '\(firstImage.id.uuidString)';
+            UPDATE clipboard_items
+            SET full_asset_id = 'legacy-full'
+            WHERE id = '\(rtfItem.id.uuidString)';
+            DELETE FROM grdb_migrations
+            WHERE identifier = 'reclaim orphaned clipboard assets';
+            """,
+            at: databaseURL
+        )
+        XCTAssertEqual(try unreferencedAssetCount(at: databaseURL), 2)
+
+        let migratedDatabase = try PasteBuddyDatabase(fileURL: databaseURL)
+        XCTAssertEqual(try unreferencedAssetCount(at: databaseURL), 0)
+        let migratedAssets = try migratedDatabase.assetRowsForTesting()
+        XCTAssertEqual(Set(migratedAssets.map(\.id)), [
+            sharedImageAssetID,
+            rtfAssetID,
+            "legacy-thumbnail",
+            "legacy-full"
+        ])
+
+        let hydrated = try ClipboardItemRepository(database: migratedDatabase).exportSnapshot()
+        XCTAssertEqual(hydrated.items.first(where: { $0.id == firstImage.id })?.payload.imageData, sharedImage)
+        XCTAssertEqual(hydrated.items.first(where: { $0.id == secondImage.id })?.payload.imageData, sharedImage)
+        XCTAssertEqual(hydrated.items.first(where: { $0.id == rtfItem.id })?.payload.rtfData, sharedRTF)
+
+        let reopenedDatabase = try PasteBuddyDatabase(fileURL: databaseURL)
+        XCTAssertEqual(try reopenedDatabase.assetRowsForTesting(), migratedAssets)
+    }
+
+    func testOrphanAssetMigrationInvalidatesRepositoryLoadedBeforeMigration() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("orphan-assets-stale-writer.sqlite")
+        let staleRepository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(fileURL: databaseURL)
+        )
+        let seed = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pre-migration baseline",
+            payload: ClipboardPayload(text: "pre-migration baseline")
+        )
+        try staleRepository.replaceAll(with: PasteBuddySnapshot(items: [seed]))
+        _ = try staleRepository.exportSnapshot()
+        try executeSQLite(
+            "DELETE FROM grdb_migrations WHERE identifier = 'reclaim orphaned clipboard assets'",
+            at: databaseURL
+        )
+
+        let migratedRepository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(fileURL: databaseURL)
+        )
+        let staleItem = ClipboardItem(
+            sourceAppName: "Mail",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Stale write",
+            payload: ClipboardPayload(text: "stale write")
+        )
+        XCTAssertThrowsError(
+            try staleRepository.synchronize(with: PasteBuddySnapshot(items: [staleItem, seed]))
+        ) { error in
+            XCTAssertEqual(error as? PasteBuddyPersistenceError, .historyUnavailable)
+        }
+
+        var migratedSnapshot = try migratedRepository.exportSnapshot()
+        let currentItem = ClipboardItem(
+            sourceAppName: "Messages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Current write",
+            payload: ClipboardPayload(text: "current write")
+        )
+        migratedSnapshot.items.insert(currentItem, at: 0)
+        XCTAssertNoThrow(try migratedRepository.synchronize(with: migratedSnapshot))
+    }
+
+    func testOrphanAssetMigrationDoesNotCreateMetadataWhenNoneExists() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("orphan-assets-no-metadata.sqlite")
+        _ = try PasteBuddyDatabase(fileURL: databaseURL)
+        try executeSQLite(
+            "DELETE FROM grdb_migrations WHERE identifier = 'reclaim orphaned clipboard assets'",
+            at: databaseURL
+        )
+
+        _ = try PasteBuddyDatabase(fileURL: databaseURL)
+
+        XCTAssertEqual(
+            try sqliteScalarInt(
+                "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = 'reclaim orphaned clipboard assets'",
+                at: databaseURL
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try sqliteScalarInt("SELECT COUNT(*) FROM snapshot_metadata", at: databaseURL),
+            0
+        )
+    }
+
     func testAssetReferenceColumnsAreIndexedForTargetedGarbageCollection() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -927,4 +1079,70 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         }
         return orders
     }
+
+    private func executeSQLite(_ sql: String, at databaseURL: URL) throws {
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &connection, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let connection else {
+            throw NSError(domain: "PasteBuddyDatabaseIncrementalTests", code: 1)
+        }
+        defer { sqlite3_close(connection) }
+
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        let result = sqlite3_exec(connection, sql, nil, nil, &errorMessage)
+        guard result == SQLITE_OK else {
+            let message = errorMessage.map { String(cString: $0) } ?? "SQLite error \(result)"
+            sqlite3_free(errorMessage)
+            throw NSError(
+                domain: "PasteBuddyDatabaseIncrementalTests",
+                code: Int(result),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
+    }
+
+    private func unreferencedAssetCount(at databaseURL: URL) throws -> Int {
+        try sqliteScalarInt(
+            """
+            SELECT COUNT(*)
+            FROM assets
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM clipboard_items
+                WHERE image_asset_id = assets.id
+                   OR rtf_asset_id = assets.id
+                   OR thumbnail_asset_id = assets.id
+                   OR full_asset_id = assets.id
+            )
+            """,
+            at: databaseURL
+        )
+    }
+
+    private func sqliteScalarInt(_ sql: String, at databaseURL: URL) throws -> Int {
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let connection else {
+            throw NSError(domain: "PasteBuddyDatabaseIncrementalTests", code: 2)
+        }
+        defer { sqlite3_close(connection) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            connection,
+            sql,
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK,
+              let statement else {
+            throw NSError(domain: "PasteBuddyDatabaseIncrementalTests", code: 3)
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw NSError(domain: "PasteBuddyDatabaseIncrementalTests", code: 4)
+        }
+        return Int(sqlite3_column_int(statement, 0))
+    }
+
 }

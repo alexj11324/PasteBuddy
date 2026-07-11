@@ -360,6 +360,30 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
                 try db.execute(sql: "ALTER TABLE pinboards ADD COLUMN system_image_name TEXT")
             }
         }
+        migrator.registerMigration("reclaim orphaned clipboard assets") { db in
+            try db.execute(sql: """
+                DELETE FROM assets
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM clipboard_items
+                    WHERE image_asset_id = assets.id
+                       OR rtf_asset_id = assets.id
+                       OR thumbnail_asset_id = assets.id
+                       OR full_asset_id = assets.id
+                )
+                """)
+
+            let hasMetadata = try Bool.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM snapshot_metadata WHERE key = ?)",
+                arguments: [ClipboardItemRepository.metadataKey]
+            ) ?? false
+            guard hasMetadata else { return }
+
+            var metadata = try ClipboardItemRepository.fetchMetadata(db: db)
+            metadata.repositoryRevision = UUID()
+            try ClipboardItemRepository.saveMetadata(metadata, db: db)
+        }
         return migrator
     }
 
@@ -596,7 +620,7 @@ struct StoredClipboardAssetForTesting: Equatable {
 }
 
 public final class ClipboardItemRepository: @unchecked Sendable {
-    private static let metadataKey = "snapshot"
+    fileprivate static let metadataKey = "snapshot"
     private let database: PasteBuddyDatabase
     private let instrumentationLock = NSLock()
     private var _replaceAllInvocationCount = 0
@@ -1951,7 +1975,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         )
     }
 
-    private static func saveMetadata(_ metadata: StoredSnapshotMetadata, db: Database) throws {
+    fileprivate static func saveMetadata(_ metadata: StoredSnapshotMetadata, db: Database) throws {
         try db.execute(
             sql: """
                 INSERT INTO snapshot_metadata (key, value_json)
@@ -1962,7 +1986,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         )
     }
 
-    private static func fetchMetadata(db: Database) throws -> StoredSnapshotMetadata {
+    fileprivate static func fetchMetadata(db: Database) throws -> StoredSnapshotMetadata {
         guard let value = try String.fetchOne(
             db,
             sql: "SELECT value_json FROM snapshot_metadata WHERE key = ?",
