@@ -84,6 +84,9 @@ extension, Share extension, and Action extension.
 
 - Signed App Store / TestFlight provisioning profiles so device builds can
   access the encrypted shared store without plaintext handoff.
+- App Store Connect account-holder review of the encryption export inventory in
+  `docs/SECURITY.md`. The current Info.plist Boolean is not a substitute for
+  completing Apple's questionnaire for the linked Iroh/Rust cryptography.
 
 The checked-in simulator project uses real bundle identifiers and entitlements,
 while simulator builds still work without a physical-device provisioning
@@ -112,6 +115,34 @@ The checked-in local simulator targets use:
 - `Support/InfoPlist/PasteBuddyKeyboard-Info.plist`
 - `Support/InfoPlist/PasteBuddyShare-Info.plist`
 - `Support/InfoPlist/PasteBuddyAction-Info.plist`
+
+## App Privacy And Exported Types
+
+Every shipping bundle receives an app-owned `PrivacyInfo.xcprivacy` at its
+bundle root. The macOS app uses the SwiftPM resource manifest at
+`Sources/PasteBuddy/Resources/PrivacyInfo.xcprivacy` and declares UserDefaults
+reason `CA92.1`. The iOS host app and all three extensions use
+`Support/Privacy/iOS/PrivacyInfo.xcprivacy` and declare App Group UserDefaults
+reason `1C8F.1`.
+
+The macOS app exports `app.pastebuddy.pinboard-item-ids`; the iOS host app
+exports `app.pastebuddy.mobile-pinboard-item-ids`. Both declarations conform to
+`public.data` and live in the final app Info.plist, rather than only in source
+code.
+
+Validate source and built artifacts with:
+
+```bash
+script/verify_app_privacy_artifacts.sh swiftpm \
+  "$(swift build --show-bin-path)/PasteBuddy_PasteBuddy.bundle"
+script/verify_app_privacy_artifacts.sh macos "/Applications/PasteBuddy Dev.app"
+script/verify_app_privacy_artifacts.sh ios \
+  /private/tmp/pastebuddy-ios-deriveddata/Build/Products/Debug-iphonesimulator/PasteBuddyiOS.app
+```
+
+The iOS check verifies the host plus Keyboard, Share, and Action extension
+bundles. The macOS check must run only after the standard stable-identity build;
+the verifier does not replace signing or TCC identity checks.
 
 ## Shared Core Verification
 

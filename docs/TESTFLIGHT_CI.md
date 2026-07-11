@@ -5,9 +5,13 @@ Pull requests targeting `main`, pushes to `main`, and manual dispatches run `.gi
 Every event starts with a read-only `verify` job that does not receive cloud or App Store Connect credentials. It:
 
 1. Runs `swift test`.
-2. Checks the localization catalogs.
-3. Compiles the Debug app and all embedded extensions for a generic iOS Simulator with signing disabled.
-4. Compiles the Release app and all embedded extensions for generic iOS with signing disabled.
+2. Verifies the macOS SwiftPM app privacy resource bundle.
+3. Checks the localization catalogs.
+4. Compiles the Debug app and all embedded extensions for a generic iOS
+   Simulator with signing disabled, then verifies every bundle's privacy
+   manifest and the host app's exported UTI.
+5. Compiles the Release app and all embedded extensions for generic iOS with
+   signing disabled, then repeats the built-artifact checks.
 
 The Xcode project uses Swift 6 with complete strict concurrency checking for the iOS app, keyboard, share, and action targets. SwiftPM tests remain a plain `swift test`; do not force third-party package targets into Swift 6 with a global compiler flag. Aligning and committing an authoritative Xcode package-resolution file remains Task 9 work; until then, the Xcode verification builds use normal package resolution instead of requiring an untracked workspace file.
 
@@ -18,8 +22,23 @@ Only a successful push to `main` or a manual dispatch of `main` unlocks the `upl
 3. Queries App Store Connect for the latest uploaded build on app `6780560937`.
 4. Compares that number with the highest `ios-build-*` git tag.
 5. Archives `PasteBuddyiOS` with `CURRENT_PROJECT_VERSION` set to the next integer.
-6. Uploads the archive to App Store Connect for TestFlight processing.
-7. Persists the uploaded build number as an `ios-build-<number>` git tag.
+6. Verifies the archived host app and all embedded extensions before export.
+7. Uploads the archive to App Store Connect for TestFlight processing.
+8. Persists the uploaded build number as an `ios-build-<number>` git tag.
+
+## Manual Encryption Export Gate
+
+Privacy-manifest checks are automated, but encryption export classification is
+not. Before the next upload, the App Store Connect account holder must resolve
+the checklist in `docs/SECURITY.md`, including the linked Iroh/Rust
+cryptography and intended French distribution. The repository currently leaves
+`ITSAppUsesNonExemptEncryption=false` in all four iOS Info.plists; CI must not
+present that existing value as a newly verified legal determination.
+
+If Apple requires documentation, upload it through App Store Connect. Add an
+`ITSEncryptionExportComplianceCode` only after Apple issues the code; never put
+account credentials, `.p8` keys, or private compliance documents in the
+repository.
 
 Required GitHub Actions secrets:
 

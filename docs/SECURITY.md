@@ -133,6 +133,58 @@ PasteBuddy treats clipboard history as high-sensitivity local user data.
   user-visible mode for this device only; it must not be used to justify
   plaintext CloudKit upload, shared pinboard transport, or MCP export.
 
+## Encryption Export Compliance Inventory
+
+This inventory was reviewed against the source and resolved dependencies on
+2026-07-11. It records engineering facts; it is not a legal classification.
+
+- `EncryptionService` uses Apple CryptoKit AES-GCM with 256-bit keys. Its
+  Secure Enclave path uses the Security framework and
+  `eciesEncryptionStandardVariableIVX963SHA256AESGCM` to wrap the data key.
+- Shared pinboard key exchange uses Apple CryptoKit Curve25519 key agreement,
+  HKDF-SHA256, and AES-GCM.
+- `IrohLib` 1.0.0 is a linked third-party Rust binary. Its resolved source
+  package and lockfile include QUIC/TLS cryptography through `rustls` and other
+  non-Apple cryptographic dependencies. It therefore cannot be classified as
+  "encryption limited to the Apple operating system" from this code review.
+- The host app, keyboard, Share, and Action Info.plists currently set
+  `ITSAppUsesNonExemptEncryption` to `false`. This review intentionally leaves
+  those declarations unchanged, but does not revalidate them as correct.
+
+Apple says the declaration must include encryption in linked third-party
+libraries. `ITSAppUsesNonExemptEncryption` may be `NO` only when the app uses no
+encryption or only encryption exempt from documentation requirements. Apple
+also distinguishes operating-system encryption, non-OS industry-standard
+algorithms, and proprietary algorithms when deciding required documentation:
+
+- [Complying with encryption export regulations](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations)
+- [Export compliance documentation for encryption](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/)
+
+Before the next TestFlight or App Store upload, the App Store Connect account
+holder must complete this determination:
+
+1. Confirm intended distribution territories, including whether France is
+   enabled.
+2. Answer the App Store Connect encryption questionnaire using both the Apple
+   framework inventory and the linked Iroh/Rust inventory above.
+3. Classify Iroh's non-OS algorithms from upstream technical evidence as
+   industry-standard or proprietary; do not infer this from transport labels
+   such as QUIC/TLS alone.
+4. If Apple classifies the app as using non-OS industry-standard encryption,
+   upload the French encryption declaration when distributing in France. If it
+   is classified as proprietary encryption, provide the required CCATS and
+   French declaration.
+5. If Apple approves uploaded documentation, add the issued value as
+   `ITSEncryptionExportComplianceCode` to every shipping target that needs it.
+6. Only after that review, confirm or change
+   `ITSAppUsesNonExemptEncryption`. Record the decision and supporting App Store
+   Connect reference in this section without committing credentials or private
+   documents.
+
+Even exempt encryption can carry a U.S. year-end self-classification reporting
+obligation. The account holder or legal owner, not CI, owns that recurring
+determination.
+
 ## Threat Model
 
 - Local disk access: in encrypted mode, an attacker who reads the Application
