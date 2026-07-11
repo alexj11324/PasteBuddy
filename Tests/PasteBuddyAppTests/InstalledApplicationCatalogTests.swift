@@ -17,18 +17,6 @@ final class InstalledApplicationCatalogTests: XCTestCase {
         }
     }
 
-    func testCatalogDeclaresBackgroundSharedTTLCacheAndSingleFlight() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Models/InstalledApplicationCatalog.swift")
-
-        XCTAssertTrue(source.contains("func applications(forceRefresh: Bool = false) async"))
-        XCTAssertTrue(source.contains("Task.detached(priority: .utility)"))
-        XCTAssertTrue(source.contains("private static let sharedCache"))
-        XCTAssertTrue(source.contains("private actor InstalledApplicationCatalogCache"))
-        XCTAssertTrue(source.contains("cacheLifetime"))
-        XCTAssertTrue(source.contains("inFlight"))
-        XCTAssertTrue(source.contains("guard usesSharedCache else"))
-    }
-
     func testCustomApplicationDirectoriesBypassSharedCacheDeterministically() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory
@@ -54,28 +42,41 @@ final class InstalledApplicationCatalogTests: XCTestCase {
         XCTAssertEqual(secondLoad.map(\.displayName), ["First", "Second"])
     }
 
-    func testSettingsLoadsInstalledApplicationsAsynchronouslyAtEveryEntryPoint() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let catalogCallLines = source.split(separator: "\n").filter {
-            $0.contains("InstalledApplicationCatalog().applications")
-        }
+    func testCacheReusesFreshApplicationsUntilForcedRefresh() async {
+        let cache = InstalledApplicationCatalogCache(cacheLifetime: 60)
+        let probe = InstalledApplicationScanProbe(results: [
+            [application(named: "First")],
+            [application(named: "Second")]
+        ])
 
-        XCTAssertEqual(catalogCallLines.count, 3)
-        XCTAssertTrue(catalogCallLines.allSatisfy { $0.contains("await ") })
+        let first = await cache.applications(forceRefresh: false) { await probe.scan() }
+        let cached = await cache.applications(forceRefresh: false) { await probe.scan() }
+        let refreshed = await cache.applications(forceRefresh: true) { await probe.scan() }
+        let callCount = await probe.count()
+
+        XCTAssertEqual(first.map(\.displayName), ["First"])
+        XCTAssertEqual(cached.map(\.displayName), ["First"])
+        XCTAssertEqual(refreshed.map(\.displayName), ["Second"])
+        XCTAssertEqual(callCount, 2)
     }
 
-    func testExplicitSettingsRefreshBypassesFreshCatalogCache() throws {
-        let catalogSource = try sourceFileContents("Sources/PasteBuddy/Models/InstalledApplicationCatalog.swift")
-        let settingsSource = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+    func testCacheCoalescesConcurrentApplicationScans() async {
+        let cache = InstalledApplicationCatalogCache(cacheLifetime: 60)
+        let gate = InstalledApplicationScanGate(result: [application(named: "Shared")])
 
-        XCTAssertTrue(catalogSource.contains("func applications(forceRefresh: Bool = false) async"))
-        XCTAssertTrue(catalogSource.contains("forceRefresh: forceRefresh"))
-        XCTAssertTrue(settingsSource.contains("reloadMCPClientCandidates(forceRefresh: true)"))
-        XCTAssertTrue(
-            settingsSource.contains(
-                "await InstalledApplicationCatalog().applications(forceRefresh: forceRefresh)"
-            )
-        )
+        async let first = cache.applications(forceRefresh: false) { await gate.scan() }
+        async let second = cache.applications(forceRefresh: false) { await gate.scan() }
+        await gate.waitUntilStarted()
+        let callCountWhileSuspended = await gate.count()
+
+        XCTAssertEqual(callCountWhileSuspended, 1)
+        await gate.release()
+        let (firstResult, secondResult) = await (first, second)
+        let finalCallCount = await gate.count()
+
+        XCTAssertEqual(firstResult, secondResult)
+        XCTAssertEqual(firstResult.map(\.displayName), ["Shared"])
+        XCTAssertEqual(finalCallCount, 1)
     }
 
     private func makeTemporaryApp(
@@ -94,15 +95,59 @@ final class InstalledApplicationCatalogTests: XCTestCase {
         try data.write(to: contentsURL.appendingPathComponent("Info.plist"))
     }
 
-    private func sourceFileContents(_ relativePath: String) throws -> String {
-        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        for _ in 0..<8 {
-            let candidate = directory.appendingPathComponent(relativePath)
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return String(decoding: try Data(contentsOf: candidate), as: UTF8.self)
-            }
-            directory.deleteLastPathComponent()
+    private func application(named name: String) -> InstalledApplication {
+        InstalledApplication(
+            url: URL(fileURLWithPath: "/Applications/\(name).app"),
+            displayName: name,
+            bundleIdentifier: "com.example.\(name.lowercased())"
+        )
+    }
+}
+
+private actor InstalledApplicationScanProbe {
+    private let results: [[InstalledApplication]]
+    private var index = 0
+
+    init(results: [[InstalledApplication]]) {
+        self.results = results
+    }
+
+    func count() -> Int { index }
+
+    func scan() -> [InstalledApplication] {
+        defer { index += 1 }
+        return results[min(index, results.index(before: results.endIndex))]
+    }
+}
+
+private actor InstalledApplicationScanGate {
+    private let result: [InstalledApplication]
+    private var calls = 0
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+    private var isReleased = false
+
+    init(result: [InstalledApplication]) {
+        self.result = result
+    }
+
+    func count() -> Int { calls }
+
+    func scan() async -> [InstalledApplication] {
+        calls += 1
+        if !isReleased {
+            await withCheckedContinuation { continuations.append($0) }
         }
-        throw XCTSkip("Could not locate \(relativePath) from \(FileManager.default.currentDirectoryPath)")
+        return result
+    }
+
+    func waitUntilStarted() async {
+        while continuations.isEmpty { await Task.yield() }
+    }
+
+    func release() {
+        isReleased = true
+        let blocked = continuations
+        continuations.removeAll()
+        blocked.forEach { $0.resume() }
     }
 }

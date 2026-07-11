@@ -80,22 +80,73 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
         XCTAssertThrowsError(try IrohClipboardWireFormat.decode(lengthPrefix: lengthPrefix, body: Data([1, 2, 3])))
     }
 
-    func testReceiveLoopAwaitsEnvelopeDeliveryInsteadOfSpawningPerFrameTasks() throws {
-        let source = try sourceFileContents("Sources/PasteBuddyCore/Services/IrohClipboardSyncService.swift")
+    func testWireFormatDecodesLengthPrefixFromMisalignedDataSlice() throws {
+        let item = ClipboardItem(
+            sourceAppName: "Unit Test",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Misaligned frame",
+            payload: ClipboardPayload(text: "unaligned-safe")
+        )
+        let frame = try IrohClipboardWireFormat.encode(IrohClipboardSyncEnvelope(item: item))
+        var prefixed = Data([0xFF])
+        prefixed.append(frame.prefix(MemoryLayout<UInt32>.size))
+        let misalignedLengthPrefix = prefixed.dropFirst()
+        let body = frame.dropFirst(MemoryLayout<UInt32>.size)
 
-        XCTAssertTrue(source.contains("onEnvelopeReceived: @escaping @Sendable (IrohClipboardSyncEnvelope) async -> Void"))
-        XCTAssertTrue(source.contains("await onEnvelopeReceived(envelope)"))
-        XCTAssertFalse(source.contains("Task { @MainActor in\n                    self?.receive(envelope)"))
+        let decoded = try IrohClipboardWireFormat.decode(
+            lengthPrefix: misalignedLengthPrefix,
+            body: Data(body)
+        )
+
+        XCTAssertEqual(decoded.item.id, item.id)
+        XCTAssertEqual(decoded.item.payload.text, "unaligned-safe")
     }
 
-    func testWireLengthReadsDoNotAssumePointerAlignment() throws {
-        let source = try sourceFileContents("Sources/PasteBuddyCore/Services/IrohClipboardSyncService.swift")
-
-        XCTAssertFalse(source.contains("rawBuffer.load(as: UInt32.self)"))
-        XCTAssertEqual(
-            source.components(separatedBy: "rawBuffer.loadUnaligned(as: UInt32.self)").count - 1,
-            2
+    func testReceiveLoopWaitsForEnvelopeDeliveryBeforeReadingNextFrame() async throws {
+        let first = ClipboardItem(
+            sourceAppName: "Unit Test",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
         )
+        let second = ClipboardItem(
+            sourceAppName: "Unit Test",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "second")
+        )
+        let reader = IrohFrameReader(frames: try [first, second].map {
+            try IrohClipboardWireFormat.encode(IrohClipboardSyncEnvelope(item: $0))
+        })
+        let delivery = IrohEnvelopeDeliveryGate()
+        let closeProbe = IrohCloseRecorder()
+
+        let loop = Task {
+            await IrohClipboardReceiveLoop.run(
+                readExact: { try await reader.readExact(size: $0) },
+                onEnvelopeReceived: { await delivery.receive($0) },
+                onClosed: { closeProbe.record() }
+            )
+        }
+        await delivery.waitUntilFirstDeliveryStarts()
+        for _ in 0..<100 { await Task.yield() }
+
+        let blockedSnapshot = await delivery.snapshot()
+        let blockedReadCount = await reader.readCount()
+        XCTAssertEqual(blockedSnapshot.titles, ["First"])
+        XCTAssertEqual(blockedSnapshot.maximumConcurrentDeliveries, 1)
+        XCTAssertEqual(blockedReadCount, 2)
+
+        await delivery.releaseFirstDelivery()
+        await loop.value
+        let finalSnapshot = await delivery.snapshot()
+
+        XCTAssertEqual(finalSnapshot.titles, ["First", "Second"])
+        XCTAssertEqual(finalSnapshot.maximumConcurrentDeliveries, 1)
+        XCTAssertEqual(closeProbe.value, 1)
     }
 
     func testWireFormatRejectsUnsupportedEnvelopeVersion() throws {
@@ -473,15 +524,6 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
         XCTAssertNil(unsharedStore.baseQuery()[kSecAttrAccessGroup as String])
     }
 
-    func testIdentityStoreSourceMigratesLegacyIdentityWithoutDeletingThroughAnUnscopedQuery() throws {
-        let source = try sourceFileContents("Sources/PasteBuddyCore/Services/IrohClipboardSyncService.swift")
-
-        XCTAssertTrue(source.contains("legacyBaseQuery"))
-        XCTAssertTrue(source.contains("loadDuplicateWinner"))
-        XCTAssertFalse(source.contains("deleteLegacyIdentity"))
-        XCTAssertFalse(source.contains("SecItemUpdate"))
-    }
-
     func testSharedIdentityStoreMigratesLegacyNoGroupIdentityWithoutChangingEndpoint() throws {
         let legacySecretKey = SecretKey.generate()
         let accessGroup = "TEAMID.com.alexjiang.PasteBuddy.shared"
@@ -684,17 +726,6 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
         XCTAssertNil(service.lastSentAt)
     }
 
-    private func sourceFileContents(_ relativePath: String) throws -> String {
-        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        for _ in 0..<8 {
-            let candidate = directory.appendingPathComponent(relativePath)
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return String(decoding: try Data(contentsOf: candidate), as: UTF8.self)
-            }
-            directory.deleteLastPathComponent()
-        }
-        throw XCTSkip("Could not locate \(relativePath) from \(FileManager.default.currentDirectoryPath)")
-    }
 }
 
 @MainActor
@@ -897,6 +928,78 @@ private actor AsyncCompletionProbe {
 
     func record() { completed = true }
     func didComplete() -> Bool { completed }
+}
+
+private actor IrohFrameReader {
+    private enum ReadError: Error {
+        case endOfFrames
+        case unexpectedByteCount(expected: UInt32, actual: Int)
+    }
+
+    private var chunks: [Data]
+    private var reads = 0
+
+    init(frames: [Data]) {
+        chunks = frames.flatMap { frame in
+            [
+                Data(frame.prefix(MemoryLayout<UInt32>.size)),
+                Data(frame.dropFirst(MemoryLayout<UInt32>.size))
+            ]
+        }
+    }
+
+    func readExact(size: UInt32) throws -> Data {
+        guard !chunks.isEmpty else { throw ReadError.endOfFrames }
+        let chunk = chunks.removeFirst()
+        guard chunk.count == Int(size) else {
+            throw ReadError.unexpectedByteCount(expected: size, actual: chunk.count)
+        }
+        reads += 1
+        return chunk
+    }
+
+    func readCount() -> Int { reads }
+}
+
+private actor IrohEnvelopeDeliveryGate {
+    private var titles: [String] = []
+    private var activeDeliveries = 0
+    private var maximumConcurrentDeliveries = 0
+    private var firstContinuation: CheckedContinuation<Void, Never>?
+
+    func receive(_ envelope: IrohClipboardSyncEnvelope) async {
+        activeDeliveries += 1
+        maximumConcurrentDeliveries = max(maximumConcurrentDeliveries, activeDeliveries)
+        titles.append(envelope.item.title)
+        if titles.count == 1 {
+            await withCheckedContinuation { firstContinuation = $0 }
+        }
+        activeDeliveries -= 1
+    }
+
+    func waitUntilFirstDeliveryStarts() async {
+        while firstContinuation == nil { await Task.yield() }
+    }
+
+    func releaseFirstDelivery() {
+        firstContinuation?.resume()
+        firstContinuation = nil
+    }
+
+    func snapshot() -> (titles: [String], maximumConcurrentDeliveries: Int) {
+        (titles, maximumConcurrentDeliveries)
+    }
+}
+
+private final class IrohCloseRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    func record() {
+        lock.withLock { count += 1 }
+    }
 }
 
 private enum IrohLifecycleProbeError: Error {

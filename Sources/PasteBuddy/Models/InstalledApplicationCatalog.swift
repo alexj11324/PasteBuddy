@@ -111,7 +111,7 @@ struct InstalledApplicationCatalog: Sendable {
     }
 }
 
-private actor InstalledApplicationCatalogCache {
+actor InstalledApplicationCatalogCache {
     private let cacheLifetime: TimeInterval
     private var cachedApplications: [InstalledApplication]?
     private var cachedAt: Date?
