@@ -140,9 +140,13 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw SnapshotStoreError.missingApplicationSupportDirectory
         }
-        return base
-            .appendingPathComponent("PasteBuddy", isDirectory: true)
-            .appendingPathComponent("clipboard.sqlite")
+        return defaultDatabaseURL(
+            in: base.appendingPathComponent("PasteBuddy", isDirectory: true)
+        )
+    }
+
+    static func defaultDatabaseURL(in persistenceContainerURL: URL) -> URL {
+        persistenceContainerURL.appendingPathComponent("clipboard.sqlite")
     }
 
     public func journalMode() throws -> String {
