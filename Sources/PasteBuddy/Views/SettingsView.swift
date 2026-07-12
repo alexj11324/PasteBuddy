@@ -7,6 +7,8 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var store: PasteBuddyStore
     @Bindable var irohSync: IrohClipboardSyncService
+    let onOpenPaywall: () -> Void
+    let onEntitlementActivated: @MainActor () async -> Void
     @State private var newCaptureRuleName = ""
     @State private var newCaptureRulePattern = ""
     @State private var newCaptureRuleCondition: CaptureRuleCondition = .containsText
@@ -20,7 +22,11 @@ struct SettingsView: View {
     @State private var selectedMCPClient: MCPClientConfigurationTarget?
     @State private var mcpClientCandidates: [MCPClientCandidate] = []
     @State private var isRunningMCPClientInstall = false
+    @State private var isRestoringPurchases = false
+    @State private var restoreStatusMessage: String?
+    @State private var restoreSucceeded = false
     @State private var mcpStatusMessage: String?
+    @State private var irohAccessStatusMessage: String?
 
     var body: some View {
         settingsSplitView
@@ -107,6 +113,7 @@ struct SettingsView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .background(.regularMaterial)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 230)
             .navigationTitle("label.settings")
         } detail: {
             selectedSettingsDetail
@@ -121,12 +128,14 @@ struct SettingsView: View {
         switch effectiveSettingsSection {
         case .general:
             generalSettingsForm
+        case .capture:
+            captureSettingsForm
+        case .paste:
+            pasteSettingsForm
         case .storage:
             storageSettingsForm
         case .plans:
             plansSettingsForm
-        case .shortcuts:
-            shortcutsSettingsForm
         case .integrations:
             integrationsSettingsForm
         }
@@ -156,7 +165,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section("label.general") {
+            Section {
                 Toggle(
                     "Launch at login",
                     isOn: Binding(
@@ -175,8 +184,14 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
             }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+    }
 
-            Section("label.capture") {
+    private var captureSettingsForm: some View {
+        Form {
+            Section {
                 Toggle(
                     store.isCapturePaused ? "Capture is paused" : "Capture is active",
                     isOn: Binding(
@@ -257,10 +272,8 @@ struct SettingsView: View {
             }
 
             Section("label.excluded_apps") {
-                LabeledContent("label.excluded_apps") {
-                    Button("action.manage_apps") {
-                        showingExcludedApplicationsSheet = true
-                    }
+                Button("action.manage_apps") {
+                    showingExcludedApplicationsSheet = true
                 }
             }
 
@@ -472,6 +485,9 @@ struct SettingsView: View {
                     Text(retentionDescription)
                 }
 
+            }
+
+            Section("label.history") {
                 Button("action.clear_unpinned_history", role: .destructive) {
                     destructiveConfirmation = .clearUnpinnedHistory
                 }
@@ -481,15 +497,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("action.paste") {
-                Toggle(
-                    "Paste as plain text by default",
-                    isOn: Binding(
-                        get: { store.snapshot.paste.alwaysPasteAsPlainText },
-                        set: { store.setAlwaysPasteAsPlainText($0) }
-                    )
-                )
-            }
             }
             .formStyle(.grouped)
             .scenePadding()
@@ -514,39 +521,27 @@ struct SettingsView: View {
                     }
                 }
 
-                HStack {
-                    Button("action.start_trial") {
-                        store.startFreeTrial()
+                if !store.snapshot.entitlement.hasActivePaidAccess() {
+                    Button("action.view_plans") {
+                        onOpenPaywall()
                     }
-
-                    Button("action.cancel_trial") {
-                        store.cancelFreeTrial()
-                    }
-                    .disabled(!store.snapshot.entitlement.isTrialActive())
-                }
-
-                HStack {
-                    Button("label.monthly") {
-                        store.activatePersonalPlan(.monthly, currentPeriodEndsAt: oneMonthFromNow)
-                    }
-
-                    Button("label.annual") {
-                        store.activatePersonalPlan(.annual, currentPeriodEndsAt: oneYearFromNow)
-                    }
-
-                    Button("label.lifetime") {
-                        store.activatePersonalPlan(.lifetime)
-                    }
-
-                    Button("label.family") {
-                        store.activatePersonalPlan(.family, currentPeriodEndsAt: oneYearFromNow)
-                    }
+                    .buttonStyle(.borderedProminent)
                 }
 
                 Button("action.restore_purchases") {
-                    let now = Date()
-                    store.markRestorePurchasesStarted(at: now)
-                    store.markRestorePurchasesFailed("Restore purchases is not available in this build.", at: now)
+                    restorePurchases()
+                }
+                .buttonStyle(.link)
+                .disabled(isRestoringPurchases)
+
+                if isRestoringPurchases {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                if let restoreStatusMessage {
+                    Text(restoreStatusMessage)
+                        .foregroundStyle(restoreSucceeded ? .green : .orange)
                 }
 
             }
@@ -555,8 +550,18 @@ struct SettingsView: View {
             .scenePadding()
     }
 
-    private var shortcutsSettingsForm: some View {
+    private var pasteSettingsForm: some View {
             Form {
+            Section("action.paste") {
+                Toggle(
+                    "action.paste_as_plain_text_by",
+                    isOn: Binding(
+                        get: { store.snapshot.paste.alwaysPasteAsPlainText },
+                        set: { store.setAlwaysPasteAsPlainText($0) }
+                    )
+                )
+            }
+
             Section("label.shortcuts") {
                 Toggle(
                     "action.enable_quick_paste_1_9",
@@ -592,6 +597,30 @@ struct SettingsView: View {
 
                 Button("label.reset_shortcuts") {
                     store.resetShortcutConfiguration()
+                }
+            }
+
+            Section("label.direct_paste") {
+                LabeledContent("label.accessibility_access") {
+                    Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
+                        .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
+                }
+
+                Button("action.request_accessibility_access") {
+                    AccessibilityPermissionService.requestTrustPrompt()
+                }
+
+                if let result = store.lastDirectPasteResult {
+                    LabeledContent("label.last_direct_paste") {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(result.statusMessage)
+                            if let guidance = result.permissionGuidance {
+                                Text(guidance.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             }
@@ -704,12 +733,6 @@ struct SettingsView: View {
                             Label("action.connect_ai_tool", systemImage: "plus.circle")
                         }
 
-                        Spacer()
-
-                        Button("action.shut_down_mcp_server", role: .destructive) {
-                            shutdownMCPServer()
-                        }
-                        .disabled(!store.snapshot.mcp.isServerEnabled)
                     }
 
                     Text(mcpClientDetectionSummary)
@@ -836,7 +859,7 @@ struct SettingsView: View {
 
                 HStack {
                     Button("action.connect") {
-                        Task { await irohSync.connectToPeer() }
+                        connectToIrohPeer()
                     }
                     .disabled(irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
@@ -848,6 +871,11 @@ struct SettingsView: View {
                     .disabled(!irohSync.connectionState.isConnected || store.snapshot.items.isEmpty)
                 }
 
+                if let irohAccessStatusMessage {
+                    Text(irohAccessStatusMessage)
+                        .foregroundStyle(.orange)
+                }
+
                 if let lastReceivedTitle = irohSync.lastReceivedTitle {
                     Text(localized("format.last_received_item", lastReceivedTitle))
                         .foregroundStyle(.secondary)
@@ -855,30 +883,6 @@ struct SettingsView: View {
 
                 Text("message.iroh_clipboard_sync_local_peer")
                     .foregroundStyle(.secondary)
-            }
-
-            Section("label.direct_paste") {
-                LabeledContent("label.accessibility_access") {
-                    Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
-                        .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
-                }
-
-                Button("action.request_accessibility_access") {
-                    AccessibilityPermissionService.requestTrustPrompt()
-                }
-
-                if let result = store.lastDirectPasteResult {
-                    LabeledContent("label.last_direct_paste") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(result.statusMessage)
-                            if let guidance = result.permissionGuidance {
-                                Text(guidance.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
             }
 
             }
@@ -1065,11 +1069,6 @@ struct SettingsView: View {
         mcpStatusMessage = localized("format.copied_mcp_install_link_for", target.displayName)
     }
 
-    private func shutdownMCPServer() {
-        store.setMCPServerEnabled(false)
-        mcpStatusMessage = localized("message.mcp_server_shut_down")
-    }
-
     private func commandSummary(for guide: MCPClientConfigurationGuide) -> String {
         ([guide.command] + guide.arguments).joined(separator: " ")
     }
@@ -1104,7 +1103,7 @@ struct SettingsView: View {
     }
 
     private func localizedSettingsTitle(_ destination: MacSettingsDestination) -> String {
-        localized("format.settings", localized(destination.displayName))
+        localized("format.settings", destination.displayName)
     }
 
     private var personalOverview: PersonalEntitlementOverview {
@@ -1130,12 +1129,35 @@ struct SettingsView: View {
         }
     }
 
-    private var oneMonthFromNow: Date {
-        Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date().addingTimeInterval(30 * 24 * 60 * 60)
+    private func restorePurchases() {
+        isRestoringPurchases = true
+        restoreStatusMessage = nil
+        Task {
+            let entitlement = await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
+            let didPersist = await store.flushPendingSave()
+            restoreSucceeded = entitlement != nil && didPersist && store.hasFullProductAccess
+            restoreStatusMessage = restoreSucceeded
+                ? localized("message.restore_purchases_succeeded")
+                : (store.lastErrorMessage ?? localized("message.restore_purchases_failed"))
+            if restoreSucceeded {
+                await onEntitlementActivated()
+            }
+            isRestoringPurchases = false
+        }
     }
 
-    private var oneYearFromNow: Date {
-        Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date().addingTimeInterval(365 * 24 * 60 * 60)
+    private func connectToIrohPeer() {
+        Task { @MainActor in
+            // Re-check after the task is actually scheduled. From this point
+            // connectToPeer captures the same lifecycle generation before its
+            // first suspension, so a later entitlement stop invalidates it.
+            guard store.hasFullProductAccess else {
+                irohAccessStatusMessage = localized("message.trial_ended_purchase_required")
+                return
+            }
+            irohAccessStatusMessage = nil
+            await irohSync.connectToPeer()
+        }
     }
 
     private var retentionDescription: String {
@@ -1702,21 +1724,26 @@ private extension CaptureRuleCondition {
 
 private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashable {
     case general
+    case capture
+    case paste
+    case integrations
     case storage
     case plans
-    case shortcuts
-    case integrations
 
     init(_ destination: MacSettingsDestination) {
         switch destination {
-        case .general, .privacy:
+        case .general:
             self = .general
+        case .privacy:
+            self = .capture
         case .storage:
             self = .storage
         case .shortcuts:
-            self = .shortcuts
+            self = .paste
         case .sync:
             self = .integrations
+        case .plans:
+            self = .plans
         }
     }
 
@@ -1726,14 +1753,16 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         switch self {
         case .general:
             "label.general"
+        case .capture:
+            "label.capture"
+        case .paste:
+            "label.paste_shortcuts"
+        case .integrations:
+            "label.integrations"
         case .storage:
             "label.storage"
         case .plans:
             "label.plans"
-        case .shortcuts:
-            "label.shortcuts"
-        case .integrations:
-            "label.integrations"
         }
     }
 
@@ -1741,14 +1770,16 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         switch self {
         case .general:
             "gearshape"
+        case .capture:
+            "record.circle"
+        case .paste:
+            "keyboard"
+        case .integrations:
+            "point.3.connected.trianglepath.dotted"
         case .storage:
             "externaldrive"
         case .plans:
             "creditcard"
-        case .shortcuts:
-            "keyboard"
-        case .integrations:
-            "point.3.connected.trianglepath.dotted"
         }
     }
 }

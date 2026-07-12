@@ -14,8 +14,7 @@ struct PasteBuddySearchClipboardIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
+        let store = try await loadEntitledStore()
         let service = AutomationActionService(store: store)
         let result = try service.searchClipboard(query: query, limit: limit ?? 5)
         return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
@@ -34,8 +33,7 @@ struct PasteBuddyCopyFirstMatchIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
+        let store = try await loadEntitledStore()
         let service = AutomationActionService(store: store)
         let result = try service.transferFirstMatchingItem(
             query: query,
@@ -60,8 +58,7 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
+        let store = try await loadEntitledStore()
         let service = AutomationActionService(store: store)
         let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
         let item = try service.firstMatchingItem(query: query)
@@ -87,8 +84,7 @@ struct PasteBuddyCreatePinboardIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
+        let store = try await loadEntitledStore()
         let service = AutomationActionService(store: store)
         do {
             let pinboard = try service.createPinboard(name: name, colorHex: colorHex)
@@ -113,8 +109,7 @@ struct PasteBuddySaveFirstMatchToPinboardIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
+        let store = try await loadEntitledStore()
         let service = AutomationActionService(store: store)
         do {
             let result = try service.pinFirstMatchingItem(query: query, toPinboardNamed: pinboardName)
@@ -179,6 +174,34 @@ struct PasteBuddyAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Pin Match",
             systemImageName: "pin.fill"
+        )
+    }
+}
+
+@MainActor
+private func loadEntitledStore() async throws -> PasteBuddyStore {
+    let store = PasteBuddyStore()
+    await store.loadAsync()
+    if store.snapshot.entitlement.plan.isPersonalPaidPlan,
+       store.snapshot.entitlement.hasActivePaidAccess() {
+        _ = try await store.refreshCurrentStoreEntitlement(
+            using: AppleStoreKitEntitlementProvider()
+        )
+        try await store.flushPendingSaveOrThrow()
+    }
+    guard store.hasFullProductAccess else {
+        throw PasteBuddyAppIntentError.entitlementRequired
+    }
+    return store
+}
+
+private enum PasteBuddyAppIntentError: LocalizedError {
+    case entitlementRequired
+
+    var errorDescription: String? {
+        PasteBuddyLocalization.string(
+            "error.product_access_required",
+            defaultValue: "Open PasteBuddy and choose View Plans to continue."
         )
     }
 }

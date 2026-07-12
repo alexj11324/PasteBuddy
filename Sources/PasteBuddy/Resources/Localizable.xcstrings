@@ -9793,6 +9793,22 @@
         }
       }
     },
+    "action.view_plans": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Plans"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看方案"
+          }
+        }
+      }
+    },
     "automation.create_item.created": {
       "localizations": {
         "en": {
@@ -10109,6 +10125,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy"
+          }
+        }
+      }
+    },
+    "brand.pastebuddy_pro": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy Pro"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 专业版"
           }
         }
       }
@@ -10790,6 +10822,23 @@
       },
       "comment": "Legacy alias for format.iroh_clipboard_envelope_version_is_unsupported. Prefer the semantic key in code."
     },
+    "error.product_access_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open PasteBuddy and choose View Plans to continue."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请打开 PasteBuddy 并选择“查看方案”以继续。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.open_pastebuddy_and_choose_view_plans_to. Prefer the semantic key in code."
+    },
     "format.added_mcp_client": {
       "localizations": {
         "en": {
@@ -10818,6 +10867,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "已分配：%d"
+          }
+        }
+      }
+    },
+    "format.billing_days": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 天"
+          }
+        }
+      }
+    },
+    "format.billing_months": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d months"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 个月"
+          }
+        }
+      }
+    },
+    "format.billing_weeks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d weeks"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 周"
+          }
+        }
+      }
+    },
+    "format.billing_years": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d years"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 年"
           }
         }
       }
@@ -10902,6 +11015,22 @@
         }
       }
     },
+    "format.continue_with_plan": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue with %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续选择%@"
+          }
+        }
+      }
+    },
     "format.copied_mcp_configuration_for": {
       "localizations": {
         "en": {
@@ -10962,6 +11091,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "已复制 %@ 的 MCP 服务器命令。"
+          }
+        }
+      }
+    },
+    "format.current_plan_name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current plan: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前方案：%@"
           }
         }
       }
@@ -11074,6 +11219,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "%d 个文件"
+          }
+        }
+      }
+    },
+    "format.free_trial_ends_at": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your free trial is active until %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "免费试用有效至 %@。"
           }
         }
       }
@@ -11442,6 +11603,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 数据库无法索引缺失的剪贴板项目：%@"
+          }
+        }
+      }
+    },
+    "format.paywall_subscription_terms": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renews every %@ until canceled. Manage the subscription in the App Store."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每%@自动续订，直至取消。可在 App Store 中管理订阅。"
           }
         }
       }
@@ -12246,6 +12423,70 @@
         }
       }
     },
+    "label.billing_day": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "day"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "天"
+          }
+        }
+      }
+    },
+    "label.billing_month": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "month"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "个月"
+          }
+        }
+      }
+    },
+    "label.billing_week": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "week"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周"
+          }
+        }
+      }
+    },
+    "label.billing_year": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "year"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "年"
+          }
+        }
+      }
+    },
     "label.block_likely_sensitive_text_locally": {
       "localizations": {
         "en": {
@@ -12546,6 +12787,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "类别"
+          }
+        }
+      }
+    },
+    "label.choose_plan": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a plan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择方案"
           }
         }
       }
@@ -13334,6 +13591,22 @@
         }
       }
     },
+    "label.fast_search_and_pinboards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast search and pinboards"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速搜索与收藏板"
+          }
+        }
+      }
+    },
     "label.file": {
       "localizations": {
         "en": {
@@ -13410,6 +13683,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "免费"
+          }
+        }
+      }
+    },
+    "label.free_trial_active": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7-day free trial active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7 天免费试用中"
           }
         }
       }
@@ -13810,6 +14099,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "导入配置"
+          }
+        }
+      }
+    },
+    "label.included_with_pro": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Included with Pro"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro 包含功能"
           }
         }
       }
@@ -14242,6 +14547,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "链接"
+          }
+        }
+      }
+    },
+    "label.local_first_privacy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local-first privacy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地优先隐私"
           }
         }
       }
@@ -14966,6 +15287,22 @@
         }
       }
     },
+    "label.paste_shortcuts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste & Shortcuts"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴与快捷键"
+          }
+        }
+      }
+    },
     "label.pastebuddy_active": {
       "localizations": {
         "en": {
@@ -15026,6 +15363,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 已暂停"
+          }
+        }
+      }
+    },
+    "label.pastebuddy_requires_a_plan": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy requires a plan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 需要付费方案"
           }
         }
       }
@@ -15222,6 +15575,22 @@
         }
       }
     },
+    "label.plan_active": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plan active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "方案已生效"
+          }
+        }
+      }
+    },
     "label.plans": {
       "localizations": {
         "en": {
@@ -15234,6 +15603,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "套餐"
+          }
+        }
+      }
+    },
+    "label.power_workflows": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power workflows"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高效工作流"
           }
         }
       }
@@ -16246,6 +16631,22 @@
         }
       }
     },
+    "label.sync": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步"
+          }
+        }
+      }
+    },
     "label.team": {
       "localizations": {
         "en": {
@@ -16390,6 +16791,22 @@
         }
       }
     },
+    "label.trial_ended": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trial ended"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用已结束"
+          }
+        }
+      }
+    },
     "label.trial_ends": {
       "localizations": {
         "en": {
@@ -16434,6 +16851,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "未知错误"
+          }
+        }
+      }
+    },
+    "label.unlimited_clipboard_workflow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited clipboard workflow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无限剪贴板工作流"
           }
         }
       }
@@ -16546,6 +16979,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "旁白"
+          }
+        }
+      }
+    },
+    "mcp.error.entitlement_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An active PasteBuddy trial or paid plan is required before using MCP tools."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 MCP 工具前，需要有效的 PasteBuddy 试用或付费方案。"
           }
         }
       }
@@ -16854,6 +17303,22 @@
         }
       }
     },
+    "message.clipboard_data_stays_local_unless_you_explicitly": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard data stays local unless you explicitly enable a sync integration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "除非你明确启用同步集成，否则剪贴板数据仅保留在本地。"
+          }
+        }
+      }
+    },
     "message.clipboard_details_ocr_text_and_pinning_actions": {
       "localizations": {
         "en": {
@@ -17094,6 +17559,22 @@
         }
       }
     },
+    "message.find_text_links_images_files_and_pinned": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find text, links, images, files, and pinned items quickly."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速查找文本、链接、图片、文件和固定项目。"
+          }
+        }
+      }
+    },
     "message.history_unavailable": {
       "localizations": {
         "en": {
@@ -17174,6 +17655,22 @@
         }
       }
     },
+    "message.keep_your_saved_clipboard_history_available_after": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep your saved clipboard history available after the trial."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用结束后继续使用已保存的剪贴板历史。"
+          }
+        }
+      }
+    },
     "message.launch_at_login_is_unavailable_in_this": {
       "localizations": {
         "en": {
@@ -17186,6 +17683,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "此构建版本不支持登录时启动"
+          }
+        }
+      }
+    },
+    "message.loading_app_store_products": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading plans from the App Store..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在从 App Store 加载方案..."
           }
         }
       }
@@ -17446,6 +17959,22 @@
         }
       }
     },
+    "message.open_pastebuddy_and_choose_view_plans_to": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open PasteBuddy and choose View Plans to continue."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请打开 PasteBuddy 并选择“查看方案”以继续。"
+          }
+        }
+      }
+    },
     "message.opened_from_the_menu_bar_the_related": {
       "localizations": {
         "en": {
@@ -17574,6 +18103,86 @@
         }
       }
     },
+    "message.paywall_app_store_confirmation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The App Store shows the final product, price, and terms before you confirm."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认前，App Store 会显示最终商品、价格和条款。"
+          }
+        }
+      }
+    },
+    "message.paywall_no_automatic_trial_charge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The 7-day trial does not start a subscription or charge you automatically."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7 天试用不会自动开始订阅，也不会自动扣费。"
+          }
+        }
+      }
+    },
+    "message.paywall_one_time_purchase": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One-time purchase. No renewal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次性购买，不会续订。"
+          }
+        }
+      }
+    },
+    "message.paywall_subtitle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep your clipboard history, search, shortcuts, and local-first workflows available after the trial."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用结束后，继续使用剪贴板历史、搜索、快捷键和本地优先工作流。"
+          }
+        }
+      }
+    },
+    "message.paywall_terms_in_confirmation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purchase terms are shown in the App Store confirmation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "购买条款将在 App Store 确认界面显示。"
+          }
+        }
+      }
+    },
     "message.peer_endpoint_id_is_invalid": {
       "localizations": {
         "en": {
@@ -17654,6 +18263,70 @@
         }
       }
     },
+    "message.purchase_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The purchase could not be completed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法完成购买。"
+          }
+        }
+      }
+    },
+    "message.purchase_pending": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The purchase is pending App Store approval."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "购买正在等待 App Store 批准。"
+          }
+        }
+      }
+    },
+    "message.purchase_persistence_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The purchase was verified, but PasteBuddy could not safely save access. Restart and use Restore Purchases."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "购买已验证，但 PasteBuddy 无法安全保存访问权限。请重启后使用“恢复购买”。"
+          }
+        }
+      }
+    },
+    "message.purchase_succeeded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purchase verified."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "购买已验证。"
+          }
+        }
+      }
+    },
     "message.recognized_local_ocr_text_appears_below_the": {
       "localizations": {
         "en": {
@@ -17714,6 +18387,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。"
+          }
+        }
+      }
+    },
+    "message.restore_no_active_entitlement": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore did not return an active entitlement."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有找到可恢复的有效购买项目。"
+          }
+        }
+      }
+    },
+    "message.restore_purchases_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not restore purchases."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法恢复购买项目。"
+          }
+        }
+      }
+    },
+    "message.restore_purchases_succeeded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purchases restored."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "购买项目已恢复。"
           }
         }
       }
@@ -17938,6 +18659,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "开始收集复制的项目。"
+          }
+        }
+      }
+    },
+    "message.store_products_unavailable.detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy did not receive any configured products or prices from the App Store. No purchase can be started."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 未从 App Store 收到已配置的商品或价格，因此无法发起购买。"
+          }
+        }
+      }
+    },
+    "message.store_products_unavailable.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plans are unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "方案暂不可用"
           }
         }
       }
@@ -18210,6 +18963,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Touch ID 会锁定历史记录视图。加密模式会把本地密钥保存在 Keychain 中。"
+          }
+        }
+      }
+    },
+    "message.trial_ended_purchase_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an App Store plan to keep using PasteBuddy. Your local clipboard data remains on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请选择 App Store 方案以继续使用 PasteBuddy。你的本地剪贴板数据仍保留在此 Mac 上。"
+          }
+        }
+      }
+    },
+    "message.use_shelf_side_panel_quick_paste_paste": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Shelf, Side Panel, Quick Paste, Paste Stack, and local Agent tools."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Shelf、侧边栏、快速粘贴、粘贴栈和本地 Agent 工具。"
           }
         }
       }
@@ -20246,6 +21031,142 @@
         }
       }
     },
+    "paywall.benefit.history.detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep your saved clipboard history available after the trial."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用结束后继续使用已保存的剪贴板历史。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.keep_your_saved_clipboard_history_available_after. Prefer the semantic key in code."
+    },
+    "paywall.benefit.history.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited clipboard workflow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无限剪贴板工作流"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.unlimited_clipboard_workflow. Prefer the semantic key in code."
+    },
+    "paywall.benefit.privacy.detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard data stays local unless you explicitly enable a sync integration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "除非你明确启用同步集成，否则剪贴板数据仅保留在本地。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.clipboard_data_stays_local_unless_you_explicitly. Prefer the semantic key in code."
+    },
+    "paywall.benefit.privacy.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local-first privacy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地优先隐私"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.local_first_privacy. Prefer the semantic key in code."
+    },
+    "paywall.benefit.search.detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find text, links, images, files, and pinned items quickly."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速查找文本、链接、图片、文件和固定项目。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.find_text_links_images_files_and_pinned. Prefer the semantic key in code."
+    },
+    "paywall.benefit.search.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast search and pinboards"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速搜索与收藏板"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.fast_search_and_pinboards. Prefer the semantic key in code."
+    },
+    "paywall.benefit.shortcuts.detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Shelf, Side Panel, Quick Paste, Paste Stack, and local Agent tools."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Shelf、侧边栏、快速粘贴、粘贴栈和本地 Agent 工具。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.use_shelf_side_panel_quick_paste_paste. Prefer the semantic key in code."
+    },
+    "paywall.benefit.shortcuts.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power workflows"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高效工作流"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.power_workflows. Prefer the semantic key in code."
+    },
     "state.available": {
       "localizations": {
         "en": {
@@ -20454,6 +21375,23 @@
         }
       },
       "comment": "Legacy alias for message.no_encrypted_cloudkit_records_found. Prefer the semantic key in code."
+    },
+    "status.plan_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy requires a plan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 需要付费方案"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.pastebuddy_requires_a_plan. Prefer the semantic key in code."
     }
   },
   "version": "1.0"

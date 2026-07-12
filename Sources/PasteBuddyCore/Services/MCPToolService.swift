@@ -80,6 +80,7 @@ public struct MCPPinFirstMatchResponse: Codable, Equatable, Sendable {
 }
 
 public enum MCPToolServiceError: LocalizedError, Equatable {
+    case entitlementRequired
     case serverDisabled
     case toolDisabled(MCPToolName)
     case historyLocked
@@ -90,6 +91,11 @@ public enum MCPToolServiceError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
+        case .entitlementRequired:
+            PasteBuddyLocalization.string(
+                "mcp.error.entitlement_required",
+                defaultValue: "PasteBuddy MCP requires an active trial or paid plan. Open Plans in PasteBuddy Settings to continue."
+            )
         case .serverDisabled:
             "PasteBuddy MCP access is disabled. Enable it in Settings before connecting an MCP client."
         case .toolDisabled(let tool):
@@ -117,6 +123,12 @@ public final class MCPToolService {
 
     public init(store: PasteBuddyStore) {
         self.store = store
+    }
+
+    public func availableTools() throws -> [MCPToolName] {
+        try store.requirePersistenceReady()
+        guard store.hasFullProductAccess, store.snapshot.mcp.isServerEnabled else { return [] }
+        return MCPToolName.allCases.filter(store.snapshot.mcp.enabledTools.contains)
     }
 
     public func searchHistory(query: String, limit: Int = 5) throws -> MCPHistorySearchResponse {
@@ -217,6 +229,9 @@ public final class MCPToolService {
 
     private func require(_ tool: MCPToolName) throws {
         try store.requirePersistenceReady()
+        guard store.hasFullProductAccess else {
+            throw MCPToolServiceError.entitlementRequired
+        }
         guard store.snapshot.mcp.isServerEnabled else {
             throw MCPToolServiceError.serverDisabled
         }
@@ -293,7 +308,9 @@ public final class MCPToolService {
             return
         }
         let outcome: MCPAccessOutcome
-        if let serviceError = error as? MCPToolServiceError, case .toolDisabled = serviceError {
+        if let serviceError = error as? MCPToolServiceError, serviceError == .entitlementRequired {
+            outcome = .denied
+        } else if let serviceError = error as? MCPToolServiceError, case .toolDisabled = serviceError {
             outcome = .denied
         } else if let serviceError = error as? MCPToolServiceError, case .privacyBlocked = serviceError {
             outcome = .denied

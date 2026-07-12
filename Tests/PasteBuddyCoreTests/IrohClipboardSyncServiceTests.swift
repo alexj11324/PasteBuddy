@@ -274,6 +274,52 @@ final class IrohClipboardSyncServiceTests: XCTestCase {
         XCTAssertEqual(completionsAfterRelease, 2)
     }
 
+    func testStartGateCanRestartAfterCancellationWithoutOldCompletionClearingNewTask() async {
+        let gate = IrohClipboardStartGate()
+        let firstOperation = SuspendedStartOperation()
+        let restartedOperation = SuspendedStartOperation()
+        let unexpectedOperation = SuspendedStartOperation()
+        let first = Task { @MainActor in
+            await gate.run { await firstOperation.run() }
+        }
+        await firstOperation.waitUntilStarted()
+
+        gate.cancel()
+        let restarted = Task { @MainActor in
+            await gate.run { await restartedOperation.run() }
+        }
+        await restartedOperation.waitUntilStarted()
+        await firstOperation.finish()
+        await first.value
+
+        let joined = Task { @MainActor in
+            await gate.run { await unexpectedOperation.run() }
+        }
+        await Task.yield()
+        let callsBeforeRestartFinished = await unexpectedOperation.calls()
+        XCTAssertEqual(callsBeforeRestartFinished, 0)
+
+        await restartedOperation.finish()
+        await restarted.value
+        await joined.value
+        let restartedCalls = await restartedOperation.calls()
+        let unexpectedCalls = await unexpectedOperation.calls()
+        XCTAssertEqual(restartedCalls, 1)
+        XCTAssertEqual(unexpectedCalls, 0)
+    }
+
+    func testLifecycleGenerationRejectsWorkCompletedAfterStop() {
+        var lifecycle = IrohClipboardLifecycleState()
+        let inFlightGeneration = lifecycle.generation
+
+        XCTAssertTrue(lifecycle.isCurrent(inFlightGeneration))
+
+        lifecycle.invalidate()
+
+        XCTAssertFalse(lifecycle.isCurrent(inFlightGeneration))
+        XCTAssertTrue(lifecycle.isCurrent(lifecycle.generation))
+    }
+
     func testIdentityStoreBaseQueryIncludesOptionalAccessGroup() {
         let accessGroup = "TEAMID.com.alexjiang.PasteBuddy.shared"
         let sharedStore = IrohClipboardIdentityStore(

@@ -8,14 +8,38 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         let service = MCPToolService(store: store)
 
         XCTAssertFalse(store.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(store.snapshot.mcp.enabledTools, MCPToolName.defaultEnabledTools)
+        XCTAssertTrue(try service.availableTools().isEmpty)
         XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
             XCTAssertEqual(error as? MCPToolServiceError, .serverDisabled)
         }
         XCTAssertTrue(store.snapshot.mcp.accessLog.isEmpty)
+    }
+
+    func testMCPRejectsMissingAndExpiredEntitlementsBeforeServerOrToolChecks() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let service = MCPToolService(store: store)
+
+        XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
+            XCTAssertEqual(error as? MCPToolServiceError, .entitlementRequired)
+        }
+        XCTAssertTrue(try service.availableTools().isEmpty)
+
+        store.startFreeTrial(days: 1, now: Date().addingTimeInterval(-2 * 24 * 60 * 60))
+        store.setMCPServerEnabled(true)
+
+        XCTAssertThrowsError(try service.searchHistory(query: "anything")) { error in
+            XCTAssertEqual(error as? MCPToolServiceError, .entitlementRequired)
+        }
+        XCTAssertTrue(try service.availableTools().isEmpty)
+        XCTAssertEqual(store.snapshot.mcp.accessLog.prefix(2).map(\.outcome), [.denied, .denied])
     }
 
     func testBlockedPersistenceRejectsMCPBeforeServerOrToolChecks() throws {
@@ -39,13 +63,19 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
+        let service = MCPToolService(store: store)
 
         XCTAssertTrue(store.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(store.snapshot.mcp.enabledTools, MCPToolName.defaultEnabledTools)
         XCTAssertTrue(store.snapshot.mcp.enabledTools.contains(.searchHistory))
         XCTAssertTrue(store.snapshot.mcp.enabledTools.contains(.listPinboards))
         XCTAssertFalse(store.snapshot.mcp.enabledTools.contains(.retrieveItem))
+        XCTAssertEqual(
+            try service.availableTools(),
+            MCPToolName.allCases.filter(MCPToolName.defaultEnabledTools.contains)
+        )
     }
 
     func testLegacyAllToolsConfigurationMigratesPayloadRetrievalBackToOptIn() throws {
@@ -66,6 +96,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         store.setMCPTool(.retrieveItem, enabled: false)
         store.setMCPTool(.listPinboards, enabled: false)
@@ -87,6 +118,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         store.setMCPTool(.retrieveItem, enabled: true)
         let item = store.addCapturedItem(ClipboardItem(
@@ -118,6 +150,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         store.setMCPTool(.retrieveItem, enabled: true)
         let item = store.addCapturedItem(ClipboardItem(
@@ -148,6 +181,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         store.setMCPTool(.retrieveItem, enabled: true)
         let imageData = Data([0x01, 0x02, 0x03, 0x04])
@@ -182,6 +216,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         store.setMCPTool(.retrieveItem, enabled: true)
         let hidden = store.addCapturedItem(ClipboardItem(
@@ -279,6 +314,7 @@ final class MCPToolServiceTests: XCTestCase {
             clipboardRepository: repository
         )
         store.load()
+        store.startFreeTrial(days: 7)
         store.selectedScope = .pasteStack
         store.searchQuery = "keep the UI query"
         let queryRevision = store.queryRevision
@@ -312,6 +348,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         store.setMCPTool(.retrieveItem, enabled: true)
         let item = store.addCapturedItem(ClipboardItem(
@@ -348,6 +385,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         let item = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Safari",
@@ -376,6 +414,7 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startFreeTrial(days: 7)
         store.setMCPServerEnabled(true)
         let item = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Notes",

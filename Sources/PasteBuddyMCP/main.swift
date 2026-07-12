@@ -66,12 +66,8 @@ private final class PasteBuddyMCPServer {
     }
 
     private func toolDefinitions() async throws -> [[String: Any]] {
-        let store = await loadStore()
-        guard store.snapshot.mcp.isServerEnabled else { return [] }
-
-        return MCPToolName.allCases
-            .filter { store.snapshot.mcp.enabledTools.contains($0) }
-            .map(toolDefinition(for:))
+        let store = try await loadStore()
+        return try MCPToolService(store: store).availableTools().map(toolDefinition(for:))
     }
 
     private func toolDefinition(for tool: MCPToolName) -> [String: Any] {
@@ -157,7 +153,7 @@ private final class PasteBuddyMCPServer {
             throw MCPToolServiceError.missingArgument("name")
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
-        let store = await loadStore()
+        let store = try await loadStore()
         let service = MCPToolService(store: store)
 
         do {
@@ -204,9 +200,16 @@ private final class PasteBuddyMCPServer {
         }
     }
 
-    private func loadStore() async -> PasteBuddyStore {
+    private func loadStore() async throws -> PasteBuddyStore {
         let store = PasteBuddyStore()
         await store.loadAsync()
+        if store.snapshot.entitlement.plan.isPersonalPaidPlan,
+           store.snapshot.entitlement.hasActivePaidAccess() {
+            _ = try await store.refreshCurrentStoreEntitlement(
+                using: AppleStoreKitEntitlementProvider()
+            )
+            try await store.flushPendingSaveOrThrow()
+        }
         return store
     }
 

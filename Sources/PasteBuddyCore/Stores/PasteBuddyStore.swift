@@ -2439,7 +2439,7 @@ public final class PasteBuddyStore {
         save()
     }
 
-    public func startFreeTrial(days: Int = 14, now: Date = Date()) {
+    public func startFreeTrial(days: Int = 7, now: Date = Date()) {
         let trialLength = max(days, 1)
         snapshot.entitlement = EntitlementConfiguration(
             plan: .trial,
@@ -2450,6 +2450,32 @@ public final class PasteBuddyStore {
             restoreState: snapshot.entitlement.restoreState
         )
         save()
+    }
+
+    @discardableResult
+    public func startFreeTrialIfEligible(days: Int = 7, now: Date = Date()) -> Bool {
+        guard snapshot.entitlement.plan == .free,
+              snapshot.entitlement.status == .inactive,
+              snapshot.entitlement.trialStartedAt == nil,
+              snapshot.entitlement.trialEndsAt == nil else {
+            return false
+        }
+        startFreeTrial(days: days, now: now)
+        return true
+    }
+
+    @discardableResult
+    public func expireFreeTrialIfNeeded(now: Date = Date()) -> Bool {
+        guard snapshot.entitlement.plan == .trial,
+              snapshot.entitlement.status == .trialing,
+              let trialEndsAt = snapshot.entitlement.trialEndsAt,
+              trialEndsAt <= now else {
+            return false
+        }
+        snapshot.entitlement.status = .expired
+        snapshot.entitlement.expiresAt = trialEndsAt
+        save()
+        return true
     }
 
     public func cancelFreeTrial(now: Date = Date()) {
@@ -2472,15 +2498,16 @@ public final class PasteBuddyStore {
         }
 
         let resolvedFamilySharing = familySharingEnabled || plan == .family
-        snapshot.entitlement = EntitlementConfiguration(
-            plan: plan,
-            status: .active,
-            purchasedAt: purchasedAt,
-            currentPeriodEndsAt: currentPeriodEndsAt,
-            expiresAt: expiresAt ?? currentPeriodEndsAt,
-            isFamilySharingEnabled: resolvedFamilySharing,
-            unlocksAllDevicesForAccount: true,
-            restoreState: snapshot.entitlement.restoreState
+        snapshot.entitlement = storeEntitlementPreservingLocalState(
+            EntitlementConfiguration(
+                plan: plan,
+                status: .active,
+                purchasedAt: purchasedAt,
+                currentPeriodEndsAt: currentPeriodEndsAt,
+                expiresAt: expiresAt ?? currentPeriodEndsAt,
+                isFamilySharingEnabled: resolvedFamilySharing,
+                unlocksAllDevicesForAccount: true
+            )
         )
         lastErrorMessage = nil
         save()
@@ -2524,7 +2551,7 @@ public final class PasteBuddyStore {
             )
             switch outcome {
             case .purchased(let entitlement):
-                snapshot.entitlement = entitlement
+                snapshot.entitlement = storeEntitlementPreservingLocalState(entitlement)
                 lastErrorMessage = nil
                 save()
             case .pending:
@@ -2540,6 +2567,42 @@ public final class PasteBuddyStore {
     }
 
     @discardableResult
+    public func refreshCurrentStoreEntitlement(
+        using provider: any StoreEntitlementProviding,
+        productConfiguration: StoreProductConfiguration = StoreProductConfiguration(),
+        at date: Date = Date()
+    ) async throws -> EntitlementConfiguration? {
+        do {
+            guard let entitlement = try await provider.currentEntitlement(
+                configuration: productConfiguration,
+                checkedAt: date
+            ) else {
+                if snapshot.entitlement.plan.isPersonalPaidPlan {
+                    let current = snapshot.entitlement
+                    snapshot.entitlement = EntitlementConfiguration(
+                        plan: .free,
+                        status: .inactive,
+                        trialStartedAt: current.trialStartedAt,
+                        trialEndsAt: current.trialEndsAt,
+                        trialCanceledAt: current.trialCanceledAt,
+                        restoreState: current.restoreState
+                    )
+                    save()
+                }
+                lastErrorMessage = nil
+                return nil
+            }
+            snapshot.entitlement = storeEntitlementPreservingLocalState(entitlement)
+            lastErrorMessage = nil
+            save()
+            return snapshot.entitlement
+        } catch {
+            recordStoreTransactionUpdateError(error)
+            throw error
+        }
+    }
+
+    @discardableResult
     public func restorePurchases(
         using provider: any StoreEntitlementProviding,
         productConfiguration: StoreProductConfiguration = StoreProductConfiguration(),
@@ -2551,13 +2614,19 @@ public final class PasteBuddyStore {
                 configuration: productConfiguration,
                 restoredAt: date
             ) else {
-                markRestorePurchasesFailed("Restore did not return an active entitlement.", at: date)
-                lastErrorMessage = "Restore did not return an active entitlement."
+                let message = PasteBuddyLocalization.string(
+                    "message.restore_no_active_entitlement",
+                    defaultValue: "Restore did not return an active entitlement."
+                )
+                markRestorePurchasesFailed(message, at: date)
+                lastErrorMessage = message
                 return nil
             }
 
-            snapshot.entitlement = entitlement
-            snapshot.entitlement.restoreState = .restored(date)
+            snapshot.entitlement = storeEntitlementPreservingLocalState(
+                entitlement,
+                restoreState: .restored(date)
+            )
             lastErrorMessage = nil
             save()
             return snapshot.entitlement
@@ -2568,21 +2637,16 @@ public final class PasteBuddyStore {
         }
     }
 
-    public func applyStoreEntitlementUpdate(_ update: StoreEntitlementUpdate) {
-        snapshot.entitlement = update.entitlement
-        switch update.entitlement.status {
-        case .active:
-            lastErrorMessage = nil
-        case .revoked:
-            lastErrorMessage = "App Store entitlement was revoked."
-        case .expired:
-            lastErrorMessage = "App Store entitlement expired."
-        case .billingRetry:
-            lastErrorMessage = "App Store billing retry is required."
-        case .inactive, .trialing, .canceled:
-            lastErrorMessage = nil
-        }
-        save()
+    private func storeEntitlementPreservingLocalState(
+        _ entitlement: EntitlementConfiguration,
+        restoreState: RestorePurchasesState? = nil
+    ) -> EntitlementConfiguration {
+        var entitlement = entitlement
+        entitlement.trialStartedAt = snapshot.entitlement.trialStartedAt
+        entitlement.trialEndsAt = snapshot.entitlement.trialEndsAt
+        entitlement.trialCanceledAt = snapshot.entitlement.trialCanceledAt
+        entitlement.restoreState = restoreState ?? snapshot.entitlement.restoreState
+        return entitlement
     }
 
     public func recordStoreTransactionUpdateError(_ error: any Error) {

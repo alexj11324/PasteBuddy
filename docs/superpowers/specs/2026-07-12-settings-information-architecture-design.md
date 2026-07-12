@@ -18,12 +18,12 @@ Alternatives considered:
 
 Use six sidebar destinations in this order:
 
-1. **General** — launch at login, menu bar status, default paste behavior, and surfaced runtime errors.
+1. **General** — launch at login, menu bar status, and surfaced runtime errors.
 2. **Capture** — active/paused state, temporary pause actions, captured content types, sensitive-text filtering, OCR, excluded apps, and custom capture rules.
 3. **Paste & Shortcuts** — quick paste, shortcut recording, reset action, Accessibility status/request, and the latest direct-paste result.
 4. **Integrations** — MCP/AI connection, connected-client activity, cloud/shared pinboards, and Iroh device pairing.
 5. **Storage** — encryption/history lock, usage, retention limits, and destructive history actions.
-6. **Plan** — current entitlement, trial/subscription actions, and restore purchases.
+6. **Plans** — current entitlement dates, navigation to the dedicated paywall, and a real StoreKit restore action with scoped, persisted success/error feedback. Product selection belongs in the paywall, not in Settings as bare purchase buttons.
 
 Existing external destinations map directly: `.privacy` to Capture, `.shortcuts` to Paste & Shortcuts, `.sync` to Integrations, `.storage` to Storage, and `.general` to General.
 
@@ -63,13 +63,14 @@ Each control is verified at the narrowest real level that can prove its contract
 | General | launch-at-login toggles the real login item when available; menu-bar row reports runtime state; plain-text default changes paste behavior | reload app and confirm persisted preference | unavailable login service and store errors remain visible |
 | Capture | active toggle, 15-minute/1-hour pause, resume, six capture/privacy toggles, excluded-app add/remove, rule add/enable/disable/remove | reload app and match each stored value | OCR is disabled when image capture is off; invalid/incomplete rules cannot be added; capture behavior follows the selected types |
 | Paste & Shortcuts | quick-paste enable, both modifier editors, every `ShortcutAction`, reset, Accessibility request, direct-paste result | reload app and match bindings | record a real shortcut and perform a real direct paste from the stable signed app; permission denial/trust is shown honestly and no repeated automatic prompt is used |
-| MCP | enable/disable, generated configurations, detected-client refresh, advanced tool toggles, revoke, shutdown wording/action | cross-process snapshot reload | packaged signed stdio probe completes initialize/list/call; disabled response and new access-log entry are asserted |
+| MCP | enable/disable, generated configurations, detected-client refresh, advanced tool toggles, and revoke | cross-process snapshot reload | packaged signed stdio probe completes initialize/list/call; disabled response and new access-log entry are asserted |
 | Sync | provider/readiness, shared pinboards, reset local-only, Iroh peer field/connect/send, pairing link copy | reload app and match persisted state where applicable | use a real configured peer/cloud test environment when available; otherwise verify the explicit unavailable/blocked state and do not claim successful sync or pairing |
 | Storage | Touch ID requirement, lock/unlock, grace period, item/byte/day limits, clear-unpinned, clear-all | reload app and match stored values | biometric unavailable/denied states are explicit; seed disposable temporary history and prove each confirmed destructive action affects only its documented set |
-| Plan | display current plan/dates, start/cancel trial, plan choices, restore | reload app/store in StoreKit test or sandbox environment | never trigger production purchases; require StoreKit test/sandbox evidence for success, otherwise verify the packaged app's unavailable/error presentation and report purchase success as unverified |
+| Plan | display current plan/dates and run StoreKit restore | flush and reload the store before reporting restore success | never trigger production purchases from Settings; verify StoreKit restore success/failure with test providers and show a scoped runtime error when the live App Store returns no entitlement |
+| Paywall | start one persisted 7-day local trial only after checking current StoreKit entitlements; hard-gate protected runtime and MCP access after expiry | persist trial start/end, verified purchases, restores, renewals, revocations, and expiration before changing access | open a separate native paywall only after an explicit user action; display only `Product.products` results and App Store prices/periods; show an honest unavailable state when App Store Connect has no matching products |
 
 Automated checks cover routing, state mutation, persistence, configuration generation, MCP protocol behavior, and localization. Runtime acceptance uses `script/build_and_run.sh --verify` and `/Applications/PasteBuddy Dev.app`, records `accessibilityTrusted=true`, `stableLaunchPathMatched=true`, bundle identifier/path, signing channel, nested MCP signature, and then uses Computer Use on the real Settings UI. Window/control coordinates come from runtime `NSWindow`, Accessibility, or `CGWindowListCopyWindowInfo` geometry; screenshots alone and guessed coordinates are not acceptance. The settings window is opened only through the explicit Settings entry point; the main/history window is not opened.
 
 ## Scope
 
-This change may reorganize `SettingsView`, focused tests, and the existing build/package/signing path needed to embed and verify `PasteBuddyMCP`. It does not redesign the main window, add settings search, change storage formats, alter entitlement semantics, install MCP configuration into live user tools, or add dependencies.
+This change may reorganize `SettingsView`, add the selected native Product Design paywall, enforce the existing entitlement model, extend focused tests, and update the existing build/package/signing path needed to embed and verify `PasteBuddyMCP`. It does not redesign the main window, add settings search, change storage formats, install MCP configuration into live user tools, invent App Store prices, or add dependencies. The paywall uses the selected native detail direction and never uses browser mockups for implementation acceptance.

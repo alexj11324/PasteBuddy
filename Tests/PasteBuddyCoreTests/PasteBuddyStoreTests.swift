@@ -2062,6 +2062,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
         var status = store.macMenuBarStatus
 
+        XCTAssertEqual(status.title, "status.plan_required")
+        XCTAssertEqual(status.systemImageName, "lock.fill")
+
+        store.startFreeTrial(days: 7)
+        status = store.macMenuBarStatus
+
         XCTAssertEqual(status.title, "PasteBuddy Active")
         XCTAssertEqual(status.systemImageName, "doc.on.clipboard")
 
@@ -2210,7 +2216,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(activeOverview.trialState, .active)
         XCTAssertTrue(activeOverview.trialSummary.contains("14 days remaining"))
         XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("When the trial ends"))
-        XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("limited mode"))
+        XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("requires"))
         XCTAssertTrue(activeOverview.crossDeviceStatement.contains("Mac, iPhone, and iPad"))
         XCTAssertEqual(activeOverview.purchaseOptions.map(\.plan), [.monthly, .annual, .lifetime, .family])
         XCTAssertTrue(activeOverview.billingSafetyStatement.contains("Payment details stay with the App Store"))
@@ -2222,6 +2228,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(endedOverview.trialState, .ended)
         XCTAssertTrue(endedOverview.trialSummary.contains("Trial ended"))
         XCTAssertTrue(endedOverview.trialOutcomeStatement.contains("do not delete local clipboard data"))
+        XCTAssertTrue(endedOverview.trialOutcomeStatement.contains("lock product access"))
 
         store.cancelFreeTrial(now: now.addingTimeInterval(120))
 
@@ -2238,6 +2245,45 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.entitlement.status, .canceled)
         let trialCanceledAt = try XCTUnwrap(reloaded.snapshot.entitlement.trialCanceledAt)
         XCTAssertEqual(trialCanceledAt.timeIntervalSince1970, now.addingTimeInterval(120).timeIntervalSince1970, accuracy: 0.001)
+    }
+
+    func testFreeTrialStartsOnceAndCannotBeResetAfterExpiry() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let startedAt = Date(timeIntervalSince1970: 10_000)
+
+        XCTAssertTrue(store.startFreeTrialIfEligible(days: 7, now: startedAt))
+        let originalEnd = try XCTUnwrap(store.snapshot.entitlement.trialEndsAt)
+        XCTAssertEqual(originalEnd, startedAt.addingTimeInterval(7 * 24 * 60 * 60))
+        XCTAssertFalse(store.startFreeTrialIfEligible(days: 7, now: startedAt.addingTimeInterval(60)))
+        XCTAssertEqual(store.snapshot.entitlement.trialEndsAt, originalEnd)
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.entitlement.trialEndsAt, originalEnd)
+        XCTAssertFalse(reloaded.startFreeTrialIfEligible(days: 7, now: originalEnd.addingTimeInterval(1)))
+        XCTAssertTrue(reloaded.expireFreeTrialIfNeeded(now: originalEnd.addingTimeInterval(1)))
+        XCTAssertEqual(reloaded.snapshot.entitlement.status, .expired)
+        XCTAssertEqual(reloaded.snapshot.entitlement.trialEndsAt, originalEnd)
+        XCTAssertFalse(reloaded.hasFullProductAccess)
+    }
+
+    func testDirectFreeTrialDefaultsToSevenDays() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let startedAt = Date(timeIntervalSince1970: 20_000)
+
+        store.startFreeTrial(now: startedAt)
+
+        XCTAssertEqual(
+            try XCTUnwrap(store.snapshot.entitlement.trialEndsAt),
+            startedAt.addingTimeInterval(7 * 24 * 60 * 60)
+        )
     }
 
     func testPaidPlansUnlockAllDevicesAndCanExpire() throws {

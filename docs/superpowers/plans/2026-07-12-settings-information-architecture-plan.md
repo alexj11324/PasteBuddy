@@ -71,7 +71,7 @@
 
 1. Run and extend existing tests for General, Capture, shortcuts, MCP, sync, storage, and plan state mutation/persistence only where coverage is missing.
 2. Use temporary seeded history for destructive-action tests; never use the user's real history as test data.
-3. Keep StoreKit success claims limited to test/sandbox evidence; otherwise verify the real unavailable/error state.
+3. Keep StoreKit success claims limited to test/sandbox evidence; Settings exposes only current entitlement and restore, flushes persistence before success, and shows scoped restore errors instead of unrelated global store errors.
 4. Run all focused suites, then full `swift test`.
 
 ## Task 7: Stable-app runtime acceptance
@@ -84,3 +84,19 @@
 4. Walk every page and control from the design verification matrix. Record pass, explicit unavailable state, or unresolved failure for each; do not convert unavailable external environments into success.
 5. Run `script/test_card_switch_latency.sh` only if the Settings changes touch shared Shelf/card rendering code; otherwise document why it is out of scope.
 6. Review `git diff`, run final relevant tests, and mark the Goal complete only if no required acceptance item remains.
+
+## Task 8: One-time trial and real StoreKit paywall
+
+**Files:**
+- Modify: `Sources/PasteBuddy/App/PasteBuddyApp.swift`
+- Add: `Sources/PasteBuddy/Views/PasteBuddyPaywallView.swift`
+- Modify: `Sources/PasteBuddyCore/Services/StoreKitEntitlementService.swift`
+- Modify: `Sources/PasteBuddyCore/Stores/PasteBuddyStore.swift`
+- Modify: existing StoreKit, store, MCP, and runtime tests
+
+1. Refresh verified current StoreKit entitlements once at launch before deciding trial eligibility.
+2. Start and persist one 7-day local trial only for a never-trialed free entitlement; do not imply automatic billing.
+3. On expiry, stop clipboard monitoring and Iroh sync, hide visible panels, and gate Shelf, Side Panel, Paste Stack, direct entry actions, and MCP tools.
+4. Present a separate native paywall only from an explicit action. Fetch with `Product.products`, show actual display prices and subscription periods, and expose no purchase action when the App Store returns no products.
+5. Apply purchases, restores, startup entitlements, and transaction updates only after StoreKit verification; flush persistence before reporting success or resuming protected runtime.
+6. Verify the App Store Connect source of truth. Treat missing products or a mismatched macOS app identity as a release blocker, not as a successful purchase flow.

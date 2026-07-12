@@ -7,17 +7,25 @@ rest of the clipboard configuration.
 
 ## Implemented Locally
 
-- Free trial lifecycle: start date, end date, cancel state, and access
-  evaluation.
+- One-time local 7-day trial lifecycle: StoreKit current-entitlement check,
+  start date, end date, expiration, persistence, and access evaluation. This
+  trial does not create a subscription or charge automatically.
 - Personal plans: monthly, annual, lifetime, and family entitlement concepts.
 - Restore purchases state: not started, in progress, restored, and failed.
 - Cross-device entitlement flag for the same account.
 - StoreKit product configuration for monthly, annual, lifetime, and family
   product IDs.
 - StoreKit 2 adapter for product lookup, purchase, transaction verification,
-  restore/sync, and verified entitlement mapping.
+  current-entitlement refresh, restore/sync, and verified entitlement mapping.
 - StoreKit transaction update observer for renewals, refunds, revocations, and
   family-sharing entitlement changes.
+- A dedicated native macOS paywall that renders only products returned by
+  StoreKit, including App Store display prices and subscription periods. Empty
+  or failed product loads remain visibly unavailable and expose no purchase
+  action.
+- Hard access enforcement after trial/entitlement expiry for clipboard capture,
+  Iroh sync, Shelf, Side Panel, Paste Stack, and MCP tools while retaining local
+  clipboard data.
 - Personal entitlement overview for Settings and tests. It turns raw
   entitlement state into user-facing trial reminders, trial end behavior,
   cross-device unlock copy, restore guidance for reinstall/device-change cases,
@@ -29,10 +37,9 @@ rest of the clipboard configuration.
   admin-visible seat/license state, billing/distribution summaries, and shared
   pinboard value propositions around ideas, links, files, screenshots, snippets,
   and staying in sync.
-- Settings UI for plan status, trial actions, trial end outcome, personal plan
-  options, same-account Mac/iPhone/iPad unlock behavior, restore state, restore
-  retry guidance, encrypted billing-safety copy, team seat metadata, team
-  onboarding copy, and admin-visible team plan summaries.
+- Settings UI for current plan/dates, navigation to the separate paywall, and
+  verified StoreKit restore with scoped error/success feedback. Settings does
+  not contain product purchase buttons.
 
 ## Security Boundary
 
@@ -46,13 +53,33 @@ data, App Store receipts, signed transaction payloads, billing tokens, or
 invoice credentials. Restore and purchase flows fail closed until StoreKit
 returns a verified active entitlement.
 
+## Verified App Store Connect State (2026-07-12)
+
+Read-only `asc` queries against app `6780560937` verified:
+
+- App: `PasteBuddy Clipboard`, bundle ID `com.alexjiang.PasteBuddy.iOS`.
+- Configured App Store platform: iOS only.
+- Subscription groups: 0.
+- In-app purchases: 0.
+
+Therefore the production purchase path is not yet available. The paywall must
+show its explicit unavailable state until App Store Connect returns matching
+products. A successful local build or fake StoreKit provider test is not
+evidence that production purchasing works.
+
 ## External Configuration Still Required
 
-- App Store Connect products for monthly, annual, lifetime, and family plans.
-- Signed App Store/TestFlight build wiring with the production product IDs and
-  purchase/restore UI.
-- App lifecycle wiring that starts `StoreTransactionUpdateObserver` at launch and
-  applies updates through `PasteBuddyStore.applyStoreEntitlementUpdate`.
+- Decide and configure the native macOS App Store/universal-purchase identity;
+  the current production macOS bundle identity is not represented by the
+  iOS-only App Store record above.
+- Configure real App Store Connect products and pricing after the platform
+  identity is correct: monthly and annual are recurring subscriptions,
+  lifetime is a non-consumable purchase, and the family product type/sharing
+  contract must be chosen explicitly. The code requests all four identifiers
+  but never invents missing products.
+- Verify product loading, purchase, relaunch entitlement refresh, restore,
+  renewal, expiration, and revocation with an App Store sandbox/TestFlight
+  account for the final signed product identity.
 - Server-side receipt validation or App Store Server API handling if the product
   needs account-level entitlement reconciliation across Mac, iPhone, and iPad.
 - Team billing backend for seat assignment, managed distribution, single
@@ -61,8 +88,8 @@ returns a verified active entitlement.
 
 ## Integration Point
 
-Use `AppleStoreKitEntitlementProvider` with `PasteBuddyStore.purchasePersonalPlan`
-and `PasteBuddyStore.restorePurchases` in the signed app target. Start
-`StoreTransactionUpdateObserver` with the same provider at app launch and apply
-each update through `PasteBuddyStore.applyStoreEntitlementUpdate`. Tests use
-fakes so the app can verify entitlement behavior without hitting the App Store.
+`PasteBuddyApp` refreshes current StoreKit entitlements before trial eligibility,
+starts `StoreTransactionUpdateObserver`, and uses
+`AppleStoreKitEntitlementProvider` for product loading, purchase, and restore.
+Tests use fakes to prove state transitions, but production acceptance still
+requires the matching App Store product identity described above.

@@ -3,6 +3,7 @@ set -euo pipefail
 
 MODE="${1:-run}"
 EXECUTABLE_NAME="PasteBuddy"
+MCP_EXECUTABLE_NAME="PasteBuddyMCP"
 SIGNING_CHANNEL="${PASTEBUDDY_SIGNING_CHANNEL:-development}"
 case "$SIGNING_CHANNEL" in
   development)
@@ -30,6 +31,7 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$EXECUTABLE_NAME"
+MCP_APP_BINARY="$APP_MACOS/$MCP_EXECUTABLE_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Support/AppIcon.icns"
 APP_ICON_NAME="AppIcon.icns"
@@ -235,12 +237,15 @@ kill_existing_app
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$EXECUTABLE_NAME"
+MCP_BUILD_BINARY="$BUILD_DIR/$MCP_EXECUTABLE_NAME"
 RESOURCE_BUNDLE="$BUILD_DIR/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 /usr/bin/ditto --norsrc --noextattr "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+/usr/bin/ditto --norsrc --noextattr "$MCP_BUILD_BINARY" "$MCP_APP_BINARY"
+chmod +x "$MCP_APP_BINARY"
 if [[ -d "$RESOURCE_BUNDLE" ]]; then
   /usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE" "$APP_RESOURCES/$(basename "$RESOURCE_BUNDLE")"
   for localization_dir in "$RESOURCE_BUNDLE"/*.lproj; do
@@ -341,6 +346,17 @@ sign_app() {
   verify_code_signature "$bundle"
 }
 
+codesign_binary() {
+  local binary="$1"
+  local codesign_args=(--force --sign "$CODESIGN_IDENTITY")
+  if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
+    codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
+  fi
+  /usr/bin/codesign "${codesign_args[@]}" "$binary"
+  /usr/bin/codesign --verify --strict --verbose=4 "$binary"
+}
+
+codesign_binary "$MCP_APP_BINARY"
 sign_app "$APP_BUNDLE"
 
 package_app() {
@@ -356,6 +372,7 @@ install_app() {
   rm -rf "$INSTALL_BUNDLE"
   /usr/bin/ditto --norsrc --noextattr "$APP_BUNDLE" "$INSTALL_BUNDLE"
   sign_app "$INSTALL_BUNDLE"
+  /usr/bin/codesign --verify --strict --verbose=4 "$INSTALL_BUNDLE/Contents/MacOS/$MCP_EXECUTABLE_NAME"
   printf 'Installed %s signed with %s (%s, %s)\n' "$INSTALL_BUNDLE" "$CODESIGN_IDENTITY" "$SIGNING_CHANNEL" "$BUNDLE_ID"
 }
 

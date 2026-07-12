@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct PasteBuddyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("clipboardPanelDisplayMode") private var panelDisplayModeRawValue = ClipboardPanelDisplayMode.sidePanel.rawValue
     @AppStorage("clipboardShelfPlacement") private var shelfPlacementRawValue = ClipboardShelfPlacement.top.rawValue
     @State private var store = PasteBuddyStore()
@@ -76,6 +77,10 @@ struct PasteBuddyApp: App {
     @State private var statusItemController: PasteBuddyStatusItemController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
     @State private var irohSync = IrohClipboardSyncService()
+    @State private var entitlementExpirationTask: Task<Void, Never>?
+    @State private var transactionObserverTask: Task<Void, Never>?
+    @State private var didRefreshCurrentStoreEntitlement = false
+    @State private var storeEntitlementRefreshFailed = false
 
     init() {
         Self.printRuntimeDiagnosticsIfNeeded()
@@ -88,8 +93,22 @@ struct PasteBuddyApp: App {
     var body: some Scene {
         let _ = configureAppDelegate()
         Settings {
-            SettingsView(store: store, irohSync: irohSync)
+            SettingsView(
+                store: store,
+                irohSync: irohSync,
+                onOpenPaywall: presentPaywall,
+                onEntitlementActivated: handleEntitlementActivated
+            )
         }
+
+        Window("brand.pastebuddy_pro", id: "paywall") {
+            PasteBuddyPaywallView(
+                store: store,
+                onEntitlementActivated: handleEntitlementActivated
+            )
+        }
+        .defaultSize(width: 560, height: 700)
+        .windowResizability(.contentSize)
     }
 
     private func configureAppDelegate() {
@@ -147,7 +166,12 @@ struct PasteBuddyApp: App {
     }
 
     private func updateStatusItem() {
-        statusItemController?.update(status: store.macMenuBarStatus)
+        var status = store.macMenuBarStatus
+        if storeEntitlementRefreshFailed {
+            status.title = "status.plan_required"
+            status.systemImageName = "lock.fill"
+        }
+        statusItemController?.update(status: status)
     }
 
     private func makeStatusItemMenu() -> NSMenu {
@@ -196,12 +220,25 @@ struct PasteBuddyApp: App {
             NSApp.activate(ignoringOtherApps: true)
         })
 
+        if storeEntitlementRefreshFailed || !store.snapshot.entitlement.hasActivePaidAccess() {
+            menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+                localized("action.view_plans"),
+                systemImageName: "creditcard"
+            ) {
+                presentPaywall()
+            })
+        }
+
         menu.addItem(.separator())
         menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
             localized(store.isPasteStackActive ? "action.stop_paste_stack" : "action.start_paste_stack"),
             systemImageName: store.isPasteStackActive ? "stop.fill" : "play.fill"
         ) {
-            store.togglePasteStack()
+            Task { @MainActor in
+                await startRuntimeIfNeeded()
+                guard requireFullProductAccessForUserAction() else { return }
+                store.togglePasteStack()
+            }
         })
 
         menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
@@ -210,6 +247,8 @@ struct PasteBuddyApp: App {
             enabled: !store.pasteStackItems.isEmpty
         ) {
             Task { @MainActor in
+                await startRuntimeIfNeeded()
+                guard requireFullProductAccessForUserAction() else { return }
                 if let item = store.pasteNextStackItem() {
                     store.recordDirectPasteResult(
                         await Self.pasteItemToTarget(
@@ -236,6 +275,7 @@ struct PasteBuddyApp: App {
 
     private func toggleClipboardShelf() async {
         await startRuntimeIfNeeded()
+        guard requireFullProductAccessForUserAction() else { return }
         PasteBuddyDiagnostics.recordAccessibilityTrust(
             .shelf,
             "accessibilityTrustCheckedBeforeShelfToggle"
@@ -279,6 +319,7 @@ struct PasteBuddyApp: App {
 
     private func showClipboardPanelMode(_ mode: ClipboardPanelDisplayMode) async {
         await startRuntimeIfNeeded()
+        guard requireFullProductAccessForUserAction() else { return }
         frontmostApplicationTracker.recordCurrentFrontmostApplication()
         PasteBuddyDiagnostics.record(.hotKey, "\(mode.rawValue)ModeRequested")
         panelDisplayMode = mode
@@ -287,7 +328,6 @@ struct PasteBuddyApp: App {
     }
 
     private func startRuntimeIfNeeded() async {
-        frontmostApplicationTracker.start()
         appDelegate.flushPendingSave = { [store] in
             await store.flushPendingSave()
         }
@@ -296,6 +336,50 @@ struct PasteBuddyApp: App {
             await store.loadAsync()
         }
         configureStatusItemIfNeeded()
+        var canStartFreeTrial = didRefreshCurrentStoreEntitlement
+        if !didRefreshCurrentStoreEntitlement {
+            do {
+                _ = try await store.refreshCurrentStoreEntitlement(
+                    using: AppleStoreKitEntitlementProvider()
+                )
+                guard await store.flushPendingSave() else {
+                    storeEntitlementRefreshFailed = true
+                    updateStatusItem()
+                    PasteBuddyDiagnostics.record(.lifecycle, "currentEntitlementPersistenceFailed")
+                    return
+                }
+                didRefreshCurrentStoreEntitlement = true
+                storeEntitlementRefreshFailed = false
+                canStartFreeTrial = true
+                updateStatusItem()
+            } catch {
+                store.recordStoreTransactionUpdateError(error)
+                PasteBuddyDiagnostics.record(
+                    .lifecycle,
+                    "currentEntitlementRefreshFailed",
+                    detail: error.localizedDescription
+                )
+                canStartFreeTrial = false
+                guard store.snapshot.entitlement.isTrialActive() else {
+                    storeEntitlementRefreshFailed = true
+                    stopProtectedRuntime()
+                    return
+                }
+                storeEntitlementRefreshFailed = false
+                updateStatusItem()
+            }
+        }
+        if canStartFreeTrial, store.startFreeTrialIfEligible(days: 7) {
+            guard await store.flushPendingSave() else {
+                PasteBuddyDiagnostics.record(.lifecycle, "freeTrialPersistenceFailed")
+                return
+            }
+        }
+        if store.expireFreeTrialIfNeeded() {
+            _ = await store.flushPendingSave()
+        }
+        startStoreTransactionObserverIfNeeded()
+        scheduleEntitlementExpirationIfNeeded()
         guard !store.isPersistenceWriteBlocked else {
             PasteBuddyDiagnostics.record(
                 .lifecycle,
@@ -304,6 +388,11 @@ struct PasteBuddyApp: App {
             )
             return
         }
+        guard store.hasFullProductAccess else {
+            stopProtectedRuntime()
+            return
+        }
+        frontmostApplicationTracker.start()
         irohSync.onItemReceived = { [store] item in
             guard !store.isPersistenceWriteBlocked else { return }
             _ = store.addSyncedItem(item)
@@ -366,6 +455,197 @@ struct PasteBuddyApp: App {
                 }
             )
         }
+    }
+
+    private func requireFullProductAccessForUserAction() -> Bool {
+        guard !storeEntitlementRefreshFailed, store.hasFullProductAccess else {
+            presentPaywall()
+            return false
+        }
+        return true
+    }
+
+    private func presentPaywall() {
+        shelfPanelController?.hide()
+        openWindow(id: "paywall")
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func handleEntitlementActivated() async {
+        // Purchase and restore callbacks reach this point only after StoreKit
+        // verification and durable persistence have both succeeded.
+        didRefreshCurrentStoreEntitlement = true
+        storeEntitlementRefreshFailed = false
+        entitlementExpirationTask?.cancel()
+        entitlementExpirationTask = nil
+        updateStatusItem()
+        await startRuntimeIfNeeded()
+    }
+
+    private func startStoreTransactionObserverIfNeeded() {
+        guard transactionObserverTask == nil else { return }
+        let observer = StoreTransactionUpdateObserver(
+            provider: AppleStoreKitEntitlementProvider()
+        )
+        transactionObserverTask = Task { @MainActor in
+            defer { transactionObserverTask = nil }
+            var failureCount = 0
+
+            while !Task.isCancelled {
+                let shouldRetry = await observer.run(
+                    onUpdate: { update in
+                        do {
+                            _ = try await store.refreshCurrentStoreEntitlement(
+                                using: AppleStoreKitEntitlementProvider()
+                            )
+                            await MainActor.run {
+                                scheduleEntitlementExpirationIfNeeded()
+                                updateStatusItem()
+                                if !store.hasFullProductAccess {
+                                    stopProtectedRuntime()
+                                }
+                            }
+                            let didPersist = await store.flushPendingSave()
+                            await MainActor.run {
+                                if didPersist {
+                                    didRefreshCurrentStoreEntitlement = true
+                                }
+                                storeEntitlementRefreshFailed = !didPersist
+                                updateStatusItem()
+                                if PasteBuddyEntitlementRuntimePolicy.canStartAfterPersistence(
+                                    store.snapshot.entitlement,
+                                    didPersist: didPersist
+                                ) {
+                                    Task { @MainActor in
+                                        await startRuntimeIfNeeded()
+                                    }
+                                } else {
+                                    if !didPersist {
+                                        PasteBuddyDiagnostics.record(
+                                            .lifecycle,
+                                            "storeEntitlementPersistenceFailed"
+                                        )
+                                    }
+                                    stopProtectedRuntime()
+                                }
+                            }
+                        } catch {
+                            await MainActor.run {
+                                store.recordStoreTransactionUpdateError(error)
+                                PasteBuddyDiagnostics.record(
+                                    .lifecycle,
+                                    "storeEntitlementReconciliationFailed",
+                                    detail: error.localizedDescription
+                                )
+                                if PasteBuddyEntitlementRuntimePolicy.shouldStopAfterFailedReconciliation(
+                                    update,
+                                    cachedEntitlement: store.snapshot.entitlement
+                                ) {
+                                    didRefreshCurrentStoreEntitlement = false
+                                    storeEntitlementRefreshFailed = true
+                                    stopProtectedRuntime()
+                                }
+                            }
+                        }
+                    },
+                    onError: { error in
+                        await MainActor.run {
+                            store.recordStoreTransactionUpdateError(error)
+                            PasteBuddyDiagnostics.record(
+                                .lifecycle,
+                                "storeTransactionObserverFailed",
+                                detail: error.localizedDescription
+                            )
+                        }
+                    }
+                )
+
+                guard shouldRetry, !Task.isCancelled else { return }
+                failureCount += 1
+                let retryDelay = PasteBuddyStoreTransactionRetryPolicy.delaySeconds(
+                    afterFailure: failureCount
+                )
+                PasteBuddyDiagnostics.record(
+                    .lifecycle,
+                    "storeTransactionObserverRetryScheduled",
+                    detail: "attempt=\(failureCount) delaySeconds=\(retryDelay)"
+                )
+                do {
+                    try await Task.sleep(for: .seconds(retryDelay))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func scheduleEntitlementExpirationIfNeeded() {
+        entitlementExpirationTask?.cancel()
+        entitlementExpirationTask = nil
+        guard let deadline = PasteBuddyEntitlementRuntimePolicy.accessDeadline(
+            for: store.snapshot.entitlement
+        ) else { return }
+
+        let delay = deadline.timeIntervalSinceNow
+        guard delay > 0 else {
+            handleEntitlementDeadline(deadline)
+            return
+        }
+
+        entitlementExpirationTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            handleEntitlementDeadline(deadline)
+        }
+    }
+
+    private func handleEntitlementDeadline(_ deadline: Date) {
+        guard PasteBuddyEntitlementRuntimePolicy.accessDeadline(
+            for: store.snapshot.entitlement
+        ) == deadline else {
+            scheduleEntitlementExpirationIfNeeded()
+            return
+        }
+
+        let now = Date()
+        guard deadline <= now else {
+            scheduleEntitlementExpirationIfNeeded()
+            return
+        }
+
+        let didChange: Bool
+        if store.snapshot.entitlement.plan == .trial {
+            didChange = store.expireFreeTrialIfNeeded(now: now)
+        } else if store.snapshot.entitlement.status == .active {
+            store.markEntitlementExpired(at: deadline)
+            didChange = true
+        } else {
+            didChange = false
+        }
+
+        if didChange {
+            Task { @MainActor in
+                _ = await store.flushPendingSave()
+            }
+        }
+        if store.snapshot.entitlement.hasFullAccess(now: now) {
+            scheduleEntitlementExpirationIfNeeded()
+        } else {
+            PasteBuddyDiagnostics.record(.lifecycle, "entitlementDeadlineReached")
+            stopProtectedRuntime()
+        }
+    }
+
+    private func stopProtectedRuntime() {
+        monitor?.stop()
+        monitor = nil
+        irohSync.stop()
+        shelfPanelController?.hide()
+        updateStatusItem()
     }
 
     private static func pasteItemToTarget(
@@ -561,6 +841,46 @@ enum PasteBuddyTerminationCoordinator {
             reply(true)
         }
         return .terminateLater
+    }
+}
+
+enum PasteBuddyEntitlementRuntimePolicy {
+    static func accessDeadline(for entitlement: EntitlementConfiguration) -> Date? {
+        if entitlement.plan == .trial {
+            return entitlement.trialEndsAt
+        }
+        return [entitlement.currentPeriodEndsAt, entitlement.expiresAt]
+            .compactMap { $0 }
+            .min()
+    }
+
+    static func shouldStopAfterFailedReconciliation(
+        _ update: StoreEntitlementUpdate,
+        cachedEntitlement: EntitlementConfiguration
+    ) -> Bool {
+        guard !update.entitlement.hasFullAccess(now: update.receivedAt),
+              update.entitlement.plan == cachedEntitlement.plan else {
+            return false
+        }
+        guard let cachedPurchaseDate = cachedEntitlement.purchasedAt else {
+            return true
+        }
+        return update.transaction.purchaseDate >= cachedPurchaseDate
+    }
+
+    static func canStartAfterPersistence(
+        _ entitlement: EntitlementConfiguration,
+        didPersist: Bool,
+        now: Date = Date()
+    ) -> Bool {
+        didPersist && entitlement.hasFullAccess(now: now)
+    }
+}
+
+enum PasteBuddyStoreTransactionRetryPolicy {
+    static func delaySeconds(afterFailure failureCount: Int) -> TimeInterval {
+        let exponent = min(max(failureCount - 1, 0), 5)
+        return TimeInterval(min(1 << exponent, 30))
     }
 }
 

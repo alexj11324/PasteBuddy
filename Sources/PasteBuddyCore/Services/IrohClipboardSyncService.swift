@@ -204,9 +204,22 @@ struct IrohClipboardSessionState {
     }
 }
 
+struct IrohClipboardLifecycleState {
+    private(set) var generation: UInt64 = 0
+
+    mutating func invalidate() {
+        generation &+= 1
+    }
+
+    func isCurrent(_ candidate: UInt64) -> Bool {
+        generation == candidate
+    }
+}
+
 @MainActor
 final class IrohClipboardStartGate {
     private var task: Task<Void, Never>?
+    private var taskID: UUID?
 
     func run(_ operation: @escaping @MainActor @Sendable () async -> Void) async {
         if let task {
@@ -214,12 +227,23 @@ final class IrohClipboardStartGate {
             return
         }
 
+        let taskID = UUID()
         let task = Task { @MainActor in
             await operation()
         }
+        self.taskID = taskID
         self.task = task
         await task.value
-        self.task = nil
+        if self.taskID == taskID {
+            self.task = nil
+            self.taskID = nil
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        taskID = nil
     }
 }
 
@@ -246,6 +270,7 @@ public final class IrohClipboardSyncService {
     @ObservationIgnored private var acceptTask: Task<Void, Never>?
     @ObservationIgnored private var currentSession: IrohClipboardSession?
     @ObservationIgnored private var sessionState = IrohClipboardSessionState()
+    @ObservationIgnored private var lifecycleState = IrohClipboardLifecycleState()
     @ObservationIgnored private let startGate = IrohClipboardStartGate()
 
     private static let peerEndpointDefaultsKey = "pastebuddy.iroh.peerEndpointId"
@@ -268,12 +293,24 @@ public final class IrohClipboardSyncService {
 
     public func start() async {
         guard endpoint == nil else { return }
+        let generation = lifecycleState.generation
         await startGate.run { [weak self] in
-            await self?.bindEndpoint()
+            await self?.bindEndpoint(generation: generation)
         }
     }
 
-    private func bindEndpoint() async {
+    public func stop() {
+        lifecycleState.invalidate()
+        startGate.cancel()
+        acceptTask?.cancel()
+        acceptTask = nil
+        currentSession?.stop()
+        currentSession = nil
+        endpoint = nil
+        connectionState = .idle
+    }
+
+    private func bindEndpoint(generation: UInt64) async {
         guard endpoint == nil else { return }
         connectionState = .binding
         do {
@@ -284,18 +321,22 @@ public final class IrohClipboardSyncService {
                 secretKey: identity.secretKey.toBytes(),
                 alpns: [IrohClipboardWireFormat.alpn]
             ))
+            guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
             self.endpoint = endpoint
             connectionState = .ready
             acceptTask = Task { [weak self] in
-                await self?.runAcceptLoop()
+                await self?.runAcceptLoop(generation: generation)
             }
         } catch {
+            guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
             connectionState = .failed(error.localizedDescription)
         }
     }
 
     public func connectToPeer() async {
+        let generation = lifecycleState.generation
         await start()
+        guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
         guard let endpoint else {
             connectionState = .failed(IrohClipboardSyncError.noEndpoint.localizedDescription)
             return
@@ -309,9 +350,12 @@ public final class IrohClipboardSyncService {
         let address = EndpointAddr(id: peerId, relayUrl: nil, addresses: [])
         do {
             let connection = try await endpoint.connect(addr: address, alpn: IrohClipboardWireFormat.alpn)
+            guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
             let stream = try await connection.openBi()
+            guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
             adoptSession(stream: stream, connection: connection, remoteIdHex: peerId.description)
         } catch {
+            guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
             connectionState = .failed(error.localizedDescription)
         }
     }
@@ -404,20 +448,25 @@ public final class IrohClipboardSyncService {
         connectionState = .failed(error.localizedDescription)
     }
 
-    private func runAcceptLoop() async {
-        while !Task.isCancelled {
+    private func runAcceptLoop(generation: UInt64) async {
+        while lifecycleState.isCurrent(generation), !Task.isCancelled {
             guard let incoming = await endpoint?.acceptNext() else { return }
+            guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
             do {
                 let accepting = try await incoming.accept()
+                guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
                 guard try await accepting.alpn() == IrohClipboardWireFormat.alpn else {
                     continue
                 }
                 let connection = try await accepting.connect()
+                guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
                 let remoteEndpointId = connection.remoteId().description
                 guard authorizeIncomingPeer(remoteEndpointId) else { continue }
                 let stream = try await connection.acceptBi()
+                guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
                 adoptSession(stream: stream, connection: connection, remoteIdHex: remoteEndpointId)
             } catch {
+                guard lifecycleState.isCurrent(generation), !Task.isCancelled else { return }
                 continue
             }
         }

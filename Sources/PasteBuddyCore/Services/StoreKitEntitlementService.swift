@@ -68,25 +68,56 @@ public struct StoreProductConfiguration: Codable, Equatable, Sendable {
     }
 }
 
-public struct StoreProductSummary: Codable, Equatable, Sendable {
+public struct StoreProductSummary: Codable, Equatable, Identifiable, Sendable {
+    public enum PurchaseKind: String, Codable, Equatable, Sendable {
+        case subscription
+        case oneTime
+        case unknown
+    }
+
+    public struct SubscriptionPeriod: Codable, Equatable, Sendable {
+        public enum Unit: String, Codable, Equatable, Sendable {
+            case day
+            case week
+            case month
+            case year
+        }
+
+        public var value: Int
+        public var unit: Unit
+
+        public init(value: Int, unit: Unit) {
+            self.value = value
+            self.unit = unit
+        }
+    }
+
     public var productID: String
     public var plan: ProductAccessPlan
     public var displayName: String
     public var displayPrice: String
     public var isFamilyShareable: Bool
+    public var purchaseKind: PurchaseKind
+    public var subscriptionPeriod: SubscriptionPeriod?
+
+    public var id: String { productID }
 
     public init(
         productID: String,
         plan: ProductAccessPlan,
         displayName: String,
         displayPrice: String,
-        isFamilyShareable: Bool
+        isFamilyShareable: Bool,
+        purchaseKind: PurchaseKind = .unknown,
+        subscriptionPeriod: SubscriptionPeriod? = nil
     ) {
         self.productID = productID
         self.plan = plan
         self.displayName = displayName
         self.displayPrice = displayPrice
         self.isFamilyShareable = isFamilyShareable
+        self.purchaseKind = purchaseKind
+        self.subscriptionPeriod = subscriptionPeriod
     }
 }
 
@@ -161,6 +192,11 @@ public enum StoreEntitlementError: LocalizedError, Equatable {
 
 public protocol StoreEntitlementProviding: Sendable {
     func fetchProducts(configuration: StoreProductConfiguration) async throws -> [StoreProductSummary]
+    /// `nil` is authoritative: StoreKit was checked successfully and returned no active entitlement.
+    func currentEntitlement(
+        configuration: StoreProductConfiguration,
+        checkedAt: Date
+    ) async throws -> EntitlementConfiguration?
     func purchase(
         plan: ProductAccessPlan,
         configuration: StoreProductConfiguration
@@ -196,16 +232,34 @@ public final class StoreTransactionUpdateObserver: @unchecked Sendable {
         onError: @escaping @Sendable (any Error) async -> Void
     ) -> Task<Void, Never> {
         Task {
-            do {
-                for try await update in provider.entitlementUpdates(
-                    configuration: configuration,
-                    receivedAt: receivedAt
-                ) {
-                    await onUpdate(update)
-                }
-            } catch {
-                await onError(error)
+            _ = await run(
+                receivedAt: receivedAt,
+                onUpdate: onUpdate,
+                onError: onError
+            )
+        }
+    }
+
+    /// Returns `true` only when observation failed and can be retried.
+    @discardableResult
+    public func run(
+        receivedAt: @Sendable @escaping () -> Date = { Date() },
+        onUpdate: @escaping @Sendable (StoreEntitlementUpdate) async -> Void,
+        onError: @escaping @Sendable (any Error) async -> Void
+    ) async -> Bool {
+        do {
+            for try await update in provider.entitlementUpdates(
+                configuration: configuration,
+                receivedAt: receivedAt
+            ) {
+                guard !Task.isCancelled else { return false }
+                await onUpdate(update)
             }
+            return false
+        } catch {
+            guard !Task.isCancelled else { return false }
+            await onError(error)
+            return true
         }
     }
 }
@@ -245,7 +299,8 @@ public enum StoreEntitlementMapper {
         from transactions: [VerifiedStoreTransaction],
         configuration: StoreProductConfiguration,
         restoredAt: Date,
-        now: Date = Date()
+        now: Date = Date(),
+        restoreState: RestorePurchasesState? = nil
     ) -> EntitlementConfiguration? {
         transactions
             .filter { $0.isActive(now: now) }
@@ -266,7 +321,7 @@ public enum StoreEntitlementMapper {
                 entitlement(
                     from: transaction,
                     plan: plan,
-                    restoreState: .restored(restoredAt),
+                    restoreState: restoreState ?? .restored(restoredAt),
                     now: now
                 )
             }
@@ -323,7 +378,28 @@ public final class AppleStoreKitEntitlementProvider: StoreEntitlementProviding, 
                 plan: plan,
                 displayName: product.displayName,
                 displayPrice: product.displayPrice,
-                isFamilyShareable: product.isFamilyShareable
+                isFamilyShareable: product.isFamilyShareable,
+                purchaseKind: product.subscription == nil ? .oneTime : .subscription,
+                subscriptionPeriod: product.subscription.flatMap { subscription in
+                    let period = subscription.subscriptionPeriod
+                    let unit: StoreProductSummary.SubscriptionPeriod.Unit
+                    switch period.unit {
+                    case .day:
+                        unit = .day
+                    case .week:
+                        unit = .week
+                    case .month:
+                        unit = .month
+                    case .year:
+                        unit = .year
+                    @unknown default:
+                        return nil
+                    }
+                    return StoreProductSummary.SubscriptionPeriod(
+                        value: period.value,
+                        unit: unit
+                    )
+                }
             )
         }
     }
@@ -359,6 +435,24 @@ public final class AppleStoreKitEntitlementProvider: StoreEntitlementProviding, 
         @unknown default:
             return .pending
         }
+    }
+
+    public func currentEntitlement(
+        configuration: StoreProductConfiguration = StoreProductConfiguration(),
+        checkedAt: Date = Date()
+    ) async throws -> EntitlementConfiguration? {
+        var transactions: [VerifiedStoreTransaction] = []
+        for await verification in Transaction.currentEntitlements {
+            let transaction = try verifiedTransaction(from: verification)
+            transactions.append(VerifiedStoreTransaction(transaction: transaction))
+        }
+        return StoreEntitlementMapper.bestActiveEntitlement(
+            from: transactions,
+            configuration: configuration,
+            restoredAt: checkedAt,
+            now: checkedAt,
+            restoreState: .notStarted
+        )
     }
 
     public func restorePurchases(

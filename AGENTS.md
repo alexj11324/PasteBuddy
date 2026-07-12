@@ -51,6 +51,15 @@
 - IMPORTANT: CAS 冲突按持久化不可用 fail fast 并向用户/调用方暴露，禁止静默重试旧完整快照；若未来需要自动重试，必须基于重新加载后的三方 merge 或操作 journal，而不是 last-writer-wins。
 - IMPORTANT: 修改这条路径时至少保留独立 `EncryptedSnapshotStore` 实例和独立 `ClipboardItemRepository` 实例的 stale-writer 回归测试。
 
+## PasteBuddy 试用期与付费墙（IMPORTANT）
+- IMPORTANT: macOS 启动后必须先读取 StoreKit 当前有效 entitlement，再判断是否启动本地 7 天试用；同一持久化身份只能启动一次，重新打开或过期后不得延长或重置。
+- IMPORTANT: 当前 7 天试用不创建 App Store 订阅、不会自动扣费；所有用户文案必须明确这一点。若未来改为自动续订试用，必须改用 App Store Connect introductory offer，禁止用本地日期伪装。
+- IMPORTANT: 试用过期且无有效付费 entitlement 时，必须停止剪贴板监控与 Iroh 同步，并拦截 Shelf、Side Panel、Paste Stack 和 MCP；本地历史保留，但产品功能保持锁定。
+- IMPORTANT: Settings 的 Plans 页面只展示当前方案/日期、打开独立付费墙的入口和恢复购买；禁止在 Settings 内重新加入裸商品按钮。
+- IMPORTANT: 付费墙只能渲染 StoreKit `Product.products` 实际返回的商品、`displayPrice` 和真实订阅周期；商品为空或加载失败时必须显示不可购买状态，禁止硬编码价格、生成占位商品或调用本地 `activatePersonalPlan` 冒充购买。
+- IMPORTANT: 购买、恢复、启动 entitlement 刷新和交易更新只有在 StoreKit 验证通过且 `flushPendingSave()` 成功后才能显示成功或恢复受保护运行时。
+- IMPORTANT: App Store Connect 产品、平台和 bundle identity 必须用真实 ASC 数据验收。开发签名或本地 StoreKit 测试只能证明 UI/代码路径，不能冒充生产商品可购买。
+
 ## PasteBuddy Shelf Liquid Glass 背景（IMPORTANT）
 - IMPORTANT: Shelf 底板、搜索框、空态/提示卡片等 custom glass surface 必须共享同一个 `ClipboardShelfGlass.defaultTintOpacity` 默认逻辑；禁止给搜索框或局部背景保留单独的 opacity state、slider 或调试控件。
 - IMPORTANT: 不要把截图里的百分比或临时调试滑杆显示值当作设计经验值；需要改 Shelf 毛玻璃不透明度时，只调整共享的 `ClipboardShelfGlass.defaultTintOpacity`，并让搜索框和整体背景同源生效。

@@ -2042,9 +2042,9 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
                 ? "Trial ending soon: \(days) \(unit) remaining."
                 : "Trial active: \(days) \(unit) remaining."
         case .canceled:
-            return "Trial canceled. Access is back at the free level until a paid personal plan is active."
+            return "Trial canceled. PasteBuddy requires an active paid personal plan."
         case .ended:
-            return "Trial ended. Access is back at the free level until a paid personal plan is active."
+            return "Trial ended. Choose a paid personal plan to keep using PasteBuddy."
         case .converted:
             return "Trial converted to \(entitlement.plan.displayName)."
         }
@@ -2056,11 +2056,11 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
     ) -> String {
         switch state {
         case .active, .endingSoon:
-            return "When the trial ends, PasteBuddy keeps local data and returns paid-only features to limited mode unless monthly, annual, lifetime, or family access is active."
+            return "When the trial ends, PasteBuddy keeps local data but requires monthly, annual, lifetime, or family access to continue."
         case .canceled:
-            return "Canceled trials stop granting full access; users can still activate monthly, annual, lifetime, or family access later."
+            return "Canceled trials stop granting access until monthly, annual, lifetime, or family access is activated."
         case .ended:
-            return "Ended trials do not delete local clipboard data; they only stop granting paid access."
+            return "Ended trials do not delete local clipboard data; they lock product access until a paid plan is active."
         case .converted:
             return "The active \(entitlement.plan.displayName) entitlement replaces trial access while StoreKit reports it as valid."
         case .notStarted:
@@ -2080,7 +2080,7 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
             return "Trial access is modeled across Mac, iPhone, and iPad for the same user until the trial ends."
         }
 
-        return "No active paid entitlement is verified yet. Mac, iPhone, and iPad stay in limited mode until a personal plan or restored purchase is active."
+        return "No active paid entitlement is verified yet. PasteBuddy stays locked until a personal plan or restored purchase is active."
     }
 
     private static func restoreSummary(for entitlement: EntitlementConfiguration, now: Date) -> String {
@@ -3595,21 +3595,24 @@ public enum MacSettingsDestination: String, CaseIterable, Codable, Identifiable,
     case privacy
     case sync
     case storage
+    case plans
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
         case .general:
-            "General"
+            PasteBuddyLocalization.string("label.general", defaultValue: "General")
         case .shortcuts:
-            "Shortcuts"
+            PasteBuddyLocalization.string("label.shortcuts", defaultValue: "Shortcuts")
         case .privacy:
-            "Privacy"
+            PasteBuddyLocalization.string("label.privacy", defaultValue: "Privacy")
         case .sync:
-            "Sync"
+            PasteBuddyLocalization.string("label.sync", defaultValue: "Sync")
         case .storage:
-            "Storage"
+            PasteBuddyLocalization.string("label.storage", defaultValue: "Storage")
+        case .plans:
+            PasteBuddyLocalization.string("label.plans", defaultValue: "Plans")
         }
     }
 
@@ -3625,6 +3628,8 @@ public enum MacSettingsDestination: String, CaseIterable, Codable, Identifiable,
             "icloud"
         case .storage:
             "externaldrive"
+        case .plans:
+            "creditcard"
         }
     }
 }
@@ -3634,6 +3639,11 @@ public struct MacMenuBarStatus: Equatable, Sendable {
     public var systemImageName: String
 
     public init(snapshot: PasteBuddySnapshot, now: Date = Date()) {
+        guard snapshot.entitlement.hasFullAccess(now: now) else {
+            title = "status.plan_required"
+            systemImageName = "lock.fill"
+            return
+        }
         let privacyReport = snapshot.privacyPostureReport(now: now)
         title = privacyReport.captureStatus.isPaused ? "PasteBuddy Paused" : "PasteBuddy Active"
         systemImageName = privacyReport.captureStatus.isPaused ? "pause.circle.fill" : "doc.on.clipboard"

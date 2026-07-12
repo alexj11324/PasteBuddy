@@ -1483,7 +1483,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(mcpSource.contains("supportedMCPClientCandidates"))
         XCTAssertTrue(source.contains("struct MCPClientDetector"))
         XCTAssertFalse(source.contains("MCPClientConfigurationTarget.settingsMenuTargets"))
-        XCTAssertTrue(mcpSource.contains("action.shut_down_mcp_server"))
+        XCTAssertFalse(mcpSource.contains("action.shut_down_mcp_server"))
         XCTAssertTrue(mcpSource.contains("label.connected_ai_tools"))
         XCTAssertTrue(source.contains("struct MCPClientConfigurationSheet"))
         XCTAssertTrue(source.contains("struct MCPClientCommandRunner"))
@@ -1526,7 +1526,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("set-key-partition-list"))
     }
 
-    func testSettingsUsesSidebarSplitViewInsteadOfToolbarTabs() throws {
+    func testBuildAndRunPackagesAndSignsMCPExecutable() throws {
+        let source = try sourceFileContents("script/build_and_run.sh")
+
+        XCTAssertTrue(source.contains("MCP_EXECUTABLE_NAME=\"PasteBuddyMCP\""))
+        XCTAssertTrue(source.contains("MCP_BUILD_BINARY=\"$BUILD_DIR/$MCP_EXECUTABLE_NAME\""))
+        XCTAssertTrue(source.contains("MCP_APP_BINARY=\"$APP_MACOS/$MCP_EXECUTABLE_NAME\""))
+        XCTAssertTrue(source.contains("\"$MCP_BUILD_BINARY\" \"$MCP_APP_BINARY\""))
+        XCTAssertTrue(source.contains("codesign_binary \"$MCP_APP_BINARY\""))
+        XCTAssertTrue(source.contains("codesign --verify --strict --verbose=4 \"$binary\""))
+    }
+
+    func testSettingsUsesTaskBasedNativeSidebar() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
 
         XCTAssertTrue(source.contains("NavigationSplitView"))
@@ -1534,9 +1545,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
         XCTAssertTrue(source.contains(".background(.regularMaterial)"))
+        XCTAssertTrue(source.contains(".navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 230)"))
         XCTAssertTrue(source.contains(".toolbar(removing: .sidebarToggle)"))
+        XCTAssertTrue(source.contains("case capture"))
+        XCTAssertTrue(source.contains("case paste"))
+        XCTAssertTrue(source.contains("\"label.paste_shortcuts\""))
+        XCTAssertTrue(source.contains("case .privacy:"))
+        XCTAssertTrue(source.contains("self = .capture"))
+        XCTAssertTrue(source.contains("case .shortcuts:"))
+        XCTAssertTrue(source.contains("self = .paste"))
         XCTAssertTrue(source.contains("case .sync:"))
         XCTAssertTrue(source.contains("self = .integrations"))
+        XCTAssertTrue(source.contains("captureSettingsForm"))
+        XCTAssertTrue(source.contains("pasteSettingsForm"))
+        XCTAssertTrue(source.contains("Section(\"label.history\")"))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
     }
@@ -1610,10 +1632,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testPlansSettingsDoesNotExposeInternalPurchaseCopy() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
         let plansStart = try XCTUnwrap(source.range(of: "private var plansSettingsForm"))
-        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutsSettingsForm"))
-        let plansSource = String(source[plansStart.lowerBound..<shortcutsStart.lowerBound])
+        let pasteStart = try XCTUnwrap(source.range(of: "private var pasteSettingsForm"))
+        let plansSource = String(source[plansStart.lowerBound..<pasteStart.lowerBound])
 
         XCTAssertTrue(plansSource.contains("action.restore_purchases"))
+        XCTAssertTrue(plansSource.contains("action.view_plans"))
         XCTAssertFalse(plansSource.contains("statusName"))
         XCTAssertFalse(plansSource.contains("accessState"))
         XCTAssertFalse(plansSource.contains("trialState.displayName"))
@@ -1627,6 +1650,232 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(plansSource.contains("StoreKit restore"))
         XCTAssertFalse(plansSource.contains("option.detail"))
         XCTAssertFalse(plansSource.contains("option.unlockSummary"))
+        XCTAssertTrue(plansSource.contains("restorePurchases()"))
+        XCTAssertTrue(source.contains("AppleStoreKitEntitlementProvider()"))
+        XCTAssertTrue(source.contains("store.restorePurchases("))
+        XCTAssertTrue(source.contains("await store.flushPendingSave()"))
+        XCTAssertTrue(source.contains("store.hasFullProductAccess"))
+        XCTAssertTrue(source.contains("await onEntitlementActivated()"))
+        XCTAssertTrue(plansSource.contains("restoreStatusMessage"))
+        XCTAssertFalse(plansSource.contains("store.lastErrorMessage"))
+        XCTAssertFalse(plansSource.contains("purchasePersonalPlan"))
+        XCTAssertFalse(plansSource.contains("Button(\"label.monthly\")"))
+        XCTAssertFalse(plansSource.contains("Button(\"label.annual\")"))
+        XCTAssertFalse(plansSource.contains("Button(\"label.lifetime\")"))
+        XCTAssertFalse(plansSource.contains("Button(\"label.family\")"))
+        XCTAssertFalse(plansSource.contains("store.activatePersonalPlan("))
+        XCTAssertFalse(plansSource.contains("store.startFreeTrial()"))
+        XCTAssertFalse(plansSource.contains("markRestorePurchasesFailed"))
+    }
+
+    func testSettingsIrohConnectCannotBypassExpiredProductAccess() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+
+        let connectStart = try XCTUnwrap(source.range(of: "private func connectToIrohPeer()"))
+        let nextProperty = try XCTUnwrap(source.range(
+            of: "\n    private var retentionDescription",
+            range: connectStart.lowerBound..<source.endIndex
+        ))
+        let connectSource = String(source[connectStart.lowerBound..<nextProperty.lowerBound])
+
+        XCTAssertTrue(source.contains("connectToIrohPeer()"))
+        XCTAssertTrue(connectSource.contains("Task { @MainActor in"))
+        XCTAssertTrue(connectSource.contains("guard store.hasFullProductAccess else"))
+        XCTAssertTrue(source.contains("message.trial_ended_purchase_required"))
+        XCTAssertTrue(source.contains("irohAccessStatusMessage"))
+        XCTAssertTrue(connectSource.contains("await irohSync.connectToPeer()"))
+        XCTAssertTrue(appSource.contains("onEntitlementActivated: handleEntitlementActivated"))
+    }
+
+    func testRuntimeStartsOneSevenDayTrialAndGatesProtectedActionsWithPaywall() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+
+        XCTAssertTrue(source.contains("store.refreshCurrentStoreEntitlement("))
+        XCTAssertTrue(source.contains("store.startFreeTrialIfEligible(days: 7)"))
+        XCTAssertTrue(source.contains("guard store.hasFullProductAccess else"))
+        XCTAssertTrue(source.contains("openWindow(id: \"paywall\")"))
+        XCTAssertTrue(source.contains("scheduleEntitlementExpirationIfNeeded()"))
+        XCTAssertTrue(source.contains("startStoreTransactionObserverIfNeeded()"))
+        XCTAssertTrue(source.contains("monitor?.stop()"))
+        XCTAssertTrue(source.contains("irohSync.stop()"))
+        XCTAssertFalse(source.contains("applyStoreEntitlementUpdate"))
+        XCTAssertFalse(source.contains("requestSettingsDestination(.plans)"))
+
+        let activationStart = try XCTUnwrap(source.range(of: "private func handleEntitlementActivated()"))
+        let observerStart = try XCTUnwrap(source.range(
+            of: "\n    private func startStoreTransactionObserverIfNeeded()",
+            range: activationStart.lowerBound..<source.endIndex
+        ))
+        let activationSource = String(source[activationStart.lowerBound..<observerStart.lowerBound])
+        XCTAssertTrue(activationSource.contains("didRefreshCurrentStoreEntitlement = true"))
+        XCTAssertTrue(activationSource.contains("storeEntitlementRefreshFailed = false"))
+    }
+
+    func testRuntimeKeepsStatusEntryVisibleWhenStoreKitRefreshFails() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let runtimeStart = try XCTUnwrap(source.range(of: "private func startRuntimeIfNeeded"))
+        let runtimeEnd = try XCTUnwrap(source.range(
+            of: "\n    private func requireFullProductAccessForUserAction",
+            range: runtimeStart.lowerBound..<source.endIndex
+        ))
+        let runtimeSource = String(source[runtimeStart.lowerBound..<runtimeEnd.lowerBound])
+        let statusConfiguration = try XCTUnwrap(runtimeSource.range(of: "configureStatusItemIfNeeded()"))
+        let storeKitRefresh = try XCTUnwrap(runtimeSource.range(of: "store.refreshCurrentStoreEntitlement("))
+
+        XCTAssertLessThan(statusConfiguration.lowerBound, storeKitRefresh.lowerBound)
+        XCTAssertTrue(runtimeSource.contains("guard store.snapshot.entitlement.isTrialActive() else"))
+        XCTAssertTrue(runtimeSource.contains("canStartFreeTrial = false"))
+        XCTAssertTrue(runtimeSource.contains("storeEntitlementRefreshFailed = true"))
+    }
+
+    func testTransactionUpdateReconcilesAccountBeforeRuntimeTransition() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let observerStart = try XCTUnwrap(source.range(of: "private func startStoreTransactionObserverIfNeeded"))
+        let observerEnd = try XCTUnwrap(source.range(
+            of: "\n    private func scheduleEntitlementExpirationIfNeeded",
+            range: observerStart.lowerBound..<source.endIndex
+        ))
+        let observerSource = String(source[observerStart.lowerBound..<observerEnd.lowerBound])
+        let refresh = try XCTUnwrap(observerSource.range(of: "store.refreshCurrentStoreEntitlement("))
+        let immediateStop = try XCTUnwrap(observerSource.range(of: "if !store.hasFullProductAccess"))
+        let flush = try XCTUnwrap(observerSource.range(of: "store.flushPendingSave()"))
+
+        XCTAssertLessThan(refresh.lowerBound, immediateStop.lowerBound)
+        XCTAssertLessThan(immediateStop.lowerBound, flush.lowerBound)
+        XCTAssertTrue(observerSource.contains("shouldStopAfterFailedReconciliation("))
+        XCTAssertTrue(observerSource.contains("observer.run("))
+        XCTAssertTrue(observerSource.contains("defer { transactionObserverTask = nil }"))
+        XCTAssertFalse(observerSource.contains("applyStoreEntitlementUpdate("))
+    }
+
+    func testEntitlementRuntimePolicySchedulesTrialAndPaidDeadlines() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let trialEnd = now.addingTimeInterval(60)
+        let periodEnd = now.addingTimeInterval(120)
+        let expiration = now.addingTimeInterval(180)
+
+        XCTAssertEqual(
+            PasteBuddyEntitlementRuntimePolicy.accessDeadline(for: EntitlementConfiguration(
+                plan: .trial,
+                status: .trialing,
+                trialEndsAt: trialEnd
+            )),
+            trialEnd
+        )
+        XCTAssertEqual(
+            PasteBuddyEntitlementRuntimePolicy.accessDeadline(for: EntitlementConfiguration(
+                plan: .annual,
+                status: .active,
+                currentPeriodEndsAt: periodEnd
+            )),
+            periodEnd
+        )
+        XCTAssertEqual(
+            PasteBuddyEntitlementRuntimePolicy.accessDeadline(for: EntitlementConfiguration(
+                plan: .annual,
+                status: .active,
+                currentPeriodEndsAt: periodEnd,
+                expiresAt: expiration
+            )),
+            periodEnd
+        )
+        XCTAssertNil(PasteBuddyEntitlementRuntimePolicy.accessDeadline(for: EntitlementConfiguration(
+            plan: .lifetime,
+            status: .active
+        )))
+    }
+
+    func testEntitlementRuntimePolicyFailsClosedBeforePersistence() {
+        let now = Date(timeIntervalSince1970: 20_000)
+        let active = EntitlementConfiguration(
+            plan: .monthly,
+            status: .active,
+            purchasedAt: now.addingTimeInterval(-60),
+            expiresAt: now.addingTimeInterval(60)
+        )
+        let revoked = StoreEntitlementUpdate(
+            transaction: VerifiedStoreTransaction(
+                productID: "monthly.id",
+                purchaseDate: now.addingTimeInterval(-60),
+                revocationDate: now
+            ),
+            entitlement: EntitlementConfiguration(
+                plan: .monthly,
+                status: .revoked,
+                expiresAt: now
+            ),
+            receivedAt: now
+        )
+        var olderRevocation = revoked
+        olderRevocation.transaction.purchaseDate = now.addingTimeInterval(-120)
+        var differentPlanRevocation = revoked
+        differentPlanRevocation.entitlement.plan = .annual
+
+        XCTAssertTrue(PasteBuddyEntitlementRuntimePolicy.shouldStopAfterFailedReconciliation(
+            revoked,
+            cachedEntitlement: active
+        ))
+        XCTAssertFalse(PasteBuddyEntitlementRuntimePolicy.shouldStopAfterFailedReconciliation(
+            olderRevocation,
+            cachedEntitlement: active
+        ))
+        XCTAssertFalse(PasteBuddyEntitlementRuntimePolicy.shouldStopAfterFailedReconciliation(
+            differentPlanRevocation,
+            cachedEntitlement: active
+        ))
+        XCTAssertFalse(PasteBuddyEntitlementRuntimePolicy.canStartAfterPersistence(
+            active,
+            didPersist: false,
+            now: now
+        ))
+        XCTAssertTrue(PasteBuddyEntitlementRuntimePolicy.canStartAfterPersistence(
+            active,
+            didPersist: true,
+            now: now
+        ))
+    }
+
+    func testTransactionObserverRetryPolicyIsBounded() {
+        XCTAssertEqual(PasteBuddyStoreTransactionRetryPolicy.delaySeconds(afterFailure: 1), 1)
+        XCTAssertEqual(PasteBuddyStoreTransactionRetryPolicy.delaySeconds(afterFailure: 2), 2)
+        XCTAssertEqual(PasteBuddyStoreTransactionRetryPolicy.delaySeconds(afterFailure: 5), 16)
+        XCTAssertEqual(PasteBuddyStoreTransactionRetryPolicy.delaySeconds(afterFailure: 6), 30)
+        XCTAssertEqual(PasteBuddyStoreTransactionRetryPolicy.delaySeconds(afterFailure: 100), 30)
+    }
+
+    func testNativePaywallUsesDynamicStoreKitProductsAndFlushesPurchases() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/PasteBuddyPaywallView.swift")
+
+        XCTAssertTrue(source.contains("AppleStoreKitEntitlementProvider()"))
+        XCTAssertTrue(source.contains("provider.fetchProducts("))
+        XCTAssertTrue(source.contains("ForEach(storeProducts)"))
+        XCTAssertTrue(source.contains("product.displayPrice"))
+        XCTAssertTrue(source.contains("product.subscriptionPeriod"))
+        XCTAssertTrue(source.contains("LazyVGrid("))
+        XCTAssertTrue(source.contains("store.purchasePersonalPlan("))
+        XCTAssertTrue(source.contains("await store.flushPendingSave()"))
+        XCTAssertTrue(source.contains("store.restorePurchases("))
+        XCTAssertTrue(source.contains("message.store_products_unavailable.detail"))
+        XCTAssertFalse(source.contains("$29.99"))
+        XCTAssertFalse(source.contains("$2.99"))
+        XCTAssertFalse(source.contains("store.activatePersonalPlan("))
+    }
+
+    func testIndependentEntrypointsReconcileCachedActivePaidAccessWithoutBlockingLocalTrial() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyAppIntents.swift")
+        let mcpSource = try sourceFileContents("Sources/PasteBuddyMCP/main.swift")
+
+        XCTAssertTrue(source.contains("private func loadEntitledStore()"))
+        XCTAssertTrue(source.contains("guard store.hasFullProductAccess else"))
+        XCTAssertTrue(source.contains("error.product_access_required"))
+        XCTAssertEqual(source.components(separatedBy: "try await loadEntitledStore()").count - 1, 5)
+        for entrypointSource in [source, mcpSource] {
+            XCTAssertTrue(entrypointSource.contains("plan.isPersonalPaidPlan"))
+            XCTAssertTrue(entrypointSource.contains("hasActivePaidAccess()"))
+            XCTAssertTrue(entrypointSource.contains("refreshCurrentStoreEntitlement("))
+            XCTAssertTrue(entrypointSource.contains("flushPendingSaveOrThrow()"))
+        }
     }
 
     func testPanelHotKeyMatcherSeparatesShowHideAndShelfModeActions() {
