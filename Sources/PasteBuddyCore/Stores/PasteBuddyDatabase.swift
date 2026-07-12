@@ -141,7 +141,12 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
             throw SnapshotStoreError.missingApplicationSupportDirectory
         }
         return base
-            .appendingPathComponent("PasteBuddy", isDirectory: true)
+            .appendingPathComponent(
+                EncryptedSnapshotStore.persistenceDirectoryName(
+                    bundleIdentifier: Bundle.main.bundleIdentifier
+                ),
+                isDirectory: true
+            )
             .appendingPathComponent("clipboard.sqlite")
     }
 

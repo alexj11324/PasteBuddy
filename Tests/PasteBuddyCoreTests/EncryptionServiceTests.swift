@@ -219,6 +219,21 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
     }
 
+    func testDevelopmentBundleUsesIsolatedPersistenceDirectory() {
+        XCTAssertEqual(
+            EncryptedSnapshotStore.persistenceDirectoryName(
+                bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+            ),
+            "PasteBuddy Dev"
+        )
+        XCTAssertEqual(
+            EncryptedSnapshotStore.persistenceDirectoryName(
+                bundleIdentifier: "com.alexjiang.PasteBuddy"
+            ),
+            "PasteBuddy"
+        )
+    }
+
     func testSnapshotStoreMigratesLegacyPlaintextSnapshotIntoEncryptedEnvelope() throws {
         let service = EncryptionService(
             keyID: "migration-key",
