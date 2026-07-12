@@ -610,7 +610,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(collectionSource.contains(".onDrag { provider }"))
         XCTAssertTrue(collectionSource.contains(".draggable(payload)"))
         XCTAssertTrue(collectionSource.contains("TapGesture(count: 2)"))
-        XCTAssertTrue(collectionSource.contains(".exclusively(before: TapGesture())"))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertFalse(collectionSource.contains(".exclusively(before: TapGesture())"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         XCTAssertFalse(collectionSource.contains("NSViewRepresentable"))
         XCTAssertFalse(collectionSource.contains("NSCollectionView"))
@@ -663,20 +664,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(decoded.plainText, "")
     }
 
-    func testPointerSelectionDoesNotScrollTheCardBeforeDoubleClickAndDragRecognition() throws {
+    func testPointerSelectionIsImmediateWithoutRemovingDoubleClickOrDrag() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
         let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
         let draggable = try XCTUnwrap(itemSource.range(of: "itemView.draggable(payload)"))
-        let pointerSelection = try XCTUnwrap(itemSource.range(of: ".exclusively(before:"))
+        let pointerSelection = try XCTUnwrap(itemSource.range(of: ".simultaneousGesture("))
         let doubleClick = try XCTUnwrap(itemSource.range(of: "onDoubleClick(itemID)"))
         let suppressScroll = try XCTUnwrap(itemSource.range(of: "lastScrolledPrimarySelectedID = itemID"))
         let select = try XCTUnwrap(itemSource.range(of: "onSelect(itemID)"))
 
         XCTAssertLessThan(draggable.lowerBound, pointerSelection.lowerBound)
-        XCTAssertLessThan(doubleClick.lowerBound, select.lowerBound)
         XCTAssertLessThan(suppressScroll.lowerBound, select.lowerBound)
+        XCTAssertNotEqual(doubleClick.lowerBound, select.lowerBound)
     }
 
     func testSidePanelPreservesTheExternalKeyWindowUntilKeyboardInputIsRequested() throws {
@@ -1719,6 +1720,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testCardSwitchLatencyTrackerMeasuresRecognitionApplyAndTotalTime() throws {
+        let tracker = PasteBuddyCardSwitchLatencyTracker()
+        let itemID = UUID()
+
+        let probeID = tracker.recordPointerDown(atUptimeNanoseconds: 1_000_000)
+        XCTAssertEqual(
+            tracker.recordSelectionRecognized(
+                itemID: itemID,
+                atUptimeNanoseconds: 4_000_000
+            ),
+            probeID
+        )
+        let measurement = try XCTUnwrap(
+            tracker.recordSelectionApplied(
+                itemID: itemID,
+                atUptimeNanoseconds: 10_000_000
+            )
+        )
+
+        XCTAssertEqual(measurement.probeID, probeID)
+        XCTAssertEqual(measurement.recognitionMilliseconds, 3, accuracy: 0.001)
+        XCTAssertEqual(measurement.applyMilliseconds, 6, accuracy: 0.001)
+        XCTAssertEqual(measurement.totalMilliseconds, 9, accuracy: 0.001)
+        XCTAssertNil(
+            tracker.recordSelectionApplied(
+                itemID: itemID,
+                atUptimeNanoseconds: 11_000_000
+            )
+        )
+    }
+
     func testShelfGlassSurfacesUseNativeTintWithoutStackedBase() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let bottomSheetStart = try XCTUnwrap(source.range(of: "func pasteBuddyBottomSheetSurface"))
@@ -1930,7 +1962,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
         XCTAssertTrue(collectionSource.contains("TapGesture(count: 2)"))
-        XCTAssertTrue(collectionSource.contains(".exclusively(before: TapGesture())"))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertFalse(collectionSource.contains(".exclusively(before: TapGesture())"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))

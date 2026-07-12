@@ -434,6 +434,9 @@ final class ClipboardShelfPanelController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] event in
             guard let self, let panel, panel.isVisible else { return event }
+            if event.type == .leftMouseDown, event.window === panel {
+                PasteBuddyCardSwitchLatencyTracker.shared.recordPointerDown()
+            }
             if Self.isShelfAuxiliaryWindow(event.window) {
                 return event
             }

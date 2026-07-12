@@ -67,6 +67,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
                 .focusEffectDisabled()
                 .onChange(of: primarySelectedID) {
                     scrollPrimarySelectionIfNeeded(with: proxy)
+                    recordSelectionAppliedAfterViewUpdate()
                 }
                 .onChange(of: previewedID) {
                     syncPresentedPreview()
@@ -126,18 +127,16 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             }
         }
             .contentShape(Rectangle())
-            .gesture(
-                TapGesture(count: 2)
-                    .exclusively(before: TapGesture())
-                    .onEnded { gesture in
+            .onTapGesture(count: 2) {
+                guard selectable else { return }
+                onDoubleClick(itemID)
+            }
+            .simultaneousGesture(
+                TapGesture().onEnded {
                     guard selectable else { return }
-                    switch gesture {
-                    case .first:
-                        onDoubleClick(itemID)
-                    case .second:
+                    PasteBuddyCardSwitchLatencyTracker.shared.recordSelectionRecognized(itemID: itemID)
                         lastScrolledPrimarySelectedID = itemID
-                        onSelect(itemID)
-                    }
+                    onSelect(itemID)
                 }
             )
             .popover(
@@ -183,6 +182,14 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         }
         lastScrolledPrimarySelectedID = primarySelectedID
         proxy.scrollTo(primarySelectedID)
+    }
+
+    private func recordSelectionAppliedAfterViewUpdate() {
+        guard let primarySelectedID else { return }
+        Task { @MainActor in
+            await Task.yield()
+            PasteBuddyCardSwitchLatencyTracker.shared.recordSelectionApplied(itemID: primarySelectedID)
+        }
     }
 
     private func syncPresentedPreview() {
