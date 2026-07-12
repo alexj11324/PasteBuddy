@@ -680,13 +680,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertNotEqual(doubleClick.lowerBound, select.lowerBound)
     }
 
-    func testSidePanelPreservesTheExternalKeyWindowUntilKeyboardInputIsRequested() throws {
+    func testCardSelectionRequestsKeyboardFocusWithoutActivatingPanelOnShow() throws {
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
         XCTAssertTrue(controllerSource.contains("styleMask: [.borderless, .nonactivatingPanel]"))
         XCTAssertTrue(controllerSource.contains("panel.becomesKeyOnlyIfNeeded = true"))
-        XCTAssertFalse(controllerSource.contains("panel.makeKey()"))
+        let showStart = try XCTUnwrap(controllerSource.range(of: "func show()"))
+        let showEnd = try XCTUnwrap(controllerSource.range(of: "\n    func hideImmediately()", range: showStart.lowerBound..<controllerSource.endIndex))
+        XCTAssertFalse(String(controllerSource[showStart.lowerBound..<showEnd.lowerBound]).contains("panel.makeKey()"))
+        XCTAssertTrue(controllerSource.contains("private func requestPanelKeyboardFocus()"))
+        XCTAssertTrue(controllerSource.contains("panel.makeKey()"))
+        XCTAssertEqual(controllerSource.components(separatedBy: "onRequestKeyboardFocus: { [weak self] in").count - 1, 2)
 
         let onAppearStart = try XCTUnwrap(sideSource.range(of: ".onAppear {"))
         let onAppearEnd = try XCTUnwrap(sideSource.range(of: "\n        .onDisappear", range: onAppearStart.lowerBound..<sideSource.endIndex))
@@ -695,12 +701,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(onAppearSource.contains("isListFocused = false"))
         XCTAssertFalse(onAppearSource.contains("setSearchFocused(false)"))
 
-        let selectStart = try XCTUnwrap(sideSource.range(of: "private func selectItem"))
-        let selectEnd = try XCTUnwrap(sideSource.range(of: "\n    private func selectSingleItem", range: selectStart.lowerBound..<sideSource.endIndex))
-        let selectSource = String(sideSource[selectStart.lowerBound..<selectEnd.lowerBound])
-        XCTAssertTrue(selectSource.contains("isSearchFocused = false"))
-        XCTAssertTrue(selectSource.contains("isListFocused = false"))
-        XCTAssertFalse(selectSource.contains("setSearchFocused(false)"))
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("let onRequestKeyboardFocus: () -> Void"))
+            let selectStart = try XCTUnwrap(source.range(of: "private func selectItem"))
+            let selectEnd = try XCTUnwrap(source.range(of: "\n    private func selectSingleItem", range: selectStart.lowerBound..<source.endIndex))
+            let selectSource = String(source[selectStart.lowerBound..<selectEnd.lowerBound])
+            XCTAssertTrue(selectSource.contains("setSearchFocused(false)"))
+            XCTAssertTrue(selectSource.contains("await Task.yield()"))
+            XCTAssertTrue(selectSource.contains("onRequestKeyboardFocus()"))
+        }
     }
 
     func testSidePanelPreviewFollowsSelectionWithoutDeferredHandoff() throws {

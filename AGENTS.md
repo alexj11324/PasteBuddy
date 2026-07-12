@@ -42,6 +42,7 @@
 - IMPORTANT: 如果确实需要把 Shelf 操作同步到全局 store，只能在明确的用户动作后同步（例如选择/复制/粘贴/删除），并确认不会把一次 chip 点击扩散成两轮 refresh 或完整 History 重算。
 - IMPORTANT: 修复 Shelf 卡顿时必须优先排查全局状态副作用、`queryRevision` bump、`selectedItemsInDisplayOrder`、`mainListItemsSnapshot` 和命令菜单 disabled 计算，不要只盯着 Shelf card 动画或 collection reload。
 - IMPORTANT: 为这类修复添加正式回归测试，验证 scoped 查询/快捷键不会 mutate `selectedScope` 或 bump 不必要的 `queryRevision`；不要只靠手动点击感觉判断。
+- IMPORTANT: 每次代码修改后必须运行相关自动化测试；任何可能影响 Shelf / Side Panel 卡片选择、预览、手势或渲染的修改，还必须运行 `script/test_card_switch_latency.sh` 并完成 10 次真实卡片切换。任一次总耗时超过 100 ms 时脚本必须立即以状态 1 失败，10 次全部通过才以状态 0 完成。
 
 ## PasteBuddy 多进程持久化一致性（IMPORTANT）
 - IMPORTANT: macOS 主应用、App Intents、MCP，以及 iOS 主应用/键盘/Share Action 会创建彼此独立的 `PasteBuddyStore`；任何单个 actor 内的 generation 或任务串行化都不能单独防止跨进程旧快照覆盖。

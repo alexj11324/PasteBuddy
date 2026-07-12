@@ -20,6 +20,7 @@ struct ClipboardSidePanelView: View {
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
+    let onRequestKeyboardFocus: () -> Void
 
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
@@ -599,8 +600,11 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
         }
-        isSearchFocused = false
-        isListFocused = false
+        setSearchFocused(false)
+        Task { @MainActor in
+            await Task.yield()
+            onRequestKeyboardFocus()
+        }
     }
 
     private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {

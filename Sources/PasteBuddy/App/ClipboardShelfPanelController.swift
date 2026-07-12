@@ -269,6 +269,8 @@ final class ClipboardShelfPanelController {
                     self?.hide()
                 } onDismissImmediately: { [weak self] in
                     self?.hideImmediately()
+                } onRequestKeyboardFocus: { [weak self] in
+                    self?.requestPanelKeyboardFocus()
                 }
                 .id(panelPresentationID)
             )
@@ -283,10 +285,17 @@ final class ClipboardShelfPanelController {
                     self?.hide()
                 } onDismissImmediately: { [weak self] in
                     self?.hideImmediately()
+                } onRequestKeyboardFocus: { [weak self] in
+                    self?.requestPanelKeyboardFocus()
                 }
                 .id(panelPresentationID)
             )
         }
+    }
+
+    private func requestPanelKeyboardFocus() {
+        guard let panel, panel.isVisible else { return }
+        panel.makeKey()
     }
 
     private func preparePanelContentForPresentation(_ panel: NSPanel) {

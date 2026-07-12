@@ -249,6 +249,7 @@ struct ClipboardShelfPanelView: View {
     let reloadClipboardHistory: @MainActor () async -> Void
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
+    let onRequestKeyboardFocus: () -> Void
 
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isShelfFocused: Bool
@@ -1031,6 +1032,10 @@ struct ClipboardShelfPanelView: View {
             shelfInteraction.select(item.id)
         }
         setSearchFocused(false)
+        Task { @MainActor in
+            await Task.yield()
+            onRequestKeyboardFocus()
+        }
     }
 
     private func pasteSelected(format: PasteFormat) {
