@@ -52,7 +52,7 @@
 - IMPORTANT: 修改这条路径时至少保留独立 `EncryptedSnapshotStore` 实例和独立 `ClipboardItemRepository` 实例的 stale-writer 回归测试。
 
 ## PasteBuddy 试用期与付费墙（IMPORTANT）
-- IMPORTANT: 个人订阅的美国基础价格为月付 US$1.99、年付 US$10.99；价格只在 App Store Connect 配置，UI 仍只展示 StoreKit 返回的本地化 `displayPrice`。
+- IMPORTANT: 个人订阅的美国基础价格为月付 US$1.99、年付 US$10.99；应用本体免费，应用和两项订阅覆盖全部 App Store 地区并自动加入未来新地区，其他商店价格使用 Apple 等值定价；价格只在 App Store Connect 配置，UI 仍只展示 StoreKit 返回的本地化 `displayPrice`。
 - IMPORTANT: macOS 启动后必须先读取 StoreKit 当前有效 entitlement，再判断是否启动本地 7 天试用；同一持久化身份只能启动一次，重新打开或过期后不得延长或重置。
 - IMPORTANT: 当前 7 天试用不创建 App Store 订阅、不会自动扣费；所有用户文案必须明确这一点。若未来改为自动续订试用，必须改用 App Store Connect introductory offer，禁止用本地日期伪装。
 - IMPORTANT: 试用过期且无有效付费 entitlement 时，必须停止剪贴板监控与 Iroh 同步，并拦截 Shelf、Side Panel、Paste Stack 和 MCP；本地历史保留，但产品功能保持锁定。

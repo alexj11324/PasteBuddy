@@ -60,31 +60,34 @@ Authenticated `asc` writes followed by public-API readback against app
 `6780560937` verified:
 
 - App: `PasteBuddy Clipboard`, bundle ID `com.alexjiang.PasteBuddy.iOS`.
+- App body price: free, available in all 175 App Store territories, with future
+  new territories enabled.
 - Configured App Store platforms: iOS 1.0 and macOS 1.0, both in
   `PREPARE_FOR_SUBMISSION`.
 - Subscription group `PasteBuddy Pro` (`22233431`) has matching `en-US` and
   `zh-Hans` localizations.
 - Monthly subscription `com.pastebuddy.subscription.monthly` (`6790532526`):
-  `ONE_MONTH`, US$1.99, available in the United States.
+  `ONE_MONTH`, US$1.99 base price, available in all 175 App Store territories.
 - Annual subscription `com.pastebuddy.subscription.annual` (`6790532825`):
-  `ONE_YEAR`, US$10.99, available in the United States.
+  `ONE_YEAR`, US$10.99 base price, available in all 175 App Store territories.
 - Both subscriptions use the same entitlement level, have English and Simplified
   Chinese metadata, and have completed 640x920 App Review screenshot uploads.
-- `asc validate subscriptions` reports no blocking diagnostics. Apple still
-  reports both products as `MISSING_METADATA`; account-level Paid Applications
-  agreement status is not exposed by the public App Store Connect API.
+- `asc validate subscriptions` reports 0 errors and 0 blocking diagnostics;
+  both products are `READY_TO_SUBMIT`.
+- A signed development build using the matching production bundle ID loaded
+  both real StoreKit products in the China storefront and rendered Apple's
+  localized `¥15.00` monthly and `¥78.00` annual prices with their actual
+  renewal periods.
+- The monthly purchase action opened Apple's sandbox confirmation sheet for the
+  real product. The sheet identified the sandbox account and explicitly stated
+  that the test purchase would not be charged; verification stopped before the
+  final confirmation.
 
-The production purchase path is not accepted until StoreKit returns both
-products for the matching signed app identity. Until then, the paywall must keep
-its explicit unavailable state and expose no purchase action.
+The paywall exposes purchase actions only for products actually returned by
+StoreKit and never synthesizes a product or price.
 
 ## External Configuration Still Required
 
-- Confirm the Paid Applications agreement/tax/banking status in App Store
-  Connect and wait for both subscriptions to leave `MISSING_METADATA`.
-- Availability is intentionally limited to the United States. Expanding to
-  additional storefronts requires an explicit release decision and Apple price
-  equalization from the US$1.99 and US$10.99 base prices.
 - Verify product loading, purchase, relaunch entitlement refresh, restore,
   renewal, expiration, and revocation with an App Store sandbox/TestFlight
   account for the final signed product identity.
