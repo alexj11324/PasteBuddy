@@ -13,8 +13,8 @@ public struct StoreProductConfiguration: Codable, Equatable, Sendable {
     public init(
         monthlyProductID: String = "com.pastebuddy.subscription.monthly",
         annualProductID: String = "com.pastebuddy.subscription.annual",
-        lifetimeProductID: String = "com.pastebuddy.lifetime",
-        familyProductID: String = "com.pastebuddy.family"
+        lifetimeProductID: String = "",
+        familyProductID: String = ""
     ) {
         self.monthlyProductID = monthlyProductID
         self.annualProductID = annualProductID

@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class StoreKitEntitlementServiceTests: XCTestCase {
+    func testDefaultProductConfigurationRequestsOnlyConfiguredSubscriptions() {
+        XCTAssertEqual(
+            StoreProductConfiguration().allProductIDs,
+            ["com.pastebuddy.subscription.monthly", "com.pastebuddy.subscription.annual"]
+        )
+    }
+
     func testProductConfigurationMapsPersonalPlansToProductIDs() {
         let configuration = StoreProductConfiguration(
             monthlyProductID: "monthly.id",

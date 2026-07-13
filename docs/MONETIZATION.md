@@ -13,8 +13,9 @@ rest of the clipboard configuration.
 - Personal plans: monthly, annual, lifetime, and family entitlement concepts.
 - Restore purchases state: not started, in progress, restored, and failed.
 - Cross-device entitlement flag for the same account.
-- StoreKit product configuration for monthly, annual, lifetime, and family
-  product IDs.
+- Production StoreKit product configuration for monthly and annual product IDs.
+  Explicit test or migration configurations may still map lifetime and family
+  entitlements, but the live paywall does not request unconfigured products.
 - StoreKit 2 adapter for product lookup, purchase, transaction verification,
   current-entitlement refresh, restore/sync, and verified entitlement mapping.
 - StoreKit transaction update observer for renewals, refunds, revocations, and
@@ -53,33 +54,37 @@ data, App Store receipts, signed transaction payloads, billing tokens, or
 invoice credentials. Restore and purchase flows fail closed until StoreKit
 returns a verified active entitlement.
 
-## Verified App Store Connect State (2026-07-12)
+## Verified App Store Connect State (2026-07-13)
 
-Read-only `asc` queries against app `6780560937` verified:
+Authenticated `asc` writes followed by public-API readback against app
+`6780560937` verified:
 
 - App: `PasteBuddy Clipboard`, bundle ID `com.alexjiang.PasteBuddy.iOS`.
-- Configured App Store platform: iOS only.
-- Subscription groups: 0.
-- In-app purchases: 0.
+- Configured App Store platforms: iOS 1.0 and macOS 1.0, both in
+  `PREPARE_FOR_SUBMISSION`.
+- Subscription group `PasteBuddy Pro` (`22233431`) has matching `en-US` and
+  `zh-Hans` localizations.
+- Monthly subscription `com.pastebuddy.subscription.monthly` (`6790532526`):
+  `ONE_MONTH`, US$1.99, available in the United States.
+- Annual subscription `com.pastebuddy.subscription.annual` (`6790532825`):
+  `ONE_YEAR`, US$10.99, available in the United States.
+- Both subscriptions use the same entitlement level, have English and Simplified
+  Chinese metadata, and have completed 640x920 App Review screenshot uploads.
+- `asc validate subscriptions` reports no blocking diagnostics. Apple still
+  reports both products as `MISSING_METADATA`; account-level Paid Applications
+  agreement status is not exposed by the public App Store Connect API.
 
-Therefore the production purchase path is not yet available. The paywall must
-show its explicit unavailable state until App Store Connect returns matching
-products. A successful local build or fake StoreKit provider test is not
-evidence that production purchasing works.
+The production purchase path is not accepted until StoreKit returns both
+products for the matching signed app identity. Until then, the paywall must keep
+its explicit unavailable state and expose no purchase action.
 
 ## External Configuration Still Required
 
-- Decide and configure the native macOS App Store/universal-purchase identity;
-  the current production macOS bundle identity is not represented by the
-  iOS-only App Store record above.
-- Configure real App Store Connect products after the platform identity is
-  correct. The approved United States base prices are US$1.99 monthly and
-  US$10.99 annually; localized storefront prices must be configured by App
-  Store Connect and rendered from StoreKit rather than hardcoded in the app.
-  Monthly and annual are recurring subscriptions,
-  lifetime is a non-consumable purchase, and the family product type/sharing
-  contract must be chosen explicitly. The code requests all four identifiers
-  but never invents missing products.
+- Confirm the Paid Applications agreement/tax/banking status in App Store
+  Connect and wait for both subscriptions to leave `MISSING_METADATA`.
+- Availability is intentionally limited to the United States. Expanding to
+  additional storefronts requires an explicit release decision and Apple price
+  equalization from the US$1.99 and US$10.99 base prices.
 - Verify product loading, purchase, relaunch entitlement refresh, restore,
   renewal, expiration, and revocation with an App Store sandbox/TestFlight
   account for the final signed product identity.
