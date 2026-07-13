@@ -72,8 +72,11 @@ evidence that production purchasing works.
 - Decide and configure the native macOS App Store/universal-purchase identity;
   the current production macOS bundle identity is not represented by the
   iOS-only App Store record above.
-- Configure real App Store Connect products and pricing after the platform
-  identity is correct: monthly and annual are recurring subscriptions,
+- Configure real App Store Connect products after the platform identity is
+  correct. The approved United States base prices are US$1.99 monthly and
+  US$10.99 annually; localized storefront prices must be configured by App
+  Store Connect and rendered from StoreKit rather than hardcoded in the app.
+  Monthly and annual are recurring subscriptions,
   lifetime is a non-consumable purchase, and the family product type/sharing
   contract must be chosen explicitly. The code requests all four identifiers
   but never invents missing products.
