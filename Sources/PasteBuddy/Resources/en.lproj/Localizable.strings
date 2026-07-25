@@ -162,6 +162,8 @@
 "format.cloud_sync_blocked_until" = "CloudKit sync needs: %@.";
 "format.color" = "Color %@";
 "format.connected_to_peer" = "Connected to %@";
+"format.copied_item" = "Copied %d item";
+"format.copied_items" = "Copied %d items";
 "format.copied_mcp_configuration_for" = "Copied MCP configuration for %@.";
 "format.copied_mcp_install_command_for" = "Copied MCP install command for %@.";
 "format.copied_mcp_install_link_for" = "Copied MCP install link for %@.";

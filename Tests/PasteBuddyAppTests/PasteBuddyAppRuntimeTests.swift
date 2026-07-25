@@ -1288,13 +1288,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".onCopyCommand {"))
-            XCTAssertTrue(source.contains("PasteboardWriter.itemProviders(for: selectedItemsInDisplayOrder) { item in"))
+            XCTAssertTrue(source.contains("ClipboardPanelCopyCoordinator.itemProviders("))
             XCTAssertTrue(source.contains("await store.hydratedItem(for: item)"))
             XCTAssertTrue(source.contains(".onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection))"))
             XCTAssertTrue(source.contains("let request = ClipboardPanelCopyGate.begin()"))
             XCTAssertTrue(source.contains("let hydratedItems = await store.hydratedItems(for: items)"))
             XCTAssertTrue(source.contains("guard ClipboardPanelCopyGate.shouldWrite(request) else { return }"))
-            XCTAssertTrue(source.contains("PasteboardWriter.copy(hydratedItems)"))
+            XCTAssertTrue(source.contains("ClipboardPanelCopyCoordinator.copy(hydratedItems, sourceWindow: sourceWindow)"))
+            XCTAssertFalse(source.contains("PasteboardWriter.copy(hydratedItems)"))
             XCTAssertFalse(source.contains("characters == \"c\""))
         }
         XCTAssertTrue(controllerSource.contains("@objc func copy(_ sender: Any?)"))

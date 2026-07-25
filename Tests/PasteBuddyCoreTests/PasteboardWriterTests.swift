@@ -250,6 +250,29 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertFalse(pasteboard.types?.contains(.tiff) ?? false)
     }
 
+    func testCopyReportsPasteboardWriteSuccess() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyCopyResult-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let textItem = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Text",
+            payload: ClipboardPayload(text: "copied")
+        )
+        let invalidImageItem = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Invalid image",
+            payload: ClipboardPayload(imageData: Data([0x01]))
+        )
+
+        XCTAssertTrue(PasteboardWriter.copy(textItem, to: pasteboard))
+        XCTAssertFalse(PasteboardWriter.copy(invalidImageItem, to: pasteboard))
+        XCTAssertFalse(PasteboardWriter.copy([], to: pasteboard))
+    }
+
     func testCopyTextPreservesRichVariantsWhenAvailable() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyRichText-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }

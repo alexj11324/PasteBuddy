@@ -162,6 +162,8 @@
 "format.cloud_sync_blocked_until" = "CloudKit 同步需要先完成：%@。";
 "format.color" = "颜色 %@";
 "format.connected_to_peer" = "已连接到 %@";
+"format.copied_item" = "已复制 %d 个项目";
+"format.copied_items" = "已复制 %d 个项目";
 "format.copied_mcp_configuration_for" = "已复制 %@ 的 MCP 配置。";
 "format.copied_mcp_install_command_for" = "已复制 %@ 的 MCP 安装命令。";
 "format.copied_mcp_install_link_for" = "已复制 %@ 的 MCP 安装链接。";

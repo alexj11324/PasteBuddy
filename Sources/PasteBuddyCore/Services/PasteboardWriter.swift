@@ -51,68 +51,78 @@ public enum PasteboardWriter {
         userConfiguredDirectPasteOptions.pasteOnly
     }
 
-    public static func copy(_ item: ClipboardItem, format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
+    @discardableResult
+    public static func copy(
+        _ item: ClipboardItem,
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general
+    ) -> Bool {
         pasteboard.clearContents()
         if format == .plainText {
-            pasteboard.setString(plainText(for: item), forType: .string)
-            return
+            return pasteboard.setString(plainText(for: item), forType: .string)
         }
 
+        var succeeded = false
         switch item.contentType {
         case .text:
             if let text = item.payload.text {
-                pasteboard.setString(text, forType: .string)
+                succeeded = pasteboard.setString(text, forType: .string) || succeeded
             }
             if let html = item.payload.htmlString {
-                pasteboard.setString(html, forType: .html)
+                succeeded = pasteboard.setString(html, forType: .html) || succeeded
             }
             if let rtfData = item.payload.rtfData {
-                pasteboard.setData(rtfData, forType: .rtf)
+                succeeded = pasteboard.setData(rtfData, forType: .rtf) || succeeded
             }
         case .url:
             if let value = item.payload.urlString, let url = URL(string: value) {
-                pasteboard.writeObjects([url as NSURL])
+                succeeded = pasteboard.writeObjects([url as NSURL])
             } else if let value = item.payload.urlString {
-                pasteboard.setString(value, forType: .string)
+                succeeded = pasteboard.setString(value, forType: .string)
             }
         case .file:
             let urls = item.payload.allFileURLStrings.compactMap(URL.init(string:))
             if !urls.isEmpty {
-                pasteboard.writeObjects(urls.map { $0 as NSURL })
+                succeeded = pasteboard.writeObjects(urls.map { $0 as NSURL })
             }
         case .image:
             if let data = item.payload.imageData, let image = NSImage(data: data) {
-                pasteboard.writeObjects([image])
+                succeeded = pasteboard.writeObjects([image])
             }
         case .mixed:
             let urls = item.payload.allFileURLStrings.compactMap(URL.init(string:))
             if !urls.isEmpty {
-                pasteboard.writeObjects(urls.map { $0 as NSURL })
+                succeeded = pasteboard.writeObjects(urls.map { $0 as NSURL }) || succeeded
             }
             if let data = item.payload.imageData, let image = NSImage(data: data) {
-                pasteboard.writeObjects([image])
+                succeeded = pasteboard.writeObjects([image]) || succeeded
             }
-            pasteboard.setString(plainText(for: item), forType: .string)
+            succeeded = pasteboard.setString(plainText(for: item), forType: .string) || succeeded
             if let html = item.payload.htmlString {
-                pasteboard.setString(html, forType: .html)
+                succeeded = pasteboard.setString(html, forType: .html) || succeeded
             }
             if let rtfData = item.payload.rtfData {
-                pasteboard.setData(rtfData, forType: .rtf)
+                succeeded = pasteboard.setData(rtfData, forType: .rtf) || succeeded
             }
         }
+        return succeeded
     }
 
-    public static func copy(_ items: [ClipboardItem], format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
+    @discardableResult
+    public static func copy(
+        _ items: [ClipboardItem],
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general
+    ) -> Bool {
         guard !items.isEmpty else {
-            return
+            return false
         }
         if items.count == 1, let item = items.first {
-            copy(item, format: format, to: pasteboard)
-            return
+            return copy(item, format: format, to: pasteboard)
         }
 
         pasteboard.clearContents()
-        pasteboard.setString(plainText(for: items), forType: .string)
+        return pasteboard.setString(plainText(for: items), forType: .string)
     }
 
     public static func itemProviders(

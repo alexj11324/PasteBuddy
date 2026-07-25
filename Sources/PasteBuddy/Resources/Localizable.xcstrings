@@ -10225,6 +10225,38 @@
         }
       }
     },
+    "format.copied_item": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied %d item"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制 %d 个项目"
+          }
+        }
+      }
+    },
+    "format.copied_items": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied %d items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制 %d 个项目"
+          }
+        }
+      }
+    },
     "format.copied_mcp_configuration_for": {
       "localizations": {
         "en": {

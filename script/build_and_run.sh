@@ -230,6 +230,8 @@ run_coordinated_install_gate_tests() {
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
   run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection
+  run_required_test_filter CopyConfirmationFeedbackTests
+  run_required_test_filter PasteboardWriterTests/testCopyReportsPasteboardWriteSuccess
   run_required_test_filter PasteboardWriterTests/testNativeCopyCommand
   run_required_test_filter PasteboardWriterTests/testDirectPaste
 }
