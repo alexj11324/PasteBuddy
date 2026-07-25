@@ -17,6 +17,7 @@ public final class PasteBuddyStore {
         didSet { bumpQueryRevision() }
     }
     public var lastErrorMessage: String?
+    public private(set) var historyQueryErrorMessage: String?
     public var isPasteStackActive: Bool {
         didSet { bumpQueryRevision() }
     }
@@ -64,6 +65,7 @@ public final class PasteBuddyStore {
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
+    @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
     private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
@@ -87,6 +89,7 @@ public final class PasteBuddyStore {
 
     private func bumpQueryRevision() {
         queryRevision &+= 1
+        historyQueryErrorMessage = nil
         bumpPresentationRevision()
     }
 
@@ -138,6 +141,7 @@ public final class PasteBuddyStore {
         self.selectedItemID = nil
         self.selectedItemIDs = []
         self.searchQuery = ""
+        self.historyQueryErrorMessage = nil
         self.isPasteStackActive = false
         self.pasteStackItems = []
         self.pasteStackDirection = .topToBottom
@@ -158,6 +162,7 @@ public final class PasteBuddyStore {
 
     public func load() {
         if let defaultPersistenceInitializationErrorMessage {
+            historyQueryErrorMessage = defaultPersistenceInitializationErrorMessage
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
             return
         }
@@ -195,12 +200,14 @@ public final class PasteBuddyStore {
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
+            historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
         }
     }
 
     public func loadAsync() async {
         if let defaultPersistenceInitializationErrorMessage {
+            historyQueryErrorMessage = defaultPersistenceInitializationErrorMessage
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
             return
         }
@@ -241,13 +248,17 @@ public final class PasteBuddyStore {
             refreshDerivedDocumentsIfNeeded()
             rebuildDedupeIndex()
             if let repositorySyncActor {
-                try await repositorySyncActor.synchronize(with: snapshot)
-                repositorySyncedDataRevision = dataRevision
-                presentationCache = PasteBuddyPresentationCache()
+                let snapshotToSync = snapshot
+                let dataRevisionToSync = dataRevision
+                try await repositorySyncActor.synchronize(with: snapshotToSync)
+                beforeRepositorySyncCommitForTesting?()
+                guard dataRevision == dataRevisionToSync else { return }
+                markClipboardRepositorySynced(to: dataRevisionToSync)
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
+            historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
         }
     }
@@ -271,12 +282,14 @@ public final class PasteBuddyStore {
     public func flushPendingSave() async {
         guard defaultPersistenceInitializationErrorMessage == nil,
               let persistenceActor else {
+            historyQueryErrorMessage = defaultPersistenceInitializationErrorMessage
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
             return
         }
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         let snapshotToSave = snapshot
+        let dataRevisionToSync = dataRevision
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
         let snapshotToPersist = await Task.detached(priority: .utility) {
             Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
@@ -284,8 +297,9 @@ public final class PasteBuddyStore {
         do {
             if let repositorySyncActor {
                 try await repositorySyncActor.synchronize(with: snapshotToSave)
-                repositorySyncedDataRevision = dataRevision
-                presentationCache = PasteBuddyPresentationCache()
+                beforeRepositorySyncCommitForTesting?()
+                guard dataRevision == dataRevisionToSync else { return }
+                markClipboardRepositorySynced(to: dataRevisionToSync)
             }
             try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
             diskStore?.storageMode = snapshotToSave.security.storageMode
@@ -297,6 +311,7 @@ public final class PasteBuddyStore {
     private func saveImmediately() {
         guard defaultPersistenceInitializationErrorMessage == nil,
               let diskStore else {
+            historyQueryErrorMessage = defaultPersistenceInitializationErrorMessage
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
             return
         }
@@ -345,8 +360,7 @@ public final class PasteBuddyStore {
                 try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
                 await MainActor.run {
                     guard self.dataRevision == dataRevisionToSync else { return }
-                    self.repositorySyncedDataRevision = dataRevisionToSync
-                    self.presentationCache = PasteBuddyPresentationCache()
+                    self.markClipboardRepositorySynced(to: dataRevisionToSync)
                     self.pendingSaveTask = nil
                     self.diskStore?.storageMode = snapshotToSave.security.storageMode
                     self.lastErrorMessage = nil
@@ -355,6 +369,7 @@ public final class PasteBuddyStore {
                 await MainActor.run {
                     guard !Task.isCancelled else { return }
                     self.repositorySyncedDataRevision = nil
+                    self.historyQueryErrorMessage = error.localizedDescription
                     self.pendingSaveTask = nil
                     self.lastErrorMessage = error.localizedDescription
                 }
@@ -489,6 +504,9 @@ public final class PasteBuddyStore {
 
         switch scope {
         case .history:
+            if clipboardRepository != nil {
+                return databaseFilteredItemCount(pinboardID: nil) ?? 0
+            }
             return snapshot.items.reduce(0) { count, item in
                 count + (matches(item) ? 1 : 0)
             }
@@ -497,6 +515,9 @@ public final class PasteBuddyStore {
                 count + (matches(item) ? 1 : 0)
             }
         case .pinboard(let id):
+            if clipboardRepository != nil {
+                return databaseFilteredItemCount(pinboardID: id) ?? 0
+            }
             guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
                 return 0
             }
@@ -512,10 +533,12 @@ public final class PasteBuddyStore {
         guard !isHistoryAccessLocked else { return [] }
         switch selectedScope {
         case .history:
+            guard isClipboardRepositoryReadyForHistoryQuery else { return [] }
             return filtered(snapshot.items).sorted { $0.createdAt > $1.createdAt }
         case .pasteStack:
             return filtered(pasteStackItemsInPasteOrder)
         case .pinboard(let id):
+            guard isClipboardRepositoryReadyForHistoryQuery else { return [] }
             guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
                 return []
             }
@@ -529,8 +552,11 @@ public final class PasteBuddyStore {
         guard !isHistoryAccessLocked else { return nil }
         let preferredID = selectedItemID ?? selectedItemIDs.first
         guard let preferredID else { return filteredItems.first }
-        return pasteStackItems.first(where: { $0.id == preferredID })
-            ?? snapshot.items.first(where: { $0.id == preferredID })
+        if let pasteStackItem = pasteStackItems.first(where: { $0.id == preferredID }) {
+            return pasteStackItem
+        }
+        guard isClipboardRepositoryReadyForHistoryQuery else { return nil }
+        return snapshot.items.first(where: { $0.id == preferredID })
     }
 
     public func hydratedItem(for item: ClipboardItem) async -> ClipboardItem {
@@ -2652,14 +2678,35 @@ public final class PasteBuddyStore {
         guard let clipboardRepository else { return true }
         do {
             try clipboardRepository.synchronize(with: snapshot)
-            repositorySyncedDataRevision = dataRevision
-            presentationCache = PasteBuddyPresentationCache()
+            markClipboardRepositorySynced(to: dataRevision)
             return true
         } catch {
             repositorySyncedDataRevision = nil
+            historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
             return false
         }
+    }
+
+    private func markClipboardRepositorySynced(to revision: Int) {
+        let readinessChanged = repositorySyncedDataRevision != revision
+        repositorySyncedDataRevision = revision
+        historyQueryErrorMessage = nil
+        presentationCache = PasteBuddyPresentationCache()
+        if readinessChanged {
+            bumpQueryRevision()
+        }
+    }
+
+    private var isClipboardRepositoryReadyForHistoryQuery: Bool {
+        guard clipboardRepository != nil else { return true }
+        guard repositorySyncedDataRevision == dataRevision else {
+            let message = PasteBuddyDatabaseError.repositoryOutOfSync.localizedDescription
+            historyQueryErrorMessage = message
+            lastErrorMessage = message
+            return false
+        }
+        return true
     }
 
     private func databaseFilteredItems(
@@ -2667,14 +2714,14 @@ public final class PasteBuddyStore {
         offset: Int,
         limit: Int
     ) -> [ClipboardItem]? {
-        guard let clipboardRepository,
-              repositorySyncedDataRevision == dataRevision else {
+        guard let clipboardRepository else {
             return nil
         }
+        guard isClipboardRepositoryReadyForHistoryQuery else { return [] }
         let filters = resolvedSearchFilters()
         guard !filters.isImpossible else { return [] }
         do {
-            return try clipboardRepository.fetchPage(ClipboardItemPageRequest(
+            let items = try clipboardRepository.fetchPage(ClipboardItemPageRequest(
                 searchQuery: filters.textQuery,
                 contentType: contentTypeFilter,
                 sourceAppName: filters.sourceAppName,
@@ -2684,9 +2731,35 @@ public final class PasteBuddyStore {
                 limit: limit,
                 offset: offset
             ))
+            return items
         } catch {
+            historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    private func databaseFilteredItemCount(pinboardID: UUID?) -> Int? {
+        guard let clipboardRepository else {
             return nil
+        }
+        guard isClipboardRepositoryReadyForHistoryQuery else { return 0 }
+        let filters = resolvedSearchFilters()
+        guard !filters.isImpossible else { return 0 }
+        do {
+            let count = try clipboardRepository.filteredItemCount(ClipboardItemPageRequest(
+                searchQuery: filters.textQuery,
+                contentType: contentTypeFilter,
+                sourceAppName: filters.sourceAppName,
+                deviceName: deviceFilter,
+                dateFilter: dateFilter,
+                pinboardID: pinboardID
+            ))
+            return count
+        } catch {
+            historyQueryErrorMessage = error.localizedDescription
+            lastErrorMessage = error.localizedDescription
+            return 0
         }
     }
 
@@ -2747,14 +2820,15 @@ public final class PasteBuddyStore {
         var sourceApps = Set<String>()
         var devices = Set<String>()
         if let clipboardRepository,
-           repositorySyncedDataRevision == dataRevision {
+           isClipboardRepositoryReadyForHistoryQuery {
             do {
                 sourceApps.formUnion(try clipboardRepository.availableSourceApps())
                 devices.formUnion(try clipboardRepository.availableDevices())
             } catch {
+                historyQueryErrorMessage = error.localizedDescription
                 lastErrorMessage = error.localizedDescription
             }
-        } else {
+        } else if clipboardRepository == nil {
             for item in snapshot.items {
                 insertNonEmpty(item.sourceAppName, into: &sourceApps)
                 insertNonEmpty(item.deviceName, into: &devices)

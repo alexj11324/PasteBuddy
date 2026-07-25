@@ -1,4 +1,20 @@
+import PasteBuddyCore
 import SwiftUI
+
+enum ClipboardPanelHistoryAvailability {
+    static func allowsActions(scope: PasteScope, errorMessage: String?) -> Bool {
+        scope == .pasteStack || errorMessage == nil
+    }
+
+    static func visibleItems<Item>(
+        _ items: [Item],
+        scope: PasteScope,
+        errorMessage: String?
+    ) -> [Item] {
+        guard allowsActions(scope: scope, errorMessage: errorMessage) else { return [] }
+        return items
+    }
+}
 
 struct ClipboardPanelPagingState<Item: Identifiable, QueryID: Equatable> where Item.ID == UUID {
     struct Request {

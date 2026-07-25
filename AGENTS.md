@@ -44,6 +44,7 @@
 - IMPORTANT: Shelf 与 Side Panel 的复制确认必须共用同一条成功反馈路径；只有系统 pasteboard 写入返回成功后才能显示一个可更新/合并的非激活 HUD，禁止在写入前或写入中显示、堆叠多个 HUD、抢焦点或延迟复制。HUD 必须使用本地化数量文案、原生 material 与辅助功能语义，遵循 Reduce Motion，并自动消失。
 - IMPORTANT: Shelf 与 Side Panel 的 Command-V 必须经原生 responder chain 共用现有 direct-paste 路径，把当前选择按 Command-C 的显示顺序粘贴到上一个外部目标；PasteBuddy 内可编辑文本框拥有优先权，异步 hydration 完成后必须用 generation gate 拒绝旧操作。
 - IMPORTANT: Shelf 与 Side Panel 必须共用增量分页状态与 `filteredItemsPage`，首屏和后续页均保持当前搜索/筛选/scope；禁止把 repository 的 100 条 page size 当成总量上限，也禁止为解决可达性一次同步加载完整历史。
+- IMPORTANT: 安装版历史查询的唯一权威是已同步 SQLite repository：repository 已配置但 revision 过期或查询失败时，Shelf 与 Side Panel 必须显示专用 history-query 错误、清空/禁用旧 paging interaction 并 fail closed，禁止静默回退到 snapshot、显示普通空历史或泄露 snapshot 的 source/device 筛选元数据（Paste Stack 本地元数据可保留）。repository readiness 从 stale 变为 synced 时必须推进两种 panel 的 query identity/revision 并重新加载首屏；async sync 只能用与输入 snapshot 配对的 revision 标记 ready，期间 revision 改变必须保持 fail closed。内容类型筛选的 page 与 count 必须共用 `ClipboardItem.effectiveContentTypes` 语义，混合内容跨页不得计数可见但查询不到；derived effective types 必须在迁移和后续 sync 中自修复。
 - IMPORTANT: 历史默认不按项目数量淘汰，旧 `maxHistoryItems` 配置只作为兼容输入忽略且不得重新写出；第 501 条及以后必须在 capture/import/sync、SQLite、pbstore 与 relaunch 后保留。时间/容量策略仍是显式用户选择，设置页必须持续显示项目数与估算磁盘占用，避免无限历史的存储增长不可见。
 - IMPORTANT: Shelf 与 Side Panel 每张卡片必须共用 `HistoryCardTimestampFormatter` 与 minute-boundary ticker：今天显示本地化时间，非今天显示日期+时间，跨年时包含年份；辅助功能标签始终提供含年、秒与时区的完整时间戳。两个 surface 必须经共享 adapter 保持一致，禁止各自格式化。
 

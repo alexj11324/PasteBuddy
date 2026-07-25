@@ -2,6 +2,19 @@ import CryptoKit
 import Foundation
 import GRDB
 
+private func effectiveContentTypesStorageValue(
+    contentType: ClipboardContentType,
+    payload: ClipboardPayload
+) -> String {
+    let values = ClipboardItem.effectiveContentTypes(
+        contentType: contentType,
+        payload: payload
+    )
+    .map(\.rawValue)
+    .sorted()
+    return ",\(values.joined(separator: ",")),"
+}
+
 public struct ClipboardItemPageRequest: Equatable, Sendable {
     public var searchQuery: String
     public var contentType: ClipboardContentType?
@@ -119,6 +132,7 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
                     source_bundle_identifier TEXT,
                     device_name TEXT NOT NULL,
                     content_type TEXT NOT NULL,
+                    effective_content_types TEXT NOT NULL DEFAULT '',
                     title TEXT NOT NULL,
                     reuse_category TEXT NOT NULL,
                     dedupe_hash TEXT NOT NULL,
@@ -227,7 +241,37 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         migrator.registerMigration("repair authoritative asset references") { db in
             try repairAuthoritativeAssetReferences(db: db)
         }
+        migrator.registerMigration("add effective content type index") { db in
+            let columns = Set(try db.columns(in: "clipboard_items").map(\.name))
+            if !columns.contains("effective_content_types") {
+                try db.execute(
+                    sql: "ALTER TABLE clipboard_items ADD COLUMN effective_content_types TEXT NOT NULL DEFAULT ''"
+                )
+            }
+            try backfillEffectiveContentTypes(db: db)
+        }
         return migrator
+    }
+
+    private static func backfillEffectiveContentTypes(db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: "SELECT id, content_type, payload_json FROM clipboard_items"
+        )
+        for row in rows {
+            let id: String = row["id"]
+            let contentTypeRaw: String = row["content_type"]
+            let payloadJSON: String = row["payload_json"]
+            let payload = try JSONDecoder.pasteBuddy.decode(
+                ClipboardPayload.self,
+                from: Data(payloadJSON.utf8)
+            )
+            let contentType = ClipboardContentType(rawValue: contentTypeRaw) ?? .text
+            try db.execute(
+                sql: "UPDATE clipboard_items SET effective_content_types = ? WHERE id = ?",
+                arguments: [effectiveContentTypesStorageValue(contentType: contentType, payload: payload), id]
+            )
+        }
     }
 
     private static func repairAuthoritativeAssetReferences(db: Database) throws {
@@ -645,6 +689,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
+    public func filteredItemCount(_ request: ClipboardItemPageRequest) throws -> Int {
+        try database.read { db in
+            try Self.filteredItemCount(request, db: db)
+        }
+    }
+
     public func hasStoredSnapshot() throws -> Bool {
         try database.read { db in
             try Bool.fetchOne(
@@ -734,6 +784,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         var sourceBundleIdentifier: String?
         var deviceName: String
         var contentType: String
+        var effectiveContentTypes: String
         var title: String
         var reuseCategory: String
         var dedupeHash: String
@@ -755,7 +806,13 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         var itemIDs: [UUID]
     }
 
-    private static func fetchPage(_ request: ClipboardItemPageRequest, db: Database) throws -> [ClipboardItem] {
+    private struct ClipboardItemFilterSQL {
+        var joins: [String]
+        var predicates: [String]
+        var arguments: StatementArguments
+    }
+
+    private static func filterSQL(_ request: ClipboardItemPageRequest) -> ClipboardItemFilterSQL {
         var joins: [String] = []
         var predicates: [String] = []
         var arguments = StatementArguments()
@@ -779,8 +836,8 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
 
         if let contentType = request.contentType {
-            predicates.append("ci.content_type = ?")
-            arguments += [contentType.rawValue]
+            predicates.append("INSTR(ci.effective_content_types, ?) > 0")
+            arguments += [",\(contentType.rawValue),"]
         }
         if let sourceAppName = request.sourceAppName?.trimmingCharacters(in: .whitespacesAndNewlines), !sourceAppName.isEmpty {
             predicates.append("ci.source_app_name = ?")
@@ -802,11 +859,22 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             predicates.append("ci.created_at >= ?")
             arguments += [cutoff.timeIntervalSince1970]
         }
+        return ClipboardItemFilterSQL(
+            joins: joins,
+            predicates: predicates,
+            arguments: arguments
+        )
+    }
 
-        let whereClause = predicates.isEmpty ? "" : "WHERE \(predicates.joined(separator: " AND "))"
+    private static func fetchPage(_ request: ClipboardItemPageRequest, db: Database) throws -> [ClipboardItem] {
+        let filter = filterSQL(request)
+        let whereClause = filter.predicates.isEmpty
+            ? ""
+            : "WHERE \(filter.predicates.joined(separator: " AND "))"
         let orderClause = request.pinboardID == nil
             ? "ci.created_at DESC, ci.snapshot_order ASC, ci.id ASC"
             : "pbi.sort_order ASC, ci.id ASC"
+        var arguments = filter.arguments
         arguments += [request.limit, request.offset]
 
         let rows = try Row.fetchAll(
@@ -814,7 +882,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             sql: """
                 SELECT ci.*
                 FROM clipboard_items ci
-                \(joins.joined(separator: "\n"))
+                \(filter.joins.joined(separator: "\n"))
                 \(whereClause)
                 ORDER BY \(orderClause)
                 LIMIT ? OFFSET ?
@@ -824,12 +892,33 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         return try items(from: rows, db: db, hydrateAssets: false)
     }
 
+    private static func filteredItemCount(
+        _ request: ClipboardItemPageRequest,
+        db: Database
+    ) throws -> Int {
+        let filter = filterSQL(request)
+        let whereClause = filter.predicates.isEmpty
+            ? ""
+            : "WHERE \(filter.predicates.joined(separator: " AND "))"
+        return try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(DISTINCT ci.id)
+                FROM clipboard_items ci
+                \(filter.joins.joined(separator: "\n"))
+                \(whereClause)
+                """,
+            arguments: filter.arguments
+        ) ?? 0
+    }
+
     private static func fetchItemSyncRecords(db: Database) throws -> [UUID: ItemSyncRecord] {
         let rows = try Row.fetchAll(
             db,
             sql: """
                 SELECT id, snapshot_order, created_at, updated_at, source_app_name,
                     source_bundle_identifier, device_name, content_type, title,
+                    effective_content_types,
                     reuse_category, dedupe_hash, payload_json, searchable_text,
                     ocr_text, ocr_state_json
                 FROM clipboard_items
@@ -852,6 +941,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                 sourceBundleIdentifier: row["source_bundle_identifier"],
                 deviceName: row["device_name"],
                 contentType: row["content_type"],
+                effectiveContentTypes: row["effective_content_types"],
                 title: row["title"],
                 reuseCategory: row["reuse_category"],
                 dedupeHash: row["dedupe_hash"],
@@ -910,6 +1000,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             && record.sourceBundleIdentifier == item.sourceBundleIdentifier
             && record.deviceName == item.deviceName
             && record.contentType == item.contentType.rawValue
+            && record.effectiveContentTypes == effectiveContentTypesStorageValue(
+                contentType: storedItem.contentType,
+                payload: storedItem.payload
+            )
             && record.title == item.title
             && record.reuseCategory == item.reuseCategory.rawValue
             && record.dedupeHash == storedItem.searchDocument.contentHash
@@ -1062,12 +1156,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             sql: """
                 INSERT INTO clipboard_items (
                     id, snapshot_order, created_at, updated_at, source_app_name,
-                    source_bundle_identifier, device_name, content_type, title,
+                    source_bundle_identifier, device_name, content_type, effective_content_types, title,
                     reuse_category, dedupe_hash, payload_json, searchable_text,
                     ocr_text, ocr_state_json, byte_count, thumbnail_asset_id, full_asset_id,
                     image_asset_id, rtf_asset_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     snapshot_order = excluded.snapshot_order,
                     created_at = excluded.created_at,
@@ -1076,6 +1170,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                     source_bundle_identifier = excluded.source_bundle_identifier,
                     device_name = excluded.device_name,
                     content_type = excluded.content_type,
+                    effective_content_types = excluded.effective_content_types,
                     title = excluded.title,
                     reuse_category = excluded.reuse_category,
                     dedupe_hash = excluded.dedupe_hash,
@@ -1096,6 +1191,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                 storedItem.sourceBundleIdentifier,
                 storedItem.deviceName,
                 storedItem.contentType.rawValue,
+                effectiveContentTypesStorageValue(
+                    contentType: storedItem.contentType,
+                    payload: storedItem.payload
+                ),
                 storedItem.title,
                 storedItem.reuseCategory.rawValue,
                 storedItem.searchDocument.contentHash,
@@ -1441,11 +1540,17 @@ public final class PasteBuddySnapshotDatabaseMigrator: @unchecked Sendable {
 
 public enum PasteBuddyDatabaseError: LocalizedError, Equatable {
     case invalidStoredUUID(String)
+    case repositoryOutOfSync
 
     public var errorDescription: String? {
         switch self {
         case .invalidStoredUUID(let value):
             "PasteBuddy database contains an invalid UUID: \(value)"
+        case .repositoryOutOfSync:
+            PasteBuddyLocalization.string(
+                "error.clipboard_database_out_of_sync",
+                defaultValue: "Clipboard history is temporarily unavailable."
+            )
         }
     }
 }

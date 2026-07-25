@@ -68,6 +68,15 @@ struct HistoryCardTimestampFormatter {
     }
 }
 
+enum HistoryCardTimestampAdapter {
+    static func presentation(
+        for capturedAt: Date,
+        formatter: HistoryCardTimestampFormatter
+    ) -> HistoryCardTimestampFormatter.Presentation {
+        formatter.presentation(for: capturedAt)
+    }
+}
+
 enum HistoryCardTimestampTicker {
     static func nextMinuteBoundary(after date: Date) -> Date {
         let elapsedMinutes = floor(date.timeIntervalSinceReferenceDate / 60)

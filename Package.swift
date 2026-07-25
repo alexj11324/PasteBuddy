@@ -61,7 +61,11 @@ let package = Package(
         ),
         .testTarget(
             name: "PasteBuddyCoreTests",
-            dependencies: ["PasteBuddyCore", "PasteBuddyMobile"],
+            dependencies: [
+                "PasteBuddyCore",
+                "PasteBuddyMobile",
+                .product(name: "GRDB", package: "GRDB.swift")
+            ],
             swiftSettings: pasteBuddySwiftSettings
         ),
         .testTarget(

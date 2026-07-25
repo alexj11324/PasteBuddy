@@ -1107,6 +1107,13 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
+        Self.effectiveContentTypes(contentType: contentType, payload: payload)
+    }
+
+    static func effectiveContentTypes(
+        contentType: ClipboardContentType,
+        payload: ClipboardPayload
+    ) -> Set<ClipboardContentType> {
         var types: Set<ClipboardContentType> = []
         let hasPresentationURL = payload.presentationURLString != nil
         let hasTextContent = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false

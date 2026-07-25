@@ -10113,6 +10113,23 @@
         }
       }
     },
+    "error.clipboard_database_out_of_sync": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard history is temporarily unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史记录暂时不可用。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.clipboard_history_is_temporarily_unavailable. Prefer the semantic key in code."
+    },
     "format.added_mcp_client": {
       "localizations": {
         "en": {
@@ -15757,6 +15774,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "剪贴板详情、OCR 文本和固定操作会显示在这里。"
+          }
+        }
+      }
+    },
+    "message.clipboard_history_is_temporarily_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard history is temporarily unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史记录暂时不可用。"
           }
         }
       }

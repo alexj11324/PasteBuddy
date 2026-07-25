@@ -508,6 +508,7 @@
 "message.cleared_shortcuts_remain_available_from_menus_but" = "已清除的快捷键仍可通过菜单使用，但不会注册对应的键盘快捷方式。系统范围的显示/隐藏注册会保留在配置中，供已签名的应用构建使用。";
 "message.click_for_pastebuddy_menu" = "点按以打开 PasteBuddy 菜单。";
 "message.clipboard_details_ocr_text_and_pinning_actions" = "剪贴板详情、OCR 文本和固定操作会显示在这里。";
+"message.clipboard_history_is_temporarily_unavailable" = "剪贴板历史记录暂时不可用。";
 "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy" = "剪贴板数据会留在这台 Mac，除非你打开同步、共享或 MCP。";
 "message.configure_cloudkit_sync_and_turn_on_shared" = "请先配置 CloudKit 同步并开启共享收藏板，然后再分享。";
 "message.copy_text_links_images_or_files_to" = "复制文本、链接、图片或文件即可开始建立本地历史。";
@@ -1104,6 +1105,7 @@
 "Cleared shortcuts remain available from menus but no keyboard equivalent is registered. System-wide show/hide registration is kept in configuration for signed app builds." = "已清除的快捷键仍可通过菜单使用，但不会注册对应的键盘快捷方式。系统范围的显示/隐藏注册会保留在配置中，供已签名的应用构建使用。";
 "Click for PasteBuddy menu." = "点按以打开 PasteBuddy 菜单。";
 "Clipboard details, OCR text, and pinning actions appear here." = "剪贴板详情、OCR 文本和固定操作会显示在这里。";
+"error.clipboard_database_out_of_sync" = "剪贴板历史记录暂时不可用。";
 "Configure CloudKit sync and turn on Shared Pinboards before sharing." = "请先配置 CloudKit 同步并开启共享收藏板，然后再分享。";
 "Copy text, links, images, or files to start building local history." = "复制文本、链接、图片或文件即可开始建立本地历史。";
 "Copy text, links, screenshots, or files to fill the shelf." = "复制文本、链接、截图或文件即可填充剪贴板架。";

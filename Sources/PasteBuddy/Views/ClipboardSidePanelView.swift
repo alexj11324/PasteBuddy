@@ -2,15 +2,6 @@ import AppKit
 import PasteBuddyCore
 import SwiftUI
 
-enum ClipboardSidePanelTimestampAdapter {
-    static func presentation(
-        for capturedAt: Date,
-        formatter: HistoryCardTimestampFormatter
-    ) -> HistoryCardTimestampFormatter.Presentation {
-        formatter.presentation(for: capturedAt)
-    }
-}
-
 private enum ClipboardSidePanelMetrics {
     static let rowHeight: CGFloat = 82
     static let thumbnailSize: CGFloat = 42
@@ -379,7 +370,11 @@ struct ClipboardSidePanelView: View {
     }
 
     private var renderedItems: [ClipboardItem] {
-        paging.items
+        ClipboardPanelHistoryAvailability.visibleItems(
+            paging.items,
+            scope: sideScope,
+            errorMessage: store.historyQueryErrorMessage
+        )
     }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -415,14 +410,23 @@ struct ClipboardSidePanelView: View {
     }
 
     private var emptyTitle: String {
-        sideScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
+        if sideScope != .pasteStack, let error = store.historyQueryErrorMessage {
+            return error
+        }
+        return sideScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
     }
 
     private var emptySystemImage: String {
-        sideScope == .pasteStack ? "tray" : "doc.on.clipboard"
+        if sideScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return "exclamationmark.triangle"
+        }
+        return sideScope == .pasteStack ? "tray" : "doc.on.clipboard"
     }
 
     private var emptyDescription: String {
+        if sideScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return ""
+        }
         if sideScope == .pasteStack {
             return store.isPasteStackActive ? localized("message.new_copies_will_appear_here") : localized("message.start_collecting_copied_items")
         }
@@ -550,6 +554,10 @@ struct ClipboardSidePanelView: View {
                 return .handled
             }
             if let index = Int(characters), (1...9).contains(index),
+               ClipboardPanelHistoryAvailability.allowsActions(
+                   scope: sideScope,
+                   errorMessage: store.historyQueryErrorMessage
+               ),
                let item = store.quickPasteItem(atOneBasedIndex: index, in: sideScope) {
                 pasteItem(item, format: store.defaultPasteFormat)
                 return .handled
@@ -725,7 +733,7 @@ private struct ClipboardSidePanelListRow: View {
         let formatter = HistoryCardTimestampFormatter(
             now: { timestampReference }
         )
-        let timestamp = ClipboardSidePanelTimestampAdapter.presentation(
+        let timestamp = HistoryCardTimestampAdapter.presentation(
             for: item.createdAt,
             formatter: formatter
         )

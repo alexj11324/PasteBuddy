@@ -508,6 +508,7 @@
 "message.cleared_shortcuts_remain_available_from_menus_but" = "Cleared shortcuts remain available from menus but no keyboard equivalent is registered. System-wide show/hide registration is kept in configuration for signed app builds.";
 "message.click_for_pastebuddy_menu" = "Click for PasteBuddy menu.";
 "message.clipboard_details_ocr_text_and_pinning_actions" = "Clipboard details, OCR text, and pinning actions appear here.";
+"message.clipboard_history_is_temporarily_unavailable" = "Clipboard history is temporarily unavailable.";
 "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy" = "Clipboard data stays on this Mac unless you turn on sync, sharing, or MCP.";
 "message.configure_cloudkit_sync_and_turn_on_shared" = "Configure CloudKit sync and turn on Shared Pinboards before sharing.";
 "message.copy_text_links_images_or_files_to" = "Copy text, links, images, or files to start building local history.";
@@ -1104,6 +1105,7 @@
 "Cleared shortcuts remain available from menus but no keyboard equivalent is registered. System-wide show/hide registration is kept in configuration for signed app builds." = "Cleared shortcuts remain available from menus but no keyboard equivalent is registered. System-wide show/hide registration is kept in configuration for signed app builds.";
 "Click for PasteBuddy menu." = "Click for PasteBuddy menu.";
 "Clipboard details, OCR text, and pinning actions appear here." = "Clipboard details, OCR text, and pinning actions appear here.";
+"error.clipboard_database_out_of_sync" = "Clipboard history is temporarily unavailable.";
 "Configure CloudKit sync and turn on Shared Pinboards before sharing." = "Configure CloudKit sync and turn on Shared Pinboards before sharing.";
 "Copy text, links, images, or files to start building local history." = "Copy text, links, images, or files to start building local history.";
 "Copy text, links, screenshots, or files to fill the shelf." = "Copy text, links, screenshots, or files to fill the shelf.";

@@ -5,15 +5,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VisionKit
 
-enum ClipboardShelfTimestampAdapter {
-    static func presentation(
-        for capturedAt: Date,
-        formatter: HistoryCardTimestampFormatter
-    ) -> HistoryCardTimestampFormatter.Presentation {
-        formatter.presentation(for: capturedAt)
-    }
-}
-
 private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
     static let cardHeight: CGFloat = 240
@@ -442,14 +433,27 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var renderedShelfItems: [ClipboardItem] {
-        paging.items
+        ClipboardPanelHistoryAvailability.visibleItems(
+            paging.items,
+            scope: shelfScope,
+            errorMessage: store.historyQueryErrorMessage
+        )
     }
 
     private var shelfDisplayItems: [ClipboardShelfDisplayItem] {
+        if shelfScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return [
+                .empty(
+                    title: emptyTitle,
+                    detail: emptyDescription,
+                    systemImageName: emptySystemImage
+                )
+            ]
+        }
         if isShowingLaunchAtLoginPrompt {
             return [.launchAtLoginPrompt]
         }
-        if paging.items.isEmpty {
+        if renderedShelfItems.isEmpty {
             return [
                 .empty(
                     title: emptyTitle,
@@ -666,14 +670,23 @@ struct ClipboardShelfPanelView: View {
         }
 
     private var emptyTitle: String {
-        shelfScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
+        if shelfScope != .pasteStack, let error = store.historyQueryErrorMessage {
+            return error
+        }
+        return shelfScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
     }
 
     private var emptySystemImage: String {
-        shelfScope == .pasteStack ? "tray" : "doc.on.clipboard"
+        if shelfScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return "exclamationmark.triangle"
+        }
+        return shelfScope == .pasteStack ? "tray" : "doc.on.clipboard"
     }
 
     private var emptyDescription: String {
+        if shelfScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return ""
+        }
         if shelfScope == .pasteStack {
             return store.isPasteStackActive ? localized("message.new_copies_will_appear_here") : localized("message.start_collecting_copied_items")
         }
@@ -893,6 +906,10 @@ struct ClipboardShelfPanelView: View {
                 return .handled
             }
             if let index = Int(characters), (1...9).contains(index),
+               ClipboardPanelHistoryAvailability.allowsActions(
+                   scope: shelfScope,
+                   errorMessage: store.historyQueryErrorMessage
+               ),
                let item = store.quickPasteItem(atOneBasedIndex: index, in: shelfScope) {
                 pasteItem(item, format: store.defaultPasteFormat)
                 return .handled
@@ -1272,7 +1289,7 @@ private struct ClipboardShelfCard: View {
         let formatter = HistoryCardTimestampFormatter(
             now: { timestampReference }
         )
-        let timestamp = ClipboardShelfTimestampAdapter.presentation(
+        let timestamp = HistoryCardTimestampAdapter.presentation(
             for: item.createdAt,
             formatter: formatter
         )

@@ -1015,12 +1015,78 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testPanelPagingMakesAll501RepositoryItemsReachableWithFiltersAndScopes"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testStorageConfigurationDropsLegacyCountCapWithoutChangingAgePolicy"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testRepositoryPagingUsesUniqueTieBreakerForEqualTimestamps"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testRepositoryPagingUsesEffectiveContentTypeAcrossMultipleBoundaries"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testConfiguredStaleRepositoryFailsClosedWithoutSnapshotFallback"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testRepositorySyncReadinessAdvancesQueryRevisionAndReloadsHistory"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testFlushDoesNotMarkRepositoryCurrentWhenSnapshotChangesDuringSync"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testSharedImportRetainsItem501AcrossSaveAndRelaunch"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testSnapshotDatabaseMigratorRetainsItem501"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testEffectiveContentTypesMigrationBackfillsLegacySQLiteAcross501Rows"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testRepositorySyncRepairsStaleEffectiveContentTypes"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testInMemoryStoreDoesNotTruncateHistoryAtRepositoryPageSize"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testBothClipboardPanelsShowRepositoryQueryFailure"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelHistoryAvailabilityFailsClosed"))
         XCTAssertTrue(source.contains("run_required_test_filter HistoryCardTimestampFormatterTests"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testNativeCopyCommand"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testDirectPaste"))
         XCTAssertTrue(source.contains("Required integration test filter matched no XCTest cases"))
         XCTAssertFalse(source.contains("/usr/bin/open -n"))
+    }
+
+    func testBothClipboardPanelsShowRepositoryQueryFailure() throws {
+        for path in [
+            "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
+            "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift"
+        ] {
+            let source = try sourceFileContents(path)
+            XCTAssertTrue(source.contains("store.historyQueryErrorMessage"), path)
+            XCTAssertTrue(source.contains("ClipboardPanelHistoryAvailability.visibleItems"), path)
+            XCTAssertTrue(source.contains("ClipboardPanelHistoryAvailability.allowsActions"), path)
+            XCTAssertTrue(source.contains("\"exclamationmark.triangle\""), path)
+        }
+    }
+
+    func testSharedPanelHistoryAvailabilityFailsClosed() {
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Previously loaded item",
+            payload: ClipboardPayload(text: "must not remain actionable")
+        )
+
+        XCTAssertTrue(ClipboardPanelHistoryAvailability.visibleItems(
+            [item],
+            scope: .history,
+            errorMessage: "Repository unavailable"
+        ).isEmpty)
+        XCTAssertTrue(ClipboardPanelHistoryAvailability.visibleItems(
+            [item],
+            scope: .pinboard(UUID()),
+            errorMessage: "Repository unavailable"
+        ).isEmpty)
+        XCTAssertEqual(ClipboardPanelHistoryAvailability.visibleItems(
+            [item],
+            scope: .pasteStack,
+            errorMessage: "Repository unavailable"
+        ).map(\.id), [item.id])
+        XCTAssertEqual(ClipboardPanelHistoryAvailability.visibleItems(
+            [item],
+            scope: .history,
+            errorMessage: nil
+        ).map(\.id), [item.id])
+        XCTAssertFalse(ClipboardPanelHistoryAvailability.allowsActions(
+            scope: .history,
+            errorMessage: "Repository unavailable"
+        ))
+        XCTAssertFalse(ClipboardPanelHistoryAvailability.allowsActions(
+            scope: .pinboard(UUID()),
+            errorMessage: "Repository unavailable"
+        ))
+        XCTAssertTrue(ClipboardPanelHistoryAvailability.allowsActions(
+            scope: .pasteStack,
+            errorMessage: "Repository unavailable"
+        ))
     }
 
     func testSettingsUsesSidebarSplitViewInsteadOfToolbarTabs() throws {

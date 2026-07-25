@@ -141,15 +141,25 @@ final class HistoryCardTimestampFormatterTests: XCTestCase {
 
         for capturedAt in [today, yesterday] {
             XCTAssertEqual(
-                ClipboardShelfTimestampAdapter.presentation(
+                HistoryCardTimestampAdapter.presentation(
                     for: capturedAt,
                     formatter: context.formatter
                 ),
-                ClipboardSidePanelTimestampAdapter.presentation(
-                    for: capturedAt,
-                    formatter: context.formatter
-                )
+                context.formatter.presentation(for: capturedAt)
             )
+        }
+
+        for path in [
+            "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
+            "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift"
+        ] {
+            let source = try String(
+                contentsOfFile: FileManager.default.currentDirectoryPath + "/" + path,
+                encoding: .utf8
+            )
+            XCTAssertTrue(source.contains("HistoryCardTimestampAdapter.presentation"), path)
+            XCTAssertFalse(source.contains("ClipboardShelfTimestampAdapter"), path)
+            XCTAssertFalse(source.contains("ClipboardSidePanelTimestampAdapter"), path)
         }
     }
 
