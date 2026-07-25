@@ -281,12 +281,10 @@ struct PasteBuddyApp: App {
                 placement: shelfPlacement,
                 displayMode: panelDisplayMode,
                 directPasteItem: { item, format in
-                    let hydratedItem = await store.hydratedItem(for: item)
-                    return await Self.pasteItemToTarget(hydratedItem, format: format, tracker: frontmostApplicationTracker)
+                    await Self.pasteItemToTarget(item, format: format, tracker: frontmostApplicationTracker)
                 },
                 directPasteItems: { items, format in
-                    let hydratedItems = await store.hydratedItems(for: items)
-                    return await Self.pasteItemsToTarget(hydratedItems, format: format, tracker: frontmostApplicationTracker)
+                    await Self.pasteItemsToTarget(items, format: format, tracker: frontmostApplicationTracker)
                 },
                 shouldIgnoreDismissalAt: { point in
                     statusController?.containsScreenPoint(point) == true

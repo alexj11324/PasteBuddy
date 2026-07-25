@@ -2644,31 +2644,24 @@ public struct SyncConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct StorageConfiguration: Codable, Equatable, Sendable {
-    public var maxHistoryItems: Int
     public var retentionDays: Int
     public var maxStorageBytes: Int
 
     public init(
-        maxHistoryItems: Int = 500,
         retentionDays: Int = 90,
         maxStorageBytes: Int = 512 * 1_024 * 1_024
     ) {
-        self.maxHistoryItems = Self.clampMaxHistoryItems(maxHistoryItems)
         self.retentionDays = Self.clampRetentionDays(retentionDays)
         self.maxStorageBytes = Self.clampMaxStorageBytes(maxStorageBytes)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case maxHistoryItems
         case retentionDays
         case maxStorageBytes
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        maxHistoryItems = Self.clampMaxHistoryItems(
-            try container.decodeIfPresent(Int.self, forKey: .maxHistoryItems) ?? 500
-        )
         retentionDays = Self.clampRetentionDays(
             try container.decodeIfPresent(Int.self, forKey: .retentionDays) ?? 90
         )
@@ -2679,17 +2672,12 @@ public struct StorageConfiguration: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(maxHistoryItems, forKey: .maxHistoryItems)
         try container.encode(retentionDays, forKey: .retentionDays)
         try container.encode(maxStorageBytes, forKey: .maxStorageBytes)
     }
 
     public var keepsHistoryForever: Bool {
         retentionDays == 0
-    }
-
-    public static func clampMaxHistoryItems(_ value: Int) -> Int {
-        min(max(value, 1), 10_000)
     }
 
     public static func clampRetentionDays(_ value: Int) -> Int {

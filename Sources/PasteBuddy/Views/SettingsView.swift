@@ -431,21 +431,13 @@ struct SettingsView: View {
                 LabeledContent("label.unpinned_history_size") {
                     Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.unpinnedEstimatedBytes), countStyle: .file))
                 }
+                LabeledContent("label.items") {
+                    Text(localized("format.items", storageReport.itemCount))
+                }
                 ProgressView(value: storageReport.usageFraction) {
                     Text("label.storage_limit")
                 } currentValueLabel: {
                     Text(storageLimitDescription)
-                }
-
-                Stepper(
-                    value: Binding(
-                        get: { store.snapshot.storage.maxHistoryItems },
-                        set: { store.updateMaxHistoryItems($0) }
-                    ),
-                    in: 50...5_000,
-                    step: 50
-                ) {
-                    Text(localized("format.keep_up_to_items", store.snapshot.storage.maxHistoryItems))
                 }
 
                 Stepper(

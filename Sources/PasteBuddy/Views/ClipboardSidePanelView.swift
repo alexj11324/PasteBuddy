@@ -33,8 +33,7 @@ struct ClipboardSidePanelView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @State private var sideScope: PasteScope = .history
-    @State private var sideItems: [ClipboardItem] = []
-    @State private var sideItemTotalCount = 0
+    @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardSidePanelQueryState>()
     @State private var interaction = ShelfInteractionModel()
     @State private var pinnedState: Bool?
 
@@ -85,6 +84,9 @@ struct ClipboardSidePanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection)) { _ in
             copySelectedItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
+            pasteSelected(format: store.defaultPasteFormat)
         }
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
             guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
@@ -326,6 +328,9 @@ struct ClipboardSidePanelView: View {
                     onDoubleClick: { id in
                         guard let item = renderedItems.first(where: { $0.id == id }) else { return }
                         pasteItem(item, format: store.defaultPasteFormat)
+                    },
+                    onLastItemAppear: {
+                        loadNextSidePage()
                     }
                 )
             }
@@ -335,7 +340,7 @@ struct ClipboardSidePanelView: View {
     }
 
     private var footer: some View {
-        Text(localized("format.items", sideItemTotalCount))
+        Text(localized("format.items", paging.totalCount))
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
@@ -358,7 +363,7 @@ struct ClipboardSidePanelView: View {
     }
 
     private var renderedItems: [ClipboardItem] {
-        sideItems
+        paging.items
     }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -409,11 +414,37 @@ struct ClipboardSidePanelView: View {
     }
 
     private func refreshSideItems() {
-        let items = store.filteredItems(for: sideScope)
-        sideItems = items
-        sideItemTotalCount = store.filteredItemCount(for: sideScope)
+        let queryID = queryState
+        let items = store.filteredItemsPage(for: sideScope, offset: 0)
+        paging.reset(
+            with: items,
+            totalCount: store.filteredItemCount(for: sideScope),
+            queryID: queryID
+        )
         interaction.replaceItems(
             items,
+            storeSelectedIDs: store.selectedItemIDs,
+            storePrimarySelectedID: store.selectedItemID
+        )
+    }
+
+    private func loadNextSidePage() {
+        guard paging.canLoadMore else { return }
+        let queryID = queryState
+        guard let request = paging.nextPageRequest(for: queryID) else { return }
+        let page = store.filteredItemsPage(
+            for: sideScope,
+            offset: request.offset
+        )
+        guard !page.isEmpty else { return }
+        guard paging.append(
+            page,
+            totalCount: store.filteredItemCount(for: sideScope),
+            for: request,
+            currentQueryID: queryState
+        ) else { return }
+        interaction.replaceItems(
+            paging.items,
             storeSelectedIDs: store.selectedItemIDs,
             storePrimarySelectedID: store.selectedItemID
         )
@@ -546,15 +577,19 @@ struct ClipboardSidePanelView: View {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
         let shouldDismissBeforePaste = !effectivePinned
+        let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
-            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
                 dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
+                guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }
                 return await directPasteItems(hydratedItems, format)
             }
-            store.recordDirectPasteResult(result)
+            if let result {
+                store.recordDirectPasteResult(result)
+            }
         }
     }
 
@@ -678,9 +713,12 @@ private struct ClipboardSidePanelListRow: View {
 
             Spacer(minLength: 8)
 
-            Text(item.createdAt.formatted(date: .omitted, time: .shortened))
+            Text(timestamp)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel(timestamp)
 
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 16, weight: .medium))
@@ -729,8 +767,12 @@ private struct ClipboardSidePanelListRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-side-panel-row-\(item.id.uuidString)")
-        .accessibilityLabel(item.title)
+        .accessibilityLabel("\(item.title), \(timestamp)")
         .accessibilityValue(NSLocalizedString(isSelected ? "state.selected" : "label.not_selected", comment: ""))
+    }
+
+    private var timestamp: String {
+        ClipboardItemTimestampFormatter.string(for: item.createdAt)
     }
 }
 

@@ -88,10 +88,9 @@ struct ClipboardShelfPanelView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isShelfFocused: Bool
     @State private var isShowingLaunchAtLoginPrompt = false
-    @State private var shelfItems: [ClipboardItem] = []
+    @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardShelfQueryState>()
     @State private var shelfInteraction = ShelfInteractionModel()
     @State private var isSearchRailPresented = false
-    @State private var relativeDateReference = Date()
     @State private var shelfScope: PasteScope = .history
 
     var body: some View {
@@ -143,15 +142,15 @@ struct ClipboardShelfPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection)) { _ in
             copySelectedItems()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
+            pasteSelected(format: store.defaultPasteFormat)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
             guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
             handlePanelArrowKey(request)
         }
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
-        }
-        .task {
-            await runShelfMinuteTicker()
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
@@ -428,14 +427,14 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var renderedShelfItems: [ClipboardItem] {
-        shelfItems
+        paging.items
     }
 
     private var shelfDisplayItems: [ClipboardShelfDisplayItem] {
         if isShowingLaunchAtLoginPrompt {
             return [.launchAtLoginPrompt]
         }
-        if shelfItems.isEmpty {
+        if paging.items.isEmpty {
             return [
                 .empty(
                     title: emptyTitle,
@@ -460,10 +459,6 @@ struct ClipboardShelfPanelView: View {
             dateFilter: store.dateFilter,
             pasteStackRevision: store.pasteStackItems.count
         )
-    }
-
-    private var relativeDateMinuteBucket: Int {
-        Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
     }
 
     private var activeFilterStrip: some View {
@@ -592,6 +587,8 @@ struct ClipboardShelfPanelView: View {
         } onDoubleClick: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
             pasteItem(item, format: defaultPasteFormat)
+        } onLastItemAppear: {
+            loadNextShelfPage()
         }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
     }
@@ -630,7 +627,6 @@ struct ClipboardShelfPanelView: View {
                         await store.enrichLinkPreviewMetadataIfNeeded(for: item)
                     },
                     isSelected: isSelected,
-                    relativeDateReference: relativeDateReference,
                     defaultPasteFormat: defaultPasteFormat,
                     pinboards: pinboards,
                     onPaste: { format in
@@ -770,14 +766,18 @@ struct ClipboardShelfPanelView: View {
     private func pasteSelected(format: PasteFormat) {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
+        let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
-            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
+                guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }
                 return await directPasteItems(hydratedItems, format)
             }
-            store.recordDirectPasteResult(result)
+            if let result {
+                store.recordDirectPasteResult(result)
+            }
         }
     }
 
@@ -945,8 +945,13 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func refreshShelfItems() {
-        let items = store.filteredItems(for: shelfScope)
-        shelfItems = items
+        let queryID = shelfQueryState
+        let items = store.filteredItemsPage(for: shelfScope, offset: 0)
+        paging.reset(
+            with: items,
+            totalCount: store.filteredItemCount(for: shelfScope),
+            queryID: queryID
+        )
 
         shelfInteraction.replaceItems(
             items,
@@ -955,17 +960,28 @@ struct ClipboardShelfPanelView: View {
         )
     }
 
-    private func runShelfMinuteTicker() async {
-        while !Task.isCancelled {
-            do {
-                try await Task.sleep(nanoseconds: 60_000_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            relativeDateReference = Date()
-        }
+    private func loadNextShelfPage() {
+        guard paging.canLoadMore else { return }
+        let queryID = shelfQueryState
+        guard let request = paging.nextPageRequest(for: queryID) else { return }
+        let page = store.filteredItemsPage(
+            for: shelfScope,
+            offset: request.offset
+        )
+        guard !page.isEmpty else { return }
+        guard paging.append(
+            page,
+            totalCount: store.filteredItemCount(for: shelfScope),
+            for: request,
+            currentQueryID: shelfQueryState
+        ) else { return }
+        shelfInteraction.replaceItems(
+            paging.items,
+            storeSelectedIDs: store.selectedItemIDs,
+            storePrimarySelectedID: store.selectedItemID
+        )
     }
+
 }
 
 private struct LaunchAtLoginShelfCard: View {
@@ -1229,7 +1245,6 @@ private struct ClipboardShelfCard: View {
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
-    let relativeDateReference: Date
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
     let onPaste: (PasteFormat) -> Void
@@ -1241,8 +1256,7 @@ private struct ClipboardShelfCard: View {
         ClipboardShelfCardVisual(
             item: item,
             imageDataProvider: imageDataProvider,
-            linkMetadataProvider: linkMetadataProvider,
-            relativeDateReference: relativeDateReference
+            linkMetadataProvider: linkMetadataProvider
         )
             .equatable()
             .overlay {
@@ -1253,7 +1267,7 @@ private struct ClipboardShelfCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
-        .accessibilityLabel("\(item.title), \(localized(item.presentationContentType.displayName))")
+        .accessibilityLabel("\(item.title), \(localized(item.presentationContentType.displayName)), \(timestamp)")
         .accessibilityValue(localized(isSelected ? "state.selected" : "label.not_selected"))
         .accessibilityHint(localized("message.press_space_to_preview_press_return_to"))
     }
@@ -1294,6 +1308,10 @@ private struct ClipboardShelfCard: View {
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+
+    private var timestamp: String {
+        ClipboardItemTimestampFormatter.string(for: item.createdAt)
     }
 }
 
@@ -1661,23 +1679,17 @@ private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
-    let relativeDateReference: Date
     private let renderSignature: ClipboardShelfCardRenderSignature
 
     init(
         item: ClipboardItem,
         imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?,
-        linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void,
-        relativeDateReference: Date
+        linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void
     ) {
         self.item = item
         self.imageDataProvider = imageDataProvider
         self.linkMetadataProvider = linkMetadataProvider
-        self.relativeDateReference = relativeDateReference
-        self.renderSignature = ClipboardShelfCardRenderSignature(
-            item: item,
-            relativeDateReference: relativeDateReference
-        )
+        self.renderSignature = ClipboardShelfCardRenderSignature(item: item)
     }
 
     private var cardTint: Color {
@@ -1690,9 +1702,12 @@ private struct ClipboardShelfCardVisual: View {
                 Text(localized(item.presentationContentType.displayName))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
-                Text(relativeDate(relativeTo: relativeDateReference))
+                Text(timestamp)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .accessibilityLabel(timestamp)
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
@@ -1752,19 +1767,14 @@ private struct ClipboardShelfCardVisual: View {
         }
     }
 
-    private func relativeDate(relativeTo date: Date) -> String {
-        Self.relativeFormatter.localizedString(for: item.createdAt, relativeTo: date)
+    private var timestamp: String {
+        ClipboardItemTimestampFormatter.string(for: item.createdAt)
     }
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
 }
 
 extension ClipboardShelfCardVisual: Equatable {
@@ -1801,9 +1811,8 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let rtfAssetID: String?
     let imageAssetID: String?
     let imageByteCount: Int?
-    let relativeDateMinuteBucket: Int
 
-    init(item: ClipboardItem, relativeDateReference: Date) {
+    init(item: ClipboardItem) {
         id = item.id
         createdAt = item.createdAt
         updatedAt = item.updatedAt
@@ -1817,7 +1826,6 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         rtfAssetID = item.payload.rtfAssetID
         imageAssetID = item.payload.imageAssetID
         imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
-        relativeDateMinuteBucket = Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
     }
 }
 

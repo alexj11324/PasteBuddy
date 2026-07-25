@@ -385,6 +385,48 @@ public final class PasteBuddyStore {
         return makeFilteredItems(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
 
+    public func filteredItemsPage(
+        for scope: PasteScope,
+        offset: Int,
+        limit: Int = 100
+    ) -> [ClipboardItem] {
+        guard !isHistoryAccessLocked else { return [] }
+        let offset = max(offset, 0)
+        let limit = max(limit, 1)
+
+        switch scope {
+        case .history:
+            if let databaseItems = databaseFilteredItems(
+                pinboardID: nil,
+                offset: offset,
+                limit: limit
+            ) {
+                return databaseItems
+            }
+            return Array(
+                historyItemsInPageOrder(filtered(snapshot.items))
+                    .dropFirst(offset)
+                    .prefix(limit)
+            )
+        case .pasteStack:
+            return Array(filtered(pasteStackItemsInPasteOrder).dropFirst(offset).prefix(limit))
+        case .pinboard(let id):
+            if let databaseItems = databaseFilteredItems(
+                pinboardID: id,
+                offset: offset,
+                limit: limit
+            ) {
+                return databaseItems
+            }
+            guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
+                return []
+            }
+            let itemByID = cachedItemByID()
+            let items = filtered(pinboard.itemIDs.compactMap { itemByID[$0] })
+            return Array(items.dropFirst(offset).prefix(limit))
+        }
+    }
+
     public func filteredItemCount(for scope: PasteScope) -> Int {
         makeFilteredItemCount(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
@@ -406,15 +448,23 @@ public final class PasteBuddyStore {
         let scopedItems: [ClipboardItem]
         switch scope {
         case .history:
-            if let databaseItems = databaseFilteredItems(pinboardID: nil) {
+            if let databaseItems = databaseFilteredItems(
+                pinboardID: nil,
+                offset: 0,
+                limit: Self.defaultHistoryPageLimit
+            ) {
                 return databaseItems
             }
             scopedItems = snapshot.items
-            return filtered(scopedItems).sorted { $0.createdAt > $1.createdAt }
+            return historyItemsInPageOrder(filtered(scopedItems))
         case .pasteStack:
             return filtered(pasteStackItemsInPasteOrder)
         case .pinboard(let id):
-            if let databaseItems = databaseFilteredItems(pinboardID: id) {
+            if let databaseItems = databaseFilteredItems(
+                pinboardID: id,
+                offset: 0,
+                limit: Self.defaultHistoryPageLimit
+            ) {
                 return databaseItems
             }
             guard let pinboard = snapshot.pinboards.first(where: { $0.id == id }) else {
@@ -906,7 +956,7 @@ public final class PasteBuddyStore {
     }
 
     @discardableResult
-    public func addCapturedItem(_ item: ClipboardItem, maxItems: Int? = nil) -> ClipboardItem {
+    public func addCapturedItem(_ item: ClipboardItem) -> ClipboardItem {
         let storedItem: ClipboardItem
         var preparedItem = item
         preparedItem.refreshSearchDocument()
@@ -930,13 +980,13 @@ public final class PasteBuddyStore {
             appendToPasteStack(storedItem)
         }
         selectSingleItem(storedItem.id)
-        pruneHistory(maxItems: maxItems)
+        pruneHistory()
         save()
         return storedItem
     }
 
     @discardableResult
-    public func addSyncedItem(_ item: ClipboardItem, maxItems: Int? = nil) -> ClipboardItem? {
+    public func addSyncedItem(_ item: ClipboardItem) -> ClipboardItem? {
         let decision = snapshot.privacy.captureDecision(
             for: item,
             sourceApplicationName: item.sourceAppName,
@@ -944,7 +994,7 @@ public final class PasteBuddyStore {
             includePause: true
         )
         guard decision.isAllowed else { return nil }
-        return addCapturedItem(item, maxItems: maxItems)
+        return addCapturedItem(item)
     }
 
     /// Duplicate captures of the same link arrive both locally (re-copy) and
@@ -1753,12 +1803,6 @@ public final class PasteBuddyStore {
         save()
     }
 
-    public func updateMaxHistoryItems(_ value: Int) {
-        snapshot.storage.maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(value)
-        pruneHistory()
-        save()
-    }
-
     public func updateRetentionDays(_ value: Int) {
         snapshot.storage.retentionDays = StorageConfiguration.clampRetentionDays(value)
         pruneHistory()
@@ -2504,27 +2548,23 @@ public final class PasteBuddyStore {
         dedupeIndex = nextIndex
     }
 
-    private func pruneHistory(now: Date = Date(), maxItems: Int? = nil) {
+    private func pruneHistory(now: Date = Date()) {
         let previousItemCount = snapshot.items.count
         let pinnedItemIDs = userPinnedItemIDs()
-        let maxHistoryItems = StorageConfiguration.clampMaxHistoryItems(maxItems ?? snapshot.storage.maxHistoryItems)
         let maxStorageBytes = StorageConfiguration.clampMaxStorageBytes(snapshot.storage.maxStorageBytes)
         let cutoff = snapshot.storage.retentionDays > 0
             ? Calendar.current.date(byAdding: .day, value: -snapshot.storage.retentionDays, to: now)
             : nil
 
-        snapshot.items = snapshot.items.enumerated().filter { index, item in
+        snapshot.items = snapshot.items.filter { item in
             if pinnedItemIDs.contains(item.id) {
                 return true
-            }
-            if index >= maxHistoryItems {
-                return false
             }
             if let cutoff, max(item.createdAt, item.updatedAt) < cutoff {
                 return false
             }
             return true
-        }.map(\.element)
+        }
 
         var estimatedBytes = snapshot.items.reduce(0) { total, item in
             total + Self.estimatedStorageBytes(for: item)
@@ -2622,7 +2662,11 @@ public final class PasteBuddyStore {
         }
     }
 
-    private func databaseFilteredItems(pinboardID: UUID?) -> [ClipboardItem]? {
+    private func databaseFilteredItems(
+        pinboardID: UUID?,
+        offset: Int,
+        limit: Int
+    ) -> [ClipboardItem]? {
         guard let clipboardRepository,
               repositorySyncedDataRevision == dataRevision else {
             return nil
@@ -2637,7 +2681,8 @@ public final class PasteBuddyStore {
                 deviceName: deviceFilter,
                 dateFilter: dateFilter,
                 pinboardID: pinboardID,
-                limit: Self.defaultHistoryPageLimit
+                limit: limit,
+                offset: offset
             ))
         } catch {
             lastErrorMessage = error.localizedDescription
@@ -2754,6 +2799,23 @@ public final class PasteBuddyStore {
         return items.filter { item in
             item.matchesNormalizedSearchQuery(normalizedQuery)
                 && matchesStructuredFilters(item, sourceAppName: filters.sourceAppName)
+        }
+    }
+
+    private func historyItemsInPageOrder(_ items: [ClipboardItem]) -> [ClipboardItem] {
+        let snapshotOrder = Dictionary(
+            uniqueKeysWithValues: snapshot.items.enumerated().map { ($0.element.id, $0.offset) }
+        )
+        return items.sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt > rhs.createdAt
+            }
+            let lhsOrder = snapshotOrder[lhs.id] ?? .max
+            let rhsOrder = snapshotOrder[rhs.id] ?? .max
+            if lhsOrder != rhsOrder {
+                return lhsOrder < rhsOrder
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
         }
     }
 

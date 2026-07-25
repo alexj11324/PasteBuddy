@@ -108,6 +108,83 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(events, ["paste"])
     }
 
+    func testSharedPanelPagingStateReachesAll501ItemsWithoutDuplicates() throws {
+        let items = (0..<501).map { index in
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Paged \(index)",
+                payload: ClipboardPayload(text: "payload \(index)")
+            )
+        }
+        var paging = ClipboardPanelPagingState<ClipboardItem, Int>()
+
+        paging.reset(
+            with: Array(items.prefix(100)),
+            totalCount: items.count,
+            queryID: 1
+        )
+        XCTAssertEqual(paging.items.count, 100)
+        XCTAssertTrue(paging.canLoadMore)
+
+        for offset in stride(from: 100, to: items.count, by: 100) {
+            let request = try XCTUnwrap(paging.nextPageRequest(for: 1))
+            XCTAssertEqual(request.offset, offset)
+            XCTAssertTrue(paging.append(
+                Array(items.dropFirst(offset).prefix(100)),
+                totalCount: items.count,
+                for: request,
+                currentQueryID: 1
+            ))
+        }
+
+        XCTAssertEqual(paging.items.map(\.id), items.map(\.id))
+        XCTAssertFalse(paging.canLoadMore)
+        XCTAssertEqual(paging.nextOffset, 501)
+    }
+
+    func testSharedPanelPagingRejectsOldQueryResponseAfterReset() throws {
+        let items = (0..<200).map { index in
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Query \(index)",
+                payload: ClipboardPayload(text: "payload \(index)")
+            )
+        }
+        var paging = ClipboardPanelPagingState<ClipboardItem, Int>()
+        paging.reset(with: Array(items.prefix(100)), totalCount: 200, queryID: 1)
+        let oldRequest = try XCTUnwrap(paging.nextPageRequest(for: 1))
+
+        paging.reset(with: Array(items.prefix(20)), totalCount: 20, queryID: 2)
+
+        XCTAssertNil(paging.nextPageRequest(for: 1))
+        XCTAssertFalse(paging.append(
+            Array(items.dropFirst(100)),
+            totalCount: 200,
+            for: oldRequest,
+            currentQueryID: 2
+        ))
+        XCTAssertEqual(paging.items.map(\.id), Array(items.prefix(20)).map(\.id))
+    }
+
+    func testBothPanelModesLoadSubsequentPagesThroughSharedPagingState() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("@State private var paging = ClipboardPanelPagingState<ClipboardItem,"))
+            XCTAssertTrue(source.contains("store.filteredItemsPage("))
+            XCTAssertTrue(source.contains("paging.nextPageRequest(for:"))
+            XCTAssertTrue(source.contains("for: request,"))
+            XCTAssertTrue(source.contains("paging.canLoadMore"))
+        }
+        XCTAssertTrue(shelfSource.contains("onLastItemAppear:"))
+        XCTAssertTrue(sideSource.contains("onLastItemAppear:"))
+    }
+
     func testShelfPreviewToggleDismissesAlreadyPreviewedCard() {
         let item = makeShelfItem(title: "Screenshot")
         let interaction = ShelfInteractionModel(items: [item])
@@ -931,6 +1008,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelArrowKeyCommandUsesExactEventModifiers"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testBothPanelModesShareNativeCommandVPasteRoute"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelPagingStateReachesAll501ItemsWithoutDuplicates"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelPagingRejectsOldQueryResponseAfterReset"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testCaptureAndSyncRetainItem501AcrossSaveAndRelaunch"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testPanelPagingMakesAll501RepositoryItemsReachableWithFiltersAndScopes"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testStorageConfigurationDropsLegacyCountCapWithoutChangingAgePolicy"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testRepositoryPagingUsesUniqueTieBreakerForEqualTimestamps"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testInMemoryStoreDoesNotTruncateHistoryAtRepositoryPageSize"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testPanelTimestampUsesExplicitLocalizedDateAndTimeForEveryYear"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testNativeCopyCommand"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testDirectPaste"))
         XCTAssertTrue(source.contains("Required integration test filter matched no XCTest cases"))
@@ -1294,12 +1380,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
-        XCTAssertTrue(shelfSource.contains("let items = store.filteredItems(for: shelfScope)"))
-        XCTAssertTrue(sideSource.contains("let items = store.filteredItems(for: sideScope)"))
-        XCTAssertTrue(sideSource.contains("sideItemTotalCount = store.filteredItemCount(for: sideScope)"))
+        XCTAssertTrue(shelfSource.contains("let items = store.filteredItemsPage(for: shelfScope, offset: 0)"))
+        XCTAssertTrue(sideSource.contains("let items = store.filteredItemsPage(for: sideScope, offset: 0)"))
+        XCTAssertTrue(sideSource.contains("totalCount: store.filteredItemCount(for: sideScope)"))
         XCTAssertFalse(shelfSource.contains("store.fullFilteredItems(for: shelfScope)"))
         XCTAssertFalse(sideSource.contains("store.fullFilteredItems(for: sideScope)"))
-        XCTAssertFalse(sideSource.contains("sideItemTotalCount = items.count"))
+        XCTAssertFalse(sideSource.contains("totalCount: items.count"))
         for source in [shelfSource, sideSource] {
             XCTAssertFalse(source.contains("renderLimit"))
             XCTAssertFalse(source.contains("overflowCount"))
@@ -1407,6 +1493,143 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString("newer external copy", forType: .string)
         XCTAssertFalse(ClipboardPanelCopyGate.shouldWrite(second, pasteboard: pasteboard))
+    }
+
+    func testPanelPasteCommandRoutesCardsButPreservesEditableFieldPaste() {
+        let editableFieldEditor = NSTextView()
+        editableFieldEditor.isEditable = true
+        let editableField = NSTextField()
+        editableField.isEditable = true
+        editableField.isEnabled = true
+        let noneditableText = NSTextView()
+        noneditableText.isEditable = false
+
+        XCTAssertFalse(
+            ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
+                firstResponder: editableFieldEditor
+            )
+        )
+        XCTAssertFalse(
+            ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
+                firstResponder: editableField
+            )
+        )
+        XCTAssertTrue(
+            ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
+                firstResponder: noneditableText
+            )
+        )
+        XCTAssertTrue(
+            ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
+                firstResponder: NSView()
+            )
+        )
+    }
+
+    func testPanelPasteGateRejectsStaleAsyncSelection() {
+        let first = ClipboardPanelPasteGate.begin()
+        let second = ClipboardPanelPasteGate.begin()
+
+        XCTAssertFalse(ClipboardPanelPasteGate.shouldPaste(first))
+        XCTAssertTrue(ClipboardPanelPasteGate.shouldPaste(second))
+    }
+
+    func testBothPanelModesShareNativeCommandVPasteRoute() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)"))
+            XCTAssertTrue(source.contains("pasteSelected(format: store.defaultPasteFormat)"))
+            XCTAssertTrue(source.contains("let request = ClipboardPanelPasteGate.begin()"))
+            XCTAssertTrue(source.contains("guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }"))
+        }
+        XCTAssertTrue(controllerSource.contains("@objc func paste(_ sender: Any?)"))
+        XCTAssertTrue(controllerSource.contains("ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste"))
+        XCTAssertTrue(controllerSource.contains("ClipboardPanelPasteCommandRouter.forwardNativePaste"))
+        XCTAssertTrue(controllerSource.contains("NotificationCenter.default.post(name: .pasteBuddyPastePanelSelection"))
+    }
+
+    func testPanelTimestampUsesExplicitLocalizedDateAndTimeForEveryYear() throws {
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let calendar = Calendar(identifier: .gregorian)
+        let olderDate = try XCTUnwrap(
+            calendar.date(from: DateComponents(
+                timeZone: timeZone,
+                year: 2024,
+                month: 1,
+                day: 2,
+                hour: 19,
+                minute: 42
+            ))
+        )
+        let recentDate = try XCTUnwrap(
+            calendar.date(from: DateComponents(
+                timeZone: timeZone,
+                year: 2026,
+                month: 7,
+                day: 25,
+                hour: 9,
+                minute: 5
+            ))
+        )
+        let english = Locale(identifier: "en_US")
+        let german = Locale(identifier: "de_DE")
+        var expectedStyle = Date.FormatStyle.dateTime
+            .year()
+            .month(.abbreviated)
+            .day()
+            .hour()
+            .minute()
+        expectedStyle.locale = english
+        expectedStyle.timeZone = timeZone
+
+        XCTAssertEqual(
+            ClipboardItemTimestampFormatter.string(
+                for: olderDate,
+                locale: english,
+                timeZone: timeZone
+            ),
+            olderDate.formatted(expectedStyle)
+        )
+        XCTAssertTrue(
+            ClipboardItemTimestampFormatter.string(
+                for: olderDate,
+                locale: english,
+                timeZone: timeZone
+            ).contains("2024")
+        )
+        XCTAssertTrue(
+            ClipboardItemTimestampFormatter.string(
+                for: recentDate,
+                locale: english,
+                timeZone: timeZone
+            ).contains("2026")
+        )
+        XCTAssertNotEqual(
+            ClipboardItemTimestampFormatter.string(
+                for: olderDate,
+                locale: english,
+                timeZone: timeZone
+            ),
+            ClipboardItemTimestampFormatter.string(
+                for: olderDate,
+                locale: german,
+                timeZone: timeZone
+            )
+        )
+    }
+
+    func testShelfAndSidePanelShareTimestampFormatterAndAccessibilityValue() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("ClipboardItemTimestampFormatter.string(for: item.createdAt)"))
+            XCTAssertTrue(source.contains(".accessibilityLabel(timestamp)"))
+            XCTAssertFalse(source.contains("formatted(date: .omitted, time: .shortened)"))
+        }
     }
 
     func testSwiftUIShelfCollectionUsesSwiftUIPopover() throws {

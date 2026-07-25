@@ -6,7 +6,30 @@ import SwiftUI
 
 extension Notification.Name {
     static let pasteBuddyCopyPanelSelection = Notification.Name("PasteBuddyCopyPanelSelection")
+    static let pasteBuddyPastePanelSelection = Notification.Name("PasteBuddyPastePanelSelection")
     static let pasteBuddyPanelArrowKey = Notification.Name("PasteBuddyPanelArrowKey")
+}
+
+@MainActor
+enum ClipboardPanelPasteCommandRouter {
+    static func shouldRouteSelectionPaste(firstResponder: NSResponder?) -> Bool {
+        if let textView = firstResponder as? NSTextView {
+            return !textView.isEditable
+        }
+        if let textField = firstResponder as? NSTextField {
+            return !textField.isEditable || !textField.isEnabled
+        }
+        return true
+    }
+
+    static func forwardNativePaste(firstResponder: NSResponder?, sender: Any?) {
+        if let textView = firstResponder as? NSTextView {
+            textView.paste(sender)
+        } else if let textField = firstResponder as? NSTextField {
+            textField.selectText(sender)
+            (textField.currentEditor() as? NSTextView)?.paste(sender)
+        }
+    }
 }
 
 struct ClipboardPanelArrowKeyCommand: Equatable {
@@ -755,6 +778,20 @@ private final class ClipboardShelfPanel: NSPanel {
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     @objc func copy(_ sender: Any?) {
         NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
+    }
+
+    @objc func paste(_ sender: Any?) {
+        let firstResponder = window?.firstResponder
+        guard ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
+            firstResponder: firstResponder
+        ) else {
+            ClipboardPanelPasteCommandRouter.forwardNativePaste(
+                firstResponder: firstResponder,
+                sender: sender
+            )
+            return
+        }
+        NotificationCenter.default.post(name: .pasteBuddyPastePanelSelection, object: self)
     }
 
     func configureForRoundedTransparentPanel(cornerRadius: CGFloat) {

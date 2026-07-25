@@ -804,7 +804,9 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
 
         let whereClause = predicates.isEmpty ? "" : "WHERE \(predicates.joined(separator: " AND "))"
-        let orderClause = request.pinboardID == nil ? "ci.created_at DESC" : "pbi.sort_order ASC"
+        let orderClause = request.pinboardID == nil
+            ? "ci.created_at DESC, ci.snapshot_order ASC, ci.id ASC"
+            : "pbi.sort_order ASC, ci.id ASC"
         arguments += [request.limit, request.offset]
 
         let rows = try Row.fetchAll(

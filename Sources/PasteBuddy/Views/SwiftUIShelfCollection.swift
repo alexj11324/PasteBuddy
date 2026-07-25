@@ -1,5 +1,52 @@
 import SwiftUI
 
+struct ClipboardPanelPagingState<Item: Identifiable, QueryID: Equatable> where Item.ID == UUID {
+    struct Request {
+        let generation: Int
+        let queryID: QueryID
+        let offset: Int
+    }
+
+    private(set) var items: [Item] = []
+    private(set) var totalCount = 0
+    private(set) var queryID: QueryID?
+    private var generation = 0
+
+    var nextOffset: Int { items.count }
+    var canLoadMore: Bool { items.count < totalCount }
+
+    mutating func reset(with page: [Item], totalCount: Int, queryID: QueryID) {
+        generation &+= 1
+        items = page
+        self.totalCount = max(totalCount, page.count)
+        self.queryID = queryID
+    }
+
+    func nextPageRequest(for queryID: QueryID) -> Request? {
+        guard canLoadMore, self.queryID == queryID else { return nil }
+        return Request(generation: generation, queryID: queryID, offset: nextOffset)
+    }
+
+    @discardableResult
+    mutating func append(
+        _ page: [Item],
+        totalCount: Int,
+        for request: Request,
+        currentQueryID: QueryID
+    ) -> Bool {
+        guard request.generation == generation,
+              request.queryID == currentQueryID,
+              queryID == currentQueryID,
+              request.offset == nextOffset else {
+            return false
+        }
+        let existingIDs = Set(items.map(\.id))
+        items.append(contentsOf: page.filter { !existingIDs.contains($0.id) })
+        self.totalCount = max(totalCount, items.count)
+        return true
+    }
+}
+
 @MainActor
 struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent: View>: View where Item.ID == UUID {
     enum Direction {
@@ -22,6 +69,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
     var dragPayload: ((Item) -> PinboardItemDragPayload?)?
     var onSelect: (UUID) -> Void
     var onDoubleClick: (UUID) -> Void
+    var onLastItemAppear: () -> Void
 
     @State private var lastScrolledPrimarySelectedID: UUID?
     @State private var presentedPreviewID: UUID?
@@ -42,7 +90,8 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         @ViewBuilder previewContent: @escaping (Item) -> PreviewContent,
         dragPayload: ((Item) -> PinboardItemDragPayload?)? = nil,
         onSelect: @escaping (UUID) -> Void,
-        onDoubleClick: @escaping (UUID) -> Void
+        onDoubleClick: @escaping (UUID) -> Void,
+        onLastItemAppear: @escaping () -> Void = {}
     ) {
         self.items = items
         self.selectedIDs = selectedIDs
@@ -59,6 +108,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         self.dragPayload = dragPayload
         self.onSelect = onSelect
         self.onDoubleClick = onDoubleClick
+        self.onLastItemAppear = onLastItemAppear
     }
 
     var body: some View {
@@ -143,6 +193,11 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
                 arrowEdge: previewArrowEdge
             ) {
                 previewContent(item)
+            }
+            .onAppear {
+                if itemID == items.last?.id {
+                    onLastItemAppear()
+                }
             }
     }
 
