@@ -40,7 +40,7 @@
 - IMPORTANT: 如果确实需要把 Shelf 操作同步到全局 store，只能在明确的用户动作后同步（例如选择/复制/粘贴/删除），并确认不会把一次 chip 点击扩散成两轮 refresh 或完整 History 重算。
 - IMPORTANT: 修复 Shelf 卡顿时必须优先排查全局状态副作用、`queryRevision` bump、`selectedItemsInDisplayOrder`、`mainListItemsSnapshot` 和命令菜单 disabled 计算，不要只盯着 Shelf card 动画或 collection reload。
 - IMPORTANT: 为这类修复添加正式回归测试，验证 scoped 查询/快捷键不会 mutate `selectedScope` 或 bump 不必要的 `queryRevision`；不要只靠手动点击感觉判断。
-- IMPORTANT: Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴；单击识别必须与双击识别并行，禁止重新使用会等待双击判定后才触发 selection 的互斥或成对 `.onTapGesture`。相关修改必须验证单击高亮无延迟且双击仍只执行粘贴。
+- IMPORTANT: Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴；单击识别必须与双击识别并行，禁止重新使用会等待双击判定后才触发 selection 的互斥或成对 `.onTapGesture`。Shift + 方向键必须从现有 anchor 扩展连续多选，确保多项复制在两个面板都有真实用户入口。相关修改必须验证单击高亮无延迟、Shift 多选可用且双击仍只执行粘贴。
 - IMPORTANT: Shelf 与 Side Panel 的复制确认必须共用同一条成功反馈路径；只有系统 pasteboard 写入返回成功后才能显示一个可更新/合并的非激活 HUD，禁止在写入前或写入中显示、堆叠多个 HUD、抢焦点或延迟复制。HUD 必须使用本地化数量文案、原生 material 与辅助功能语义，遵循 Reduce Motion，并自动消失。
 
 ## PasteBuddy Shelf Liquid Glass 背景（IMPORTANT）

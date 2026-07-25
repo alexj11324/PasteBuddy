@@ -174,6 +174,46 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(interaction.selectedIDs, [second.id])
     }
 
+    func testShelfShiftSelectionExtendsFromTheExistingAnchor() {
+        let first = makeShelfItem(title: "First")
+        let second = makeShelfItem(title: "Second")
+        let third = makeShelfItem(title: "Third")
+        let interaction = ShelfInteractionModel(items: [first, second, third])
+
+        interaction.selectSingle(first.id)
+        interaction.extendSelection(by: 1)
+        XCTAssertEqual(interaction.selectedIDs, [first.id, second.id])
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+
+        interaction.extendSelection(by: 1)
+        XCTAssertEqual(interaction.selectedIDs, [first.id, second.id, third.id])
+        XCTAssertEqual(interaction.primarySelectedID, third.id)
+        XCTAssertEqual(interaction.selectionAnchorID, first.id)
+
+        interaction.extendSelection(by: -1)
+        XCTAssertEqual(interaction.selectedIDs, [first.id, second.id])
+        interaction.extendSelection(by: -1)
+        interaction.extendSelection(by: -1)
+        XCTAssertEqual(interaction.selectedIDs, [first.id])
+
+        interaction.selectSingle(third.id)
+        interaction.extendSelection(by: -1)
+        XCTAssertEqual(interaction.selectedIDs, [second.id, third.id])
+        XCTAssertEqual(interaction.primarySelectedID, second.id)
+        XCTAssertEqual(interaction.selectionAnchorID, third.id)
+    }
+
+    func testShelfAndSidePanelRouteShiftArrowToRangeSelection() throws {
+        for path in [
+            "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
+            "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
+        ] {
+            let source = try sourceFileContents(path)
+            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
+            XCTAssertTrue(source.contains("extendSelection("))
+        }
+    }
+
     func testShelfTreatsPopoverWindowsAsAuxiliaryPreviewWindows() {
         XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("NSPopoverWindow"))
         XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("_TtC7SwiftUI19PlatformPopoverHost"))

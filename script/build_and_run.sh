@@ -229,6 +229,8 @@ run_coordinated_install_gate_tests() {
   mode_installs_app || return 0
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
+  run_required_test_filter PasteBuddyAppRuntimeTests/testShelfShiftSelectionExtendsFromTheExistingAnchor
+  run_required_test_filter PasteBuddyAppRuntimeTests/testShelfAndSidePanelRouteShiftArrowToRangeSelection
   run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection
   run_required_test_filter CopyConfirmationFeedbackTests
   run_required_test_filter PasteboardWriterTests/testCopyReportsPasteboardWriteSuccess

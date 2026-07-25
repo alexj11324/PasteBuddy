@@ -532,6 +532,19 @@ struct ClipboardSidePanelView: View {
             }
         }
 
+        if modifiers == .shift, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow, .leftArrow:
+                interaction.extendSelection(by: -1)
+                return .handled
+            case .downArrow, .rightArrow:
+                interaction.extendSelection(by: 1)
+                return .handled
+            default:
+                break
+            }
+        }
+
         if keyPress.key == .return {
             if modifiers.isEmpty {
                 pasteSelected(format: store.defaultPasteFormat)
