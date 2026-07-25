@@ -28,7 +28,8 @@ STABLE_DEVELOPMENT_BUNDLE="/Applications/PasteBuddy Dev.app"
 SOURCE_BRANCH="$(/usr/bin/git -C "$ROOT_DIR" symbolic-ref --short -q HEAD || true)"
 SOURCE_COMMIT="$(/usr/bin/git -C "$ROOT_DIR" rev-parse HEAD)"
 DIST_DIR="$ROOT_DIR/dist"
-STAGE_ROOT="${PASTEBUDDY_STAGE_ROOT:-/private/tmp/pastebuddy-build}"
+DEFAULT_STAGE_ROOT="/private/tmp/pastebuddy-build-$SOURCE_COMMIT-$$"
+STAGE_ROOT="${PASTEBUDDY_STAGE_ROOT:-$DEFAULT_STAGE_ROOT}"
 APP_BUNDLE="$STAGE_ROOT/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
@@ -37,7 +38,8 @@ APP_BINARY="$APP_MACOS/$EXECUTABLE_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Support/AppIcon.icns"
 APP_ICON_NAME="AppIcon.icns"
-INSTALL_BUNDLE="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
+INSTALL_BUNDLE_RAW="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
+INSTALL_BUNDLE="$(cd "$(dirname "$INSTALL_BUNDLE_RAW")" && pwd -P)/$(basename "$INSTALL_BUNDLE_RAW")"
 PACKAGE_ZIP="$DIST_DIR/$APP_NAME-installable.zip"
 SENTRY_KEYCHAIN_SERVICE="${PASTEBUDDY_SENTRY_KEYCHAIN_SERVICE:-PasteBuddy Sentry DSN}"
 SENTRY_KEYCHAIN_ACCOUNT="${PASTEBUDDY_SENTRY_KEYCHAIN_ACCOUNT:-$BUNDLE_ID}"
@@ -219,6 +221,8 @@ assert_coordinated_install_source() {
     || die "Refusing to overwrite $STABLE_DEVELOPMENT_BUNDLE from '$SOURCE_BRANCH'. Use $INTEGRATION_BRANCH."
   [[ -z "$(/usr/bin/git -C "$ROOT_DIR" status --porcelain --untracked-files=normal)" ]] \
     || die "Refusing to install an uncommitted source state into $STABLE_DEVELOPMENT_BUNDLE."
+  [[ "$STAGE_ROOT" == "$DEFAULT_STAGE_ROOT" ]] \
+    || die "Refusing shared or caller-controlled staging for $STABLE_DEVELOPMENT_BUNDLE."
 }
 
 running_pids_for_bundle_id() {
@@ -373,6 +377,11 @@ package_app() {
 }
 
 install_app() {
+  assert_coordinated_install_source
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceBranch' "$INFO_PLIST")" == "$SOURCE_BRANCH" ]] \
+    || die "Staged app source branch does not match the coordinated source."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceCommit' "$INFO_PLIST")" == "$(/usr/bin/git -C "$ROOT_DIR" rev-parse HEAD)" ]] \
+    || die "Staged app source commit does not match the current coordinated HEAD."
   kill_existing_app
   assert_safe_bundle_path "$INSTALL_BUNDLE"
   if [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" && -d "$INSTALL_BUNDLE" ]]; then

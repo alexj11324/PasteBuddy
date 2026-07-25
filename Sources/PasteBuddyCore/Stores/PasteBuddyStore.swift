@@ -50,9 +50,9 @@ public final class PasteBuddyStore {
     public private(set) var queryRevision: Int
     public private(set) var repositorySyncedDataRevision: Int?
 
-    private var diskStore: EncryptedSnapshotStore
+    private var diskStore: EncryptedSnapshotStore?
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
-    @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor
+    @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor?
     @ObservationIgnored private let clipboardRepository: ClipboardItemRepository?
     @ObservationIgnored private let repositorySyncActor: ClipboardRepositorySyncActor?
     @ObservationIgnored private let defaultPersistenceInitializationErrorMessage: String?
@@ -98,7 +98,7 @@ public final class PasteBuddyStore {
     ) {
         let usesDefaultDiskStore = diskStore == nil
         var defaultPersistenceInitializationErrorMessage: String?
-        let resolvedDiskStore: EncryptedSnapshotStore
+        let resolvedDiskStore: EncryptedSnapshotStore?
         if let diskStore {
             resolvedDiskStore = diskStore
         } else {
@@ -106,12 +106,7 @@ public final class PasteBuddyStore {
                 resolvedDiskStore = try EncryptedSnapshotStore.defaultStore(storageMode: .standard)
             } catch {
                 defaultPersistenceInitializationErrorMessage = error.localizedDescription
-                resolvedDiskStore = EncryptedSnapshotStore(
-                    fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
-                        .appendingPathComponent("PasteBuddy")
-                        .appendingPathComponent("clipboard.pbstore"),
-                    storageMode: .standard
-                )
+                resolvedDiskStore = nil
             }
         }
         let resolvedClipboardRepository: ClipboardItemRepository?
@@ -130,10 +125,10 @@ public final class PasteBuddyStore {
             resolvedClipboardRepository = nil
         }
         var initialSnapshot = PasteBuddySnapshot()
-        initialSnapshot.security.storageMode = resolvedDiskStore.storageMode
+        initialSnapshot.security.storageMode = resolvedDiskStore?.storageMode ?? .standard
         self.diskStore = resolvedDiskStore
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
-        self.persistenceActor = SnapshotPersistenceActor(diskStore: resolvedDiskStore)
+        self.persistenceActor = resolvedDiskStore.map(SnapshotPersistenceActor.init(diskStore:))
         self.clipboardRepository = resolvedClipboardRepository
         self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
         self.defaultPersistenceInitializationErrorMessage = defaultPersistenceInitializationErrorMessage
@@ -166,6 +161,7 @@ public final class PasteBuddyStore {
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
             return
         }
+        guard let diskStore else { return }
         do {
             let repositoryHasStoredSnapshot = try clipboardRepository?.hasStoredSnapshot() == true
             var loadedSnapshot = if repositoryHasStoredSnapshot, let clipboardRepository {
@@ -208,6 +204,7 @@ public final class PasteBuddyStore {
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
             return
         }
+        guard let persistenceActor else { return }
         do {
             let repositoryHasStoredSnapshot = try await repositorySyncActor?.hasStoredSnapshot() == true
             let result: SnapshotPersistenceLoadResult
@@ -232,9 +229,9 @@ public final class PasteBuddyStore {
             snapshot = loadedSnapshot
             if let loadedStorageMode = result.loadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
-                diskStore.storageMode = loadedStorageMode
+                diskStore?.storageMode = loadedStorageMode
             } else {
-                diskStore.storageMode = snapshot.security.storageMode
+                diskStore?.storageMode = snapshot.security.storageMode
             }
             if snapshot.security.requiresBiometricUnlock {
                 lockHistory()
@@ -272,6 +269,11 @@ public final class PasteBuddyStore {
     }
 
     public func flushPendingSave() async {
+        guard defaultPersistenceInitializationErrorMessage == nil,
+              let persistenceActor else {
+            lastErrorMessage = defaultPersistenceInitializationErrorMessage
+            return
+        }
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         let snapshotToSave = snapshot
@@ -286,13 +288,18 @@ public final class PasteBuddyStore {
                 presentationCache = PasteBuddyPresentationCache()
             }
             try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
-            diskStore.storageMode = snapshotToSave.security.storageMode
+            diskStore?.storageMode = snapshotToSave.security.storageMode
         } catch {
             lastErrorMessage = error.localizedDescription
         }
     }
 
     private func saveImmediately() {
+        guard defaultPersistenceInitializationErrorMessage == nil,
+              let diskStore else {
+            lastErrorMessage = defaultPersistenceInitializationErrorMessage
+            return
+        }
         let snapshotToSave = snapshot
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
         let snapshotToPersist = Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
@@ -306,6 +313,11 @@ public final class PasteBuddyStore {
     }
 
     private func scheduleSave(delayNanoseconds: UInt64) {
+        guard defaultPersistenceInitializationErrorMessage == nil,
+              let persistenceActor else {
+            lastErrorMessage = defaultPersistenceInitializationErrorMessage
+            return
+        }
         let snapshotToSave = snapshot
         let dataRevisionToSync = dataRevision
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
@@ -336,7 +348,7 @@ public final class PasteBuddyStore {
                     self.repositorySyncedDataRevision = dataRevisionToSync
                     self.presentationCache = PasteBuddyPresentationCache()
                     self.pendingSaveTask = nil
-                    self.diskStore.storageMode = snapshotToSave.security.storageMode
+                    self.diskStore?.storageMode = snapshotToSave.security.storageMode
                     self.lastErrorMessage = nil
                 }
             } catch {
@@ -1761,7 +1773,7 @@ public final class PasteBuddyStore {
 
     public func setHistoryEncryptionEnabled(_ isEnabled: Bool) {
         snapshot.security.storageMode = isEnabled ? .encrypted : .standard
-        diskStore.storageMode = snapshot.security.storageMode
+        diskStore?.storageMode = snapshot.security.storageMode
         save()
     }
 
