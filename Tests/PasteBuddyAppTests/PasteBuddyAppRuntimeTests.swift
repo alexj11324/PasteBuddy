@@ -1016,7 +1016,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testStorageConfigurationDropsLegacyCountCapWithoutChangingAgePolicy"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testRepositoryPagingUsesUniqueTieBreakerForEqualTimestamps"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyStoreTests/testInMemoryStoreDoesNotTruncateHistoryAtRepositoryPageSize"))
-        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testPanelTimestampUsesExplicitLocalizedDateAndTimeForEveryYear"))
+        XCTAssertTrue(source.contains("run_required_test_filter HistoryCardTimestampFormatterTests"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testNativeCopyCommand"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testDirectPaste"))
         XCTAssertTrue(source.contains("Required integration test filter matched no XCTest cases"))
@@ -1549,87 +1549,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste"))
         XCTAssertTrue(controllerSource.contains("ClipboardPanelPasteCommandRouter.forwardNativePaste"))
         XCTAssertTrue(controllerSource.contains("NotificationCenter.default.post(name: .pasteBuddyPastePanelSelection"))
-    }
-
-    func testPanelTimestampUsesExplicitLocalizedDateAndTimeForEveryYear() throws {
-        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
-        let calendar = Calendar(identifier: .gregorian)
-        let olderDate = try XCTUnwrap(
-            calendar.date(from: DateComponents(
-                timeZone: timeZone,
-                year: 2024,
-                month: 1,
-                day: 2,
-                hour: 19,
-                minute: 42
-            ))
-        )
-        let recentDate = try XCTUnwrap(
-            calendar.date(from: DateComponents(
-                timeZone: timeZone,
-                year: 2026,
-                month: 7,
-                day: 25,
-                hour: 9,
-                minute: 5
-            ))
-        )
-        let english = Locale(identifier: "en_US")
-        let german = Locale(identifier: "de_DE")
-        var expectedStyle = Date.FormatStyle.dateTime
-            .year()
-            .month(.abbreviated)
-            .day()
-            .hour()
-            .minute()
-        expectedStyle.locale = english
-        expectedStyle.timeZone = timeZone
-
-        XCTAssertEqual(
-            ClipboardItemTimestampFormatter.string(
-                for: olderDate,
-                locale: english,
-                timeZone: timeZone
-            ),
-            olderDate.formatted(expectedStyle)
-        )
-        XCTAssertTrue(
-            ClipboardItemTimestampFormatter.string(
-                for: olderDate,
-                locale: english,
-                timeZone: timeZone
-            ).contains("2024")
-        )
-        XCTAssertTrue(
-            ClipboardItemTimestampFormatter.string(
-                for: recentDate,
-                locale: english,
-                timeZone: timeZone
-            ).contains("2026")
-        )
-        XCTAssertNotEqual(
-            ClipboardItemTimestampFormatter.string(
-                for: olderDate,
-                locale: english,
-                timeZone: timeZone
-            ),
-            ClipboardItemTimestampFormatter.string(
-                for: olderDate,
-                locale: german,
-                timeZone: timeZone
-            )
-        )
-    }
-
-    func testShelfAndSidePanelShareTimestampFormatterAndAccessibilityValue() throws {
-        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
-
-        for source in [shelfSource, sideSource] {
-            XCTAssertTrue(source.contains("ClipboardItemTimestampFormatter.string(for: item.createdAt)"))
-            XCTAssertTrue(source.contains(".accessibilityLabel(timestamp)"))
-            XCTAssertFalse(source.contains("formatted(date: .omitted, time: .shortened)"))
-        }
     }
 
     func testSwiftUIShelfCollectionUsesSwiftUIPopover() throws {

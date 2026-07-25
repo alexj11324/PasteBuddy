@@ -2,6 +2,15 @@ import AppKit
 import PasteBuddyCore
 import SwiftUI
 
+enum ClipboardSidePanelTimestampAdapter {
+    static func presentation(
+        for capturedAt: Date,
+        formatter: HistoryCardTimestampFormatter
+    ) -> HistoryCardTimestampFormatter.Presentation {
+        formatter.presentation(for: capturedAt)
+    }
+}
+
 private enum ClipboardSidePanelMetrics {
     static let rowHeight: CGFloat = 82
     static let thumbnailSize: CGFloat = 42
@@ -36,6 +45,7 @@ struct ClipboardSidePanelView: View {
     @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardSidePanelQueryState>()
     @State private var interaction = ShelfInteractionModel()
     @State private var pinnedState: Bool?
+    @State private var timestampReference = Date()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -94,6 +104,11 @@ struct ClipboardSidePanelView: View {
         }
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
+        }
+        .task {
+            await HistoryCardTimestampTicker.run {
+                timestampReference = $0
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
@@ -284,6 +299,7 @@ struct ClipboardSidePanelView: View {
                             item: item,
                             imageDataProvider: store.imageData,
                             isSelected: isSelected,
+                            timestampReference: timestampReference,
                             onPaste: { format in
                                 pasteItem(item, format: format)
                             },
@@ -698,6 +714,7 @@ private struct ClipboardSidePanelListRow: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let isSelected: Bool
+    let timestampReference: Date
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
@@ -705,6 +722,14 @@ private struct ClipboardSidePanelListRow: View {
     let pinboards: [Pinboard]
 
     var body: some View {
+        let formatter = HistoryCardTimestampFormatter(
+            now: { timestampReference }
+        )
+        let timestamp = ClipboardSidePanelTimestampAdapter.presentation(
+            for: item.createdAt,
+            formatter: formatter
+        )
+
         HStack(spacing: 12) {
             SourceApplicationIconBadge(item: item, size: ClipboardSidePanelMetrics.thumbnailSize)
                 .frame(width: ClipboardSidePanelMetrics.thumbnailSize, height: ClipboardSidePanelMetrics.thumbnailSize)
@@ -713,12 +738,12 @@ private struct ClipboardSidePanelListRow: View {
 
             Spacer(minLength: 8)
 
-            Text(timestamp)
+            Text(timestamp.visibleText)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-                .accessibilityLabel(timestamp)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .layoutPriority(1)
 
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 16, weight: .medium))
@@ -767,13 +792,10 @@ private struct ClipboardSidePanelListRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-side-panel-row-\(item.id.uuidString)")
-        .accessibilityLabel("\(item.title), \(timestamp)")
+        .accessibilityLabel("\(item.title), \(timestamp.accessibilityText)")
         .accessibilityValue(NSLocalizedString(isSelected ? "state.selected" : "label.not_selected", comment: ""))
     }
 
-    private var timestamp: String {
-        ClipboardItemTimestampFormatter.string(for: item.createdAt)
-    }
 }
 
 private struct ClipboardSidePanelContentPreview: View {

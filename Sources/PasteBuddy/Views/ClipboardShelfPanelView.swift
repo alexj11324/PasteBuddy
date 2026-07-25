@@ -5,6 +5,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VisionKit
 
+enum ClipboardShelfTimestampAdapter {
+    static func presentation(
+        for capturedAt: Date,
+        formatter: HistoryCardTimestampFormatter
+    ) -> HistoryCardTimestampFormatter.Presentation {
+        formatter.presentation(for: capturedAt)
+    }
+}
+
 private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
     static let cardHeight: CGFloat = 240
@@ -91,6 +100,7 @@ struct ClipboardShelfPanelView: View {
     @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardShelfQueryState>()
     @State private var shelfInteraction = ShelfInteractionModel()
     @State private var isSearchRailPresented = false
+    @State private var timestampReference = Date()
     @State private var shelfScope: PasteScope = .history
 
     var body: some View {
@@ -151,6 +161,11 @@ struct ClipboardShelfPanelView: View {
         }
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
+        }
+        .task {
+            await HistoryCardTimestampTicker.run {
+                timestampReference = $0
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
@@ -627,6 +642,7 @@ struct ClipboardShelfPanelView: View {
                         await store.enrichLinkPreviewMetadataIfNeeded(for: item)
                     },
                     isSelected: isSelected,
+                    timestampReference: timestampReference,
                     defaultPasteFormat: defaultPasteFormat,
                     pinboards: pinboards,
                     onPaste: { format in
@@ -981,7 +997,6 @@ struct ClipboardShelfPanelView: View {
             storePrimarySelectedID: store.selectedItemID
         )
     }
-
 }
 
 private struct LaunchAtLoginShelfCard: View {
@@ -1245,6 +1260,7 @@ private struct ClipboardShelfCard: View {
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
+    let timestampReference: Date
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
     let onPaste: (PasteFormat) -> Void
@@ -1253,10 +1269,19 @@ private struct ClipboardShelfCard: View {
     let onDelete: () -> Void
 
     var body: some View {
+        let formatter = HistoryCardTimestampFormatter(
+            now: { timestampReference }
+        )
+        let timestamp = ClipboardShelfTimestampAdapter.presentation(
+            for: item.createdAt,
+            formatter: formatter
+        )
+
         ClipboardShelfCardVisual(
             item: item,
             imageDataProvider: imageDataProvider,
-            linkMetadataProvider: linkMetadataProvider
+            linkMetadataProvider: linkMetadataProvider,
+            timestamp: timestamp
         )
             .equatable()
             .overlay {
@@ -1267,7 +1292,9 @@ private struct ClipboardShelfCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
-        .accessibilityLabel("\(item.title), \(localized(item.presentationContentType.displayName)), \(timestamp)")
+        .accessibilityLabel(
+            "\(item.title), \(localized(item.presentationContentType.displayName)), \(timestamp.accessibilityText)"
+        )
         .accessibilityValue(localized(isSelected ? "state.selected" : "label.not_selected"))
         .accessibilityHint(localized("message.press_space_to_preview_press_return_to"))
     }
@@ -1310,9 +1337,6 @@ private struct ClipboardShelfCard: View {
         NSLocalizedString(key, comment: "")
     }
 
-    private var timestamp: String {
-        ClipboardItemTimestampFormatter.string(for: item.createdAt)
-    }
 }
 
 struct ShelfExpandedPreview: View {
@@ -1679,17 +1703,23 @@ private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
+    let timestamp: HistoryCardTimestampFormatter.Presentation
     private let renderSignature: ClipboardShelfCardRenderSignature
 
     init(
         item: ClipboardItem,
         imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?,
-        linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void
+        linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void,
+        timestamp: HistoryCardTimestampFormatter.Presentation
     ) {
         self.item = item
         self.imageDataProvider = imageDataProvider
         self.linkMetadataProvider = linkMetadataProvider
-        self.renderSignature = ClipboardShelfCardRenderSignature(item: item)
+        self.timestamp = timestamp
+        self.renderSignature = ClipboardShelfCardRenderSignature(
+            item: item,
+            timestamp: timestamp
+        )
     }
 
     private var cardTint: Color {
@@ -1702,12 +1732,11 @@ private struct ClipboardShelfCardVisual: View {
                 Text(localized(item.presentationContentType.displayName))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
-                Text(timestamp)
+                Text(timestamp.visibleText)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .accessibilityLabel(timestamp)
+                    .minimumScaleFactor(0.8)
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
@@ -1767,14 +1796,9 @@ private struct ClipboardShelfCardVisual: View {
         }
     }
 
-    private var timestamp: String {
-        ClipboardItemTimestampFormatter.string(for: item.createdAt)
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
-
 }
 
 extension ClipboardShelfCardVisual: Equatable {
@@ -1811,8 +1835,9 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let rtfAssetID: String?
     let imageAssetID: String?
     let imageByteCount: Int?
+    let timestamp: HistoryCardTimestampFormatter.Presentation
 
-    init(item: ClipboardItem) {
+    init(item: ClipboardItem, timestamp: HistoryCardTimestampFormatter.Presentation) {
         id = item.id
         createdAt = item.createdAt
         updatedAt = item.updatedAt
@@ -1826,6 +1851,7 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         rtfAssetID = item.payload.rtfAssetID
         imageAssetID = item.payload.imageAssetID
         imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
+        self.timestamp = timestamp
     }
 }
 
