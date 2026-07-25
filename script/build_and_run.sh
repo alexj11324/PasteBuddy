@@ -50,6 +50,73 @@ die() {
   exit 1
 }
 
+running_pids_for_bundle_id() {
+  local pid details
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    details="$(/usr/bin/lsappinfo info -only bundleID -app "$pid" 2>/dev/null || true)"
+    [[ "$details" == *"bundleID=\"$BUNDLE_ID\""* ]] && printf '%s\n' "$pid"
+  done < <(pgrep -x "$EXECUTABLE_NAME" 2>/dev/null || true)
+}
+
+wait_for_single_installed_app() {
+  local binary="$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
+  local pids=()
+  local pid command
+  for _ in {1..20}; do
+    pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(running_pids_for_bundle_id)
+    if [[ ${#pids[@]} -eq 1 ]]; then
+      command="$(/bin/ps -p "${pids[0]}" -o command= 2>/dev/null || true)"
+      command="${command#"${command%%[![:space:]]*}"}"
+      [[ "$command" == "$binary" ]] || die "Running $APP_NAME instance is not the stable installed app: $command"
+      printf 'runningInstanceCount=1 pid=%s bundlePath=%s\n' "${pids[0]}" "$INSTALL_BUNDLE"
+      return 0
+    fi
+    [[ ${#pids[@]} -lt 2 ]] || die "Expected one running $APP_NAME instance; found ${#pids[@]}."
+    sleep 0.5
+  done
+  die "$APP_NAME did not appear as one stable installed process after launch."
+}
+
+open_development_panel() {
+  [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]] \
+    || die "The development panel control is available only for com.alexjiang.PasteBuddy.dev."
+  [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] \
+    || die "The development panel control may target only $STABLE_DEVELOPMENT_BUNDLE."
+  [[ "$SOURCE_BRANCH" == "$INTEGRATION_BRANCH" ]] \
+    || die "The development panel control must run from $INTEGRATION_BRANCH."
+  local panel="${2:-}"
+  local installed_info_plist="$STABLE_DEVELOPMENT_BUNDLE/Contents/Info.plist"
+  case "$panel" in
+    shelf|side-panel)
+      ;;
+    *)
+      die "usage: $0 --open-panel [shelf|side-panel]"
+      ;;
+  esac
+  [[ -f "$installed_info_plist" ]] || die "Stable development app is not installed: $STABLE_DEVELOPMENT_BUNDLE"
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$installed_info_plist" 2>/dev/null || true)" == "$BUNDLE_ID" ]] \
+    || die "Stable development app has the wrong bundle identity."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceBranch' "$installed_info_plist" 2>/dev/null || true)" == "$INTEGRATION_BRANCH" ]] \
+    || die "Stable development app was not delivered from $INTEGRATION_BRANCH."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceCommit' "$installed_info_plist" 2>/dev/null || true)" == "$SOURCE_COMMIT" ]] \
+    || die "Stable development app does not match the current integrated commit; install it through --verify first."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$installed_info_plist" 2>/dev/null || true)" == "pastebuddy-dev" ]] \
+    || die "Stable development app does not expose the development panel URL."
+  /usr/bin/open -a "$STABLE_DEVELOPMENT_BUNDLE" "pastebuddy-dev://panel/$panel"
+  wait_for_single_installed_app
+}
+
+case "$MODE" in
+  --open-panel|open-panel)
+    open_development_panel "$@"
+    exit 0
+    ;;
+esac
+
 is_adhoc_sign_identity() {
   local identity="$1"
   local normalized
@@ -228,6 +295,7 @@ assert_coordinated_install_source() {
 run_coordinated_install_gate_tests() {
   mode_installs_app || return 0
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
+  run_required_test_filter PasteBuddyAppRuntimeTests/testDevelopmentPanel
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfShiftSelectionExtendsFromTheExistingAnchor
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfAndSidePanelRouteShiftArrowToRangeSelection
@@ -272,15 +340,6 @@ run_required_test_filter() {
   /usr/bin/grep -Eq 'Executed [1-9][0-9]* tests?' "$output" \
     || die "Required integration test filter matched no XCTest cases: $filter"
   rm -f "$output"
-}
-
-running_pids_for_bundle_id() {
-  local pid details
-  while IFS= read -r pid; do
-    [[ -n "$pid" ]] || continue
-    details="$(/usr/bin/lsappinfo info -only bundleID -app "$pid" 2>/dev/null || true)"
-    [[ "$details" == *"bundleID=\"$BUNDLE_ID\""* ]] && printf '%s\n' "$pid"
-  done < <(pgrep -x "$EXECUTABLE_NAME" 2>/dev/null || true)
 }
 
 kill_existing_app() {
@@ -373,6 +432,11 @@ fi
 if [[ -n "$CONFIGURED_SENTRY_ENVIRONMENT" ]]; then
   /usr/bin/plutil -insert PasteBuddySentryEnvironment -string "$CONFIGURED_SENTRY_ENVIRONMENT" "$INFO_PLIST"
 fi
+if [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]]; then
+  /usr/bin/plutil -insert CFBundleURLTypes -json \
+    '[{"CFBundleURLName":"com.alexjiang.PasteBuddy.dev.panel","CFBundleURLSchemes":["pastebuddy-dev"]}]' \
+    "$INFO_PLIST"
+fi
 
 assert_safe_bundle_path() {
   local bundle="$1"
@@ -453,28 +517,6 @@ open_app() {
   wait_for_single_installed_app
 }
 
-wait_for_single_installed_app() {
-  local binary="$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
-  local pids=()
-  local pid command
-  for _ in {1..20}; do
-    pids=()
-    while IFS= read -r pid; do
-      [[ -n "$pid" ]] && pids+=("$pid")
-    done < <(running_pids_for_bundle_id)
-    if [[ ${#pids[@]} -eq 1 ]]; then
-      command="$(/bin/ps -p "${pids[0]}" -o command= 2>/dev/null || true)"
-      command="${command#"${command%%[![:space:]]*}"}"
-      [[ "$command" == "$binary" ]] || die "Running $APP_NAME instance is not the stable installed app: $command"
-      printf 'runningInstanceCount=1 pid=%s bundlePath=%s\n' "${pids[0]}" "$INSTALL_BUNDLE"
-      return 0
-    fi
-    [[ ${#pids[@]} -lt 2 ]] || die "Expected one running $APP_NAME instance; found ${#pids[@]}."
-    sleep 0.5
-  done
-  die "$APP_NAME did not appear as one stable installed process after launch."
-}
-
 print_runtime_diagnostics() {
   local binary="$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
   [[ -x "$binary" ]] || die "Runtime diagnostics binary is missing: $binary"
@@ -524,7 +566,7 @@ case "$MODE" in
     package_app "$INSTALL_BUNDLE"
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package|--open-panel [shelf|side-panel]]" >&2
     exit 2
     ;;
 esac

@@ -10,9 +10,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             startRuntimeIfReady()
         }
     }
+    var handleDevelopmentURL: ((URL) -> Void)? {
+        didSet {
+            guard let handleDevelopmentURL else { return }
+            pendingDevelopmentURLs.forEach(handleDevelopmentURL)
+            pendingDevelopmentURLs.removeAll()
+        }
+    }
     var flushPendingSave: (() async -> Void)?
     private var didFinishLaunching = false
     private var didRequestRuntimeStart = false
+    private var pendingDevelopmentURLs: [URL] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -26,6 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         flag
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let handleDevelopmentURL else {
+            pendingDevelopmentURLs.append(contentsOf: urls)
+            return
+        }
+        urls.forEach(handleDevelopmentURL)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -80,6 +96,17 @@ struct PasteBuddyApp: App {
         appDelegate.startRuntime = {
             Task { @MainActor in
                 await startRuntimeIfNeeded()
+            }
+        }
+        appDelegate.handleDevelopmentURL = { url in
+            guard let command = PasteBuddyDevelopmentCommand(
+                url: url,
+                bundleIdentifier: Bundle.main.bundleIdentifier
+            ) else {
+                return
+            }
+            Task { @MainActor in
+                await showClipboardPanel(command.displayMode)
             }
         }
     }
@@ -463,6 +490,33 @@ struct PasteBuddyApp: App {
         print("sentryConfigured=\(sentryConfiguration != nil)")
         print("sentryEnvironment=\(sentryConfiguration?.environment ?? "not-configured")")
         Darwin.exit(EXIT_SUCCESS)
+    }
+}
+
+enum PasteBuddyDevelopmentCommand: Equatable {
+    case openPanel(ClipboardPanelDisplayMode)
+
+    init?(url: URL, bundleIdentifier: String?) {
+        guard bundleIdentifier == "com.alexjiang.PasteBuddy.dev",
+              url.scheme == "pastebuddy-dev",
+              url.host == "panel" else {
+            return nil
+        }
+        switch url.path {
+        case "/shelf":
+            self = .openPanel(.shelf)
+        case "/side-panel":
+            self = .openPanel(.sidePanel)
+        default:
+            return nil
+        }
+    }
+
+    var displayMode: ClipboardPanelDisplayMode {
+        switch self {
+        case let .openPanel(displayMode):
+            displayMode
+        }
     }
 }
 

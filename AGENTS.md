@@ -69,6 +69,7 @@
 - IMPORTANT: `/Applications/PasteBuddy Dev.app` 只能由干净的 `codex/integrated-delivery` 分支通过 `script/build_and_run.sh` 安装；安装包必须记录 source branch/commit，安装后保持 user immutable，其他 worktree 禁止解除保护或覆盖。
 - IMPORTANT: isolated worktree 只允许运行 build/test。需要运行时基线时必须使用独立临时 bundle id、独立数据目录且不得启动第二个菜单栏实例；禁止把对照构建安装为 `PasteBuddy Dev.app`。
 - IMPORTANT: stable install 验收必须同时证明：恰好一个 `.dev` 进程来自 `/Applications/PasteBuddy Dev.app`、只打开 `Application Support/PasteBuddy Dev/clipboard.sqlite`、权威历史跨 relaunch 保留，且 Info.plist source commit 是当前交付 HEAD。
+- IMPORTANT: 开发版 Shelf / Side Panel 的自动化入口统一使用 `script/build_and_run.sh --open-panel shelf|side-panel`；该命令只能通过 `pastebuddy-dev://panel/...` 唤醒已安装的 `com.alexjiang.PasteBuddy.dev` 单实例并复用现有 `showClipboardPanel` 路径，禁止构建、安装、启动第二个常驻实例或注册到生产 bundle。
 - IMPORTANT: standard storage 下，含 snapshot metadata 的 SQLite 是 history 读取权威；开发 bundle 的 pbstore/SQLite 必须同在 `PasteBuddy Dev`，初始化失败必须可见并 fail closed，禁止回退 `/tmp`、生产目录或 stale snapshot。
 - IMPORTANT: link preview title、image asset ID 与 SQLite indexed asset reference 必须由同一次 store/repository save 提交；UI 只从共享 store/repository hydration 读取，禁止 surface 自建第二份 metadata cache。
 - IMPORTANT: accessory app 必须在任何 history/database `await` 之前创建 status item；生命周期回归必须验证调用顺序和稳定安装后的存活。

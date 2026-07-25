@@ -17,6 +17,72 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testDevelopmentPanelCommandAcceptsOnlyTheDevShelfAndSidePanelURLs() throws {
+        let shelf = try XCTUnwrap(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://panel/shelf")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        let sidePanel = try XCTUnwrap(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://panel/side-panel")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+
+        XCTAssertEqual(shelf.displayMode.rawValue, ClipboardPanelDisplayMode.shelf.rawValue)
+        XCTAssertEqual(sidePanel.displayMode.rawValue, ClipboardPanelDisplayMode.sidePanel.rawValue)
+        XCTAssertNil(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://panel/shelf")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy"
+        ))
+        XCTAssertNil(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://panel/unknown")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        XCTAssertNil(PasteBuddyDevelopmentCommand(
+            url: URL(string: "https://panel/shelf")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+    }
+
+    func testDevelopmentPanelURLWaitsForTheAppDelegateHandler() {
+        let delegate = AppDelegate()
+        let url = URL(string: "pastebuddy-dev://panel/shelf")!
+        var handledURLs: [URL] = []
+
+        delegate.application(NSApplication.shared, open: [url])
+        XCTAssertTrue(handledURLs.isEmpty)
+
+        delegate.handleDevelopmentURL = { handledURLs.append($0) }
+        XCTAssertEqual(handledURLs, [url])
+    }
+
+    func testDevelopmentPanelCLIReusesTheInstalledDevAppWithoutBuildingOrInstalling() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let buildScript = try sourceFileContents("script/build_and_run.sh")
+        let openMode = try XCTUnwrap(buildScript.range(of: "--open-panel|open-panel)"))
+        let signingSetup = try XCTUnwrap(buildScript.range(of: "CODESIGN_KEYCHAIN=\"$(resolve_code_sign_keychain)\""))
+        let build = try XCTUnwrap(buildScript.range(of: "swift build"))
+
+        XCTAssertLessThan(openMode.lowerBound, signingSetup.lowerBound)
+        XCTAssertLessThan(openMode.lowerBound, build.lowerBound)
+        XCTAssertTrue(buildScript.contains(
+            "/usr/bin/open -a \"$STABLE_DEVELOPMENT_BUNDLE\" \"pastebuddy-dev://panel/$panel\""
+        ))
+        XCTAssertTrue(buildScript.contains("wait_for_single_installed_app"))
+        XCTAssertTrue(buildScript.contains("PasteBuddySourceBranch"))
+        XCTAssertTrue(buildScript.contains("PasteBuddySourceCommit"))
+        XCTAssertTrue(buildScript.contains(
+            "The development panel control may target only $STABLE_DEVELOPMENT_BUNDLE."
+        ))
+        XCTAssertTrue(buildScript.contains("Stable development app does not match the current integrated commit"))
+        XCTAssertTrue(buildScript.contains("shelf|side-panel)"))
+        XCTAssertTrue(buildScript.contains("CFBundleURLTypes"))
+        XCTAssertTrue(buildScript.contains("\"CFBundleURLSchemes\":[\"pastebuddy-dev\"]"))
+        XCTAssertFalse(buildScript.contains("/usr/bin/open \"pastebuddy-dev://panel/$panel\""))
+        XCTAssertFalse(buildScript.contains("/usr/bin/open -n \"pastebuddy-dev://panel/$panel\""))
+        XCTAssertTrue(appSource.contains("func application(_ application: NSApplication, open urls: [URL])"))
+        XCTAssertTrue(appSource.contains("showClipboardPanel(command.displayMode)"))
+    }
+
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
