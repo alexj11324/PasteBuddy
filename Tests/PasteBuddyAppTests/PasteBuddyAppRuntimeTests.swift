@@ -842,6 +842,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("lsappinfo info -only bundleID"))
         XCTAssertTrue(source.contains("runningInstanceCount=1"))
         XCTAssertTrue(source.contains("/usr/bin/chflags uchg"))
+        XCTAssertTrue(source.contains("run_coordinated_install_gate_tests"))
+        XCTAssertTrue(source.contains("swift test --filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes"))
+        XCTAssertTrue(source.contains("swift test --filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection"))
+        XCTAssertTrue(source.contains("swift test --filter PasteboardWriterTests/testNativeCopyCommand"))
+        XCTAssertTrue(source.contains("swift test --filter PasteboardWriterTests/testDirectPaste"))
         XCTAssertFalse(source.contains("/usr/bin/open -n"))
     }
 
@@ -1252,6 +1257,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
+        let agents = try sourceFileContents("AGENTS.md")
         let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
@@ -1271,6 +1277,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertLessThan(select.lowerBound, popover.lowerBound)
         XCTAssertFalse(itemSource.contains(".onTapGesture {"))
         XCTAssertFalse(itemSource.contains(".exclusively(before: TapGesture())"))
+        XCTAssertTrue(agents.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
     }
 
     func testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection() throws {

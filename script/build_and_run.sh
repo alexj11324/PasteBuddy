@@ -225,6 +225,15 @@ assert_coordinated_install_source() {
     || die "Refusing shared or caller-controlled staging for $STABLE_DEVELOPMENT_BUNDLE."
 }
 
+run_coordinated_install_gate_tests() {
+  mode_installs_app || return 0
+  [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
+  swift test --filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
+  swift test --filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection
+  swift test --filter PasteboardWriterTests/testNativeCopyCommand
+  swift test --filter PasteboardWriterTests/testDirectPaste
+}
+
 running_pids_for_bundle_id() {
   local pid details
   while IFS= read -r pid; do
@@ -257,6 +266,7 @@ kill_existing_app() {
 }
 
 assert_coordinated_install_source
+run_coordinated_install_gate_tests
 
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
