@@ -40,6 +40,7 @@
 - IMPORTANT: 如果确实需要把 Shelf 操作同步到全局 store，只能在明确的用户动作后同步（例如选择/复制/粘贴/删除），并确认不会把一次 chip 点击扩散成两轮 refresh 或完整 History 重算。
 - IMPORTANT: 修复 Shelf 卡顿时必须优先排查全局状态副作用、`queryRevision` bump、`selectedItemsInDisplayOrder`、`mainListItemsSnapshot` 和命令菜单 disabled 计算，不要只盯着 Shelf card 动画或 collection reload。
 - IMPORTANT: 为这类修复添加正式回归测试，验证 scoped 查询/快捷键不会 mutate `selectedScope` 或 bump 不必要的 `queryRevision`；不要只靠手动点击感觉判断。
+- IMPORTANT: Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴；单击识别必须与双击识别并行，禁止重新使用会等待双击判定后才触发 selection 的互斥或成对 `.onTapGesture`。相关修改必须验证单击高亮无延迟且双击仍只执行粘贴。
 
 ## PasteBuddy Shelf Liquid Glass 背景（IMPORTANT）
 - IMPORTANT: Shelf 底板、搜索框、空态/提示卡片等 custom glass surface 必须共享同一个 `ClipboardShelfGlass.defaultTintOpacity` 默认逻辑；禁止给搜索框或局部背景保留单独的 opacity state、slider 或调试控件。
@@ -57,6 +58,14 @@
 - IMPORTANT: 发布、安装包、真实用户路径或需要验证 Accessibility/TCC 权限持久性的测试，必须使用 `Developer ID Application` 签名，并安装到 `/Applications/PasteBuddy.app` 后验证。
 - IMPORTANT: 如果构建命令、脚本、环境变量或 Xcode 设置试图使用 ad-hoc 签名，必须立即拒绝并改为稳定签名身份，不要继续运行 UI/HID 权限验证。
 - IMPORTANT: `script/build_and_run.sh` 是本仓库标准构建入口；默认 `PASTEBUDDY_SIGNING_CHANNEL=development`，发布验证显式使用 `PASTEBUDDY_SIGNING_CHANNEL=release`。
+
+## PasteBuddy 集成交付与共享状态（IMPORTANT）
+- IMPORTANT: `/Applications/PasteBuddy Dev.app` 只能由干净的 `codex/integrated-delivery` 分支通过 `script/build_and_run.sh` 安装；安装包必须记录 source branch/commit，安装后保持 user immutable，其他 worktree 禁止解除保护或覆盖。
+- IMPORTANT: isolated worktree 只允许运行 build/test。需要运行时基线时必须使用独立临时 bundle id、独立数据目录且不得启动第二个菜单栏实例；禁止把对照构建安装为 `PasteBuddy Dev.app`。
+- IMPORTANT: stable install 验收必须同时证明：恰好一个 `.dev` 进程来自 `/Applications/PasteBuddy Dev.app`、只打开 `Application Support/PasteBuddy Dev/clipboard.sqlite`、权威历史跨 relaunch 保留，且 Info.plist source commit 是当前交付 HEAD。
+- IMPORTANT: standard storage 下，含 snapshot metadata 的 SQLite 是 history 读取权威；开发 bundle 的 pbstore/SQLite 必须同在 `PasteBuddy Dev`，初始化失败必须可见并 fail closed，禁止回退 `/tmp`、生产目录或 stale snapshot。
+- IMPORTANT: link preview title、image asset ID 与 SQLite indexed asset reference 必须由同一次 store/repository save 提交；UI 只从共享 store/repository hydration 读取，禁止 surface 自建第二份 metadata cache。
+- IMPORTANT: accessory app 必须在任何 history/database `await` 之前创建 status item；生命周期回归必须验证调用顺序和稳定安装后的存活。
 
 ## iOS TestFlight 发布固定流程（IMPORTANT）
 - IMPORTANT: PasteBuddy iOS/TestFlight 发布必须使用 `script/push_testflight.sh`；不要只手动 `git push`，也不要绕过 CI 手动上传 App Store Connect。

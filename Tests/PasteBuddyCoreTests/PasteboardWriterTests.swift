@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import PasteBuddyCore
 @testable import PasteBuddyMobile
@@ -360,6 +361,122 @@ final class PasteboardWriterTests: XCTestCase {
         PasteboardWriter.copy([first, second], to: pasteboard)
 
         XCTAssertEqual(pasteboard.string(forType: .string), "first\nhttps://example.com")
+    }
+
+    func testNativeCopyCommandProvidersUseSharedPlainTextForMultipleItems() async throws {
+        let first = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
+        )
+        let second = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Second",
+            payload: ClipboardPayload(urlString: "https://example.com")
+        )
+
+        let providers = PasteboardWriter.itemProviders(for: [first, second]) { $0 }
+
+        XCTAssertEqual(providers.count, 1)
+        XCTAssertTrue(providers[0].canLoadObject(ofClass: NSString.self))
+        let textData = try await loadData(from: providers[0], type: .plainText)
+        XCTAssertEqual(
+            textData.flatMap { String(data: $0, encoding: .utf8) },
+            "first\nhttps://example.com"
+        )
+    }
+
+    func testNativeCopyCommandProvidersPreserveFileURLOrder() async throws {
+        let firstURL = try XCTUnwrap(URL(string: "file:///Users/example/First.txt"))
+        let secondURL = try XCTUnwrap(URL(string: "file:///Users/example/Second.txt"))
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Files",
+            payload: ClipboardPayload(
+                fileURLStrings: [firstURL.absoluteString, secondURL.absoluteString]
+            )
+        )
+        let providers = PasteboardWriter.itemProviders(for: [item]) { $0 }
+
+        XCTAssertEqual(providers.count, 2)
+        let firstURLData = try await loadData(from: providers[0], type: .fileURL)
+        let secondURLData = try await loadData(from: providers[1], type: .fileURL)
+        XCTAssertEqual(firstURLData.flatMap { String(data: $0, encoding: .utf8) }, firstURL.absoluteString)
+        XCTAssertEqual(secondURLData.flatMap { String(data: $0, encoding: .utf8) }, secondURL.absoluteString)
+    }
+
+    func testNativeCopyCommandProviderLazilyHydratesExternalizedImages() async throws {
+        let image = Self.testImage()
+        let lightweightItem = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(
+                imageAssetID: "image-asset",
+                imageByteCount: image.tiffRepresentation?.count
+            )
+        )
+        var hydratedItem = lightweightItem
+        hydratedItem.payload.imageData = image.tiffRepresentation
+        let provider = try XCTUnwrap(
+            PasteboardWriter.itemProviders(for: [lightweightItem]) { _ in hydratedItem }.first
+        )
+
+        let data = try await loadData(from: provider, type: .tiff)
+
+        XCTAssertFalse(try XCTUnwrap(data).isEmpty)
+    }
+
+    func testNativeCopyCommandProviderLazilyHydratesExternalizedRTF() async throws {
+        let rtfData = Data("{\\rtf1\\ansi Rich body}".utf8)
+        let lightweightItem = ClipboardItem(
+            sourceAppName: "Pages",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Rich",
+            payload: ClipboardPayload(
+                text: "Rich body",
+                rtfAssetID: "rtf-asset",
+                rtfByteCount: rtfData.count
+            )
+        )
+        var hydratedItem = lightweightItem
+        hydratedItem.payload.rtfData = rtfData
+        let provider = try XCTUnwrap(
+            PasteboardWriter.itemProviders(for: [lightweightItem]) { _ in hydratedItem }.first
+        )
+
+        let loadedRTFData = try await loadData(from: provider, type: .rtf)
+        XCTAssertEqual(loadedRTFData, rtfData)
+    }
+
+    func testNativeCopyCommandProviderReportsMissingHydratedAsset() async throws {
+        let lightweightItem = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Missing Screenshot",
+            payload: ClipboardPayload(imageAssetID: "missing-image-asset")
+        )
+        let provider = try XCTUnwrap(
+            PasteboardWriter.itemProviders(for: [lightweightItem]) { $0 }.first
+        )
+
+        do {
+            _ = try await loadData(from: provider, type: .tiff)
+            XCTFail("Expected missing hydrated asset to fail")
+        } catch {
+            let underlyingError = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError
+            XCTAssertEqual(underlyingError?.domain, NSCocoaErrorDomain)
+            XCTAssertEqual(underlyingError?.code, CocoaError.fileReadNoSuchFile.rawValue)
+        }
     }
 
     func testCopyEmptySelectionLeavesPasteboardUntouched() throws {
@@ -812,6 +929,18 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(result.outcome, .emptySelection)
         XCTAssertEqual(result.itemCount, 0)
         XCTAssertEqual(pasteboard.string(forType: .string), "existing")
+    }
+
+    private func loadData(from provider: NSItemProvider, type: UTType) async throws -> Data? {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: data)
+                }
+            }
+        }
     }
 
     private static func testImage() -> NSImage {

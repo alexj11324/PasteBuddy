@@ -83,7 +83,12 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
             throw SnapshotStoreError.missingApplicationSupportDirectory
         }
         return base
-            .appendingPathComponent("PasteBuddy", isDirectory: true)
+            .appendingPathComponent(
+                EncryptedSnapshotStore.persistenceDirectoryName(
+                    bundleIdentifier: Bundle.main.bundleIdentifier
+                ),
+                isDirectory: true
+            )
             .appendingPathComponent("clipboard.sqlite")
     }
 
@@ -173,19 +178,7 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
                     value_json TEXT NOT NULL
                 )
                 """)
-            try db.execute(sql: """
-                CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_search_fts
-                USING fts5(
-                    item_id UNINDEXED,
-                    title,
-                    labels,
-                    source_app_name,
-                    device_name,
-                    content_type,
-                    searchable_text,
-                    ocr_text
-                )
-                """)
+            try createTrigramSearchIndex(db: db)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_created_at ON clipboard_items(created_at DESC)")
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_type_created ON clipboard_items(content_type, created_at DESC)")
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_source_created ON clipboard_items(source_app_name, created_at DESC)")
@@ -204,7 +197,58 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         migrator.registerMigration("allow duplicate item dedupe hashes") { db in
             try removeClipboardItemsDedupeUniqueConstraintIfNeeded(db: db)
         }
+        migrator.registerMigration("use trigram substring search") { db in
+            let schema = try String.fetchOne(
+                db,
+                sql: "SELECT sql FROM sqlite_master WHERE name = 'clipboard_search_fts'"
+            ) ?? ""
+            guard !schema.contains("tokenize='trigram'") else { return }
+
+            try db.execute(sql: "DROP TABLE IF EXISTS clipboard_search_fts")
+            try createTrigramSearchIndex(db: db)
+            try db.execute(sql: """
+                INSERT INTO clipboard_search_fts (item_id, searchable_text)
+                SELECT id, COALESCE(searchable_text, '')
+                FROM clipboard_items
+                """)
+        }
+        migrator.registerMigration("add indexed asset references") { db in
+            let columns = Set(try db.columns(in: "clipboard_items").map(\.name))
+            if !columns.contains("image_asset_id") {
+                try db.execute(sql: "ALTER TABLE clipboard_items ADD COLUMN image_asset_id TEXT")
+            }
+            if !columns.contains("rtf_asset_id") {
+                try db.execute(sql: "ALTER TABLE clipboard_items ADD COLUMN rtf_asset_id TEXT")
+            }
+            try repairAuthoritativeAssetReferences(db: db)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_image_asset ON clipboard_items(image_asset_id)")
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_rtf_asset ON clipboard_items(rtf_asset_id)")
+        }
+        migrator.registerMigration("repair authoritative asset references") { db in
+            try repairAuthoritativeAssetReferences(db: db)
+        }
         return migrator
+    }
+
+    private static func repairAuthoritativeAssetReferences(db: Database) throws {
+        try db.execute(sql: """
+            UPDATE clipboard_items
+            SET image_asset_id = json_extract(payload_json, '$.imageAssetID'),
+                rtf_asset_id = json_extract(payload_json, '$.rtfAssetID')
+            WHERE image_asset_id IS NOT json_extract(payload_json, '$.imageAssetID')
+               OR rtf_asset_id IS NOT json_extract(payload_json, '$.rtfAssetID')
+            """)
+    }
+
+    private static func createTrigramSearchIndex(db: Database) throws {
+        try db.execute(sql: """
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_search_fts
+            USING fts5(
+                item_id UNINDEXED,
+                searchable_text,
+                tokenize='trigram'
+            )
+            """)
     }
 
     private static let clipboardItemColumnList = """
@@ -382,6 +426,19 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
                     data: row["data"] ?? Data()
                 )
             }
+        }
+    }
+
+    func indexedAssetReferencesForTesting(itemID: UUID) throws -> (image: String?, rtf: String?) {
+        try pool.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: "SELECT image_asset_id, rtf_asset_id FROM clipboard_items WHERE id = ?",
+                arguments: [itemID.uuidString]
+            ) else {
+                return (nil, nil)
+            }
+            return (row["image_asset_id"], row["rtf_asset_id"])
         }
     }
 }
@@ -585,6 +642,16 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     public func itemCount() throws -> Int {
         try database.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard_items") ?? 0
+        }
+    }
+
+    public func hasStoredSnapshot() throws -> Bool {
+        try database.read { db in
+            try Bool.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM snapshot_metadata WHERE key = ?)",
+                arguments: [Self.metadataKey]
+            ) ?? false
         }
     }
 
@@ -995,9 +1062,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                     id, snapshot_order, created_at, updated_at, source_app_name,
                     source_bundle_identifier, device_name, content_type, title,
                     reuse_category, dedupe_hash, payload_json, searchable_text,
-                    ocr_text, ocr_state_json, byte_count, thumbnail_asset_id, full_asset_id
+                    ocr_text, ocr_state_json, byte_count, thumbnail_asset_id, full_asset_id,
+                    image_asset_id, rtf_asset_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     snapshot_order = excluded.snapshot_order,
                     created_at = excluded.created_at,
@@ -1013,7 +1081,9 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                     searchable_text = excluded.searchable_text,
                     ocr_text = excluded.ocr_text,
                     ocr_state_json = excluded.ocr_state_json,
-                    byte_count = excluded.byte_count
+                    byte_count = excluded.byte_count,
+                    image_asset_id = excluded.image_asset_id,
+                    rtf_asset_id = excluded.rtf_asset_id
                 """,
             arguments: [
                 storedItem.id.uuidString,
@@ -1031,7 +1101,9 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                 storedItem.searchDocument.normalizedText,
                 storedItem.payload.ocrText,
                 ocrStateJSON,
-                storedItem.searchDocument.storageBytes
+                storedItem.searchDocument.storageBytes,
+                storedItem.payload.imageAssetID,
+                storedItem.payload.rtfAssetID
             ]
         )
         try replaceLabels(for: storedItem, db: db)
@@ -1143,21 +1215,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         try db.execute(sql: "DELETE FROM clipboard_search_fts WHERE item_id = ?", arguments: [item.id.uuidString])
         try db.execute(
             sql: """
-                INSERT INTO clipboard_search_fts (
-                    item_id, title, labels, source_app_name, device_name,
-                    content_type, searchable_text, ocr_text
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO clipboard_search_fts (item_id, searchable_text)
+                VALUES (?, ?)
                 """,
             arguments: [
                 item.id.uuidString,
-                item.title,
-                item.labels.joined(separator: " "),
-                item.sourceAppName,
-                item.deviceName,
-                item.contentType.displayName,
-                item.searchDocument.normalizedText,
-                item.payload.ocrText
+                item.searchDocument.normalizedText
             ]
         )
     }

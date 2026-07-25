@@ -3757,6 +3757,43 @@ final class PasteBuddyStoreTests: XCTestCase {
         }
     }
 
+    func testAsyncLoadUsesStoredSQLiteSnapshotInsteadOfStaleDiskSnapshot() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let stale = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Stale snapshot",
+            payload: ClipboardPayload(text: "must not be loaded")
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: [stale]))
+
+        let authoritative = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Authoritative SQLite",
+            payload: ClipboardPayload(urlString: "https://example.com/authoritative")
+        )
+        let repository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(
+                fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+            )
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [authoritative]))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        await store.loadAsync()
+
+        XCTAssertEqual(store.snapshot.items.map(\.id), [authoritative.id])
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+    }
+
     func testSearchDocumentRefreshKeepsDedupeIndexCurrentAfterTextEditAndOCR() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

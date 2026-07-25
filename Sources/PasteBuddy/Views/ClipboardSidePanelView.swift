@@ -76,6 +76,14 @@ struct ClipboardSidePanelView: View {
         .focusable(true)
         .focusEffectDisabled()
         .focused($isListFocused)
+        .onCopyCommand {
+            PasteboardWriter.itemProviders(for: selectedItemsInDisplayOrder) { item in
+                await store.hydratedItem(for: item)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection)) { _ in
+            copySelectedItems()
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
         }
@@ -602,6 +610,17 @@ struct ClipboardSidePanelView: View {
         Task { @MainActor in
             let hydratedItem = await store.hydratedItem(for: item)
             PasteboardWriter.copy(hydratedItem, format: format)
+        }
+    }
+
+    private func copySelectedItems() {
+        let items = selectedItemsInDisplayOrder
+        guard !items.isEmpty else { return }
+        let request = ClipboardPanelCopyGate.begin()
+        Task { @MainActor in
+            let hydratedItems = await store.hydratedItems(for: items)
+            guard ClipboardPanelCopyGate.shouldWrite(request) else { return }
+            PasteboardWriter.copy(hydratedItems)
         }
     }
 

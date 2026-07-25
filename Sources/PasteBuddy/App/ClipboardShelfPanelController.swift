@@ -4,6 +4,29 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 
+extension Notification.Name {
+    static let pasteBuddyCopyPanelSelection = Notification.Name("PasteBuddyCopyPanelSelection")
+}
+
+@MainActor
+enum ClipboardPanelCopyGate {
+    struct Request {
+        let generation: Int
+        let pasteboardChangeCount: Int
+    }
+
+    private static var generation = 0
+
+    static func begin(pasteboard: NSPasteboard = .general) -> Request {
+        generation += 1
+        return Request(generation: generation, pasteboardChangeCount: pasteboard.changeCount)
+    }
+
+    static func shouldWrite(_ request: Request, pasteboard: NSPasteboard = .general) -> Bool {
+        request.generation == generation && request.pasteboardChangeCount == pasteboard.changeCount
+    }
+}
+
 enum ClipboardShelfPlacement: String, CaseIterable, Identifiable {
     case top
     case bottom
@@ -664,6 +687,10 @@ private final class ClipboardShelfPanel: NSPanel {
 }
 
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    @objc func copy(_ sender: Any?) {
+        NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
+    }
+
     func configureForRoundedTransparentPanel(cornerRadius: CGFloat) {
         wantsLayer = true
         layer?.cornerRadius = cornerRadius
@@ -686,8 +713,8 @@ private extension NSRect {
 
 @MainActor
 final class PasteBuddyPanelHotKeyController {
-    private let onToggle: @MainActor () -> Void
-    private let onShelfMode: @MainActor () -> Void
+    private let onSidePanel: @MainActor () -> Void
+    private let onShelf: @MainActor () -> Void
     private var registration: PasteBuddyCarbonHotKeyRegistration?
     private var eventTap: PasteBuddyPanelHotKeyEventTap?
     private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
@@ -695,11 +722,11 @@ final class PasteBuddyPanelHotKeyController {
     private var isShortcutRecordingActive = false
 
     init(
-        onToggle: @escaping @MainActor () -> Void,
-        onShelfMode: @escaping @MainActor () -> Void
+        onSidePanel: @escaping @MainActor () -> Void,
+        onShelf: @escaping @MainActor () -> Void
     ) {
-        self.onToggle = onToggle
-        self.onShelfMode = onShelfMode
+        self.onSidePanel = onSidePanel
+        self.onShelf = onShelf
         let handler: @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void = { [weak self] action, source in
             self?.trigger(action: action, source: source)
         }
@@ -724,10 +751,10 @@ final class PasteBuddyPanelHotKeyController {
         }
         guard triggerGate.shouldTrigger(action: action, source: source) else { return }
         switch action {
-        case .showHide:
-            onToggle()
-        case .shelfMode:
-            onShelfMode()
+        case .sidePanel:
+            onSidePanel()
+        case .shelf:
+            onShelf()
         }
     }
 
@@ -740,8 +767,8 @@ final class PasteBuddyPanelHotKeyController {
 }
 
 enum PasteBuddyPanelHotKeyAction: String, Sendable {
-    case showHide
-    case shelfMode
+    case sidePanel
+    case shelf
 }
 
 enum PasteBuddyPanelHotKeySource: String, Sendable {
@@ -754,7 +781,7 @@ struct PasteBuddyPanelHotKeyTriggerGate {
     var duplicateInterval: TimeInterval = 0.25
 
     mutating func shouldTrigger(source: PasteBuddyPanelHotKeySource, now: Date = Date()) -> Bool {
-        shouldTrigger(action: .showHide, source: source, now: now)
+        shouldTrigger(action: .sidePanel, source: source, now: now)
     }
 
     mutating func shouldTrigger(
@@ -845,8 +872,8 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 
     private func registerHotKeys() {
         unregisterHotKeys()
-        registerHotKey(id: pasteBuddyShowHideHotKeyID, keyCode: UInt32(kVK_ANSI_V))
-        registerHotKey(id: pasteBuddyShelfModeHotKeyID, keyCode: UInt32(kVK_ANSI_B))
+        registerHotKey(id: pasteBuddySidePanelHotKeyID, keyCode: UInt32(kVK_ANSI_V))
+        registerHotKey(id: pasteBuddyShelfHotKeyID, keyCode: UInt32(kVK_ANSI_S))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32) {
@@ -881,10 +908,10 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 
     private static func action(for hotKeyID: UInt32) -> PasteBuddyPanelHotKeyAction? {
         switch hotKeyID {
-        case pasteBuddyShowHideHotKeyID:
-            return .showHide
-        case pasteBuddyShelfModeHotKeyID:
-            return .shelfMode
+        case pasteBuddySidePanelHotKeyID:
+            return .sidePanel
+        case pasteBuddyShelfHotKeyID:
+            return .shelf
         default:
             return nil
         }
@@ -975,7 +1002,7 @@ final class PasteBuddyPanelHotKeyEventTap {
 
 enum PasteBuddyPanelHotKeyMatcher {
     static func matches(keyCode: Int64, flags: CGEventFlags) -> Bool {
-        action(keyCode: keyCode, flags: flags) == .showHide
+        action(keyCode: keyCode, flags: flags) == .sidePanel
     }
 
     static func action(keyCode: Int64, flags: CGEventFlags) -> PasteBuddyPanelHotKeyAction? {
@@ -987,9 +1014,9 @@ enum PasteBuddyPanelHotKeyMatcher {
         }
         switch keyCode {
         case Int64(kVK_ANSI_V):
-            return .showHide
-        case Int64(kVK_ANSI_B):
-            return .shelfMode
+            return .sidePanel
+        case Int64(kVK_ANSI_S):
+            return .shelf
         default:
             return nil
         }
@@ -997,5 +1024,5 @@ enum PasteBuddyPanelHotKeyMatcher {
 }
 
 private let pasteBuddyHotKeySignature: OSType = 0x50425348
-private let pasteBuddyShowHideHotKeyID: UInt32 = 1
-private let pasteBuddyShelfModeHotKeyID: UInt32 = 2
+private let pasteBuddySidePanelHotKeyID: UInt32 = 1
+private let pasteBuddyShelfHotKeyID: UInt32 = 2

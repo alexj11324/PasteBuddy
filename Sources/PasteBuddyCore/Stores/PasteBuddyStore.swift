@@ -55,6 +55,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor
     @ObservationIgnored private let clipboardRepository: ClipboardItemRepository?
     @ObservationIgnored private let repositorySyncActor: ClipboardRepositorySyncActor?
+    @ObservationIgnored private let defaultPersistenceInitializationErrorMessage: String?
     @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
     @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
@@ -96,6 +97,7 @@ public final class PasteBuddyStore {
         historyUnlockAuthenticator: any HistoryUnlockAuthenticating = SystemHistoryUnlockAuthenticator()
     ) {
         let usesDefaultDiskStore = diskStore == nil
+        var defaultPersistenceInitializationErrorMessage: String?
         let resolvedDiskStore: EncryptedSnapshotStore
         if let diskStore {
             resolvedDiskStore = diskStore
@@ -103,6 +105,7 @@ public final class PasteBuddyStore {
             do {
                 resolvedDiskStore = try EncryptedSnapshotStore.defaultStore(storageMode: .standard)
             } catch {
+                defaultPersistenceInitializationErrorMessage = error.localizedDescription
                 resolvedDiskStore = EncryptedSnapshotStore(
                     fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
                         .appendingPathComponent("PasteBuddy")
@@ -120,6 +123,7 @@ public final class PasteBuddyStore {
                     database: try PasteBuddyDatabase(fileURL: PasteBuddyDatabase.defaultDatabaseURL())
                 )
             } catch {
+                defaultPersistenceInitializationErrorMessage = error.localizedDescription
                 resolvedClipboardRepository = nil
             }
         } else {
@@ -132,6 +136,7 @@ public final class PasteBuddyStore {
         self.persistenceActor = SnapshotPersistenceActor(diskStore: resolvedDiskStore)
         self.clipboardRepository = resolvedClipboardRepository
         self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
+        self.defaultPersistenceInitializationErrorMessage = defaultPersistenceInitializationErrorMessage
         self.saveDebounceNanoseconds = saveDebounceNanoseconds ?? (usesDefaultDiskStore ? Self.defaultSaveDebounceNanoseconds : nil)
         self.snapshot = initialSnapshot
         self.selectedScope = .history
@@ -157,9 +162,19 @@ public final class PasteBuddyStore {
     }
 
     public func load() {
+        if let defaultPersistenceInitializationErrorMessage {
+            lastErrorMessage = defaultPersistenceInitializationErrorMessage
+            return
+        }
         do {
-            var loadedSnapshot = try diskStore.load()
-            if Self.needsExternalAssetHydration(loadedSnapshot),
+            let repositoryHasStoredSnapshot = try clipboardRepository?.hasStoredSnapshot() == true
+            var loadedSnapshot = if repositoryHasStoredSnapshot, let clipboardRepository {
+                try clipboardRepository.exportSnapshot()
+            } else {
+                try diskStore.load()
+            }
+            if !repositoryHasStoredSnapshot,
+               Self.needsExternalAssetHydration(loadedSnapshot),
                let clipboardRepository {
                 let repositorySnapshot = try clipboardRepository.exportSnapshot()
                 if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
@@ -189,10 +204,25 @@ public final class PasteBuddyStore {
     }
 
     public func loadAsync() async {
+        if let defaultPersistenceInitializationErrorMessage {
+            lastErrorMessage = defaultPersistenceInitializationErrorMessage
+            return
+        }
         do {
-            let result = try await persistenceActor.load()
+            let repositoryHasStoredSnapshot = try await repositorySyncActor?.hasStoredSnapshot() == true
+            let result: SnapshotPersistenceLoadResult
+            if repositoryHasStoredSnapshot, let repositorySyncActor {
+                let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
+                result = SnapshotPersistenceLoadResult(
+                    snapshot: repositorySnapshot,
+                    loadedStorageMode: repositorySnapshot.security.storageMode
+                )
+            } else {
+                result = try await persistenceActor.load()
+            }
             var loadedSnapshot = result.snapshot
-            if Self.needsExternalAssetHydration(loadedSnapshot),
+            if !repositoryHasStoredSnapshot,
+               Self.needsExternalAssetHydration(loadedSnapshot),
                let repositorySyncActor {
                 let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
                 if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {

@@ -23,6 +23,10 @@ BUNDLE_ID="${PASTEBUDDY_BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
 MIN_SYSTEM_VERSION="14.5"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INTEGRATION_BRANCH="codex/integrated-delivery"
+STABLE_DEVELOPMENT_BUNDLE="/Applications/PasteBuddy Dev.app"
+SOURCE_BRANCH="$(/usr/bin/git -C "$ROOT_DIR" symbolic-ref --short -q HEAD || true)"
+SOURCE_COMMIT="$(/usr/bin/git -C "$ROOT_DIR" rev-parse HEAD)"
 DIST_DIR="$ROOT_DIR/dist"
 STAGE_ROOT="${PASTEBUDDY_STAGE_ROOT:-/private/tmp/pastebuddy-build}"
 APP_BUNDLE="$STAGE_ROOT/$APP_NAME.app"
@@ -197,16 +201,41 @@ resolve_sentry_dsn() {
 
 CODESIGN_IDENTITY="$(resolve_code_sign_identity)"
 
-kill_binary() {
-  local binary="$1"
+mode_installs_app() {
+  case "$MODE" in
+    run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--install|install|--install-package|install-package)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+assert_coordinated_install_source() {
+  mode_installs_app || return 0
+  [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
+  [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]] \
+    || die "The stable development app may only use the development signing channel and bundle identity."
+  [[ "$SOURCE_BRANCH" == "$INTEGRATION_BRANCH" ]] \
+    || die "Refusing to overwrite $STABLE_DEVELOPMENT_BUNDLE from '$SOURCE_BRANCH'. Use $INTEGRATION_BRANCH."
+  [[ -z "$(/usr/bin/git -C "$ROOT_DIR" status --porcelain --untracked-files=normal)" ]] \
+    || die "Refusing to install an uncommitted source state into $STABLE_DEVELOPMENT_BUNDLE."
+}
+
+running_pids_for_bundle_id() {
+  local pid details
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    details="$(/usr/bin/lsappinfo info -only bundleID -app "$pid" 2>/dev/null || true)"
+    [[ "$details" == *"bundleID=\"$BUNDLE_ID\""* ]] && printf '%s\n' "$pid"
+  done < <(pgrep -x "$EXECUTABLE_NAME" 2>/dev/null || true)
+}
+
+kill_existing_app() {
   local pids=()
   local pid
-  if [[ -x "$binary" ]]; then
-    while IFS= read -r pid; do
-      [[ -z "$pid" ]] && continue
-      pids+=("$pid")
-    done < <(pgrep -f "$binary" 2>/dev/null || true)
-  fi
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && pids+=("$pid")
+  done < <(running_pids_for_bundle_id)
   [[ ${#pids[@]} -gt 0 ]] || return 0
   kill "${pids[@]}" >/dev/null 2>&1 || true
   for _ in {1..50}; do
@@ -223,14 +252,7 @@ kill_binary() {
   kill -9 "${pids[@]}" >/dev/null 2>&1 || true
 }
 
-kill_existing_app() {
-  kill_binary "$APP_BINARY"
-  kill_binary "$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
-  kill_binary "$STAGE_ROOT/PasteBuddy.app/Contents/MacOS/$EXECUTABLE_NAME"
-  kill_binary "$STAGE_ROOT/PasteBuddy Dev.app/Contents/MacOS/$EXECUTABLE_NAME"
-}
-
-kill_existing_app
+assert_coordinated_install_source
 
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
@@ -281,6 +303,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$CODESIGN_IDENTITY</string>
   <key>PasteBuddyStableAppPath</key>
   <string>$INSTALL_BUNDLE</string>
+  <key>PasteBuddySourceBranch</key>
+  <string>$SOURCE_BRANCH</string>
+  <key>PasteBuddySourceCommit</key>
+  <string>$SOURCE_COMMIT</string>
 </dict>
 </plist>
 PLIST
@@ -349,14 +375,45 @@ package_app() {
 install_app() {
   kill_existing_app
   assert_safe_bundle_path "$INSTALL_BUNDLE"
+  if [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" && -d "$INSTALL_BUNDLE" ]]; then
+    /usr/bin/chflags nouchg "$INSTALL_BUNDLE"
+  fi
+  trap '[[ -d "$INSTALL_BUNDLE" ]] && /usr/bin/chflags uchg "$INSTALL_BUNDLE" || true' EXIT
   rm -rf "$INSTALL_BUNDLE"
   /usr/bin/ditto --norsrc --noextattr "$APP_BUNDLE" "$INSTALL_BUNDLE"
   sign_app "$INSTALL_BUNDLE"
+  if [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]]; then
+    /usr/bin/chflags uchg "$INSTALL_BUNDLE"
+  fi
+  trap - EXIT
   printf 'Installed %s signed with %s (%s, %s)\n' "$INSTALL_BUNDLE" "$CODESIGN_IDENTITY" "$SIGNING_CHANNEL" "$BUNDLE_ID"
 }
 
 open_app() {
-  /usr/bin/open -n "$INSTALL_BUNDLE"
+  /usr/bin/open "$INSTALL_BUNDLE"
+  wait_for_single_installed_app
+}
+
+wait_for_single_installed_app() {
+  local binary="$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
+  local pids=()
+  local pid command
+  for _ in {1..20}; do
+    pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(running_pids_for_bundle_id)
+    if [[ ${#pids[@]} -eq 1 ]]; then
+      command="$(/bin/ps -p "${pids[0]}" -o command= 2>/dev/null || true)"
+      command="${command#"${command%%[![:space:]]*}"}"
+      [[ "$command" == "$binary" ]] || die "Running $APP_NAME instance is not the stable installed app: $command"
+      printf 'runningInstanceCount=1 pid=%s bundlePath=%s\n' "${pids[0]}" "$INSTALL_BUNDLE"
+      return 0
+    fi
+    [[ ${#pids[@]} -lt 2 ]] || die "Expected one running $APP_NAME instance; found ${#pids[@]}."
+    sleep 0.5
+  done
+  die "$APP_NAME did not appear as one stable installed process after launch."
 }
 
 print_runtime_diagnostics() {
@@ -392,22 +449,10 @@ case "$MODE" in
   --verify|verify)
     install_app
     print_runtime_diagnostics
-    /usr/bin/open -n -W "$INSTALL_BUNDLE" &
+    /usr/bin/open -W "$INSTALL_BUNDLE" &
     OPEN_PID="$!"
-    for _ in {1..20}; do
-      if pgrep -x "$EXECUTABLE_NAME" >/dev/null || pgrep -f "$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME" >/dev/null; then
-        kill "$OPEN_PID" >/dev/null 2>&1 || true
-        exit 0
-      fi
-      if ! kill -0 "$OPEN_PID" >/dev/null 2>&1; then
-        echo "$APP_NAME exited before verify could observe a running process" >&2
-        exit 1
-      fi
-      sleep 0.5
-    done
+    wait_for_single_installed_app
     kill "$OPEN_PID" >/dev/null 2>&1 || true
-    echo "$EXECUTABLE_NAME did not appear in the process table after launch" >&2
-    exit 1
     ;;
   --install|install)
     install_app

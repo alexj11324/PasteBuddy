@@ -40,8 +40,15 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw SnapshotStoreError.missingApplicationSupportDirectory
         }
-        let directory = base.appendingPathComponent("PasteBuddy", isDirectory: true)
+        let directory = base.appendingPathComponent(
+            persistenceDirectoryName(bundleIdentifier: Bundle.main.bundleIdentifier),
+            isDirectory: true
+        )
         return defaultStore(in: directory, storageMode: storageMode)
+    }
+
+    static func persistenceDirectoryName(bundleIdentifier: String?) -> String {
+        bundleIdentifier == "com.alexjiang.PasteBuddy.dev" ? "PasteBuddy Dev" : "PasteBuddy"
     }
 
     public static func defaultStore(

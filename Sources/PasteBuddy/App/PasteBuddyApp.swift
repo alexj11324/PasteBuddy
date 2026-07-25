@@ -232,12 +232,10 @@ struct PasteBuddyApp: App {
         shelfPanelController?.toggle()
     }
 
-    private func showClipboardShelfMode() async {
+    private func showClipboardPanel(_ displayMode: ClipboardPanelDisplayMode) async {
         await startRuntimeIfNeeded()
-        PasteBuddyDiagnostics.record(.hotKey, "shelfModeRequested")
-        panelDisplayMode = .shelf
-        shelfPanelController?.displayMode = .shelf
-        shelfPanelController?.placement = shelfPlacement
+        PasteBuddyDiagnostics.record(.hotKey, "panelModeRequested", detail: "mode=\(displayMode.rawValue)")
+        panelDisplayMode = displayMode
         shelfPanelController?.show()
     }
 
@@ -247,10 +245,10 @@ struct PasteBuddyApp: App {
             await store.flushPendingSave()
         }
 
+        configureStatusItemIfNeeded()
         await storeLoadGate.loadIfNeeded {
             await store.loadAsync()
         }
-        configureStatusItemIfNeeded()
         irohSync.onItemReceived = { [store] item in
             _ = store.addSyncedItem(item)
         }
@@ -300,14 +298,14 @@ struct PasteBuddyApp: App {
 
         if panelHotKeyController == nil, shelfPanelController != nil {
             panelHotKeyController = PasteBuddyPanelHotKeyController(
-                onToggle: {
+                onSidePanel: {
                     Task { @MainActor in
-                        await toggleClipboardShelf()
+                        await showClipboardPanel(.sidePanel)
                     }
                 },
-                onShelfMode: {
+                onShelf: {
                     Task { @MainActor in
-                        await showClipboardShelfMode()
+                        await showClipboardPanel(.shelf)
                     }
                 }
             )

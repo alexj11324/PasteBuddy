@@ -12,6 +12,43 @@ final class ClipboardMonitorTests: XCTestCase {
             count += 1
             return count
         }
+
+        func calls() -> Int {
+            count
+        }
+    }
+
+    override func tearDown() async throws {
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil
+        ClipboardLinkMetadataFetcher.resetFetchStateForTesting()
+        try await super.tearDown()
+    }
+
+    func testLinkMetadataFailuresRetryWhileConcurrentRequestsShareOneFetch() async {
+        let urlString = "https://metadata-retry.example/preview"
+        let counter = CaptureCallCounter()
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
+            let call = await counter.next()
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            return call == 1
+                ? nil
+                : ClipboardLinkPreviewMetadata(title: "Recovered preview")
+        }
+
+        async let first = ClipboardLinkMetadataFetcher.fetch(for: urlString)
+        async let second = ClipboardLinkMetadataFetcher.fetch(for: urlString)
+        async let third = ClipboardLinkMetadataFetcher.fetch(for: urlString)
+        let concurrentResults = await [first, second, third]
+
+        XCTAssertTrue(concurrentResults.allSatisfy { $0 == nil })
+        let callsAfterConcurrentFetch = await counter.calls()
+        XCTAssertEqual(callsAfterConcurrentFetch, 1)
+
+        let retry = await ClipboardLinkMetadataFetcher.fetch(for: urlString)
+        let callsAfterRetry = await counter.calls()
+
+        XCTAssertEqual(retry?.title, "Recovered preview")
+        XCTAssertEqual(callsAfterRetry, 2)
     }
 
     func testCapturedURLItemIsStoredWithoutWaitingForLinkMetadata() async throws {

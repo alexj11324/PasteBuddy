@@ -117,14 +117,26 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             .frame(width: itemSize.width, height: itemSize.height)
             .contentShape(Rectangle())
             .id(itemID)
-            .onTapGesture {
-                guard selectable else { return }
-                onSelect(itemID)
+
+        ZStack {
+            if let payload = dragPayload?(item) {
+                itemView.draggable(payload)
+            } else {
+                itemView
             }
+        }
+            .contentShape(Rectangle())
             .onTapGesture(count: 2) {
                 guard selectable else { return }
                 onDoubleClick(itemID)
             }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    guard selectable else { return }
+                    lastScrolledPrimarySelectedID = itemID
+                    onSelect(itemID)
+                }
+            )
             .popover(
                 isPresented: presentedPreviewBinding(for: itemID),
                 attachmentAnchor: .rect(.bounds),
@@ -132,12 +144,6 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             ) {
                 previewContent(item)
             }
-
-        if let payload = dragPayload?(item) {
-            itemView.draggable(payload)
-        } else {
-            itemView
-        }
     }
 
     private var itemIDs: [UUID] {

@@ -355,9 +355,25 @@ public struct ClipboardLinkPreviewMetadata: Sendable {
 public enum ClipboardLinkMetadataFetcher {
     /// Test seam: production always fetches through LinkPresentation.
     @MainActor public static var fetchOverrideForTesting: ((String) async -> ClipboardLinkPreviewMetadata?)?
+    @MainActor private static var inFlightRequests: [String: Task<ClipboardLinkPreviewMetadata?, Never>] = [:]
 
     @MainActor
     public static func fetch(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
+        if let request = inFlightRequests[urlString] {
+            return await request.value
+        }
+
+        let request = Task { @MainActor in
+            await fetchUncached(for: urlString)
+        }
+        inFlightRequests[urlString] = request
+        let metadata = await request.value
+        inFlightRequests.removeValue(forKey: urlString)
+        return metadata
+    }
+
+    @MainActor
+    private static func fetchUncached(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
         if let fetchOverrideForTesting {
             return await fetchOverrideForTesting(urlString)
         }
@@ -372,6 +388,14 @@ public enum ClipboardLinkMetadataFetcher {
         } catch {
             return nil
         }
+    }
+
+    @MainActor
+    static func resetFetchStateForTesting() {
+        for request in inFlightRequests.values {
+            request.cancel()
+        }
+        inFlightRequests.removeAll()
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
