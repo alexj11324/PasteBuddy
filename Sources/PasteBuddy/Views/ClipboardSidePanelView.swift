@@ -51,7 +51,6 @@ struct ClipboardSidePanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
-        .background(sidePanelKeyboardShortcuts)
         .onAppear {
             store.searchQuery = ""
             store.clearFilters()
@@ -92,34 +91,6 @@ struct ClipboardSidePanelView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
-    }
-
-    private var sidePanelKeyboardShortcuts: some View {
-        Group {
-            keyboardShortcut(.leftArrow, modifiers: [.shift]) { interaction.extendSelection(by: -1) }
-            keyboardShortcut(.rightArrow, modifiers: [.shift]) { interaction.extendSelection(by: 1) }
-            keyboardShortcut(.upArrow, modifiers: [.shift]) { interaction.extendSelection(by: -1) }
-            keyboardShortcut(.downArrow, modifiers: [.shift]) { interaction.extendSelection(by: 1) }
-            keyboardShortcut(.leftArrow) { moveSelection(.left) }
-            keyboardShortcut(.rightArrow) { moveSelection(.right) }
-            keyboardShortcut(.upArrow) { moveSelection(.up) }
-            keyboardShortcut(.downArrow) { moveSelection(.down) }
-        }
-        .disabled(isSearchFocused || interaction.previewedID != nil)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
-    }
-
-    private func keyboardShortcut(
-        _ key: KeyEquivalent,
-        modifiers: EventModifiers = [],
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Color.clear
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(key, modifiers: modifiers)
     }
 
     private var toolbar: some View {
@@ -468,7 +439,7 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
         }
-        setSearchFocused(false)
+        requestPanelKeyboardFocus()
     }
 
     private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
@@ -480,6 +451,16 @@ struct ClipboardSidePanelView: View {
     private func setSearchFocused(_ isFocused: Bool) {
         isSearchFocused = isFocused
         isListFocused = !isFocused
+    }
+
+    private func requestPanelKeyboardFocus() {
+        isSearchFocused = false
+        isListFocused = false
+        Task { @MainActor in
+            await Task.yield()
+            guard !isSearchFocused else { return }
+            isListFocused = true
+        }
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
@@ -508,6 +489,38 @@ struct ClipboardSidePanelView: View {
         if keyPress.key == .space, modifiers.isEmpty, !isSearchFocused {
             toggleSelectedItemPreview()
             return .handled
+        }
+
+        if modifiers.isEmpty, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow:
+                moveSelection(.up)
+                return .handled
+            case .downArrow:
+                moveSelection(.down)
+                return .handled
+            case .leftArrow:
+                moveSelection(.left)
+                return .handled
+            case .rightArrow:
+                moveSelection(.right)
+                return .handled
+            default:
+                break
+            }
+        }
+
+        if modifiers == .shift, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow, .leftArrow:
+                interaction.extendSelection(by: -1)
+                return .handled
+            case .downArrow, .rightArrow:
+                interaction.extendSelection(by: 1)
+                return .handled
+            default:
+                break
+            }
         }
 
         if keyPress.key == .return {
