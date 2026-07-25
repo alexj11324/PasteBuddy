@@ -161,18 +161,26 @@ struct ClipboardShelfPanelView: View {
             keyboardShortcut(.rightArrow) { moveSelection(.right) }
             keyboardShortcut(.upArrow) { moveSelection(.up) }
             keyboardShortcut(.downArrow) { moveSelection(.down) }
+            keyboardShortcut(.leftArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: -1) }
+            keyboardShortcut(.rightArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: 1) }
+            keyboardShortcut(.upArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: -1) }
+            keyboardShortcut(.downArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: 1) }
         }
         .disabled(isSearchFocused || shelfInteraction.previewedID != nil)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
     }
 
-    private func keyboardShortcut(_ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
+    private func keyboardShortcut(
+        _ key: KeyEquivalent,
+        modifiers: EventModifiers = [],
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Color.clear
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(key, modifiers: [])
+        .keyboardShortcut(key, modifiers: modifiers)
     }
 
     private var toolbar: some View {
@@ -900,19 +908,6 @@ struct ClipboardShelfPanelView: View {
                 return .handled
             case .rightArrow:
                 moveSelection(.right)
-                return .handled
-            default:
-                break
-            }
-        }
-
-        if modifiers == .shift, !isSearchFocused {
-            switch keyPress.key {
-            case .upArrow, .leftArrow:
-                shelfInteraction.extendSelection(by: -1)
-                return .handled
-            case .downArrow, .rightArrow:
-                shelfInteraction.extendSelection(by: 1)
                 return .handled
             default:
                 break
