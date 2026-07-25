@@ -209,7 +209,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
         ] {
             let source = try sourceFileContents(path)
-            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
+            for key in ["leftArrow", "rightArrow", "upArrow", "downArrow"] {
+                let shiftShortcut = try XCTUnwrap(source.range(of: "keyboardShortcut(.\(key), modifiers: [.shift])"))
+                let plainShortcut = try XCTUnwrap(source.range(of: "keyboardShortcut(.\(key))"))
+                XCTAssertLessThan(shiftShortcut.lowerBound, plainShortcut.lowerBound)
+            }
             XCTAssertTrue(source.contains("extendSelection(by:"))
             XCTAssertFalse(source.contains(".onMoveCommand(perform: handleShelfMoveCommand)"))
             XCTAssertFalse(source.contains(".onMoveCommand(perform: handleSidePanelMoveCommand)"))
@@ -1277,7 +1281,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("collectionView.scrollToItems("))
     }
 
-    func testShelfAndSidePanelUseOneModifierAwareArrowKeyOwner() throws {
+    func testShelfAndSidePanelUseExplicitModifierAwareArrowShortcuts() throws {
         let collectionSource = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
@@ -1287,12 +1291,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("TapGesture().onEnded"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
-            XCTAssertTrue(source.contains(".onKeyPress(phases: .down)"))
-            XCTAssertTrue(source.contains("if modifiers.isEmpty, !isSearchFocused"))
-            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
-            XCTAssertFalse(source.contains("shelfKeyboardShortcuts"))
-            XCTAssertFalse(source.contains("sidePanelKeyboardShortcuts"))
-            XCTAssertFalse(source.contains(".keyboardShortcut(key, modifiers: [])"))
+            XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow, modifiers: [.shift])"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.rightArrow, modifiers: [.shift])"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.upArrow, modifiers: [.shift])"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.downArrow, modifiers: [.shift])"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow) { moveSelection(.left) }"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.rightArrow) { moveSelection(.right) }"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.upArrow) { moveSelection(.up) }"))
+            XCTAssertTrue(source.contains("keyboardShortcut(.downArrow) { moveSelection(.down) }"))
+            XCTAssertTrue(source.contains(".keyboardShortcut(key, modifiers: modifiers)"))
         }
     }
 
