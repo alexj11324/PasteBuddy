@@ -764,7 +764,7 @@ final class ClipboardShelfPanelController {
     }
 }
 
-private final class ClipboardShelfPanel: NSPanel {
+final class ClipboardShelfPanel: NSPanel {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
@@ -773,15 +773,8 @@ private final class ClipboardShelfPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
-}
-
-private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
-    @objc func copy(_ sender: Any?) {
-        NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
-    }
 
     @objc func paste(_ sender: Any?) {
-        let firstResponder = window?.firstResponder
         guard ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
             firstResponder: firstResponder
         ) else {
@@ -792,6 +785,12 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
             return
         }
         NotificationCenter.default.post(name: .pasteBuddyPastePanelSelection, object: self)
+    }
+}
+
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    @objc func copy(_ sender: Any?) {
+        NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
     }
 
     func configureForRoundedTransparentPanel(cornerRadius: CGFloat) {

@@ -1095,6 +1095,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("run_required_test_filter HistoryCardTimestampFormatterTests"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testNativeCopyCommand"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testDirectPaste"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testPanelWindowOwnsNativePasteResponder"))
         XCTAssertTrue(source.contains("Required integration test filter matched no XCTest cases"))
         XCTAssertFalse(source.contains("/usr/bin/open -n"))
     }
@@ -1656,6 +1657,29 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 firstResponder: NSView()
             )
         )
+    }
+
+    func testPanelWindowOwnsNativePasteResponder() {
+        let panel = ClipboardShelfPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        let routed = expectation(description: "Panel routes paste through the shared selection notification")
+        let observer = NotificationCenter.default.addObserver(
+            forName: .pasteBuddyPastePanelSelection,
+            object: panel,
+            queue: nil
+        ) { _ in
+            routed.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        panel.paste(nil)
+
+        XCTAssertTrue(panel.responds(to: #selector(ClipboardShelfPanel.paste(_:))))
+        wait(for: [routed], timeout: 0.1)
     }
 
     func testPanelPasteGateRejectsStaleAsyncSelection() {
