@@ -6,6 +6,46 @@ import SwiftUI
 
 extension Notification.Name {
     static let pasteBuddyCopyPanelSelection = Notification.Name("PasteBuddyCopyPanelSelection")
+    static let pasteBuddyPanelArrowKey = Notification.Name("PasteBuddyPanelArrowKey")
+}
+
+struct ClipboardPanelArrowKeyCommand: Equatable {
+    let offset: Int
+    let extendsSelection: Bool
+
+    static func resolve(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> ClipboardPanelArrowKeyCommand? {
+        let offset: Int
+        switch Int(keyCode) {
+        case kVK_LeftArrow, kVK_UpArrow:
+            offset = -1
+        case kVK_RightArrow, kVK_DownArrow:
+            offset = 1
+        default:
+            return nil
+        }
+        let modifiers = modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        guard modifiers.isEmpty || modifiers == .shift else { return nil }
+        return ClipboardPanelArrowKeyCommand(offset: offset, extendsSelection: modifiers == .shift)
+    }
+}
+
+@MainActor
+final class ClipboardPanelArrowKeyRequest {
+    let command: ClipboardPanelArrowKeyCommand
+    private(set) var isHandled = false
+
+    init(command: ClipboardPanelArrowKeyCommand) {
+        self.command = command
+    }
+
+    func markHandled() {
+        isHandled = true
+    }
 }
 
 @MainActor
@@ -107,6 +147,7 @@ final class ClipboardShelfPanelController {
     }
     private var panel: ClipboardShelfPanel?
     private var localMouseDownMonitor: Any?
+    private var localKeyDownMonitor: Any?
     private var globalMouseDownMonitor: Any?
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appResignActiveObserver: NSObjectProtocol?
@@ -175,6 +216,7 @@ final class ClipboardShelfPanelController {
         guard let panel, panel.isVisible else { return }
         PasteBuddyDiagnostics.record(.shelf, "hideImmediate")
         stopOutsideClickMonitoring()
+        stopPanelKeyMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
         closeShelfAuxiliaryWindows()
@@ -191,6 +233,7 @@ final class ClipboardShelfPanelController {
         guard !isAnimatingPanelOut else { return }
         PasteBuddyDiagnostics.record(.shelf, "hideRequested")
         stopOutsideClickMonitoring()
+        stopPanelKeyMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
         closeShelfAuxiliaryWindows()
@@ -448,7 +491,30 @@ final class ClipboardShelfPanelController {
 
     private func startDismissalMonitoring(for panel: NSPanel) {
         startOutsideClickMonitoring(for: panel)
+        startPanelKeyMonitoring(for: panel)
         startFocusMonitoring(for: panel)
+    }
+
+    private func startPanelKeyMonitoring(for panel: NSPanel) {
+        stopPanelKeyMonitoring()
+        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak panel] event in
+            guard let panel, panel.isVisible, event.window === panel,
+                  let command = ClipboardPanelArrowKeyCommand.resolve(
+                      keyCode: event.keyCode,
+                      modifierFlags: event.modifierFlags
+                  ) else {
+                return event
+            }
+            let request = ClipboardPanelArrowKeyRequest(command: command)
+            NotificationCenter.default.post(name: .pasteBuddyPanelArrowKey, object: request)
+            return request.isHandled ? nil : event
+        }
+    }
+
+    private func stopPanelKeyMonitoring() {
+        guard let localKeyDownMonitor else { return }
+        NSEvent.removeMonitor(localKeyDownMonitor)
+        self.localKeyDownMonitor = nil
     }
 
     private func startOutsideClickMonitoring(for panel: NSPanel) {

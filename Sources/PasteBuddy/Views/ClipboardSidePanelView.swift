@@ -86,6 +86,10 @@ struct ClipboardSidePanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection)) { _ in
             copySelectedItems()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
+            guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
+            handlePanelArrowKey(request)
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
         }
@@ -439,7 +443,7 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
         }
-        requestPanelKeyboardFocus()
+        setSearchFocused(false)
     }
 
     private func selectSingleItem(_ id: UUID?, keepsPreviewOpen: Bool = false) {
@@ -451,16 +455,6 @@ struct ClipboardSidePanelView: View {
     private func setSearchFocused(_ isFocused: Bool) {
         isSearchFocused = isFocused
         isListFocused = !isFocused
-    }
-
-    private func requestPanelKeyboardFocus() {
-        isSearchFocused = false
-        isListFocused = false
-        Task { @MainActor in
-            await Task.yield()
-            guard !isSearchFocused else { return }
-            isListFocused = true
-        }
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
@@ -489,38 +483,6 @@ struct ClipboardSidePanelView: View {
         if keyPress.key == .space, modifiers.isEmpty, !isSearchFocused {
             toggleSelectedItemPreview()
             return .handled
-        }
-
-        if modifiers.isEmpty, !isSearchFocused {
-            switch keyPress.key {
-            case .upArrow:
-                moveSelection(.up)
-                return .handled
-            case .downArrow:
-                moveSelection(.down)
-                return .handled
-            case .leftArrow:
-                moveSelection(.left)
-                return .handled
-            case .rightArrow:
-                moveSelection(.right)
-                return .handled
-            default:
-                break
-            }
-        }
-
-        if modifiers == .shift, !isSearchFocused {
-            switch keyPress.key {
-            case .upArrow, .leftArrow:
-                interaction.extendSelection(by: -1)
-                return .handled
-            case .downArrow, .rightArrow:
-                interaction.extendSelection(by: 1)
-                return .handled
-            default:
-                break
-            }
         }
 
         if keyPress.key == .return {
@@ -552,6 +514,16 @@ struct ClipboardSidePanelView: View {
         }
 
         return .ignored
+    }
+
+    private func handlePanelArrowKey(_ request: ClipboardPanelArrowKeyRequest) {
+        guard !isSearchFocused, interaction.previewedID == nil else { return }
+        if request.command.extendsSelection {
+            interaction.extendSelection(by: request.command.offset)
+        } else {
+            selectOffset(request.command.offset)
+        }
+        request.markHandled()
     }
 
     private func beginSearch(with characters: String) -> Bool {

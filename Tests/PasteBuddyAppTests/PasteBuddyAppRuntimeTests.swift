@@ -204,19 +204,59 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfAndSidePanelRouteShiftArrowToRangeSelection() throws {
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
         for path in [
             "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
             "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
         ] {
             let source = try sourceFileContents(path)
-            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
+            XCTAssertTrue(source.contains("NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)"))
+            XCTAssertTrue(source.contains("handlePanelArrowKey(request)"))
             XCTAssertTrue(source.contains("extendSelection(by:"))
-            XCTAssertTrue(source.contains("requestPanelKeyboardFocus()"))
-            XCTAssertTrue(source.contains("guard !isSearchFocused else { return }"))
             XCTAssertFalse(source.contains("keyboardShortcut(.downArrow"))
             XCTAssertFalse(source.contains(".onMoveCommand(perform: handleShelfMoveCommand)"))
             XCTAssertFalse(source.contains(".onMoveCommand(perform: handleSidePanelMoveCommand)"))
         }
+        XCTAssertTrue(controllerSource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
+        XCTAssertTrue(controllerSource.contains("event.window === panel"))
+        XCTAssertTrue(controllerSource.contains("return request.isHandled ? nil : event"))
+        XCTAssertTrue(controllerSource.contains("NSEvent.removeMonitor(localKeyDownMonitor)"))
+    }
+
+    func testClipboardPanelArrowKeyCommandUsesExactEventModifiers() {
+        XCTAssertEqual(
+            ClipboardPanelArrowKeyCommand.resolve(
+                keyCode: UInt16(kVK_DownArrow),
+                modifierFlags: [.function, .numericPad]
+            ),
+            ClipboardPanelArrowKeyCommand(offset: 1, extendsSelection: false)
+        )
+        XCTAssertEqual(
+            ClipboardPanelArrowKeyCommand.resolve(
+                keyCode: UInt16(kVK_UpArrow),
+                modifierFlags: [.shift, .function]
+            ),
+            ClipboardPanelArrowKeyCommand(offset: -1, extendsSelection: true)
+        )
+        XCTAssertNil(
+            ClipboardPanelArrowKeyCommand.resolve(
+                keyCode: UInt16(kVK_RightArrow),
+                modifierFlags: [.command]
+            )
+        )
+        XCTAssertNil(
+            ClipboardPanelArrowKeyCommand.resolve(
+                keyCode: UInt16(kVK_ANSI_A),
+                modifierFlags: []
+            )
+        )
+
+        let request = ClipboardPanelArrowKeyRequest(
+            command: ClipboardPanelArrowKeyCommand(offset: 1, extendsSelection: true)
+        )
+        XCTAssertFalse(request.isHandled)
+        request.markHandled()
+        XCTAssertTrue(request.isHandled)
     }
 
     func testShelfTreatsPopoverWindowsAsAuxiliaryPreviewWindows() {
@@ -466,11 +506,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertTrue(source.contains("await Task.yield()"))
             XCTAssertTrue(source.contains("setSearchFocused(false)"))
             XCTAssertTrue(source.contains(".focusEffectDisabled()"))
-            XCTAssertTrue(source.contains("if modifiers.isEmpty, !isSearchFocused"))
-            XCTAssertTrue(source.contains("case .leftArrow:"))
-            XCTAssertTrue(source.contains("moveSelection(.left)"))
-            XCTAssertTrue(source.contains("case .rightArrow:"))
-            XCTAssertTrue(source.contains("moveSelection(.right)"))
+            XCTAssertTrue(source.contains("NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)"))
+            XCTAssertTrue(source.contains("private func handlePanelArrowKey(_ request: ClipboardPanelArrowKeyRequest)"))
+            XCTAssertTrue(source.contains("selectOffset(request.command.offset)"))
             XCTAssertFalse(source.contains(".onMoveCommand(perform: moveSelection)"))
             XCTAssertTrue(source.contains("ClipboardPanelSearchInput.accepts(modifiers)"))
             XCTAssertTrue(source.contains("beginSearch(with: keyPress.characters)"))
@@ -482,6 +520,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertFalse(source.contains("previewFirstRenderedItem"))
             XCTAssertFalse(source.contains("previewsFirstItemWhenIdle"))
         }
+        XCTAssertTrue(controllerSource.contains("ClipboardPanelArrowKeyCommand.resolve("))
+        XCTAssertTrue(controllerSource.contains("NotificationCenter.default.post(name: .pasteBuddyPanelArrowKey"))
 
         XCTAssertFalse(shelfSource.contains("store.setSelectedItemIDs(ids, in: shelfScope)"))
         XCTAssertFalse(sideSource.contains("store.setSelectedItemIDs(ids, in: sideScope)"))
@@ -889,6 +929,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("/usr/bin/chflags uchg"))
         XCTAssertTrue(source.contains("run_coordinated_install_gate_tests"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelArrowKeyCommandUsesExactEventModifiers"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testNativeCopyCommand"))
         XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testDirectPaste"))
@@ -1280,24 +1321,27 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("collectionView.scrollToItems("))
     }
 
-    func testShelfAndSidePanelUseOneFocusedModifierAwareArrowOwner() throws {
+    func testShelfAndSidePanelUseLifecycleScopedModifierAwareArrowOwner() throws {
         let collectionSource = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
 
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
         XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
         XCTAssertTrue(collectionSource.contains("TapGesture().onEnded"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
-            XCTAssertTrue(source.contains(".onKeyPress(phases: .down)"))
-            XCTAssertTrue(source.contains("if modifiers.isEmpty, !isSearchFocused"))
-            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
-            XCTAssertTrue(source.contains("requestPanelKeyboardFocus()"))
-            XCTAssertTrue(source.contains("await Task.yield()"))
+            XCTAssertTrue(source.contains("private func handlePanelArrowKey(_ request: ClipboardPanelArrowKeyRequest)"))
+            XCTAssertTrue(source.contains("guard !isSearchFocused"))
+            XCTAssertTrue(source.contains("previewedID == nil"))
+            XCTAssertTrue(source.contains("request.markHandled()"))
             XCTAssertFalse(source.contains("shelfKeyboardShortcuts"))
             XCTAssertFalse(source.contains("sidePanelKeyboardShortcuts"))
         }
+        XCTAssertTrue(controllerSource.contains("private var localKeyDownMonitor: Any?"))
+        XCTAssertTrue(controllerSource.contains("startPanelKeyMonitoring(for: panel)"))
+        XCTAssertTrue(controllerSource.contains("stopPanelKeyMonitoring()"))
     }
 
     func testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes() throws {
