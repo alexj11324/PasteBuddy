@@ -1277,7 +1277,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("collectionView.scrollToItems("))
     }
 
-    func testShelfAndSidePanelOwnNonPreviewKeyboardShortcuts() throws {
+    func testShelfAndSidePanelUseOneModifierAwareArrowKeyOwner() throws {
         let collectionSource = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
@@ -1287,15 +1287,13 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("TapGesture().onEnded"))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
-            XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow) { moveSelection(.left) }"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.rightArrow) { moveSelection(.right) }"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.upArrow) { moveSelection(.up) }"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.downArrow) { moveSelection(.down) }"))
-            XCTAssertTrue(source.contains(".keyboardShortcut(key, modifiers: [])"))
+            XCTAssertTrue(source.contains(".onKeyPress(phases: .down)"))
+            XCTAssertTrue(source.contains("if modifiers.isEmpty, !isSearchFocused"))
+            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
+            XCTAssertFalse(source.contains("shelfKeyboardShortcuts"))
+            XCTAssertFalse(source.contains("sidePanelKeyboardShortcuts"))
+            XCTAssertFalse(source.contains(".keyboardShortcut(key, modifiers: [])"))
         }
-        XCTAssertTrue(shelfSource.contains(".disabled(isSearchFocused || shelfInteraction.previewedID != nil)"))
-        XCTAssertTrue(sideSource.contains(".disabled(isSearchFocused || interaction.previewedID != nil)"))
     }
 
     func testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes() throws {
