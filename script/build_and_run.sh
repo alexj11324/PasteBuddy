@@ -228,10 +228,23 @@ assert_coordinated_install_source() {
 run_coordinated_install_gate_tests() {
   mode_installs_app || return 0
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
-  swift test --filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
-  swift test --filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection
-  swift test --filter PasteboardWriterTests/testNativeCopyCommand
-  swift test --filter PasteboardWriterTests/testDirectPaste
+  run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
+  run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection
+  run_required_test_filter PasteboardWriterTests/testNativeCopyCommand
+  run_required_test_filter PasteboardWriterTests/testDirectPaste
+}
+
+run_required_test_filter() {
+  local filter="$1"
+  local output
+  output="$(mktemp /private/tmp/pastebuddy-required-test.XXXXXX)"
+  if ! swift test --filter "$filter" 2>&1 | /usr/bin/tee "$output"; then
+    rm -f "$output"
+    return 1
+  fi
+  /usr/bin/grep -Eq 'Executed [1-9][0-9]* tests?' "$output" \
+    || die "Required integration test filter matched no XCTest cases: $filter"
+  rm -f "$output"
 }
 
 running_pids_for_bundle_id() {

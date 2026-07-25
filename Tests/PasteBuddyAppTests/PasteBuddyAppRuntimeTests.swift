@@ -843,10 +843,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("runningInstanceCount=1"))
         XCTAssertTrue(source.contains("/usr/bin/chflags uchg"))
         XCTAssertTrue(source.contains("run_coordinated_install_gate_tests"))
-        XCTAssertTrue(source.contains("swift test --filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes"))
-        XCTAssertTrue(source.contains("swift test --filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection"))
-        XCTAssertTrue(source.contains("swift test --filter PasteboardWriterTests/testNativeCopyCommand"))
-        XCTAssertTrue(source.contains("swift test --filter PasteboardWriterTests/testDirectPaste"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testNativeCopyCommand"))
+        XCTAssertTrue(source.contains("run_required_test_filter PasteboardWriterTests/testDirectPaste"))
+        XCTAssertTrue(source.contains("Required integration test filter matched no XCTest cases"))
         XCTAssertFalse(source.contains("/usr/bin/open -n"))
     }
 
