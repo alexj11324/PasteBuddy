@@ -128,7 +128,6 @@ struct ClipboardShelfPanelView: View {
         .onChange(of: store.searchQuery) {
             shelfInteraction.dismissPreview()
         }
-        .onMoveCommand(perform: handleShelfMoveCommand)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
         .focusEffectDisabled()
@@ -699,21 +698,7 @@ struct ClipboardShelfPanelView: View {
         }
     }
 
-    private func handleShelfMoveCommand(_ direction: MoveCommandDirection) {
-        moveSelection(direction)
-        Task { @MainActor in
-            await Task.yield()
-            if !isSearchFocused {
-                isShelfFocused = true
-            }
-        }
-    }
-
     private func selectOffset(_ offset: Int) {
-        if NSEvent.modifierFlags.contains(.shift) {
-            shelfInteraction.extendSelection(by: offset)
-            return
-        }
         let items = renderedShelfItems
         guard !items.isEmpty else { return }
         let currentID = shelfInteraction.primarySelectedID ?? shelfInteraction.selectedIDs.first
@@ -904,6 +889,19 @@ struct ClipboardShelfPanelView: View {
                 return .handled
             case .rightArrow:
                 moveSelection(.right)
+                return .handled
+            default:
+                break
+            }
+        }
+
+        if modifiers == .shift, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow, .leftArrow:
+                shelfInteraction.extendSelection(by: -1)
+                return .handled
+            case .downArrow, .rightArrow:
+                shelfInteraction.extendSelection(by: 1)
                 return .handled
             default:
                 break

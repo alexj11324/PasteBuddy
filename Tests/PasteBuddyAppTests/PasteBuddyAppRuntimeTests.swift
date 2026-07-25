@@ -209,8 +209,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
         ] {
             let source = try sourceFileContents(path)
-            XCTAssertTrue(source.contains("if NSEvent.modifierFlags.contains(.shift)"))
-            XCTAssertTrue(source.contains("extendSelection(by: offset)"))
+            XCTAssertTrue(source.contains("if modifiers == .shift, !isSearchFocused"))
+            XCTAssertTrue(source.contains("extendSelection(by:"))
+            XCTAssertFalse(source.contains(".onMoveCommand(perform: handleShelfMoveCommand)"))
+            XCTAssertFalse(source.contains(".onMoveCommand(perform: handleSidePanelMoveCommand)"))
         }
     }
 

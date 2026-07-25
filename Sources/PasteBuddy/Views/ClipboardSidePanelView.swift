@@ -71,7 +71,6 @@ struct ClipboardSidePanelView: View {
         .onChange(of: store.searchQuery) {
             interaction.dismissPreview()
         }
-        .onMoveCommand(perform: handleSidePanelMoveCommand)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
         .focusEffectDisabled()
@@ -486,21 +485,7 @@ struct ClipboardSidePanelView: View {
         }
     }
 
-    private func handleSidePanelMoveCommand(_ direction: MoveCommandDirection) {
-        moveSelection(direction)
-        Task { @MainActor in
-            await Task.yield()
-            if !isSearchFocused {
-                isListFocused = true
-            }
-        }
-    }
-
     private func selectOffset(_ offset: Int) {
-        if NSEvent.modifierFlags.contains(.shift) {
-            interaction.extendSelection(by: offset)
-            return
-        }
         let items = renderedItems
         guard !items.isEmpty else { return }
         let currentID = interaction.primarySelectedID ?? interaction.selectedIDs.first
@@ -530,6 +515,19 @@ struct ClipboardSidePanelView: View {
                 return .handled
             case .rightArrow:
                 moveSelection(.right)
+                return .handled
+            default:
+                break
+            }
+        }
+
+        if modifiers == .shift, !isSearchFocused {
+            switch keyPress.key {
+            case .upArrow, .leftArrow:
+                interaction.extendSelection(by: -1)
+                return .handled
+            case .downArrow, .rightArrow:
+                interaction.extendSelection(by: 1)
                 return .handled
             default:
                 break
