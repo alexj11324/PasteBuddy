@@ -101,26 +101,18 @@ struct ClipboardSidePanelView: View {
             keyboardShortcut(.rightArrow) { moveSelection(.right) }
             keyboardShortcut(.upArrow) { moveSelection(.up) }
             keyboardShortcut(.downArrow) { moveSelection(.down) }
-            keyboardShortcut(.leftArrow, modifiers: [.shift]) { interaction.extendSelection(by: -1) }
-            keyboardShortcut(.rightArrow, modifiers: [.shift]) { interaction.extendSelection(by: 1) }
-            keyboardShortcut(.upArrow, modifiers: [.shift]) { interaction.extendSelection(by: -1) }
-            keyboardShortcut(.downArrow, modifiers: [.shift]) { interaction.extendSelection(by: 1) }
         }
         .disabled(isSearchFocused || interaction.previewedID != nil)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
     }
 
-    private func keyboardShortcut(
-        _ key: KeyEquivalent,
-        modifiers: EventModifiers = [],
-        action: @escaping () -> Void
-    ) -> some View {
+    private func keyboardShortcut(_ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Color.clear
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(key, modifiers: modifiers)
+        .keyboardShortcut(key, modifiers: [])
     }
 
     private var toolbar: some View {
@@ -505,6 +497,10 @@ struct ClipboardSidePanelView: View {
     }
 
     private func selectOffset(_ offset: Int) {
+        if NSEvent.modifierFlags.contains(.shift) {
+            interaction.extendSelection(by: offset)
+            return
+        }
         let items = renderedItems
         guard !items.isEmpty else { return }
         let currentID = interaction.primarySelectedID ?? interaction.selectedIDs.first

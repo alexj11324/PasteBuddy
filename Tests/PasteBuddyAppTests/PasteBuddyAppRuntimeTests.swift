@@ -209,11 +209,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
         ] {
             let source = try sourceFileContents(path)
-            XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow, modifiers: [.shift])"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.rightArrow, modifiers: [.shift])"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.upArrow, modifiers: [.shift])"))
-            XCTAssertTrue(source.contains("keyboardShortcut(.downArrow, modifiers: [.shift])"))
-            XCTAssertTrue(source.contains("extendSelection(by:"))
+            XCTAssertTrue(source.contains("if NSEvent.modifierFlags.contains(.shift)"))
+            XCTAssertTrue(source.contains("extendSelection(by: offset)"))
         }
     }
 
@@ -1293,7 +1290,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertTrue(source.contains("keyboardShortcut(.rightArrow) { moveSelection(.right) }"))
             XCTAssertTrue(source.contains("keyboardShortcut(.upArrow) { moveSelection(.up) }"))
             XCTAssertTrue(source.contains("keyboardShortcut(.downArrow) { moveSelection(.down) }"))
-            XCTAssertTrue(source.contains(".keyboardShortcut(key, modifiers: modifiers)"))
+            XCTAssertTrue(source.contains(".keyboardShortcut(key, modifiers: [])"))
         }
         XCTAssertTrue(shelfSource.contains(".disabled(isSearchFocused || shelfInteraction.previewedID != nil)"))
         XCTAssertTrue(sideSource.contains(".disabled(isSearchFocused || interaction.previewedID != nil)"))

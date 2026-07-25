@@ -161,26 +161,18 @@ struct ClipboardShelfPanelView: View {
             keyboardShortcut(.rightArrow) { moveSelection(.right) }
             keyboardShortcut(.upArrow) { moveSelection(.up) }
             keyboardShortcut(.downArrow) { moveSelection(.down) }
-            keyboardShortcut(.leftArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: -1) }
-            keyboardShortcut(.rightArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: 1) }
-            keyboardShortcut(.upArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: -1) }
-            keyboardShortcut(.downArrow, modifiers: [.shift]) { shelfInteraction.extendSelection(by: 1) }
         }
         .disabled(isSearchFocused || shelfInteraction.previewedID != nil)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
     }
 
-    private func keyboardShortcut(
-        _ key: KeyEquivalent,
-        modifiers: EventModifiers = [],
-        action: @escaping () -> Void
-    ) -> some View {
+    private func keyboardShortcut(_ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Color.clear
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(key, modifiers: modifiers)
+        .keyboardShortcut(key, modifiers: [])
     }
 
     private var toolbar: some View {
@@ -718,6 +710,10 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func selectOffset(_ offset: Int) {
+        if NSEvent.modifierFlags.contains(.shift) {
+            shelfInteraction.extendSelection(by: offset)
+            return
+        }
         let items = renderedShelfItems
         guard !items.isEmpty else { return }
         let currentID = shelfInteraction.primarySelectedID ?? shelfInteraction.selectedIDs.first
