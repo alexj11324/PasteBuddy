@@ -5,6 +5,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VisionKit
 
+enum ClipboardShelfTimestampAdapter {
+    static func presentation(
+        for capturedAt: Date,
+        formatter: HistoryCardTimestampFormatter
+    ) -> HistoryCardTimestampFormatter.Presentation {
+        formatter.presentation(for: capturedAt)
+    }
+}
+
 private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
     static let cardHeight: CGFloat = 240
@@ -91,7 +100,7 @@ struct ClipboardShelfPanelView: View {
     @State private var shelfItems: [ClipboardItem] = []
     @State private var shelfInteraction = ShelfInteractionModel()
     @State private var isSearchRailPresented = false
-    @State private var relativeDateReference = Date()
+    @State private var timestampReference = Date()
     @State private var shelfScope: PasteScope = .history
 
     var body: some View {
@@ -151,7 +160,9 @@ struct ClipboardShelfPanelView: View {
             handleShelfKeyPress(keyPress, allowsPreview: true)
         }
         .task {
-            await runShelfMinuteTicker()
+            await HistoryCardTimestampTicker.run {
+                timestampReference = $0
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
@@ -462,10 +473,6 @@ struct ClipboardShelfPanelView: View {
         )
     }
 
-    private var relativeDateMinuteBucket: Int {
-        Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
-    }
-
     private var activeFilterStrip: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
@@ -630,7 +637,7 @@ struct ClipboardShelfPanelView: View {
                         await store.enrichLinkPreviewMetadataIfNeeded(for: item)
                     },
                     isSelected: isSelected,
-                    relativeDateReference: relativeDateReference,
+                    timestampReference: timestampReference,
                     defaultPasteFormat: defaultPasteFormat,
                     pinboards: pinboards,
                     onPaste: { format in
@@ -955,17 +962,6 @@ struct ClipboardShelfPanelView: View {
         )
     }
 
-    private func runShelfMinuteTicker() async {
-        while !Task.isCancelled {
-            do {
-                try await Task.sleep(nanoseconds: 60_000_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            relativeDateReference = Date()
-        }
-    }
 }
 
 private struct LaunchAtLoginShelfCard: View {
@@ -1229,7 +1225,7 @@ private struct ClipboardShelfCard: View {
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
-    let relativeDateReference: Date
+    let timestampReference: Date
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
     let onPaste: (PasteFormat) -> Void
@@ -1238,11 +1234,19 @@ private struct ClipboardShelfCard: View {
     let onDelete: () -> Void
 
     var body: some View {
+        let formatter = HistoryCardTimestampFormatter(
+            now: { timestampReference }
+        )
+        let timestamp = ClipboardShelfTimestampAdapter.presentation(
+            for: item.createdAt,
+            formatter: formatter
+        )
+
         ClipboardShelfCardVisual(
             item: item,
             imageDataProvider: imageDataProvider,
             linkMetadataProvider: linkMetadataProvider,
-            relativeDateReference: relativeDateReference
+            timestamp: timestamp
         )
             .equatable()
             .overlay {
@@ -1253,7 +1257,9 @@ private struct ClipboardShelfCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
-        .accessibilityLabel("\(item.title), \(localized(item.presentationContentType.displayName))")
+        .accessibilityLabel(
+            "\(item.title), \(localized(item.presentationContentType.displayName)), \(timestamp.accessibilityText)"
+        )
         .accessibilityValue(localized(isSelected ? "state.selected" : "label.not_selected"))
         .accessibilityHint(localized("message.press_space_to_preview_press_return_to"))
     }
@@ -1661,22 +1667,22 @@ private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
-    let relativeDateReference: Date
+    let timestamp: HistoryCardTimestampFormatter.Presentation
     private let renderSignature: ClipboardShelfCardRenderSignature
 
     init(
         item: ClipboardItem,
         imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?,
         linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void,
-        relativeDateReference: Date
+        timestamp: HistoryCardTimestampFormatter.Presentation
     ) {
         self.item = item
         self.imageDataProvider = imageDataProvider
         self.linkMetadataProvider = linkMetadataProvider
-        self.relativeDateReference = relativeDateReference
+        self.timestamp = timestamp
         self.renderSignature = ClipboardShelfCardRenderSignature(
             item: item,
-            relativeDateReference: relativeDateReference
+            timestamp: timestamp
         )
     }
 
@@ -1690,9 +1696,11 @@ private struct ClipboardShelfCardVisual: View {
                 Text(localized(item.presentationContentType.displayName))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
-                Text(relativeDate(relativeTo: relativeDateReference))
+                Text(timestamp.visibleText)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
@@ -1752,19 +1760,9 @@ private struct ClipboardShelfCardVisual: View {
         }
     }
 
-    private func relativeDate(relativeTo date: Date) -> String {
-        Self.relativeFormatter.localizedString(for: item.createdAt, relativeTo: date)
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
 }
 
 extension ClipboardShelfCardVisual: Equatable {
@@ -1801,9 +1799,9 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let rtfAssetID: String?
     let imageAssetID: String?
     let imageByteCount: Int?
-    let relativeDateMinuteBucket: Int
+    let timestamp: HistoryCardTimestampFormatter.Presentation
 
-    init(item: ClipboardItem, relativeDateReference: Date) {
+    init(item: ClipboardItem, timestamp: HistoryCardTimestampFormatter.Presentation) {
         id = item.id
         createdAt = item.createdAt
         updatedAt = item.updatedAt
@@ -1817,7 +1815,7 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         rtfAssetID = item.payload.rtfAssetID
         imageAssetID = item.payload.imageAssetID
         imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
-        relativeDateMinuteBucket = Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
+        self.timestamp = timestamp
     }
 }
 
