@@ -1411,16 +1411,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(generalSource.contains("label.launch_at_login"))
         XCTAssertTrue(generalSource.contains("Picker(\"label.panel_style\", selection: $panelDisplayMode)"))
         XCTAssertTrue(generalSource.contains("action.paste_as_plain_text_by"))
-        XCTAssertTrue(generalSource.contains("label.accessibility_access"))
+        XCTAssertTrue(generalSource.contains("label.direct_paste_permission"))
         XCTAssertFalse(generalSource.contains("action.clear_settings_focus"))
         XCTAssertFalse(generalSource.contains("label.menu_bar"))
         XCTAssertTrue(captureSource.contains("action.save_clipboard_history"))
         XCTAssertTrue(captureSource.contains("action.save_copied_images"))
         XCTAssertTrue(captureSource.contains("action.recognize_text_in_copied_images"))
         XCTAssertTrue(captureSource.contains("DisclosureGroup(\"label.advanced_capture_rules\")"))
+        XCTAssertTrue(captureSource.contains("DisclosureGroup(\"label.temporary_capture_pause\")"))
         XCTAssertFalse(captureSource.localizedCaseInsensitiveContains("screenshot"))
-        XCTAssertFalse(captureSource.contains("action.pause_15m"))
-        XCTAssertFalse(captureSource.contains("action.pause_1h"))
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
@@ -1482,9 +1481,21 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bindingRowSource.contains("onClear: currentBinding.isEnabled"))
         XCTAssertFalse(bindingRowSource.contains("Button(\"action.clear_shortcut\")"))
         XCTAssertTrue(source.contains("action.reset_all_shortcuts"))
+        XCTAssertTrue(source.contains("destructiveConfirmation = .resetShortcuts"))
+        XCTAssertTrue(source.contains("state.recording_shortcut"))
+        XCTAssertTrue(source.contains("message.press_key_combination_to_record"))
         XCTAssertFalse(source.contains("ShortcutModifierToggles"))
         XCTAssertFalse(source.contains("Toggle(modifier.displayName"))
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
+    }
+
+    func testCaptureRuleRemovalUsesSemanticLabelsAndConfirmation() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        XCTAssertTrue(source.contains("format.enable_capture_rule"))
+        XCTAssertTrue(source.contains("format.remove_capture_rule"))
+        XCTAssertTrue(source.contains("destructiveConfirmation = .removeCaptureRule(rule.id, rule.name)"))
+        XCTAssertFalse(source.contains("Toggle(\n                                \"Enabled\""))
     }
 
     func testStorageSettingsKeepsRiskyControlsBehindExplicitDisclosure() throws {

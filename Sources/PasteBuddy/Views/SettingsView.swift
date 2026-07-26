@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var isRunningMCPClientInstall = false
     @State private var mcpStatusMessage: String?
     @State private var isRestoringPurchases = false
+    @State private var launchAtLoginErrorMessage: String?
 
     var body: some View {
         settingsSplitView
@@ -153,12 +154,22 @@ struct SettingsView: View {
                     "label.launch_at_login",
                     isOn: Binding(
                         get: { store.snapshot.general.launchAtLoginEnabled },
-                        set: { store.setLaunchAtLoginEnabled($0) }
+                        set: { isEnabled in
+                            store.setLaunchAtLoginEnabled(isEnabled)
+                            launchAtLoginErrorMessage =
+                                store.snapshot.general.launchAtLoginEnabled == isEnabled
+                                ? nil
+                                : store.lastErrorMessage
+                        }
                     )
                 )
                 .disabled(!LaunchAtLoginService.isAvailable)
 
-                if !LaunchAtLoginService.isAvailable {
+                if let launchAtLoginErrorMessage {
+                    Text(launchAtLoginErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if !LaunchAtLoginService.isAvailable {
                     Text("message.launch_at_login_is_unavailable_in_this")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -182,13 +193,15 @@ struct SettingsView: View {
             }
 
             Section("label.direct_paste") {
-                LabeledContent("label.accessibility_access") {
-                    Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
-                        .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
-                }
+                LabeledContent("label.direct_paste_permission") {
+                    HStack {
+                        Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
+                            .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
 
-                Button("action.request_accessibility_access") {
-                    AccessibilityPermissionService.requestTrustPrompt()
+                        Button("action.request_accessibility_access") {
+                            AccessibilityPermissionService.requestTrustPrompt()
+                        }
+                    }
                 }
             }
         }
@@ -217,6 +230,23 @@ struct SettingsView: View {
                     Text(localized("format.capture_resumes_at", pauseUntil.formatted(date: .omitted, time: .shortened)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                DisclosureGroup("label.temporary_capture_pause") {
+                    HStack {
+                        Button("action.pause_15m") {
+                            store.pauseCapture(for: 15 * 60)
+                        }
+
+                        Button("action.pause_1h") {
+                            store.pauseCapture(for: 60 * 60)
+                        }
+
+                        Button("action.resume") {
+                            store.resumeCapture()
+                        }
+                        .disabled(!store.isCapturePaused)
+                    }
                 }
 
                 Toggle(
@@ -304,7 +334,7 @@ struct SettingsView: View {
                             Label(rule.name, systemImage: rule.condition.systemImageName)
                             Spacer()
                             Toggle(
-                                "Enabled",
+                                localized("format.enable_capture_rule", rule.name),
                                 isOn: Binding(
                                     get: {
                                         store.snapshot.privacy.customCaptureRules
@@ -315,9 +345,12 @@ struct SettingsView: View {
                                 )
                             )
                             .labelsHidden()
+                            .accessibilityLabel(localized("format.enable_capture_rule", rule.name))
 
-                            Button("action.remove", role: .destructive) {
-                                store.removeCaptureRule(rule.id)
+                            Button(role: .destructive) {
+                                destructiveConfirmation = .removeCaptureRule(rule.id, rule.name)
+                            } label: {
+                                Text(localized("format.remove_capture_rule", rule.name))
                             }
                         }
 
@@ -537,7 +570,7 @@ struct SettingsView: View {
                 Button("action.restore_purchases") {
                     isRestoringPurchases = true
                     Task {
-                        await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
+                        _ = await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
                         await store.flushPendingSave()
                         isRestoringPurchases = false
                     }
@@ -591,7 +624,7 @@ struct SettingsView: View {
                 }
 
                 Button("action.reset_all_shortcuts") {
-                    store.resetShortcutConfiguration()
+                    destructiveConfirmation = .resetShortcuts
                 }
             }
             }
@@ -826,6 +859,10 @@ struct SettingsView: View {
             store.updateRetentionDays(days)
         case .reduceStorageLimit(let bytes):
             store.updateMaxStorageBytes(bytes)
+        case .removeCaptureRule(let id, _):
+            store.removeCaptureRule(id)
+        case .resetShortcuts:
+            store.resetShortcutConfiguration()
         }
     }
 
@@ -1025,10 +1062,6 @@ struct SettingsView: View {
         )
     }
 
-    private func localizedSettingsTitle(_ destination: MacSettingsDestination) -> String {
-        localized("format.settings", localized(destination.displayName))
-    }
-
     private func localizedPlanName(for plan: ProductAccessPlan) -> String {
         switch plan {
         case .free:
@@ -1049,13 +1082,16 @@ struct SettingsView: View {
     }
 
     private var restoreStatusMessage: String? {
+        if isRestoringPurchases {
+            return localized("state.restoring_purchases")
+        }
         switch store.snapshot.entitlement.restoreState {
         case .notStarted:
             nil
         case .inProgress:
             localized("state.restoring_purchases")
         case .restored:
-            localized("state.purchases_restored")
+            store.lastErrorMessage ?? localized("state.purchases_restored")
         case .failed(_, let message):
             message
         }
@@ -1685,6 +1721,8 @@ private enum SettingsDestructiveAction {
     case disableCloudSync
     case reduceRetentionDays(Int)
     case reduceStorageLimit(Int)
+    case removeCaptureRule(UUID, String)
+    case resetShortcuts
 
     var title: String {
         switch self {
@@ -1700,6 +1738,10 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("dialog.reduce_history_retention", comment: "")
         case .reduceStorageLimit:
             NSLocalizedString("dialog.reduce_storage_limit", comment: "")
+        case .removeCaptureRule:
+            NSLocalizedString("dialog.remove_capture_rule", comment: "")
+        case .resetShortcuts:
+            NSLocalizedString("dialog.reset_all_shortcuts", comment: "")
         }
     }
 
@@ -1725,6 +1767,14 @@ private enum SettingsDestructiveAction {
                 locale: Locale.current,
                 ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
             )
+        case .removeCaptureRule(_, let name):
+            String(
+                format: NSLocalizedString("format.removing_capture_rule_cannot_be_undone", comment: ""),
+                locale: Locale.current,
+                name
+            )
+        case .resetShortcuts:
+            NSLocalizedString("message.resetting_shortcuts_restores_every_default", comment: "")
         }
     }
 
@@ -1740,6 +1790,14 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("label.reset_to_local_only", comment: "")
         case .reduceRetentionDays, .reduceStorageLimit:
             NSLocalizedString("action.apply_storage_limit", comment: "")
+        case .removeCaptureRule(_, let name):
+            String(
+                format: NSLocalizedString("format.remove_capture_rule", comment: ""),
+                locale: Locale.current,
+                name
+            )
+        case .resetShortcuts:
+            NSLocalizedString("action.reset_all_shortcuts", comment: "")
         }
     }
 }
@@ -2113,7 +2171,16 @@ private struct ShortcutCaptureButton: View {
             }
         }
         .onDisappear { recorder.stop() }
-        .accessibilityLabel(displayName)
+        .accessibilityLabel(
+            recorder.isRecording
+                ? NSLocalizedString("state.recording_shortcut", comment: "")
+                : displayName
+        )
+        .accessibilityHint(
+            recorder.isRecording
+                ? NSLocalizedString("message.press_key_combination_to_record", comment: "")
+                : NSLocalizedString("action.record_shortcut", comment: "")
+        )
     }
 
     private var shortcutLabel: some View {

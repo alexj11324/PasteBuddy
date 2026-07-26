@@ -200,7 +200,9 @@
 "dialog.new_pin_group" = "New Pin Group";
 "dialog.reduce_history_retention" = "Reduce History Retention?";
 "dialog.reduce_storage_limit" = "Reduce Storage Limit?";
+"dialog.remove_capture_rule" = "Remove Capture Rule?";
 "dialog.rename_pin" = "Rename Pin";
+"dialog.reset_all_shortcuts" = "Reset All Shortcuts?";
 "dialog.reset_sync_to_local_only" = "Reset Sync to Local Only?";
 "dialog.save_all_pins" = "Save All Pins";
 "format.added_mcp_client" = "Added PasteBuddy to %@. If the client is already running, refresh MCP servers or restart the client.";
@@ -217,6 +219,7 @@
 "format.copied_mcp_install_link_for" = "Copied MCP install link for %@.";
 "format.copied_mcp_server_command_for" = "Copied MCP server command for %@.";
 "format.detected_mcp_clients" = "Detected: %@";
+"format.enable_capture_rule" = "Enable %@";
 "format.excluded" = "Excluded %@.";
 "format.file" = "%d file";
 "format.files" = "%d files";
@@ -244,7 +247,9 @@
 "format.reducing_storage_may_remove_history" = "Using a %@ limit may immediately remove older unpinned items.";
 "format.refine_search_or_filters_to_see_more" = "Refine search or filters to see %d more.";
 "format.remove" = "Remove %@";
+"format.remove_capture_rule" = "Remove %@";
 "format.remove_label" = "Remove label %@";
+"format.removing_capture_rule_cannot_be_undone" = "The capture rule \"%@\" will be removed. This action cannot be undone.";
 "format.resumes_at" = "Resumes at %@.";
 "format.seats" = "Seats: %d";
 "format.selected" = "%d selected";
@@ -346,6 +351,7 @@
 "label.device_unlock" = "Device Unlock";
 "label.digits_only" = "Digits only";
 "label.direct_paste" = "Direct Paste";
+"label.direct_paste_permission" = "Direct Paste Permission";
 "label.disabled_types" = "Disabled Types";
 "label.distribution" = "Distribution";
 "label.drag" = "Drag";
@@ -545,6 +551,7 @@
 "label.team" = "Team";
 "label.team_name" = "Team Name";
 "label.template" = "Template";
+"label.temporary_capture_pause" = "Temporary Pause";
 "label.text" = "Text";
 "label.this_device" = "This Device";
 "label.this_mac" = "This Mac";
@@ -622,10 +629,12 @@
 "message.per_item_copy_and_paste_menus_still" = "Per-item copy and paste menus still let you choose original format or plain text for a single action.";
 "message.pinned_items_are_preserved_when_normal_history" = "Pinned items are preserved when normal history expires, storage limits prune old content, or unpinned history is cleared. Use the explicit all-history action to remove pinned item memberships too.";
 "message.preparing_shared_content" = "Preparing shared content...";
+"message.press_key_combination_to_record" = "Press the key combination to record.";
 "message.press_space_to_preview_press_return_to" = "Press Space to preview. Press Return to paste.";
 "message.recognized_local_ocr_text_appears_below_the" = "Recognized local OCR text appears below the image when available.";
 "message.removes_all_active_clipboard_filters" = "Removes all active clipboard filters.";
 "message.removes_this_clipboard_item_from_history_and" = "Removes this clipboard item from history and pinboards. Use Undo Delete to restore it.";
+"message.resetting_shortcuts_restores_every_default" = "This restores every shortcut to its default.";
 "message.resetting_sync_to_local_only_disables_cloud" = "This disables cloud sync and resets its local configuration. Local clipboard history stays on this Mac.";
 "message.retrieve_item_requires_explicit_mcp_opt_in" = "Retrieving full clipboard payloads is off by default. Turn on Retrieve Clipboard Item only for AI tools you trust.";
 "message.run_local_apple_ocr_after_image_capture" = "Run local Apple OCR after image capture";
@@ -783,6 +792,7 @@
 "state.purchases_restored" = "Purchases restored.";
 "state.ready" = "Ready";
 "state.recognizing_text" = "Recognizing text…";
+"state.recording_shortcut" = "Recording Shortcut";
 "state.required" = "Required";
 "state.restoring_purchases" = "Restoring purchases...";
 "state.selected" = "Selected";

@@ -200,7 +200,9 @@
 "dialog.new_pin_group" = "新建贴图组";
 "dialog.reduce_history_retention" = "缩短历史保留期？";
 "dialog.reduce_storage_limit" = "降低存储上限？";
+"dialog.remove_capture_rule" = "移除捕获规则？";
 "dialog.rename_pin" = "重命名贴图";
+"dialog.reset_all_shortcuts" = "重置所有快捷键？";
 "dialog.reset_sync_to_local_only" = "将同步重置为仅本地？";
 "dialog.save_all_pins" = "保存所有贴图";
 "format.added_mcp_client" = "已将 PasteBuddy 添加到 %@。如果客户端已在运行，请刷新 MCP 服务器或重启客户端。";
@@ -217,6 +219,7 @@
 "format.copied_mcp_install_link_for" = "已复制 %@ 的 MCP 安装链接。";
 "format.copied_mcp_server_command_for" = "已复制 %@ 的 MCP 服务器命令。";
 "format.detected_mcp_clients" = "已检测到：%@";
+"format.enable_capture_rule" = "启用%@";
 "format.excluded" = "已排除 %@。";
 "format.file" = "%d 个文件";
 "format.files" = "%d 个文件";
@@ -244,7 +247,9 @@
 "format.reducing_storage_may_remove_history" = "使用 %@ 上限可能会立即移除更早的未固定项目。";
 "format.refine_search_or_filters_to_see_more" = "优化搜索或筛选条件以查看更多 %d 项。";
 "format.remove" = "移除 %@";
+"format.remove_capture_rule" = "移除%@";
 "format.remove_label" = "移除标签 %@";
+"format.removing_capture_rule_cannot_be_undone" = "将移除捕获规则“%@”。此操作无法撤销。";
 "format.resumes_at" = "将在 %@ 恢复。";
 "format.seats" = "席位：%d";
 "format.selected" = "已选择 %d 项";
@@ -346,6 +351,7 @@
 "label.device_unlock" = "设备解锁";
 "label.digits_only" = "仅数字键";
 "label.direct_paste" = "直接粘贴";
+"label.direct_paste_permission" = "直接粘贴权限";
 "label.disabled_types" = "已禁用类型";
 "label.distribution" = "分发";
 "label.drag" = "拖动";
@@ -545,6 +551,7 @@
 "label.team" = "团队";
 "label.team_name" = "团队名称";
 "label.template" = "模板";
+"label.temporary_capture_pause" = "临时暂停";
 "label.text" = "文本";
 "label.this_device" = "本设备";
 "label.this_mac" = "这台 Mac";
@@ -622,10 +629,12 @@
 "message.per_item_copy_and_paste_menus_still" = "每个项目的复制和粘贴菜单仍可让你在单次操作中选择原始格式或纯文本。";
 "message.pinned_items_are_preserved_when_normal_history" = "当普通历史记录过期、存储限制清理旧内容，或未固定的历史记录被清除时，已固定项目会被保留。若要一并移除固定项目的归属关系，请使用明确的“清除所有历史记录”操作。";
 "message.preparing_shared_content" = "正在准备共享内容...";
+"message.press_key_combination_to_record" = "请按下要录制的组合键。";
 "message.press_space_to_preview_press_return_to" = "按空格键预览，按 Return 粘贴。";
 "message.recognized_local_ocr_text_appears_below_the" = "可用时，识别到的本地 OCR 文本会显示在图片下方。";
 "message.removes_all_active_clipboard_filters" = "移除所有已启用的剪贴板过滤器。";
 "message.removes_this_clipboard_item_from_history_and" = "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。";
+"message.resetting_shortcuts_restores_every_default" = "这会将所有快捷键恢复为默认值。";
 "message.resetting_sync_to_local_only_disables_cloud" = "这会关闭云同步并重置其本地配置。本地剪贴板历史仍保留在这台 Mac 上。";
 "message.retrieve_item_requires_explicit_mcp_opt_in" = "默认不允许读取完整剪贴板内容。仅对你信任的 AI 工具开启“读取剪贴板项目”。";
 "message.run_local_apple_ocr_after_image_capture" = "图片捕获后运行 Apple 本地 OCR";
@@ -783,6 +792,7 @@
 "state.purchases_restored" = "购买项目已恢复。";
 "state.ready" = "就绪";
 "state.recognizing_text" = "正在识别文字…";
+"state.recording_shortcut" = "正在录制快捷键";
 "state.required" = "必需";
 "state.restoring_purchases" = "正在恢复购买项目…";
 "state.selected" = "已选择";
