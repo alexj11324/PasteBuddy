@@ -455,6 +455,52 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(request.isHandled)
     }
 
+    func testClipboardPanelSpaceKeyRoutesPreviewAtTheWindowLevel() throws {
+        XCTAssertTrue(
+            ClipboardPanelPreviewKeyCommand.matches(
+                keyCode: UInt16(kVK_Space),
+                modifierFlags: []
+            )
+        )
+        XCTAssertTrue(
+            ClipboardPanelPreviewKeyCommand.matches(
+                keyCode: UInt16(kVK_Space),
+                modifierFlags: [.capsLock, .function, .numericPad]
+            )
+        )
+        XCTAssertFalse(
+            ClipboardPanelPreviewKeyCommand.matches(
+                keyCode: UInt16(kVK_Space),
+                modifierFlags: [.command]
+            )
+        )
+        XCTAssertFalse(
+            ClipboardPanelPreviewKeyCommand.matches(
+                keyCode: UInt16(kVK_Return),
+                modifierFlags: []
+            )
+        )
+
+        let request = ClipboardPanelPreviewKeyRequest()
+        XCTAssertFalse(request.isHandled)
+        request.markHandled()
+        XCTAssertTrue(request.isHandled)
+
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        XCTAssertTrue(controllerSource.contains("ClipboardPanelPreviewKeyCommand.matches("))
+        XCTAssertTrue(controllerSource.contains("NotificationCenter.default.post(name: .pasteBuddyPanelPreviewKey"))
+        for path in [
+            "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
+            "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
+        ] {
+            let source = try sourceFileContents(path)
+            XCTAssertTrue(source.contains("NotificationCenter.default.publisher(for: .pasteBuddyPanelPreviewKey)"))
+            XCTAssertTrue(source.contains("toggleSelectedItemPreview()"))
+            XCTAssertTrue(source.contains("!isSearchFocused"))
+            XCTAssertTrue(source.contains("request.markHandled()"))
+        }
+    }
+
     func testShelfTreatsPopoverWindowsAsAuxiliaryPreviewWindows() {
         XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("NSPopoverWindow"))
         XCTAssertTrue(ClipboardShelfPanelController.isShelfAuxiliaryWindowClassName("_TtC7SwiftUI19PlatformPopoverHost"))

@@ -155,6 +155,12 @@ struct ClipboardShelfPanelView: View {
             guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
             handlePanelArrowKey(request)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelPreviewKey)) { notification in
+            guard let request = notification.object as? ClipboardPanelPreviewKeyRequest,
+                  !isSearchFocused else { return }
+            toggleSelectedItemPreview()
+            request.markHandled()
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
         }

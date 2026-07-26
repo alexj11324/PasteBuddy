@@ -8,6 +8,7 @@ extension Notification.Name {
     static let pasteBuddyCopyPanelSelection = Notification.Name("PasteBuddyCopyPanelSelection")
     static let pasteBuddyPastePanelSelection = Notification.Name("PasteBuddyPastePanelSelection")
     static let pasteBuddyPanelArrowKey = Notification.Name("PasteBuddyPanelArrowKey")
+    static let pasteBuddyPanelPreviewKey = Notification.Name("PasteBuddyPanelPreviewKey")
 }
 
 @MainActor
@@ -57,6 +58,18 @@ struct ClipboardPanelArrowKeyCommand: Equatable {
     }
 }
 
+enum ClipboardPanelPreviewKeyCommand {
+    static func matches(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> Bool {
+        let modifiers = modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        return Int(keyCode) == kVK_Space && modifiers.isEmpty
+    }
+}
+
 @MainActor
 final class ClipboardPanelArrowKeyRequest {
     let command: ClipboardPanelArrowKeyCommand
@@ -65,6 +78,15 @@ final class ClipboardPanelArrowKeyRequest {
     init(command: ClipboardPanelArrowKeyCommand) {
         self.command = command
     }
+
+    func markHandled() {
+        isHandled = true
+    }
+}
+
+@MainActor
+final class ClipboardPanelPreviewKeyRequest {
+    private(set) var isHandled = false
 
     func markHandled() {
         isHandled = true
@@ -522,15 +544,25 @@ final class ClipboardShelfPanelController {
     private func startPanelKeyMonitoring(for panel: NSPanel) {
         stopPanelKeyMonitoring()
         localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak panel] event in
-            guard let panel, panel.isVisible, event.window === panel,
-                  let command = ClipboardPanelArrowKeyCommand.resolve(
-                      keyCode: event.keyCode,
-                      modifierFlags: event.modifierFlags
-                  ) else {
+            guard let panel, panel.isVisible, event.window === panel else {
                 return event
             }
-            let request = ClipboardPanelArrowKeyRequest(command: command)
-            NotificationCenter.default.post(name: .pasteBuddyPanelArrowKey, object: request)
+            if let command = ClipboardPanelArrowKeyCommand.resolve(
+                      keyCode: event.keyCode,
+                      modifierFlags: event.modifierFlags
+                  ) {
+                let request = ClipboardPanelArrowKeyRequest(command: command)
+                NotificationCenter.default.post(name: .pasteBuddyPanelArrowKey, object: request)
+                return request.isHandled ? nil : event
+            }
+            guard ClipboardPanelPreviewKeyCommand.matches(
+                keyCode: event.keyCode,
+                modifierFlags: event.modifierFlags
+            ) else {
+                return event
+            }
+            let request = ClipboardPanelPreviewKeyRequest()
+            NotificationCenter.default.post(name: .pasteBuddyPanelPreviewKey, object: request)
             return request.isHandled ? nil : event
         }
     }
