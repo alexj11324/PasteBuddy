@@ -401,23 +401,19 @@ struct SettingsView: View {
     }
 
     private var storageSettingsForm: some View {
-            Form {
+        Form {
             Section("label.storage_security") {
-                LabeledContent("label.storage_mode") {
-                    Text(localized(store.snapshot.security.storageMode.displayName))
-                }
-
                 Toggle(
-                    "Require Touch ID to unlock history",
+                    "label.require_touch_id_for_history",
                     isOn: Binding(
                         get: { store.snapshot.security.requiresBiometricUnlock },
                         set: { store.setBiometricHistoryLockEnabled($0) }
                     )
                 )
 
-                LabeledContent("label.history_lock") {
-                    Text(localized(store.historyAccessStatusLine))
-                }
+                Text(localized(store.historyAccessStatusLine))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Stepper(
                     value: Binding(
@@ -431,50 +427,37 @@ struct SettingsView: View {
                 }
                 .disabled(!store.snapshot.security.requiresBiometricUnlock)
 
-                HStack {
-                    Button("action.unlock_history") {
-                        Task {
-                            await store.unlockHistoryWithTouchID()
+                DisclosureGroup("label.history_access") {
+                    HStack {
+                        Button("action.unlock_history") {
+                            Task {
+                                await store.unlockHistoryWithTouchID()
+                            }
                         }
-                    }
-                    .disabled(!store.snapshot.security.requiresBiometricUnlock || !store.isHistoryAccessLocked)
+                        .disabled(!store.snapshot.security.requiresBiometricUnlock || !store.isHistoryAccessLocked)
 
-                    Button("action.lock_history") {
-                        store.lockHistory()
+                        Button("action.lock_history") {
+                            store.lockHistory()
+                        }
+                        .disabled(!store.snapshot.security.requiresBiometricUnlock || store.isHistoryAccessLocked)
                     }
-                    .disabled(!store.snapshot.security.requiresBiometricUnlock || store.isHistoryAccessLocked)
                 }
             }
 
             Section("label.storage_retention") {
                 let storageReport = store.storageUsageReport
-                LabeledContent("label.estimated_history_size") {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.estimatedBytes), countStyle: .file))
-                }
-                LabeledContent("label.pinned_history_size") {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.pinnedEstimatedBytes), countStyle: .file))
-                }
-                LabeledContent("label.unpinned_history_size") {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.unpinnedEstimatedBytes), countStyle: .file))
-                }
-                LabeledContent("label.items") {
-                    Text(localized("format.items", storageReport.itemCount))
-                }
-                ProgressView(value: storageReport.usageFraction) {
-                    Text("label.storage_limit")
-                } currentValueLabel: {
-                    Text(storageLimitDescription)
-                }
-
-                Stepper(
-                    value: Binding(
-                        get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
-                        set: { store.updateMaxStorageBytes($0 * 1_024 * 1_024) }
-                    ),
-                    in: 1...102_400,
-                    step: 50
-                ) {
-                    Text(localized("format.use_up_to", storageLimitDescription))
+                LabeledContent("label.storage_usage") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(
+                            ByteCountFormatter.string(
+                                fromByteCount: Int64(storageReport.estimatedBytes),
+                                countStyle: .file
+                            )
+                        )
+                        Text(localized("format.items", storageReport.itemCount))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Stepper(
@@ -488,27 +471,47 @@ struct SettingsView: View {
                     Text(retentionDescription)
                 }
 
-                Button("action.clear_unpinned_history", role: .destructive) {
-                    destructiveConfirmation = .clearUnpinnedHistory
+                DisclosureGroup("label.advanced_storage") {
+                    LabeledContent("label.storage_mode") {
+                        Text(localized(store.snapshot.security.storageMode.displayName))
+                    }
+                    LabeledContent("label.pinned_history_size") {
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.pinnedEstimatedBytes), countStyle: .file))
+                    }
+                    LabeledContent("label.unpinned_history_size") {
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.unpinnedEstimatedBytes), countStyle: .file))
+                    }
+                    ProgressView(value: storageReport.usageFraction) {
+                        Text("label.storage_limit")
+                    } currentValueLabel: {
+                        Text(storageLimitDescription)
+                    }
+
+                    Stepper(
+                        value: Binding(
+                            get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
+                            set: { store.updateMaxStorageBytes($0 * 1_024 * 1_024) }
+                        ),
+                        in: 1...102_400,
+                        step: 50
+                    ) {
+                        Text(localized("format.use_up_to", storageLimitDescription))
+                    }
                 }
 
-                Button("action.clear_all_history_including_pinned", role: .destructive) {
-                    destructiveConfirmation = .clearAllHistory
+                Menu("action.clear_history_ellipsis") {
+                    Button("action.clear_unpinned_history", role: .destructive) {
+                        destructiveConfirmation = .clearUnpinnedHistory
+                    }
+
+                    Button("action.clear_all_history_including_pinned", role: .destructive) {
+                        destructiveConfirmation = .clearAllHistory
+                    }
                 }
             }
-
-            Section("action.paste") {
-                Toggle(
-                    "Paste as plain text by default",
-                    isOn: Binding(
-                        get: { store.snapshot.paste.alwaysPasteAsPlainText },
-                        set: { store.setAlwaysPasteAsPlainText($0) }
-                    )
-                )
-            }
-            }
-            .formStyle(.grouped)
-            .scenePadding()
+        }
+        .formStyle(.grouped)
+        .scenePadding()
     }
 
     private var plansSettingsForm: some View {
@@ -606,7 +609,7 @@ struct SettingsView: View {
                     ShortcutBindingEditorRow(store: store, action: action)
                 }
 
-                Button("label.reset_shortcuts") {
+                Button("action.reset_all_shortcuts") {
                     store.resetShortcutConfiguration()
                 }
             }
@@ -2074,27 +2077,30 @@ private struct ShortcutBindingEditorRow: View {
     let action: ShortcutAction
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                LabeledContent(action.displayName) {
-                    ShortcutCaptureButton(displayName: currentBinding.displayName) { shortcut in
-                        store.setShortcutBinding(
-                            action,
-                            key: shortcut.key,
-                            modifiers: shortcut.modifiers
-                        )
-                    }
-                }
-                Button("action.clear_shortcut") {
+        LabeledContent(localized(action.settingsTitleKey)) {
+            ShortcutCaptureButton(
+                displayName: currentBinding.isEnabled
+                    ? currentBinding.displayName
+                    : localized("label.not_set"),
+                onClear: currentBinding.isEnabled ? {
                     store.clearShortcutBinding(action)
-                }
-                .disabled(!currentBinding.isEnabled)
+                } : nil
+            ) { shortcut in
+                store.setShortcutBinding(
+                    action,
+                    key: shortcut.key,
+                    modifiers: shortcut.modifiers
+                )
             }
         }
     }
 
     private var currentBinding: ShortcutBinding {
         store.snapshot.shortcuts.binding(for: action)
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
     }
 }
 
@@ -2145,32 +2151,70 @@ private struct RecordedShortcut {
 
 private struct ShortcutCaptureButton: View {
     let displayName: String
+    var onClear: (() -> Void)?
     let onCapture: (RecordedShortcut) -> Void
     @StateObject private var recorder = ShortcutRecorderState()
 
     var body: some View {
-        Button {
-            recorder.start(onCapture: onCapture)
-        } label: {
-            Text(recorder.isRecording ? "…" : displayName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(recorder.isRecording ? .white : .secondary)
-                .lineLimit(1)
-                .frame(minWidth: 76, alignment: .trailing)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(recorder.isRecording ? Color.accentColor : Color.clear)
+        Group {
+            if let onClear {
+                Menu {
+                    Button("action.record_shortcut") {
+                        recorder.start(onCapture: onCapture)
+                    }
+                    Button("action.clear_shortcut", role: .destructive) {
+                        onClear()
+                    }
+                } label: {
+                    shortcutLabel
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(recorder.isRecording ? 0.7 : 0), lineWidth: 1)
+                .menuStyle(.borderlessButton)
+            } else {
+                Button {
+                    recorder.start(onCapture: onCapture)
+                } label: {
+                    shortcutLabel
                 }
+                .buttonStyle(.plain)
+            }
         }
-        .buttonStyle(.plain)
         .onDisappear { recorder.stop() }
         .accessibilityLabel(displayName)
+    }
+
+    private var shortcutLabel: some View {
+        Text(recorder.isRecording ? "…" : displayName)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(recorder.isRecording ? .white : .secondary)
+            .lineLimit(1)
+            .frame(minWidth: 76, alignment: .trailing)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(recorder.isRecording ? Color.accentColor : Color.clear)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(recorder.isRecording ? 0.7 : 0), lineWidth: 1)
+            }
+    }
+}
+
+private extension ShortcutAction {
+    var settingsTitleKey: String {
+        switch self {
+        case .showHidePanel:
+            "action.show_hide_panel"
+        case .activatePasteStack:
+            "label.activate_paste_stack"
+        case .pasteNextStackItem:
+            "action.paste_next_stack_item"
+        case .pasteSelectedItem:
+            "action.paste_selected"
+        case .pasteSelectedPlainText:
+            "action.paste_selected_plain_text"
+        }
     }
 }
 

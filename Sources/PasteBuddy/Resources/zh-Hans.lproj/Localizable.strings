@@ -9,6 +9,7 @@
 "action.clear_all_history_including_pinned" = "清除所有历史，包括固定项目";
 "action.clear_app_filter" = "清除应用过滤器";
 "action.clear_filters" = "清除过滤器";
+"action.clear_history_ellipsis" = "清除历史记录…";
 "action.clear_mcp_access_log" = "清除 MCP 访问记录";
 "action.clear_search" = "清除搜索";
 "action.clear_settings_focus" = "清除设置焦点";
@@ -102,6 +103,7 @@
 "action.quit_app" = "退出 PasteBuddy";
 "action.recognize_text" = "识别文字";
 "action.recognize_text_in_copied_images" = "识别已复制图片中的文字";
+"action.record_shortcut" = "录制快捷键";
 "action.refresh_detected_ai_tools" = "刷新已检测工具";
 "action.reload_clipboard_history" = "重新加载剪贴板历史";
 "action.remove" = "移除";
@@ -110,6 +112,7 @@
 "action.remove_from_pinboard" = "从收藏板移除";
 "action.rename" = "重命名";
 "action.request_accessibility_access" = "请求辅助功能权限";
+"action.reset_all_shortcuts" = "重置所有快捷键";
 "action.reset_pin_appearance" = "重置大小和透明度";
 "action.restore" = "恢复";
 "action.restore_purchases" = "恢复购买";
@@ -254,6 +257,7 @@
 "label.admin_email" = "管理员邮箱";
 "label.advanced_capture_rules" = "高级捕获规则";
 "label.advanced_ellipsis" = "高级...";
+"label.advanced_storage" = "高级存储";
 "label.agent_connection" = "Agent 连接（MCP）";
 "label.agent_connection_status" = "Agent 连接";
 "label.all" = "全部";
@@ -352,6 +356,7 @@
 "label.general" = "通用";
 "label.guidance" = "指引";
 "label.history" = "历史";
+"label.history_access" = "历史记录访问";
 "label.history_lock" = "历史锁";
 "label.history_lock_is_off" = "历史锁已关闭";
 "label.history_locked_until_touch_id" = "历史已锁定，需通过 Touch ID 解锁";
@@ -470,6 +475,7 @@
 "label.recording" = "正在记录";
 "label.regular_expression" = "正则表达式";
 "label.renews_or_expires" = "续订或到期";
+"label.require_touch_id_for_history" = "需要 Touch ID 才能解锁历史";
 "label.require_touch_id_to_unlock" = "需要 Touch ID 才能解锁历史";
 "label.reset_shortcuts" = "重置快捷键";
 "label.reset_to_local_only" = "重置为仅本地";
@@ -520,6 +526,7 @@
 "label.storage_mode" = "存储模式";
 "label.storage_retention" = "存储与保留";
 "label.storage_security" = "存储安全";
+"label.storage_usage" = "存储用量";
 "label.supported_ai_tools" = "支持的 AI 工具";
 "label.supported_locales" = "支持的语言";
 "label.team" = "团队";
