@@ -35,6 +35,8 @@ struct ClipboardSidePanelView: View {
     @State private var sideScope: PasteScope = .history
     @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardSidePanelQueryState>()
     @State private var interaction = ShelfInteractionModel()
+    @State private var preparedPreview: ClipboardPreparedPreview?
+    @State private var previewRequestID: UUID?
     @State private var pinnedState: Bool?
     @State private var timestampReference = Date()
     var body: some View {
@@ -61,13 +63,13 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
         }
         .onChange(of: queryState) {
             refreshSideItems()
         }
         .onChange(of: store.searchQuery) {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
         }
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
@@ -293,7 +295,7 @@ struct ClipboardSidePanelView: View {
                     previewedID: interaction.previewedID,
                     previewArrowEdge: .trailing,
                     onPreviewDismiss: { id in
-                        interaction.dismissPreview(for: id)
+                        dismissPreparedPreview(for: id)
                     },
                     isSelectable: { _ in true },
                     content: { item, isSelected in
@@ -326,13 +328,16 @@ struct ClipboardSidePanelView: View {
                         .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
                     },
                     previewContent: { item in
-                        AnyView(
+                        guard let preparedPreview,
+                              preparedPreview.item.id == item.id else {
+                            return AnyView(EmptyView())
+                        }
+                        return AnyView(
                             ShelfExpandedPreview(
-                                item: item,
-                                hydrateItemProvider: store.hydratedItem,
+                                preparedPreview: preparedPreview,
                                 maxWidth: ClipboardSidePanelMetrics.previewMaxWidth,
                                 onDismiss: {
-                                    interaction.dismissPreview()
+                                    dismissPreparedPreview()
                                 },
                                 onMove: moveSelection,
                                 onTextInput: beginSearch
@@ -498,7 +503,7 @@ struct ClipboardSidePanelView: View {
 
     private func setSideScope(_ scope: PasteScope) {
         if sideScope != scope {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
             sideScope = scope
         }
         if store.hasActiveFilters {
@@ -548,10 +553,15 @@ struct ClipboardSidePanelView: View {
     private func selectOffset(_ offset: Int) {
         let items = renderedItems
         guard !items.isEmpty else { return }
+        let keepsPreviewOpen = interaction.previewedID != nil
         let currentID = interaction.primarySelectedID ?? interaction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
-        selectSingleItem(items[nextIndex].id, keepsPreviewOpen: interaction.previewedID != nil)
+        let nextItem = items[nextIndex]
+        selectSingleItem(nextItem.id)
+        if keepsPreviewOpen {
+            prepareAndPresentPreview(for: nextItem)
+        }
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
@@ -609,7 +619,7 @@ struct ClipboardSidePanelView: View {
 
     private func beginSearch(with characters: String) -> Bool {
         guard ClipboardPanelSearchInput.accepts(characters) else { return false }
-        interaction.dismissPreview()
+        dismissPreparedPreview()
         store.searchQuery += characters
         setSearchFocused(true)
         return true
@@ -618,9 +628,39 @@ struct ClipboardSidePanelView: View {
     private func toggleSelectedItemPreview() {
         guard let item = selectedItemsInDisplayOrder.first else { return }
         setSearchFocused(false)
-        if interaction.togglePreview(for: item.id) {
+        if interaction.previewedID == item.id {
+            dismissPreparedPreview()
+        } else {
             selectSingleItem(item.id)
+            prepareAndPresentPreview(for: item)
         }
+    }
+
+    private func prepareAndPresentPreview(for item: ClipboardItem) {
+        dismissPreparedPreview()
+        let requestID = UUID()
+        previewRequestID = requestID
+        Task { @MainActor in
+            let prepared = await ClipboardPreparedPreview.prepare(
+                item: item,
+                hydrateItem: store.hydratedItem
+            )
+            guard !Task.isCancelled,
+                  prepared.canPresent(
+                    requestID: requestID,
+                    currentRequestID: previewRequestID,
+                    selectedItemID: interaction.primarySelectedID
+                  ) else { return }
+            preparedPreview = prepared
+            interaction.presentPreview(for: item.id)
+        }
+    }
+
+    private func dismissPreparedPreview(for id: UUID? = nil) {
+        guard id == nil || interaction.previewedID == id else { return }
+        interaction.dismissPreview(for: id)
+        previewRequestID = nil
+        preparedPreview = nil
     }
 
     private func pasteSelected(format: PasteFormat) {
@@ -692,7 +732,7 @@ struct ClipboardSidePanelView: View {
             return
         }
         if interaction.previewedID != nil {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
             return
         }
         onDismiss()

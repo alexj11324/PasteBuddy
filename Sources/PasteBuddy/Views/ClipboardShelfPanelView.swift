@@ -94,6 +94,8 @@ struct ClipboardShelfPanelView: View {
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardShelfQueryState>()
     @State private var shelfInteraction = ShelfInteractionModel()
+    @State private var preparedPreview: ClipboardPreparedPreview?
+    @State private var previewRequestID: UUID?
     @State private var isSearchRailPresented = false
     @State private var timestampReference = Date()
     @State private var shelfScope: PasteScope = .history
@@ -125,12 +127,13 @@ struct ClipboardShelfPanelView: View {
         }
         .onDisappear {
             isSearchRailPresented = false
+            dismissPreparedPreview()
         }
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
         }
         .onChange(of: store.searchQuery) {
-            shelfInteraction.dismissPreview()
+            dismissPreparedPreview()
         }
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
@@ -592,7 +595,7 @@ struct ClipboardShelfPanelView: View {
             previewedID: shelfInteraction.previewedID,
             previewArrowEdge: .bottom,
             onPreviewDismiss: { id in
-                shelfInteraction.dismissPreview(for: id)
+                dismissPreparedPreview(for: id)
             },
             isSelectable: { displayItem in
                 if case .clipboard = displayItem {
@@ -613,15 +616,16 @@ struct ClipboardShelfPanelView: View {
                 alignment: .bottom
             )
         } previewContent: { displayItem in
-            guard case .clipboard(let item) = displayItem else {
+            guard case .clipboard(let item) = displayItem,
+                  let preparedPreview,
+                  preparedPreview.item.id == item.id else {
                 return AnyView(EmptyView())
             }
             return AnyView(
                 ShelfExpandedPreview(
-                    item: item,
-                    hydrateItemProvider: store.hydratedItem,
+                    preparedPreview: preparedPreview,
                     onDismiss: {
-                        shelfInteraction.dismissPreview()
+                        dismissPreparedPreview()
                     },
                     onMove: moveSelection,
                     onTextInput: beginSearch
@@ -755,15 +759,20 @@ struct ClipboardShelfPanelView: View {
     private func selectOffset(_ offset: Int) {
         let items = renderedShelfItems
         guard !items.isEmpty else { return }
+        let keepsPreviewOpen = shelfInteraction.previewedID != nil
         let currentID = shelfInteraction.primarySelectedID ?? shelfInteraction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
-        selectSingleItem(items[nextIndex].id, keepsPreviewOpen: shelfInteraction.previewedID != nil)
+        let nextItem = items[nextIndex]
+        selectSingleItem(nextItem.id)
+        if keepsPreviewOpen {
+            prepareAndPresentPreview(for: nextItem)
+        }
     }
 
     private func setScope(_ scope: PasteScope) {
         guard shelfScope != scope else { return }
-        shelfInteraction.dismissPreview()
+        dismissPreparedPreview()
         shelfScope = scope
     }
 
@@ -817,7 +826,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func clearFilter(_ descriptor: ClipboardFilterDescriptor) {
-        shelfInteraction.dismissPreview()
+        dismissPreparedPreview()
         switch descriptor.kind {
         case .contentType:
             store.contentTypeFilter = nil
@@ -985,7 +994,7 @@ struct ClipboardShelfPanelView: View {
 
     private func beginSearch(with characters: String) -> Bool {
         guard ClipboardPanelSearchInput.accepts(characters) else { return false }
-        shelfInteraction.dismissPreview()
+        dismissPreparedPreview()
         store.searchQuery += characters
         setSearchFocused(true)
         return true
@@ -994,9 +1003,39 @@ struct ClipboardShelfPanelView: View {
     private func toggleSelectedItemPreview() {
         guard let item = selectedItemsInDisplayOrder.first else { return }
         setSearchFocused(false)
-        if shelfInteraction.togglePreview(for: item.id) {
+        if shelfInteraction.previewedID == item.id {
+            dismissPreparedPreview()
+        } else {
             selectSingleItem(item.id)
+            prepareAndPresentPreview(for: item)
         }
+    }
+
+    private func prepareAndPresentPreview(for item: ClipboardItem) {
+        dismissPreparedPreview()
+        let requestID = UUID()
+        previewRequestID = requestID
+        Task { @MainActor in
+            let prepared = await ClipboardPreparedPreview.prepare(
+                item: item,
+                hydrateItem: store.hydratedItem
+            )
+            guard !Task.isCancelled,
+                  prepared.canPresent(
+                    requestID: requestID,
+                    currentRequestID: previewRequestID,
+                    selectedItemID: shelfInteraction.primarySelectedID
+                  ) else { return }
+            preparedPreview = prepared
+            shelfInteraction.presentPreview(for: item.id)
+        }
+    }
+
+    private func dismissPreparedPreview(for id: UUID? = nil) {
+        guard id == nil || shelfInteraction.previewedID == id else { return }
+        shelfInteraction.dismissPreview(for: id)
+        previewRequestID = nil
+        preparedPreview = nil
     }
 
     private func handleExitCommand() {
@@ -1009,7 +1048,7 @@ struct ClipboardShelfPanelView: View {
             return
         }
         if shelfInteraction.previewedID != nil {
-            shelfInteraction.dismissPreview()
+            dismissPreparedPreview()
             return
         }
         onDismiss()
@@ -1410,22 +1449,64 @@ private struct ClipboardShelfCard: View {
 
 }
 
+struct ClipboardPreparedPreview {
+    let item: ClipboardItem
+    let image: NSImage?
+    let imageLoadError: String?
+
+    var isPresentable: Bool {
+        item.presentationContentType != .image
+            || !item.payload.hasImageAsset
+            || image != nil
+            || imageLoadError != nil
+    }
+
+    func canPresent(
+        requestID: UUID,
+        currentRequestID: UUID?,
+        selectedItemID: UUID?
+    ) -> Bool {
+        isPresentable
+            && requestID == currentRequestID
+            && item.id == selectedItemID
+    }
+
+    @MainActor
+    static func prepare(
+        item: ClipboardItem,
+        hydrateItem: @MainActor (ClipboardItem) async -> ClipboardItem
+    ) async -> ClipboardPreparedPreview {
+        guard item.presentationContentType == .image, item.payload.hasImageAsset else {
+            return ClipboardPreparedPreview(item: item, image: nil, imageLoadError: nil)
+        }
+        let hydrated = await hydrateItem(item)
+        guard let data = hydrated.payload.imageData,
+              let image = NSImage(data: data) else {
+            return ClipboardPreparedPreview(
+                item: hydrated,
+                image: nil,
+                imageLoadError: NSLocalizedString("message.image_data_unavailable_for_preview", comment: "")
+            )
+        }
+        return ClipboardPreparedPreview(item: hydrated, image: image, imageLoadError: nil)
+    }
+}
+
 struct ShelfExpandedPreview: View {
     private static let textPreviewHeight: CGFloat = 420
     private static let imageActionAreaHeight: CGFloat = 70
 
     @FocusState private var isPreviewFocused: Bool
-    @State private var hydratedImageItem: ClipboardItem?
-    @State private var fullImage: NSImage?
-    @State private var imageLoadError: String?
-    @State private var imageLoadRequestID: UUID?
 
-    let item: ClipboardItem
-    let hydrateItemProvider: @MainActor (ClipboardItem) async -> ClipboardItem
+    let preparedPreview: ClipboardPreparedPreview
     var maxWidth: CGFloat = 640
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
     let onTextInput: (String) -> Bool
+
+    private var item: ClipboardItem {
+        preparedPreview.item
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1438,15 +1519,6 @@ struct ShelfExpandedPreview: View {
         .focused($isPreviewFocused)
         .onAppear {
             requestPreviewFocus()
-        }
-        .task(id: imageLoadIdentity) {
-            await loadFullImageIfNeeded()
-        }
-        .onDisappear {
-            imageLoadRequestID = nil
-            hydratedImageItem = nil
-            fullImage = nil
-            imageLoadError = nil
         }
         .onMoveCommand(perform: handlePreviewMoveCommand)
         .onExitCommand(perform: onDismiss)
@@ -1461,24 +1533,19 @@ struct ShelfExpandedPreview: View {
         switch item.presentationContentType {
         case .image:
             if item.payload.hasImageAsset {
-                if let hydratedImageItem, let fullImage {
+                if let fullImage = preparedPreview.image {
                     ShelfExpandedImagePreview(
-                        item: hydratedImageItem,
+                        item: item,
                         image: fullImage,
                         displaySize: imagePreviewDisplaySize
                     )
                     .frame(maxWidth: .infinity, alignment: .center)
-                } else if let imageLoadError {
+                } else if let imageLoadError = preparedPreview.imageLoadError {
                     ContentUnavailableView(
                         imageLoadError,
                         systemImage: "exclamationmark.triangle"
                     )
                     .frame(width: imagePreviewBounds.width, height: imagePreviewBounds.height)
-                } else {
-                    ProgressView(localized("state.loading_image"))
-                        .controlSize(.large)
-                        .frame(width: imagePreviewBounds.width, height: imagePreviewBounds.height)
-                        .accessibilityLabel(localized("state.loading_image"))
                 }
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
@@ -1521,42 +1588,13 @@ struct ShelfExpandedPreview: View {
 
     private var imagePreviewDisplaySize: CGSize? {
         guard item.presentationContentType == .image,
-              let hydratedImageItem,
-              let imageSize = ClipboardImageCache.imageSize(for: hydratedImageItem) else {
+              let imageSize = preparedPreview.image?.size else {
             return nil
         }
         return ClipboardImageCache.fittedDisplaySize(
             for: imageSize,
             within: imagePreviewBounds
         )
-    }
-
-    private var imageLoadIdentity: String {
-        ClipboardImagePreviewRequest.assetIdentity(for: item)
-    }
-
-    private func loadFullImageIfNeeded() async {
-        guard item.presentationContentType == .image, item.payload.hasImageAsset else { return }
-        let requestID = UUID()
-        imageLoadRequestID = requestID
-        hydratedImageItem = nil
-        fullImage = nil
-        imageLoadError = nil
-
-        let hydrated = await hydrateItemProvider(item)
-        guard ClipboardImagePreviewRequest.isCurrent(
-            requestID,
-            currentRequestID: imageLoadRequestID
-        ), !Task.isCancelled else {
-            return
-        }
-        guard let data = hydrated.payload.imageData,
-              let image = NSImage(data: data) else {
-            imageLoadError = localized("message.image_data_unavailable_for_preview")
-            return
-        }
-        hydratedImageItem = hydrated
-        fullImage = image
     }
 
     private func previewText(_ text: String) -> some View {
@@ -1622,13 +1660,6 @@ enum ClipboardImagePreviewRequest {
             item.payload.imageAssetID ?? "inline",
             String(item.updatedAt.timeIntervalSince1970)
         ].joined(separator: ":")
-    }
-
-    static func isCurrent(
-        _ requestID: UUID,
-        currentRequestID: UUID?
-    ) -> Bool {
-        requestID == currentRequestID
     }
 }
 

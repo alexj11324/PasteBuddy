@@ -675,7 +675,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("previewArrowEdge: .bottom"))
         XCTAssertTrue(shelfSource.contains("shelfInteraction.dismissPreview(for: id)"))
         XCTAssertTrue(shelfSource.contains("previewContent: { displayItem in"))
-        XCTAssertTrue(shelfSource.contains("hydrateItemProvider: store.hydratedItem"))
+        XCTAssertTrue(shelfSource.contains("ClipboardPreparedPreview.prepare(\n                item: item,\n                hydrateItem: store.hydratedItem"))
         XCTAssertTrue(shelfSource.contains("dragPayload: { displayItem in"))
         XCTAssertTrue(shelfSource.contains("plainText: PasteboardWriter.plainText(for: item)"))
         XCTAssertFalse(shelfSource.contains("dragItemProvider: { displayItem in"))
@@ -696,7 +696,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(sideSource.contains("previewAvoidsContainingWindowOverlap: true"))
         XCTAssertTrue(sideSource.contains("maxWidth: ClipboardSidePanelMetrics.previewMaxWidth"))
         XCTAssertTrue(sideSource.contains("previewContent: { item in"))
-        XCTAssertTrue(sideSource.contains("hydrateItemProvider: store.hydratedItem"))
+        XCTAssertTrue(sideSource.contains("ClipboardPreparedPreview.prepare(\n                item: item,\n                hydrateItem: store.hydratedItem"))
         XCTAssertTrue(sideSource.contains("dragPayload: { item in"))
         XCTAssertTrue(sideSource.contains("plainText: PasteboardWriter.plainText(for: item)"))
         XCTAssertFalse(sideSource.contains("dragItemProvider: { item in"))
@@ -756,7 +756,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testSidePanelPreviewFollowsSelectionWithoutDeferredHandoff() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
-        XCTAssertTrue(source.contains("selectSingleItem(items[nextIndex].id, keepsPreviewOpen: interaction.previewedID != nil)"))
+        XCTAssertTrue(source.contains("selectSingleItem(nextItem.id)"))
+        XCTAssertTrue(source.contains("prepareAndPresentPreview(for: nextItem)"))
         XCTAssertTrue(source.contains("interaction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)"))
         XCTAssertFalse(source.contains("pendingPreviewSelectionID"))
         XCTAssertFalse(source.contains("previewScrollTargetID"))
@@ -851,10 +852,13 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(imagePreviewSource.contains("trackingImageView = imageView"))
         XCTAssertTrue(imagePreviewSource.contains("imageView.addSubview(overlayView)"))
         XCTAssertTrue(imagePreviewSource.contains("selectableItemsHighlighted = true"))
-        XCTAssertTrue(expandedPreviewSource.contains("let hydrated = await hydrateItemProvider(item)"))
-        XCTAssertTrue(expandedPreviewSource.contains("NSImage(data: data)"))
-        XCTAssertTrue(expandedPreviewSource.contains("ProgressView(localized(\"state.loading_image\"))"))
-        XCTAssertTrue(expandedPreviewSource.contains("message.image_data_unavailable_for_preview"))
+        XCTAssertTrue(source.contains("struct ClipboardPreparedPreview"))
+        XCTAssertTrue(source.contains("let hydrated = await hydrateItem(item)"))
+        XCTAssertTrue(source.contains("NSImage(data: data)"))
+        XCTAssertTrue(source.contains("var isPresentable: Bool"))
+        XCTAssertTrue(source.contains("message.image_data_unavailable_for_preview"))
+        XCTAssertFalse(expandedPreviewSource.contains("ProgressView(localized(\"state.loading_image\"))"))
+        XCTAssertFalse(expandedPreviewSource.contains("await hydrateItemProvider(item)"))
         XCTAssertFalse(expandedPreviewSource.contains("cachedThumbnail(for: item"))
         XCTAssertTrue(imagePreviewSource.contains("Label(localized(\"action.recognize_text\"), systemImage: \"text.viewfinder\")"))
         XCTAssertFalse(imagePreviewSource.contains("OCRService().analyze"))
@@ -943,15 +947,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         hydratedItem.payload.imageData = imageData
         var hydrationCount = 0
 
-        for pass in 1...2 {
-            let didHydrate = expectation(description: "hydrated preview \(pass)")
+        for _ in 1...2 {
+            let preparedPreview = await ClipboardPreparedPreview.prepare(
+                item: lightweightItem
+            ) { _ in
+                hydrationCount += 1
+                return hydratedItem
+            }
+            XCTAssertTrue(preparedPreview.isPresentable)
+            XCTAssertNotNil(preparedPreview.image)
+            XCTAssertNil(preparedPreview.imageLoadError)
             let preview = ShelfExpandedPreview(
-                item: lightweightItem,
-                hydrateItemProvider: { _ in
-                    hydrationCount += 1
-                    didHydrate.fulfill()
-                    return hydratedItem
-                },
+                preparedPreview: preparedPreview,
                 onDismiss: {},
                 onMove: { _ in },
                 onTextInput: { _ in false }
@@ -970,7 +977,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             window.contentView = container
             container.layoutSubtreeIfNeeded()
 
-            await fulfillment(of: [didHydrate], timeout: 2)
             for _ in 0..<5 {
                 await Task.yield()
                 container.layoutSubtreeIfNeeded()
@@ -982,6 +988,76 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
 
         XCTAssertEqual(hydrationCount, 2)
+    }
+
+    func testImagePreviewPreparationGatesPresentationOnHydratedImageOrExplicitError() async throws {
+        let imageData = try XCTUnwrap(
+            makeTestImage(width: 32, height: 24) { _, _ in
+                (red: 12, green: 90, blue: 180, alpha: 255)
+            }.tiffRepresentation
+        )
+        let lightweightItem = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Repository image",
+            payload: ClipboardPayload(imageAssetID: "repository-image")
+        )
+        var hydratedItem = lightweightItem
+        hydratedItem.payload.imageData = imageData
+
+        let ready = await ClipboardPreparedPreview.prepare(item: lightweightItem) { _ in hydratedItem }
+        XCTAssertTrue(ready.isPresentable)
+        XCTAssertNotNil(ready.image)
+        XCTAssertNil(ready.imageLoadError)
+
+        let failed = await ClipboardPreparedPreview.prepare(item: lightweightItem) { $0 }
+        XCTAssertTrue(failed.isPresentable)
+        XCTAssertNil(failed.image)
+        XCTAssertFalse(try XCTUnwrap(failed.imageLoadError).isEmpty)
+
+        let requestID = UUID()
+        XCTAssertTrue(
+            ready.canPresent(
+                requestID: requestID,
+                currentRequestID: requestID,
+                selectedItemID: lightweightItem.id
+            )
+        )
+        XCTAssertFalse(
+            ready.canPresent(
+                requestID: requestID,
+                currentRequestID: UUID(),
+                selectedItemID: lightweightItem.id
+            )
+        )
+        XCTAssertFalse(
+            ready.canPresent(
+                requestID: requestID,
+                currentRequestID: requestID,
+                selectedItemID: UUID()
+            )
+        )
+
+        for path in [
+            "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
+            "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
+        ] {
+            let source = try sourceFileContents(path)
+            let toggle = try XCTUnwrap(source.range(of: "private func toggleSelectedItemPreview()"))
+            let prepareCall = try XCTUnwrap(
+                source.range(of: "prepareAndPresentPreview(for: item)", range: toggle.lowerBound..<source.endIndex)
+            )
+            let singleSelection = try XCTUnwrap(
+                source.range(of: "selectSingleItem(item.id)", range: toggle.lowerBound..<prepareCall.lowerBound)
+            )
+            XCTAssertLessThan(singleSelection.lowerBound, prepareCall.lowerBound)
+            let prepare = try XCTUnwrap(source.range(of: "let prepared = await ClipboardPreparedPreview.prepare("))
+            let assign = try XCTUnwrap(source.range(of: "preparedPreview = prepared", range: prepare.lowerBound..<source.endIndex))
+            let present = try XCTUnwrap(source.range(of: ".presentPreview(for: item.id)", range: assign.lowerBound..<source.endIndex))
+            XCTAssertLessThan(prepare.lowerBound, assign.lowerBound)
+            XCTAssertLessThan(assign.lowerBound, present.lowerBound)
+        }
     }
 
     func testShelfLinkCardsUsePersistedMetadataPreviewWithoutViewFetch() throws {
@@ -1553,23 +1629,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testImagePreviewRejectsStaleAsyncResultsAfterDismissOrItemChange() async {
-        let requestID = UUID()
-        let replacementRequestID = UUID()
-        await Task.yield()
-
-        XCTAssertFalse(
-            ClipboardImagePreviewRequest.isCurrent(
-                requestID,
-                currentRequestID: replacementRequestID
-            )
-        )
-        XCTAssertFalse(
-            ClipboardImagePreviewRequest.isCurrent(
-                requestID,
-                currentRequestID: nil
-            )
-        )
+    func testImagePreviewRejectsStaleAsyncResultsAfterDismissOrItemChange() throws {
+        for path in [
+            "Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift",
+            "Sources/PasteBuddy/Views/ClipboardSidePanelView.swift",
+        ] {
+            let source = try sourceFileContents(path)
+            XCTAssertTrue(source.contains("let requestID = UUID()"))
+            XCTAssertTrue(source.contains("!Task.isCancelled,"))
+            XCTAssertTrue(source.contains("prepared.canPresent("))
+            XCTAssertTrue(source.contains("currentRequestID: previewRequestID"))
+            XCTAssertTrue(source.contains("previewRequestID = nil"))
+        }
     }
 
     func testDiagnosticsRecorderCapturesHotKeyEventsForTesting() {
@@ -1662,7 +1733,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("direction: .vertical"))
         XCTAssertFalse(source.contains("ShelfCollectionRepresentable"))
         XCTAssertTrue(source.contains("clipboard-side-panel-row-"))
-        XCTAssertTrue(source.contains("interaction.togglePreview"))
+        XCTAssertTrue(source.contains("prepareAndPresentPreview(for: item)"))
         XCTAssertTrue(source.contains("ShelfExpandedPreview"))
         XCTAssertTrue(source.contains("ClipboardImageThumbnailView"))
         XCTAssertTrue(source.contains(".focusEffectDisabled()"))
