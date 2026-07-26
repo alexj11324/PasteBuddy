@@ -1494,7 +1494,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
         XCTAssertTrue(source.contains(".background(.regularMaterial)"))
         XCTAssertTrue(source.contains(".background(SettingsSidebarToggleRemover())"))
-        XCTAssertTrue(source.contains("$0.itemIdentifier == .toggleSidebar"))
+        XCTAssertTrue(source.contains("item.itemIdentifier == .toggleSidebar"))
+        XCTAssertTrue(source.contains("#selector(NSSplitViewController.toggleSidebar(_:))"))
         XCTAssertTrue(source.contains("toolbar.removeItem(at: index)"))
         XCTAssertTrue(source.contains("NSToolbar.willAddItemNotification"))
         XCTAssertTrue(source.contains("toolbarWillAddItem"))
@@ -1559,6 +1560,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         window.contentView = NSView()
         XCTAssertNil(remover.observedToolbar)
+    }
+
+    func testSettingsSidebarToggleRemovalRecognizesSwiftUIToggleAction() {
+        let item = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("swiftui-sidebar-toggle"))
+        item.action = #selector(NSSplitViewController.toggleSidebar(_:))
+
+        XCTAssertTrue(SettingsSidebarToggleRemovalView.isSidebarToggleItem(item))
+
+        let xcode27Item = NSToolbarItem(
+            itemIdentifier: NSToolbarItem.Identifier(
+                "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
+            )
+        )
+        XCTAssertTrue(SettingsSidebarToggleRemovalView.isSidebarToggleItem(xcode27Item))
     }
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {

@@ -1124,6 +1124,10 @@ private struct SettingsSidebarToggleRemover: NSViewRepresentable {
 }
 
 final class SettingsSidebarToggleRemovalView: NSView {
+    private static let swiftUISidebarToggleIdentifier = NSToolbarItem.Identifier(
+        "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
+    )
+
     private(set) weak var observedToolbar: NSToolbar?
 
     override func viewDidMoveToWindow() {
@@ -1176,9 +1180,15 @@ final class SettingsSidebarToggleRemovalView: NSView {
 
     fileprivate func removeSidebarToggle() {
         guard let toolbar = window?.toolbar else { return }
-        while let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == .toggleSidebar }) {
+        while let index = toolbar.items.firstIndex(where: Self.isSidebarToggleItem) {
             toolbar.removeItem(at: index)
         }
+    }
+
+    static func isSidebarToggleItem(_ item: NSToolbarItem) -> Bool {
+        item.itemIdentifier == .toggleSidebar
+            || item.itemIdentifier == swiftUISidebarToggleIdentifier
+            || item.action == #selector(NSSplitViewController.toggleSidebar(_:))
     }
 
     deinit {
