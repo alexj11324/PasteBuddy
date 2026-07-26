@@ -99,6 +99,21 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(appSource.contains("action.capture_screenshot"))
     }
 
+    func testBuildAndRunCopiesXcode27CompiledLocalizationsIntoMainBundle() throws {
+        let buildScript = try sourceFileContents("script/build_and_run.sh")
+        let localizationScript = try sourceFileContents("script/copy_compiled_localizations.sh")
+
+        XCTAssertTrue(buildScript.contains(
+            "[[ -d \"$RESOURCE_BUNDLE\" ]] || die \"Missing SwiftPM resource bundle"
+        ))
+        XCTAssertTrue(buildScript.contains(
+            "\"$ROOT_DIR/script/copy_compiled_localizations.sh\" \"$RESOURCE_BUNDLE\" \"$APP_RESOURCES\""
+        ))
+        XCTAssertTrue(localizationScript.contains("\"$RESOURCE_BUNDLE/Contents/Resources\""))
+        XCTAssertTrue(localizationScript.contains("for locale in en zh-Hans"))
+        XCTAssertTrue(localizationScript.contains("Missing compiled $locale localization"))
+    }
+
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
@@ -1478,7 +1493,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
         XCTAssertTrue(source.contains(".background(.regularMaterial)"))
-        XCTAssertTrue(source.contains(".toolbar(removing: .sidebarToggle)"))
+        XCTAssertTrue(source.contains(".background(SettingsSidebarToggleRemover())"))
+        XCTAssertTrue(source.contains("$0.itemIdentifier == .toggleSidebar"))
+        XCTAssertTrue(source.contains("toolbar.removeItem(at: index)"))
+        XCTAssertFalse(source.contains(".toolbar(removing: .sidebarToggle)"))
         XCTAssertTrue(source.contains("case capture"))
         XCTAssertTrue(source.contains("case .privacy:"))
         XCTAssertTrue(source.contains("self = .capture"))

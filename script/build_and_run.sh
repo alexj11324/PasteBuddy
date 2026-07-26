@@ -300,6 +300,7 @@ run_coordinated_install_gate_tests() {
   mode_installs_app || return 0
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
   python3 Tests/test_localization_catalog_workflow.py --quiet
+  bash Tests/test_copy_compiled_localizations.sh
   run_required_test_filter PasteBuddyAppRuntimeTests/testDevelopmentPanel
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfShiftSelectionExtendsFromTheExistingAnchor
@@ -388,13 +389,10 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 /usr/bin/ditto --norsrc --noextattr "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
-if [[ -d "$RESOURCE_BUNDLE" ]]; then
-  /usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE" "$APP_RESOURCES/$(basename "$RESOURCE_BUNDLE")"
-  for localization_dir in "$RESOURCE_BUNDLE"/*.lproj; do
-    [[ -d "$localization_dir" ]] || continue
-    /usr/bin/ditto --norsrc --noextattr "$localization_dir" "$APP_RESOURCES/$(basename "$localization_dir")"
-  done
-fi
+[[ -d "$RESOURCE_BUNDLE" ]] || die "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE"
+/usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE" "$APP_RESOURCES/$(basename "$RESOURCE_BUNDLE")"
+"$ROOT_DIR/script/copy_compiled_localizations.sh" "$RESOURCE_BUNDLE" "$APP_RESOURCES" \
+  || die "Failed to copy compiled localizations into the app bundle."
 if [[ -f "$APP_ICON_SOURCE" ]]; then
   /usr/bin/ditto --norsrc --noextattr "$APP_ICON_SOURCE" "$APP_RESOURCES/$APP_ICON_NAME"
 fi

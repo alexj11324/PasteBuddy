@@ -113,7 +113,7 @@ struct SettingsView: View {
             selectedSettingsDetail
                 .navigationTitle(effectiveSettingsSection.titleKey)
         }
-        .toolbar(removing: .sidebarToggle)
+        .background(SettingsSidebarToggleRemover())
         .navigationSplitViewStyle(.balanced)
     }
 
@@ -1111,6 +1111,47 @@ struct SettingsView: View {
         )
     }
 
+}
+
+private struct SettingsSidebarToggleRemover: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        SettingsSidebarToggleRemovalView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? SettingsSidebarToggleRemovalView)?.removeSidebarToggle()
+    }
+}
+
+private final class SettingsSidebarToggleRemovalView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowDidUpdate),
+                name: NSWindow.didUpdateNotification,
+                object: window
+            )
+        }
+        removeSidebarToggle()
+    }
+
+    @objc private func windowDidUpdate(_ notification: Notification) {
+        removeSidebarToggle()
+    }
+
+    fileprivate func removeSidebarToggle() {
+        guard let toolbar = window?.toolbar else { return }
+        while let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == .toggleSidebar }) {
+            toolbar.removeItem(at: index)
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 }
 
 private struct MCPClientConfigurationSheet: View {
