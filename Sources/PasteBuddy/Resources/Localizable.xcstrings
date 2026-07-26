@@ -5609,7 +5609,7 @@
           }
         }
       },
-      "comment": "Legacy alias for label.require_touch_id_to_unlock. Prefer the semantic key in code."
+      "comment": "Legacy alias for label.require_touch_id_for_history. Prefer the semantic key in code."
     },
     "Required": {
       "localizations": {
@@ -7726,6 +7726,22 @@
         }
       }
     },
+    "action.clear_history_ellipsis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear History..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除历史记录…"
+          }
+        }
+      }
+    },
     "action.clear_mcp_access_log": {
       "localizations": {
         "en": {
@@ -9214,6 +9230,22 @@
         }
       }
     },
+    "action.record_shortcut": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Record Shortcut"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录制快捷键"
+          }
+        }
+      }
+    },
     "action.refresh_detected_ai_tools": {
       "localizations": {
         "en": {
@@ -9338,6 +9370,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "请求辅助功能权限"
+          }
+        }
+      }
+    },
+    "action.reset_all_shortcuts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset All Shortcuts"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置所有快捷键"
           }
         }
       }
@@ -11816,6 +11864,22 @@
         }
       }
     },
+    "label.advanced_storage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced Storage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高级存储"
+          }
+        }
+      }
+    },
     "label.agent_connection": {
       "localizations": {
         "en": {
@@ -13380,6 +13444,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "历史"
+          }
+        }
+      }
+    },
+    "label.history_access": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History Access"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史记录访问"
           }
         }
       }
@@ -15272,6 +15352,22 @@
         }
       }
     },
+    "label.require_touch_id_for_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Require Touch ID to unlock history"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要 Touch ID 才能解锁历史"
+          }
+        }
+      }
+    },
     "label.require_touch_id_to_unlock": {
       "localizations": {
         "en": {
@@ -16068,6 +16164,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "存储安全"
+          }
+        }
+      }
+    },
+    "label.storage_usage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储用量"
           }
         }
       }

@@ -9,6 +9,7 @@
 "action.clear_all_history_including_pinned" = "Clear All History Including Pinned Items";
 "action.clear_app_filter" = "Clear app filter";
 "action.clear_filters" = "Clear Filters";
+"action.clear_history_ellipsis" = "Clear History...";
 "action.clear_mcp_access_log" = "Clear MCP Access Log";
 "action.clear_search" = "Clear search";
 "action.clear_settings_focus" = "Clear Settings Focus";
@@ -102,6 +103,7 @@
 "action.quit_app" = "Quit PasteBuddy";
 "action.recognize_text" = "Recognize Text";
 "action.recognize_text_in_copied_images" = "Recognize text in copied images";
+"action.record_shortcut" = "Record Shortcut";
 "action.refresh_detected_ai_tools" = "Refresh Detected Tools";
 "action.reload_clipboard_history" = "Reload clipboard history";
 "action.remove" = "Remove";
@@ -110,6 +112,7 @@
 "action.remove_from_pinboard" = "Remove from Pinboard";
 "action.rename" = "Rename";
 "action.request_accessibility_access" = "Request Accessibility Access";
+"action.reset_all_shortcuts" = "Reset All Shortcuts";
 "action.reset_pin_appearance" = "Reset Size and Opacity";
 "action.restore" = "Restore";
 "action.restore_purchases" = "Restore Purchases";
@@ -254,6 +257,7 @@
 "label.admin_email" = "Admin Email";
 "label.advanced_capture_rules" = "Advanced Capture Rules";
 "label.advanced_ellipsis" = "Advanced...";
+"label.advanced_storage" = "Advanced Storage";
 "label.agent_connection" = "Agent Connection (MCP)";
 "label.agent_connection_status" = "Agent Connection";
 "label.all" = "All";
@@ -352,6 +356,7 @@
 "label.general" = "General";
 "label.guidance" = "Guidance";
 "label.history" = "History";
+"label.history_access" = "History Access";
 "label.history_lock" = "History Lock";
 "label.history_lock_is_off" = "History lock is off";
 "label.history_locked_until_touch_id" = "History locked until Touch ID unlock";
@@ -470,6 +475,7 @@
 "label.recording" = "Recording";
 "label.regular_expression" = "Regular Expression";
 "label.renews_or_expires" = "Renews Or Expires";
+"label.require_touch_id_for_history" = "Require Touch ID to unlock history";
 "label.require_touch_id_to_unlock" = "Require Touch ID to unlock history";
 "label.reset_shortcuts" = "Reset Shortcuts";
 "label.reset_to_local_only" = "Reset to Local Only";
@@ -520,6 +526,7 @@
 "label.storage_mode" = "Storage Mode";
 "label.storage_retention" = "Storage & Retention";
 "label.storage_security" = "Storage Security";
+"label.storage_usage" = "Storage Usage";
 "label.supported_ai_tools" = "Supported AI Tools";
 "label.supported_locales" = "Supported Locales";
 "label.team" = "Team";

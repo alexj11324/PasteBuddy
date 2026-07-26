@@ -1538,6 +1538,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testShortcutSettingsRecordKeyCombinationsInsteadOfManualToggles() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let bindingRowStart = try XCTUnwrap(source.range(of: "private struct ShortcutBindingEditorRow"))
+        let modifierRowStart = try XCTUnwrap(source.range(of: "private struct ShortcutModifierEditorRow"))
+        let bindingRowSource = String(source[bindingRowStart.lowerBound..<modifierRowStart.lowerBound])
 
         XCTAssertTrue(source.contains("ShortcutCaptureButton"))
         XCTAssertTrue(source.contains("ShortcutRecorderState"))
@@ -1546,9 +1549,30 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("NotificationCenter.default.post(name: .pasteBuddyShortcutRecordingDidChange"))
         XCTAssertTrue(source.contains("store.setShortcutBinding("))
         XCTAssertTrue(source.contains("store.setQuickPasteModifiers(shortcut.modifiers"))
+        XCTAssertTrue(bindingRowSource.contains("onClear: currentBinding.isEnabled"))
+        XCTAssertFalse(bindingRowSource.contains("Button(\"action.clear_shortcut\")"))
+        XCTAssertTrue(source.contains("action.reset_all_shortcuts"))
         XCTAssertFalse(source.contains("ShortcutModifierToggles"))
         XCTAssertFalse(source.contains("Toggle(modifier.displayName"))
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
+    }
+
+    func testStorageSettingsKeepsRiskyControlsBehindExplicitDisclosure() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let storageStart = try XCTUnwrap(source.range(of: "private var storageSettingsForm"))
+        let plansStart = try XCTUnwrap(source.range(of: "private var plansSettingsForm"))
+        let storageSource = String(source[storageStart.lowerBound..<plansStart.lowerBound])
+
+        XCTAssertTrue(storageSource.contains("label.require_touch_id_for_history"))
+        XCTAssertTrue(storageSource.contains("label.storage_usage"))
+        XCTAssertTrue(storageSource.contains("DisclosureGroup(\"label.history_access\")"))
+        XCTAssertTrue(storageSource.contains("DisclosureGroup(\"label.advanced_storage\")"))
+        XCTAssertTrue(storageSource.contains("store.updateMaxStorageBytes"))
+        XCTAssertTrue(storageSource.contains("Menu(\"action.clear_history_ellipsis\")"))
+        XCTAssertTrue(storageSource.contains("destructiveConfirmation = .clearUnpinnedHistory"))
+        XCTAssertTrue(storageSource.contains("destructiveConfirmation = .clearAllHistory"))
+        XCTAssertFalse(storageSource.contains("Section(\"action.paste\")"))
+        XCTAssertFalse(storageSource.contains("Paste as plain text by default"))
     }
 
     func testPanelHotKeyControllerPausesGlobalHotKeysWhileRecordingShortcuts() throws {
