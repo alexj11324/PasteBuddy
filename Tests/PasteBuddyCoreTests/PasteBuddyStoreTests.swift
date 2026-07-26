@@ -1,3 +1,4 @@
+import GRDB
 import XCTest
 @testable import PasteBuddyCore
 
@@ -228,7 +229,10 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let oldDate = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
         let pinned = ClipboardItem(
+            createdAt: oldDate,
+            updatedAt: oldDate,
             sourceAppName: "Notes",
             deviceName: "Test Mac",
             contentType: .text,
@@ -247,11 +251,57 @@ final class PasteBuddyStoreTests: XCTestCase {
         let pinboardID = store.snapshot.pinboards[0].id
         store.selectedItemID = pinned.id
         store.pinSelectedItem(to: pinboardID)
-        store.addCapturedItem(recent, maxItems: 1)
+        store.addCapturedItem(recent)
+        store.updateRetentionDays(7)
 
         XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == pinned.id }))
         XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == recent.id }))
         XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [pinned.id])
+    }
+
+    func testCaptureAndSyncRetainItem501AcrossSaveAndRelaunch() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+
+        for index in 0..<500 {
+            store.addCapturedItem(ClipboardItem(
+                sourceAppName: "Capture \(index)",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Captured \(index)",
+                payload: ClipboardPayload(text: "captured payload \(index)")
+            ))
+        }
+        let synced501 = try XCTUnwrap(store.addSyncedItem(ClipboardItem(
+            sourceAppName: "Peer iPhone",
+            deviceName: "Peer iPhone",
+            contentType: .text,
+            title: "Synced 501",
+            payload: ClipboardPayload(text: "synced payload 501")
+        )))
+
+        XCTAssertEqual(store.snapshot.items.count, 501)
+        XCTAssertTrue(store.snapshot.items.contains(where: { $0.id == synced501.id }))
+
+        await store.flushPendingSave()
+        XCTAssertEqual(try repository.itemCount(), 501)
+
+        let reloaded = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.items.count, 501)
+        XCTAssertTrue(reloaded.snapshot.items.contains(where: { $0.id == synced501.id }))
     }
 
     func testDuplicateCapturedItemMovesExistingItemToTopWithoutCreatingNewHistory() throws {
@@ -584,6 +634,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.smartPinboard(for: .files)?.itemIDs, [file.id])
         XCTAssertTrue(store.userPinboards.allSatisfy { !SmartPinboardCategory.isSmartPinboardName($0.name) })
 
+        let oldDate = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
+        for index in store.snapshot.items.indices {
+            store.snapshot.items[index].createdAt = oldDate
+            store.snapshot.items[index].updatedAt = oldDate
+        }
         let newerLink = store.addCapturedItem(ClipboardItem(
             sourceAppName: "Safari",
             deviceName: "Test Mac",
@@ -594,7 +649,7 @@ final class PasteBuddyStoreTests: XCTestCase {
 
         XCTAssertEqual(store.smartPinboard(for: .links)?.itemIDs, [newerLink.id, link.id, textWithURL.id])
 
-        store.updateMaxHistoryItems(1)
+        store.updateRetentionDays(1)
 
         XCTAssertEqual(store.snapshot.items.map(\.id), [newerLink.id])
         XCTAssertEqual(store.smartPinboard(for: .links)?.itemIDs, [newerLink.id])
@@ -953,16 +1008,34 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        store.updateMaxHistoryItems(250)
         store.updateRetentionDays(14)
         store.updateMaxStorageBytes(256 * 1_024 * 1_024)
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
 
-        XCTAssertEqual(reloaded.snapshot.storage.maxHistoryItems, 250)
         XCTAssertEqual(reloaded.snapshot.storage.retentionDays, 14)
         XCTAssertEqual(reloaded.snapshot.storage.maxStorageBytes, 256 * 1_024 * 1_024)
+    }
+
+    func testStorageConfigurationDropsLegacyCountCapWithoutChangingAgePolicy() throws {
+        let legacyJSON = Data(
+            """
+            {
+              "maxHistoryItems": 500,
+              "retentionDays": 90,
+              "maxStorageBytes": 536870912
+            }
+            """.utf8
+        )
+
+        let decoded = try JSONDecoder().decode(StorageConfiguration.self, from: legacyJSON)
+        XCTAssertEqual(decoded.retentionDays, 90)
+
+        let reencoded = try XCTUnwrap(String(data: JSONEncoder().encode(decoded), encoding: .utf8))
+        XCTAssertFalse(reencoded.contains("maxHistoryItems"))
+        XCTAssertEqual(StorageConfiguration().retentionDays, 90)
+        XCTAssertFalse(StorageConfiguration().keepsHistoryForever)
     }
 
     func testGeneralSettingsPersistThroughEncryptedStore() throws {
@@ -2086,7 +2159,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(report.coverageStatement.contains("Shortcuts"))
         XCTAssertTrue(report.coverageStatement.contains("keyboard"))
         XCTAssertTrue(report.coverageStatement.contains("MCP"))
-        XCTAssertEqual(report.localBoundaryStatement, "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy")
+        XCTAssertEqual(report.localBoundaryStatement, "message.clipboard_payloads_images_ocr_metadata_thumbnails_privacy")
         XCTAssertTrue(report.syncBoundaryStatement.contains("private iCloud"))
         XCTAssertFalse(report.syncBoundaryStatement.contains("encrypted records"))
         XCTAssertTrue(report.vendorServerStatement.contains("does not send clipboard payloads to vendor servers"))
@@ -3742,19 +3815,61 @@ final class PasteBuddyStoreTests: XCTestCase {
         ]
 
         XCTAssertNil(store.repositorySyncedDataRevision)
-        for (query, expectedIDs) in expectedIDsByQuery {
+        for (query, _) in expectedIDsByQuery {
             store.searchQuery = query
-            XCTAssertEqual(store.filteredItems.map(\.id), expectedIDs)
+            XCTAssertTrue(store.filteredItems.isEmpty)
+            XCTAssertEqual(store.filteredItemCount(for: .history), 0)
+            XCTAssertTrue(store.isHistoryQueryTransitioning)
+            XCTAssertNil(store.historyQueryErrorMessage)
         }
+        XCTAssertNil(store.lastErrorMessage)
 
         await store.flushPendingSave()
 
         XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertFalse(store.isHistoryQueryTransitioning)
         for (query, expectedIDs) in expectedIDsByQuery {
             store.searchQuery = query
             XCTAssertEqual(store.filteredItems.map(\.id), expectedIDs)
             XCTAssertEqual(store.filteredItemCount(for: .history), expectedIDs.count)
         }
+    }
+
+    func testAsyncLoadUsesStoredSQLiteSnapshotInsteadOfStaleDiskSnapshot() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let stale = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Stale snapshot",
+            payload: ClipboardPayload(text: "must not be loaded")
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: [stale]))
+
+        let authoritative = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "Authoritative SQLite",
+            payload: ClipboardPayload(urlString: "https://example.com/authoritative")
+        )
+        let repository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(
+                fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+            )
+        )
+        try repository.replaceAll(with: PasteBuddySnapshot(items: [authoritative]))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        await store.loadAsync()
+
+        XCTAssertEqual(store.snapshot.items.map(\.id), [authoritative.id])
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
     }
 
     func testSearchDocumentRefreshKeepsDedupeIndexCurrentAfterTextEditAndOCR() throws {
@@ -3846,11 +3961,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        let now = Date(timeIntervalSince1970: 3_000_000)
+        let now = Date()
         let items = (0..<500).map { index in
-            ClipboardItem(
-                createdAt: now.addingTimeInterval(TimeInterval(-index)),
-                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+            let timestamp = now.addingTimeInterval(-TimeInterval(index) * 24 * 60 * 60)
+            return ClipboardItem(
+                createdAt: timestamp,
+                updatedAt: timestamp,
                 sourceAppName: index.isMultiple(of: 2) ? "Notes" : "Safari",
                 deviceName: "Test Mac",
                 contentType: .text,
@@ -3872,7 +3988,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         store.pasteStackItems = [items[0], items[150], items[420], stalePasteStackItem]
         store.setSelectedItemIDs(Set([items[0].id, items[150].id, items[420].id, stalePasteStackItem.id]))
 
-        store.updateMaxHistoryItems(100)
+        store.updateRetentionDays(100)
 
         let remainingIDs = Set(store.snapshot.items.map(\.id))
         XCTAssertTrue(pinnedIDs.allSatisfy { remainingIDs.contains($0) })
@@ -3882,7 +3998,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(store.pasteStackItems.contains(where: { $0.id == items[150].id }))
         XCTAssertFalse(store.pasteStackItems.contains(where: { $0.id == stalePasteStackItem.id }))
         XCTAssertTrue(store.selectedItemIDs.allSatisfy { remainingIDs.contains($0) })
-        XCTAssertLessThanOrEqual(store.snapshot.items.filter { !pinnedIDs.contains($0.id) }.count, 100)
+        XCTAssertLessThanOrEqual(store.snapshot.items.filter { !pinnedIDs.contains($0.id) }.count, 101)
     }
 
     func testGRDBRepositoryUsesWALFTSFiltersAndPaging() throws {
@@ -3957,6 +4073,392 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(exported.items.map(\.id), snapshot.items.map(\.id))
         XCTAssertEqual(exported.pinboards.map(\.itemIDs), [[image.id, olderText.id]])
         XCTAssertTrue(exported.general.launchAtLoginEnabled)
+    }
+
+    func testRepositoryPagingUsesUniqueTieBreakerForEqualTimestamps() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let timestamp = Date(timeIntervalSince1970: 7_000_000)
+        let items = try (0..<205).map { index in
+            ClipboardItem(
+                id: try XCTUnwrap(UUID(uuidString: String(
+                    format: "00000000-0000-0000-0000-%012X",
+                    index
+                ))),
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Equal Timestamp \(index)",
+                payload: ClipboardPayload(text: "payload \(index)")
+            )
+        }
+        try repository.replaceAll(with: PasteBuddySnapshot(items: items))
+
+        var paged: [ClipboardItem] = []
+        for offset in stride(from: 0, to: items.count, by: 37) {
+            paged.append(contentsOf: try repository.fetchPage(
+                ClipboardItemPageRequest(limit: 37, offset: offset)
+            ))
+        }
+
+        XCTAssertEqual(paged.map(\.id), items.map(\.id))
+        XCTAssertEqual(Set(paged.map(\.id)).count, items.count)
+    }
+
+    func testRepositoryPagingUsesEffectiveContentTypeAcrossMultipleBoundaries() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let timestamp = Date(timeIntervalSince1970: 8_000_000)
+        let items = (0..<305).map { index in
+            ClipboardItem(
+                createdAt: timestamp.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Finder",
+                deviceName: "Test Mac",
+                contentType: .mixed,
+                title: "Mixed \(index)",
+                payload: ClipboardPayload(
+                    text: "text \(index)",
+                    fileURLString: "file:///tmp/item-\(index).txt"
+                )
+            )
+        }
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+        store.contentTypeFilter = .text
+
+        var paged: [ClipboardItem] = []
+        for offset in stride(from: 0, to: items.count, by: 100) {
+            paged.append(contentsOf: store.filteredItemsPage(
+                for: .history,
+                offset: offset
+            ))
+        }
+
+        XCTAssertEqual(store.filteredItemCount(for: .history), items.count)
+        XCTAssertEqual(paged.map(\.id), items.map(\.id))
+        XCTAssertEqual(Set(paged.map(\.id)).count, items.count)
+    }
+
+    func testConfiguredStaleRepositoryFailsClosedWithoutSnapshotFallback() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let snapshotItem = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Snapshot-only item",
+            payload: ClipboardPayload(text: "must not escape authority gate")
+        )
+        let pasteStackItem = ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Local Stack",
+            contentType: .text,
+            title: "Paste-stack-only item",
+            payload: ClipboardPayload(text: "local temporary value")
+        )
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.snapshot = PasteBuddySnapshot(items: [snapshotItem])
+        store.pasteStackItems = [pasteStackItem]
+        store.selectedItemID = snapshotItem.id
+        store.selectedItemIDs = [snapshotItem.id]
+        store.markHistoryUnlockedForTesting()
+
+        XCTAssertNil(store.repositorySyncedDataRevision)
+        XCTAssertTrue(store.filteredItemsPage(for: .history, offset: 0).isEmpty)
+        XCTAssertEqual(store.filteredItemCount(for: .history), 0)
+        XCTAssertTrue(store.mainListItemsSnapshot.isEmpty)
+        XCTAssertNil(store.selectedItem)
+        XCTAssertEqual(store.availableSourceApps, ["Terminal"])
+        XCTAssertEqual(store.availableDevices, ["Local Stack"])
+        XCTAssertTrue(store.sourceAppSuggestions(matching: "Notes").isEmpty)
+        XCTAssertEqual(
+            store.historyQueryErrorMessage,
+            PasteBuddyDatabaseError.repositoryOutOfSync.localizedDescription
+        )
+        XCTAssertEqual(
+            store.lastErrorMessage,
+            PasteBuddyDatabaseError.repositoryOutOfSync.localizedDescription
+        )
+    }
+
+    func testRepositorySyncInFlightKeepsEveryHistoryTransitionOnLastCoherentRevision() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date()
+        let items = (0..<125).map { index in
+            let isLink = index.isMultiple(of: 3)
+            return ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: isLink ? "Safari" : "Notes",
+                deviceName: "Test Mac",
+                contentType: isLink ? .url : .text,
+                title: isLink ? "Link \(index)" : "Note \(index)",
+                payload: isLink
+                    ? ClipboardPayload(urlString: "https://example.com/\(index)")
+                    : ClipboardPayload(text: index == 1 ? "unique transition needle" : "body \(index)")
+            )
+        }
+        let links = items.filter { $0.contentType == .url }
+        let favorites = Pinboard(
+            name: "Favorites",
+            colorHex: "#4EA7FC",
+            itemIDs: [items[0].id, items[1].id]
+        )
+        let smartLinks = Pinboard(
+            name: SmartPinboardCategory.links.pinboardName,
+            colorHex: SmartPinboardCategory.links.colorHex,
+            itemIDs: links.map(\.id)
+        )
+        try harness.snapshotStore.save(
+            PasteBuddySnapshot(items: items, pinboards: [favorites, smartLinks])
+        )
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        store.load()
+        let lastCoherentRevision = try XCTUnwrap(store.repositorySyncedDataRevision)
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pending capture",
+            payload: ClipboardPayload(text: "not in the last coherent revision")
+        ))
+        XCTAssertNotEqual(store.dataRevision, lastCoherentRevision)
+
+        struct Transition {
+            let name: String
+            let scope: PasteScope
+            let expectedCount: Int
+            let configure: @MainActor (PasteBuddyStore) -> Void
+        }
+        let transitions = [
+            Transition(name: "category Links", scope: .history, expectedCount: links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+                $0.contentTypeFilter = .url
+            },
+            Transition(name: "search typing", scope: .history, expectedCount: 1) {
+                $0.clearFilters()
+                $0.searchQuery = "unique transition needle"
+            },
+            Transition(name: "search clearing", scope: .history, expectedCount: items.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            },
+            Transition(name: "source app filter", scope: .history, expectedCount: links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+                $0.sourceAppFilter = "Safari"
+            },
+            Transition(name: "content type filter", scope: .history, expectedCount: items.count - links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+                $0.contentTypeFilter = .text
+            },
+            Transition(name: "favorites pinboard", scope: .pinboard(favorites.id), expectedCount: 2) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            },
+            Transition(name: "smart Links pinboard", scope: .pinboard(smartLinks.id), expectedCount: links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            },
+            Transition(name: "app activation refresh", scope: .history, expectedCount: items.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            }
+        ]
+
+        for panelMode in ["Shelf", "Side Panel"] {
+            for transition in transitions {
+                transition.configure(store)
+                let page = store.filteredItemsPage(for: transition.scope, offset: 0)
+                XCTAssertNil(store.historyQueryErrorMessage, "\(panelMode): \(transition.name)")
+                XCTAssertEqual(
+                    store.filteredItemCount(for: transition.scope),
+                    transition.expectedCount,
+                    "\(panelMode): \(transition.name)"
+                )
+                XCTAssertEqual(
+                    page.count,
+                    min(transition.expectedCount, 100),
+                    "\(panelMode): \(transition.name)"
+                )
+            }
+        }
+
+        store.clearFilters()
+        store.searchQuery = ""
+        for panelMode in ["Shelf", "Side Panel"] {
+            let firstPage = store.filteredItemsPage(for: .history, offset: 0)
+            let nextPage = store.filteredItemsPage(for: .history, offset: firstPage.count)
+            XCTAssertEqual(firstPage.count, 100, "\(panelMode): first page")
+            XCTAssertEqual(nextPage.count, 25, "\(panelMode): load more")
+            XCTAssertEqual(store.filteredItemCount(for: .history), 125, "\(panelMode): total")
+            XCTAssertNil(store.historyQueryErrorMessage, "\(panelMode): pagination")
+        }
+
+        store.pasteStackItems = [items[1]]
+        XCTAssertEqual(store.filteredItemsPage(for: .pasteStack, offset: 0).map(\.id), [items[1].id])
+        XCTAssertNil(store.historyQueryErrorMessage)
+
+        await store.flushPendingSave()
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertEqual(store.filteredItemCount(for: .history), 126)
+        XCTAssertNil(store.historyQueryErrorMessage)
+    }
+
+    func testRepositorySyncReadinessAdvancesQueryRevisionAndReloadsHistory() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pending repository sync",
+            payload: ClipboardPayload(text: "reload after authority catches up")
+        )
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        store.snapshot = PasteBuddySnapshot(items: [item])
+        store.markHistoryUnlockedForTesting()
+
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        let staleQueryRevision = store.queryRevision
+
+        await store.flushPendingSave()
+
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertGreaterThan(store.queryRevision, staleQueryRevision)
+        XCTAssertNil(store.historyQueryErrorMessage)
+        XCTAssertEqual(store.filteredItems.map(\.id), [item.id])
+    }
+
+    func testFlushDoesNotMarkRepositoryCurrentWhenSnapshotChangesDuringSync() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let first = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First revision",
+            payload: ClipboardPayload(text: "first")
+        )
+        let second = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Concurrent revision",
+            payload: ClipboardPayload(text: "second")
+        )
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        store.snapshot = PasteBuddySnapshot(items: [first])
+        store.markHistoryUnlockedForTesting()
+        store.beforeRepositorySyncCommitForTesting = {
+            store.beforeRepositorySyncCommitForTesting = nil
+            store.snapshot.items.insert(second, at: 0)
+        }
+
+        await store.flushPendingSave()
+
+        XCTAssertNotEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        XCTAssertEqual(try repository.exportSnapshot().items.map(\.id), [first.id])
+
+        await store.flushPendingSave()
+
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertEqual(Set(store.filteredItems.map(\.id)), Set([first.id, second.id]))
+    }
+
+    func testSharedImportRetainsItem501AcrossSaveAndRelaunch() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        let service = SharedContentImportService()
+        for index in 0..<501 {
+            try service.importContent(
+                SharedContentInput(
+                    text: "Imported item \(index)",
+                    source: .shareExtension,
+                    deviceName: "Test iPhone"
+                ),
+                into: store
+            )
+        }
+        await store.flushPendingSave()
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+
+        XCTAssertEqual(reloaded.snapshot.items.count, 501)
+        XCTAssertTrue(reloaded.snapshot.items.contains {
+            $0.payload.text == "Imported item 500"
+        })
+    }
+
+    func testInMemoryStoreDoesNotTruncateHistoryAtRepositoryPageSize() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.snapshot = PasteBuddySnapshot(items: (0..<501).map { index in
+            ClipboardItem(
+                createdAt: Date(timeIntervalSince1970: TimeInterval(501 - index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Mobile history \(index)",
+                payload: ClipboardPayload(text: "payload \(index)")
+            )
+        })
+        store.markHistoryUnlockedForTesting()
+
+        XCTAssertEqual(store.filteredItems.count, 501)
     }
 
     func testGRDBRepositoryStoresImageAndRTFAssetsOutsidePayloadJSONAndKeepsPagesLightweight() throws {
@@ -4046,6 +4548,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertNil(lightweightItem.payload.rtfData)
         XCTAssertNotNil(lightweightItem.payload.imageAssetID)
         XCTAssertNotNil(lightweightItem.payload.rtfAssetID)
+        let dataRevision = store.dataRevision
+        let historyCount = store.filteredItemCount(for: .history)
 
         let hydratedImageData = await store.imageData(for: lightweightItem)
         XCTAssertEqual(hydratedImageData, imageData)
@@ -4054,6 +4558,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(hydratedItem.payload.imageData, imageData)
         XCTAssertEqual(hydratedItem.payload.rtfData, rtfData)
         XCTAssertTrue(hydratedItem.matches("asset ocr"))
+        XCTAssertEqual(store.dataRevision, dataRevision)
+        XCTAssertEqual(store.filteredItemCount(for: .history), historyCount)
     }
 
     func testRepositoryBackedStoreWritesAssetReferencesToDiskSnapshotAndHydratesOnReload() throws {
@@ -4240,6 +4746,121 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(exported.security.requiresBiometricUnlock)
     }
 
+    func testSnapshotDatabaseMigratorRetainsItem501() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let items = (0..<501).map { index in
+            ClipboardItem(
+                createdAt: Date(timeIntervalSince1970: TimeInterval(501 - index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Migrated item \(index)",
+                payload: ClipboardPayload(text: "Migrated payload \(index)")
+            )
+        }
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let report = try PasteBuddySnapshotDatabaseMigrator(
+            snapshotStore: harness.snapshotStore,
+            repository: repository
+        ).migrateFromSnapshot(createBackup: false)
+        let exported = try repository.exportSnapshot()
+
+        XCTAssertEqual(report.itemCount, 501)
+        XCTAssertEqual(exported.items.count, 501)
+        XCTAssertEqual(Set(exported.items.map(\.id)), Set(items.map(\.id)))
+        XCTAssertTrue(exported.items.contains { $0.id == items[500].id })
+    }
+
+    func testEffectiveContentTypesMigrationBackfillsLegacySQLiteAcross501Rows() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("clipboard.sqlite")
+        let items = (0..<501).map { index in
+            ClipboardItem(
+                createdAt: Date(timeIntervalSince1970: TimeInterval(501 - index)),
+                sourceAppName: "Safari",
+                deviceName: "Test Mac",
+                contentType: .mixed,
+                title: "Legacy mixed item \(index)",
+                payload: ClipboardPayload(
+                    text: "Legacy text \(index)",
+                    urlString: "https://example.com/\(index)"
+                )
+            )
+        }
+        try seedRepository(at: databaseURL, snapshot: PasteBuddySnapshot(items: items))
+
+        let legacyQueue = try DatabaseQueue(path: databaseURL.path)
+        try legacyQueue.write { db in
+            try db.execute(sql: "ALTER TABLE clipboard_items DROP COLUMN effective_content_types")
+            try db.execute(
+                sql: "DELETE FROM grdb_migrations WHERE identifier = ?",
+                arguments: ["add effective content type index"]
+            )
+        }
+
+        let migratedRepository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(fileURL: databaseURL)
+        )
+        let exported = try migratedRepository.exportSnapshot()
+        var paged: [ClipboardItem] = []
+        for offset in stride(from: 0, to: items.count, by: 100) {
+            paged.append(contentsOf: try migratedRepository.fetchPage(
+                ClipboardItemPageRequest(contentType: .text, limit: 100, offset: offset)
+            ))
+        }
+
+        XCTAssertEqual(exported.items.count, 501)
+        XCTAssertEqual(Set(exported.items.map(\.id)), Set(items.map(\.id)))
+        XCTAssertEqual(try migratedRepository.filteredItemCount(
+            ClipboardItemPageRequest(contentType: .text)
+        ), 501)
+        XCTAssertEqual(Set(paged.map(\.id)), Set(items.map(\.id)))
+        XCTAssertTrue(paged.contains { $0.id == items[500].id })
+    }
+
+    func testRepositorySyncRepairsStaleEffectiveContentTypes() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("clipboard.sqlite")
+        let item = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Repair mixed item",
+            payload: ClipboardPayload(text: "Repair text", urlString: "https://example.com/repair")
+        )
+        let snapshot = PasteBuddySnapshot(items: [item])
+        try seedRepository(at: databaseURL, snapshot: snapshot)
+
+        let queue = try DatabaseQueue(path: databaseURL.path)
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE clipboard_items SET effective_content_types = '' WHERE id = ?",
+                arguments: [item.id.uuidString]
+            )
+        }
+
+        let repository = ClipboardItemRepository(database: try PasteBuddyDatabase(fileURL: databaseURL))
+        let summary = try repository.synchronize(with: snapshot)
+
+        XCTAssertEqual(summary.upsertedItemCount, 1)
+        XCTAssertEqual(try repository.filteredItemCount(
+            ClipboardItemPageRequest(contentType: .url)
+        ), 1)
+        XCTAssertEqual(
+            try repository.fetchPage(ClipboardItemPageRequest(contentType: .text)).map(\.id),
+            [item.id]
+        )
+    }
+
     func testQueryAndPasteStackStateKeepRepositorySyncedToDataRevision() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -4367,6 +4988,60 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.selectedItemsInDisplayOrder.map(\.id), [beyondRepositoryPageItem.id])
     }
 
+    func testPanelPagingMakesAll501RepositoryItemsReachableWithFiltersAndScopes() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 5_000_000)
+        let items = (0..<501).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: index.isMultiple(of: 2) ? "Notes" : "Safari",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Paged Item \(index)",
+                payload: ClipboardPayload(text: "paged payload \(index)")
+            )
+        }
+        let pinboard = Pinboard(
+            name: "All Items",
+            colorHex: "#4EA7FC",
+            itemIDs: items.map(\.id)
+        )
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items, pinboards: [pinboard]))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        func allPages(in scope: PasteScope) -> [ClipboardItem] {
+            var result: [ClipboardItem] = []
+            while result.count < store.filteredItemCount(for: scope) {
+                let page = store.filteredItemsPage(
+                    for: scope,
+                    offset: result.count,
+                    limit: 100
+                )
+                guard !page.isEmpty else { break }
+                result.append(contentsOf: page)
+            }
+            return result
+        }
+
+        XCTAssertEqual(allPages(in: .history).map(\.id), items.map(\.id))
+        XCTAssertEqual(allPages(in: .pinboard(pinboard.id)).map(\.id), items.map(\.id))
+
+        store.sourceAppFilter = "Notes"
+        let filtered = allPages(in: .history)
+        XCTAssertEqual(filtered.count, 251)
+        XCTAssertTrue(filtered.allSatisfy { $0.sourceAppName == "Notes" })
+    }
+
     func testQuickPasteKeepsOneThroughNineLimitWithRepositoryBackedHistory() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -4397,6 +5072,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 1)?.id, items[0].id)
         XCTAssertEqual(store.quickPasteItem(atOneBasedIndex: 9)?.id, items[8].id)
         XCTAssertNil(store.quickPasteItem(atOneBasedIndex: 10))
+    }
+
+    private func seedRepository(at databaseURL: URL, snapshot: PasteBuddySnapshot) throws {
+        let database = try PasteBuddyDatabase(fileURL: databaseURL)
+        try ClipboardItemRepository(database: database).replaceAll(with: snapshot)
     }
 }
 

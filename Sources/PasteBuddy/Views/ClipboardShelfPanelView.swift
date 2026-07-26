@@ -40,6 +40,7 @@ private struct ClipboardShelfQueryState: Equatable {
 
 private enum ClipboardShelfDisplayItem: Identifiable {
     case launchAtLoginPrompt
+    case loading
     case empty(title: String, detail: String, systemImageName: String)
     case clipboard(ClipboardItem)
 
@@ -47,6 +48,8 @@ private enum ClipboardShelfDisplayItem: Identifiable {
         switch self {
         case .launchAtLoginPrompt:
             UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        case .loading:
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         case .empty:
             UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         case .clipboard(let item):
@@ -79,6 +82,7 @@ struct ClipboardShelfPanelView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var store: PasteBuddyStore
+    @Binding var isPinned: Bool
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let reloadClipboardHistory: @MainActor () async -> Void
@@ -88,11 +92,14 @@ struct ClipboardShelfPanelView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isShelfFocused: Bool
     @State private var isShowingLaunchAtLoginPrompt = false
-    @State private var shelfItems: [ClipboardItem] = []
+    @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardShelfQueryState>()
     @State private var shelfInteraction = ShelfInteractionModel()
+    @State private var preparedPreview: ClipboardPreparedPreview?
+    @State private var previewRequestID: UUID?
     @State private var isSearchRailPresented = false
-    @State private var relativeDateReference = Date()
+    @State private var timestampReference = Date()
     @State private var shelfScope: PasteScope = .history
+    @State private var pinnedState: Bool?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -107,7 +114,6 @@ struct ClipboardShelfPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
-        .background(shelfKeyboardShortcuts)
         .onAppear {
             store.searchQuery = ""
             store.clearFilters()
@@ -121,51 +127,69 @@ struct ClipboardShelfPanelView: View {
         }
         .onDisappear {
             isSearchRailPresented = false
+            dismissPreparedPreview()
         }
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
         }
         .onChange(of: store.searchQuery) {
-            shelfInteraction.dismissPreview()
+            dismissPreparedPreview()
         }
-        .onMoveCommand(perform: handleShelfMoveCommand)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
         .focusEffectDisabled()
         .focused($isShelfFocused)
+        .onCopyCommand {
+            let items = selectedItemsInDisplayOrder
+            return ClipboardPanelCopyCoordinator.itemProviders(
+                for: items,
+                sourceWindow: NSApp.keyWindow
+            ) { item in
+                await store.hydratedItem(for: item)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection)) { _ in
+            copySelectedItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
+            pasteSelected(format: store.defaultPasteFormat)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
+            guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
+            handlePanelArrowKey(request)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelPreviewKey)) { notification in
+            guard let request = notification.object as? ClipboardPanelPreviewKeyRequest,
+                  !isSearchFocused else { return }
+            toggleSelectedItemPreview()
+            request.markHandled()
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
         }
         .task {
-            await runShelfMinuteTicker()
+            await HistoryCardTimestampTicker.run {
+                timestampReference = $0
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
     }
 
-    private var shelfKeyboardShortcuts: some View {
-        Group {
-            keyboardShortcut(.leftArrow) { moveSelection(.left) }
-            keyboardShortcut(.rightArrow) { moveSelection(.right) }
-            keyboardShortcut(.upArrow) { moveSelection(.up) }
-            keyboardShortcut(.downArrow) { moveSelection(.down) }
-        }
-        .disabled(isSearchFocused || shelfInteraction.previewedID != nil)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
-    }
-
-    private func keyboardShortcut(_ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Color.clear
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(key, modifiers: [])
-    }
-
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
+                Button {
+                    setPinned(!effectivePinned)
+                } label: {
+                    ShelfToolbarCircleIcon(systemName: effectivePinned ? "pin.fill" : "pin")
+                        .rotationEffect(.degrees(45))
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .help(localized("action.pin"))
+                .accessibilityLabel(localized("action.pin"))
+
                 searchControl
                     .layoutPriority(3)
                     .zIndex(20)
@@ -433,15 +457,40 @@ struct ClipboardShelfPanelView: View {
         selectedItemsInDisplayOrder.count
     }
 
+    private var effectivePinned: Bool {
+        pinnedState ?? isPinned
+    }
+
+    private func setPinned(_ value: Bool) {
+        pinnedState = value
+        isPinned = value
+    }
+
     private var renderedShelfItems: [ClipboardItem] {
-        shelfItems
+        ClipboardPanelHistoryAvailability.visibleItems(
+            paging.items,
+            scope: shelfScope,
+            errorMessage: store.historyQueryErrorMessage
+        )
     }
 
     private var shelfDisplayItems: [ClipboardShelfDisplayItem] {
+        if shelfScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return [
+                .empty(
+                    title: emptyTitle,
+                    detail: emptyDescription,
+                    systemImageName: emptySystemImage
+                )
+            ]
+        }
         if isShowingLaunchAtLoginPrompt {
             return [.launchAtLoginPrompt]
         }
-        if shelfItems.isEmpty {
+        if renderedShelfItems.isEmpty, store.isHistoryQueryTransitioning, shelfScope != .pasteStack {
+            return [.loading]
+        }
+        if renderedShelfItems.isEmpty {
             return [
                 .empty(
                     title: emptyTitle,
@@ -466,10 +515,6 @@ struct ClipboardShelfPanelView: View {
             dateFilter: store.dateFilter,
             pasteStackRevision: store.pasteStackItems.count
         )
-    }
-
-    private var relativeDateMinuteBucket: Int {
-        Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
     }
 
     private var activeFilterStrip: some View {
@@ -550,7 +595,7 @@ struct ClipboardShelfPanelView: View {
             previewedID: shelfInteraction.previewedID,
             previewArrowEdge: .bottom,
             onPreviewDismiss: { id in
-                shelfInteraction.dismissPreview(for: id)
+                dismissPreparedPreview(for: id)
             },
             isSelectable: { displayItem in
                 if case .clipboard = displayItem {
@@ -571,16 +616,16 @@ struct ClipboardShelfPanelView: View {
                 alignment: .bottom
             )
         } previewContent: { displayItem in
-            guard case .clipboard(let item) = displayItem else {
+            guard case .clipboard(let item) = displayItem,
+                  let preparedPreview,
+                  preparedPreview.item.id == item.id else {
                 return AnyView(EmptyView())
             }
             return AnyView(
                 ShelfExpandedPreview(
-                    item: item,
-                    imageDataProvider: store.imageData,
-                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                    preparedPreview: preparedPreview,
                     onDismiss: {
-                        shelfInteraction.dismissPreview()
+                        dismissPreparedPreview()
                     },
                     onMove: moveSelection,
                     onTextInput: beginSearch
@@ -598,6 +643,8 @@ struct ClipboardShelfPanelView: View {
         } onDoubleClick: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
             pasteItem(item, format: defaultPasteFormat)
+        } onLastItemAppear: {
+            loadNextShelfPage()
         }
         .frame(height: ClipboardShelfMetrics.shelfHeight)
     }
@@ -618,6 +665,12 @@ struct ClipboardShelfPanelView: View {
                     }
                 }
                 .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+            case .loading:
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
             case .empty(let title, let detail, let systemImageName):
                 VStack {
                     Spacer(minLength: 0)
@@ -636,7 +689,7 @@ struct ClipboardShelfPanelView: View {
                         await store.enrichLinkPreviewMetadataIfNeeded(for: item)
                     },
                     isSelected: isSelected,
-                    relativeDateReference: relativeDateReference,
+                    timestampReference: timestampReference,
                     defaultPasteFormat: defaultPasteFormat,
                     pinboards: pinboards,
                     onPaste: { format in
@@ -647,6 +700,13 @@ struct ClipboardShelfPanelView: View {
                     },
                     onPin: { pinboardID in
                         store.pinItem(item.id, to: pinboardID)
+                    },
+                    onScreenPin: {
+                        Task { @MainActor in
+                            ScreenPinController.shared.pin(
+                                await store.hydratedItem(for: item)
+                            )
+                        }
                     },
                     onDelete: {
                         store.removeItem(item.id)
@@ -660,18 +720,27 @@ struct ClipboardShelfPanelView: View {
         }
 
     private var emptyTitle: String {
-        shelfScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
+        if shelfScope != .pasteStack, let error = store.historyQueryErrorMessage {
+            return error
+        }
+        return shelfScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
     }
 
     private var emptySystemImage: String {
-        shelfScope == .pasteStack ? "tray" : "doc.on.clipboard"
+        if shelfScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return "exclamationmark.triangle"
+        }
+        return shelfScope == .pasteStack ? "tray" : "doc.on.clipboard"
     }
 
     private var emptyDescription: String {
+        if shelfScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return ""
+        }
         if shelfScope == .pasteStack {
             return store.isPasteStackActive ? localized("message.new_copies_will_appear_here") : localized("message.start_collecting_copied_items")
         }
-        return localized("message.copy_text_links_screenshots_or_files_to")
+        return localized("message.copy_text_links_images_or_files_to")
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
@@ -687,28 +756,23 @@ struct ClipboardShelfPanelView: View {
         }
     }
 
-    private func handleShelfMoveCommand(_ direction: MoveCommandDirection) {
-        moveSelection(direction)
-        Task { @MainActor in
-            await Task.yield()
-            if !isSearchFocused {
-                isShelfFocused = true
-            }
-        }
-    }
-
     private func selectOffset(_ offset: Int) {
         let items = renderedShelfItems
         guard !items.isEmpty else { return }
+        let keepsPreviewOpen = shelfInteraction.previewedID != nil
         let currentID = shelfInteraction.primarySelectedID ?? shelfInteraction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
-        selectSingleItem(items[nextIndex].id, keepsPreviewOpen: shelfInteraction.previewedID != nil)
+        let nextItem = items[nextIndex]
+        selectSingleItem(nextItem.id)
+        if keepsPreviewOpen {
+            prepareAndPresentPreview(for: nextItem)
+        }
     }
 
     private func setScope(_ scope: PasteScope) {
         guard shelfScope != scope else { return }
-        shelfInteraction.dismissPreview()
+        dismissPreparedPreview()
         shelfScope = scope
     }
 
@@ -762,7 +826,7 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func clearFilter(_ descriptor: ClipboardFilterDescriptor) {
-        shelfInteraction.dismissPreview()
+        dismissPreparedPreview()
         switch descriptor.kind {
         case .contentType:
             store.contentTypeFilter = nil
@@ -786,21 +850,29 @@ struct ClipboardShelfPanelView: View {
     private func pasteSelected(format: PasteFormat) {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
+        let shouldDismissBeforePaste = !effectivePinned
+        let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
-            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
+                guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }
                 return await directPasteItems(hydratedItems, format)
             }
-            store.recordDirectPasteResult(result)
+            if let result {
+                store.recordDirectPasteResult(result)
+            }
         }
     }
 
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
+        let shouldDismissBeforePaste = !effectivePinned
         Task { @MainActor in
             let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItem = await store.hydratedItem(for: item)
@@ -811,9 +883,26 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func copyItem(_ item: ClipboardItem, format: PasteFormat) {
+        let sourceWindow = NSApp.keyWindow
         Task { @MainActor in
             let hydratedItem = await store.hydratedItem(for: item)
-            PasteboardWriter.copy(hydratedItem, format: format)
+            ClipboardPanelCopyCoordinator.copy(
+                hydratedItem,
+                format: format,
+                sourceWindow: sourceWindow
+            )
+        }
+    }
+
+    private func copySelectedItems() {
+        let items = selectedItemsInDisplayOrder
+        guard !items.isEmpty else { return }
+        let sourceWindow = NSApp.keyWindow
+        let request = ClipboardPanelCopyGate.begin()
+        Task { @MainActor in
+            let hydratedItems = await store.hydratedItems(for: items)
+            guard ClipboardPanelCopyGate.shouldWrite(request) else { return }
+            ClipboardPanelCopyCoordinator.copy(hydratedItems, sourceWindow: sourceWindow)
         }
     }
 
@@ -858,25 +947,6 @@ struct ClipboardShelfPanelView: View {
             return .handled
         }
 
-        if modifiers.isEmpty, !isSearchFocused {
-            switch keyPress.key {
-            case .upArrow:
-                moveSelection(.up)
-                return .handled
-            case .downArrow:
-                moveSelection(.down)
-                return .handled
-            case .leftArrow:
-                moveSelection(.left)
-                return .handled
-            case .rightArrow:
-                moveSelection(.right)
-                return .handled
-            default:
-                break
-            }
-        }
-
         if keyPress.key == .return {
             if modifiers.isEmpty {
                 pasteSelected(format: store.defaultPasteFormat)
@@ -895,6 +965,10 @@ struct ClipboardShelfPanelView: View {
                 return .handled
             }
             if let index = Int(characters), (1...9).contains(index),
+               ClipboardPanelHistoryAvailability.allowsActions(
+                   scope: shelfScope,
+                   errorMessage: store.historyQueryErrorMessage
+               ),
                let item = store.quickPasteItem(atOneBasedIndex: index, in: shelfScope) {
                 pasteItem(item, format: store.defaultPasteFormat)
                 return .handled
@@ -908,9 +982,19 @@ struct ClipboardShelfPanelView: View {
         return .ignored
     }
 
+    private func handlePanelArrowKey(_ request: ClipboardPanelArrowKeyRequest) {
+        guard !isSearchFocused, shelfInteraction.previewedID == nil else { return }
+        if request.command.extendsSelection {
+            shelfInteraction.extendSelection(by: request.command.offset)
+        } else {
+            selectOffset(request.command.offset)
+        }
+        request.markHandled()
+    }
+
     private func beginSearch(with characters: String) -> Bool {
         guard ClipboardPanelSearchInput.accepts(characters) else { return false }
-        shelfInteraction.dismissPreview()
+        dismissPreparedPreview()
         store.searchQuery += characters
         setSearchFocused(true)
         return true
@@ -919,9 +1003,39 @@ struct ClipboardShelfPanelView: View {
     private func toggleSelectedItemPreview() {
         guard let item = selectedItemsInDisplayOrder.first else { return }
         setSearchFocused(false)
-        if shelfInteraction.togglePreview(for: item.id) {
+        if shelfInteraction.previewedID == item.id {
+            dismissPreparedPreview()
+        } else {
             selectSingleItem(item.id)
+            prepareAndPresentPreview(for: item)
         }
+    }
+
+    private func prepareAndPresentPreview(for item: ClipboardItem) {
+        dismissPreparedPreview()
+        let requestID = UUID()
+        previewRequestID = requestID
+        Task { @MainActor in
+            let prepared = await ClipboardPreparedPreview.prepare(
+                item: item,
+                hydrateItem: store.hydratedItem
+            )
+            guard !Task.isCancelled,
+                  prepared.canPresent(
+                    requestID: requestID,
+                    currentRequestID: previewRequestID,
+                    selectedItemID: shelfInteraction.primarySelectedID
+                  ) else { return }
+            preparedPreview = prepared
+            shelfInteraction.presentPreview(for: item.id)
+        }
+    }
+
+    private func dismissPreparedPreview(for id: UUID? = nil) {
+        guard id == nil || shelfInteraction.previewedID == id else { return }
+        shelfInteraction.dismissPreview(for: id)
+        previewRequestID = nil
+        preparedPreview = nil
     }
 
     private func handleExitCommand() {
@@ -934,7 +1048,7 @@ struct ClipboardShelfPanelView: View {
             return
         }
         if shelfInteraction.previewedID != nil {
-            shelfInteraction.dismissPreview()
+            dismissPreparedPreview()
             return
         }
         onDismiss()
@@ -953,8 +1067,13 @@ struct ClipboardShelfPanelView: View {
     }
 
     private func refreshShelfItems() {
-        let items = store.filteredItems(for: shelfScope)
-        shelfItems = items
+        let queryID = shelfQueryState
+        let items = store.filteredItemsPage(for: shelfScope, offset: 0)
+        paging.reset(
+            with: items,
+            totalCount: store.filteredItemCount(for: shelfScope),
+            queryID: queryID
+        )
 
         shelfInteraction.replaceItems(
             items,
@@ -963,16 +1082,26 @@ struct ClipboardShelfPanelView: View {
         )
     }
 
-    private func runShelfMinuteTicker() async {
-        while !Task.isCancelled {
-            do {
-                try await Task.sleep(nanoseconds: 60_000_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            relativeDateReference = Date()
-        }
+    private func loadNextShelfPage() {
+        guard paging.canLoadMore else { return }
+        let queryID = shelfQueryState
+        guard let request = paging.nextPageRequest(for: queryID) else { return }
+        let page = store.filteredItemsPage(
+            for: shelfScope,
+            offset: request.offset
+        )
+        guard !page.isEmpty else { return }
+        guard paging.append(
+            page,
+            totalCount: store.filteredItemCount(for: shelfScope),
+            for: request,
+            currentQueryID: shelfQueryState
+        ) else { return }
+        shelfInteraction.replaceItems(
+            paging.items,
+            storeSelectedIDs: store.selectedItemIDs,
+            storePrimarySelectedID: store.selectedItemID
+        )
     }
 }
 
@@ -1237,20 +1366,29 @@ private struct ClipboardShelfCard: View {
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
-    let relativeDateReference: Date
+    let timestampReference: Date
     let defaultPasteFormat: PasteFormat
     let pinboards: [Pinboard]
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
+    let onScreenPin: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
+        let formatter = HistoryCardTimestampFormatter(
+            now: { timestampReference }
+        )
+        let timestamp = HistoryCardTimestampAdapter.presentation(
+            for: item.createdAt,
+            formatter: formatter
+        )
+
         ClipboardShelfCardVisual(
             item: item,
             imageDataProvider: imageDataProvider,
             linkMetadataProvider: linkMetadataProvider,
-            relativeDateReference: relativeDateReference
+            timestamp: timestamp
         )
             .equatable()
             .overlay {
@@ -1261,7 +1399,9 @@ private struct ClipboardShelfCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-shelf-card-\(item.id.uuidString)")
-        .accessibilityLabel("\(item.title), \(localized(item.presentationContentType.displayName))")
+        .accessibilityLabel(
+            "\(item.title), \(localized(item.presentationContentType.displayName)), \(timestamp.accessibilityText)"
+        )
         .accessibilityValue(localized(isSelected ? "state.selected" : "label.not_selected"))
         .accessibilityHint(localized("message.press_space_to_preview_press_return_to"))
     }
@@ -1287,6 +1427,9 @@ private struct ClipboardShelfCard: View {
                 }
             }
             Divider()
+            Button("action.pin_to_screen") {
+                onScreenPin()
+            }
             Menu("action.pin") {
                 ForEach(pinboards) { pinboard in
                     Button(pinboard.name) {
@@ -1303,20 +1446,67 @@ private struct ClipboardShelfCard: View {
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
+
+}
+
+struct ClipboardPreparedPreview {
+    let item: ClipboardItem
+    let image: NSImage?
+    let imageLoadError: String?
+
+    var isPresentable: Bool {
+        item.presentationContentType != .image
+            || !item.payload.hasImageAsset
+            || image != nil
+            || imageLoadError != nil
+    }
+
+    func canPresent(
+        requestID: UUID,
+        currentRequestID: UUID?,
+        selectedItemID: UUID?
+    ) -> Bool {
+        isPresentable
+            && requestID == currentRequestID
+            && item.id == selectedItemID
+    }
+
+    @MainActor
+    static func prepare(
+        item: ClipboardItem,
+        hydrateItem: @MainActor (ClipboardItem) async -> ClipboardItem
+    ) async -> ClipboardPreparedPreview {
+        guard item.presentationContentType == .image, item.payload.hasImageAsset else {
+            return ClipboardPreparedPreview(item: item, image: nil, imageLoadError: nil)
+        }
+        let hydrated = await hydrateItem(item)
+        guard let data = hydrated.payload.imageData,
+              let image = NSImage(data: data) else {
+            return ClipboardPreparedPreview(
+                item: hydrated,
+                image: nil,
+                imageLoadError: NSLocalizedString("message.image_data_unavailable_for_preview", comment: "")
+            )
+        }
+        return ClipboardPreparedPreview(item: hydrated, image: image, imageLoadError: nil)
+    }
 }
 
 struct ShelfExpandedPreview: View {
     private static let textPreviewHeight: CGFloat = 420
+    private static let imageActionAreaHeight: CGFloat = 70
 
     @FocusState private var isPreviewFocused: Bool
 
-    let item: ClipboardItem
-    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
-    let tint: Color
+    let preparedPreview: ClipboardPreparedPreview
     var maxWidth: CGFloat = 640
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
     let onTextInput: (String) -> Bool
+
+    private var item: ClipboardItem {
+        preparedPreview.item
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1343,13 +1533,20 @@ struct ShelfExpandedPreview: View {
         switch item.presentationContentType {
         case .image:
             if item.payload.hasImageAsset {
-                ShelfExpandedImagePreview(
-                    item: item,
-                    imageDataProvider: imageDataProvider,
-                    tint: tint,
-                    displaySize: imagePreviewDisplaySize
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
+                if let fullImage = preparedPreview.image {
+                    ShelfExpandedImagePreview(
+                        item: item,
+                        image: fullImage,
+                        displaySize: imagePreviewDisplaySize
+                    )
+                    .frame(maxWidth: .infinity, alignment: .center)
+                } else if let imageLoadError = preparedPreview.imageLoadError {
+                    ContentUnavailableView(
+                        imageLoadError,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .frame(width: imagePreviewBounds.width, height: imagePreviewBounds.height)
+                }
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
                     .frame(height: Self.textPreviewHeight)
@@ -1376,7 +1573,7 @@ struct ShelfExpandedPreview: View {
 
     private var previewFrameHeight: CGFloat {
         if let imagePreviewDisplaySize {
-            return imagePreviewDisplaySize.height + 28
+            return imagePreviewDisplaySize.height + Self.imageActionAreaHeight + 28
         }
         return Self.textPreviewHeight + 28
     }
@@ -1391,8 +1588,7 @@ struct ShelfExpandedPreview: View {
 
     private var imagePreviewDisplaySize: CGSize? {
         guard item.presentationContentType == .image,
-              item.payload.hasImageAsset,
-              let imageSize = ClipboardImageCache.imageSize(for: item) else {
+              let imageSize = preparedPreview.image?.size else {
             return nil
         }
         return ClipboardImageCache.fittedDisplaySize(
@@ -1457,83 +1653,116 @@ struct ShelfExpandedPreview: View {
     }
 }
 
+enum ClipboardImagePreviewRequest {
+    static func assetIdentity(for item: ClipboardItem) -> String {
+        [
+            item.id.uuidString,
+            item.payload.imageAssetID ?? "inline",
+            String(item.updatedAt.timeIntervalSince1970)
+        ].joined(separator: ":")
+    }
+}
+
+private enum ClipboardImagePreviewLiveTextState: Equatable {
+    case idle
+    case loading
+    case ready
+    case empty
+    case unsupported
+    case failed(String)
+
+    var isLoading: Bool {
+        self == .loading
+    }
+}
+
 private struct ShelfExpandedImagePreview: View {
     let item: ClipboardItem
-    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
-    let tint: Color
+    let image: NSImage
     let displaySize: CGSize?
-    @State private var liveTextImage: NSImage?
-    @State private var fallbackImage: NSImage?
+    @State private var liveTextState: ClipboardImagePreviewLiveTextState = .idle
+    @State private var liveTextActivation = 0
 
     var body: some View {
-        ZStack {
-            if let liveTextImage {
-                ShelfLiveTextImagePreview(
-                    image: liveTextImage,
-                    analysisID: analysisID
-                )
-            } else if let image = fallbackImage ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(tint.opacity(0.10))
-                Image(systemName: "photo")
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(tint)
-            }
-        }
-        .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .accessibilityLabel(localized("label.captured_image_preview"))
-        .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
-            let cachedImage = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)
-            fallbackImage = cachedImage
-
-            let imageData = await imageDataProvider(item)
-
-            if let imageData, let image = NSImage(data: imageData) {
-                guard !Task.isCancelled else { return }
-                liveTextImage = image
-                fallbackImage = image
-                return
-            }
-
-            guard cachedImage == nil else { return }
-            let loadedImage = await ClipboardImageCache.thumbnail(
-                for: item,
-                imageData: imageData,
-                maxPixelSize: maxPixelSize
+        VStack(alignment: .trailing, spacing: 10) {
+            ShelfLiveTextImagePreview(
+                image: image,
+                analysisID: ClipboardImagePreviewRequest.assetIdentity(for: item),
+                activation: liveTextActivation,
+                onStateChange: { liveTextState = $0 }
             )
-            guard !Task.isCancelled else { return }
-            fallbackImage = loadedImage
-        }
-    }
+                .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityLabel(localized("label.captured_image_preview"))
 
-    private var maxPixelSize: Int {
-        1_600
+            Button {
+                liveTextState = .loading
+                liveTextActivation += 1
+            } label: {
+                if liveTextState.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(localized("state.recognizing_text"))
+                } else {
+                    Label(localized("action.recognize_text"), systemImage: "text.viewfinder")
+                }
+            }
+            .disabled(liveTextState.isLoading)
+            .accessibilityLabel(localized("action.recognize_text"))
+            .accessibilityValue(liveTextState.isLoading ? localized("state.recognizing_text") : "")
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(statusMessageIsError ? .red : .secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     private var resolvedDisplaySize: CGSize {
         displaySize ?? CGSize(width: 612, height: 420)
     }
 
-    private var analysisID: String {
-        ClipboardImageCache.thumbnailCacheKey(
-            for: item,
-            maxPixelSize: maxPixelSize
-        ) ?? item.id.uuidString
+    private var statusMessage: String? {
+        switch liveTextState {
+        case .empty:
+            localized("message.no_text_was_recognized")
+        case .unsupported:
+            localized("message.live_text_unavailable")
+        case .failed(let message):
+            localized("format.text_recognition_failed", message)
+        case .idle, .loading, .ready:
+            nil
+        }
+    }
+
+    private var statusMessageIsError: Bool {
+        if case .failed = liveTextState {
+            return true
+        }
+        return false
     }
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        String(
+            format: NSLocalizedString(key, comment: ""),
+            locale: Locale.current,
+            arguments: arguments
+        )
     }
 }
 
 private struct ShelfLiveTextImagePreview: NSViewRepresentable {
     let image: NSImage
     let analysisID: String
+    let activation: Int
+    let onStateChange: (ClipboardImagePreviewLiveTextState) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -1551,7 +1780,12 @@ private struct ShelfLiveTextImagePreview: NSViewRepresentable {
         nsView.imageView.image = image
         context.coordinator.imageView = nsView.imageView
         context.coordinator.overlayView = nsView.overlayView
-        context.coordinator.analyze(image: image, analysisID: analysisID)
+        context.coordinator.activate(
+            image: image,
+            requestID: "\(analysisID):\(activation)",
+            activation: activation,
+            onStateChange: onStateChange
+        )
     }
 
     static func dismantleNSView(_ nsView: ShelfLiveTextImagePreviewContainer, coordinator: Coordinator) {
@@ -1559,31 +1793,51 @@ private struct ShelfLiveTextImagePreview: NSViewRepresentable {
         nsView.overlayView.analysis = nil
     }
 
+    @MainActor
     final class Coordinator: NSObject, ImageAnalysisOverlayViewDelegate {
         weak var imageView: NSImageView?
         weak var overlayView: ImageAnalysisOverlayView?
         private var analysisTask: Task<Void, Never>?
-        private var activeAnalysisID: String?
+        private var activeRequestID: String?
 
-        func analyze(image: NSImage, analysisID: String) {
-            guard ImageAnalyzer.isSupported else { return }
-            guard activeAnalysisID != analysisID else { return }
-            activeAnalysisID = analysisID
+        func activate(
+            image: NSImage,
+            requestID: String,
+            activation: Int,
+            onStateChange: @escaping (ClipboardImagePreviewLiveTextState) -> Void
+        ) {
+            guard activation > 0, activeRequestID != requestID else { return }
+            activeRequestID = requestID
             analysisTask?.cancel()
             overlayView?.analysis = nil
+            overlayView?.preferredInteractionTypes = []
+
+            guard ImageAnalyzer.isSupported else {
+                Task { @MainActor in
+                    onStateChange(.unsupported)
+                }
+                return
+            }
 
             analysisTask = Task { @MainActor [weak self, image] in
-                let configuration = ImageAnalyzer.Configuration(.text)
                 do {
                     let analysis = try await ImageAnalyzer().analyze(
                         image,
                         orientation: .up,
-                        configuration: configuration
+                        configuration: ImageAnalyzer.Configuration(.text)
                     )
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, self?.activeRequestID == requestID else { return }
+                    guard analysis.hasResults(for: .text) else {
+                        onStateChange(.empty)
+                        return
+                    }
                     self?.overlayView?.analysis = analysis
+                    self?.overlayView?.preferredInteractionTypes = .textSelection
+                    self?.overlayView?.selectableItemsHighlighted = true
+                    onStateChange(.ready)
                 } catch {
-                    self?.overlayView?.analysis = nil
+                    guard !Task.isCancelled, self?.activeRequestID == requestID else { return }
+                    onStateChange(.failed(error.localizedDescription))
                 }
             }
         }
@@ -1591,7 +1845,7 @@ private struct ShelfLiveTextImagePreview: NSViewRepresentable {
         func cancelAnalysis() {
             analysisTask?.cancel()
             analysisTask = nil
-            activeAnalysisID = nil
+            activeRequestID = nil
         }
 
         func contentsRect(for overlayView: ImageAnalysisOverlayView) -> CGRect {
@@ -1634,18 +1888,11 @@ private final class ShelfLiveTextImagePreviewContainer: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
-
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        addSubview(imageView)
-
         overlayView.translatesAutoresizingMaskIntoConstraints = false
         overlayView.trackingImageView = imageView
-        overlayView.preferredInteractionTypes = .automaticTextOnly
-        overlayView.selectableItemsHighlighted = true
+        addSubview(imageView)
         imageView.addSubview(overlayView)
 
         NSLayoutConstraint.activate([
@@ -1669,22 +1916,22 @@ private struct ClipboardShelfCardVisual: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
-    let relativeDateReference: Date
+    let timestamp: HistoryCardTimestampFormatter.Presentation
     private let renderSignature: ClipboardShelfCardRenderSignature
 
     init(
         item: ClipboardItem,
         imageDataProvider: @escaping @MainActor (ClipboardItem) async -> Data?,
         linkMetadataProvider: @escaping @MainActor (ClipboardItem) async -> Void,
-        relativeDateReference: Date
+        timestamp: HistoryCardTimestampFormatter.Presentation
     ) {
         self.item = item
         self.imageDataProvider = imageDataProvider
         self.linkMetadataProvider = linkMetadataProvider
-        self.relativeDateReference = relativeDateReference
+        self.timestamp = timestamp
         self.renderSignature = ClipboardShelfCardRenderSignature(
             item: item,
-            relativeDateReference: relativeDateReference
+            timestamp: timestamp
         )
     }
 
@@ -1698,9 +1945,11 @@ private struct ClipboardShelfCardVisual: View {
                 Text(localized(item.presentationContentType.displayName))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
-                Text(relativeDate(relativeTo: relativeDateReference))
+                Text(timestamp.visibleText)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             Spacer()
             SourceApplicationIconBadge(item: item)
@@ -1760,19 +2009,9 @@ private struct ClipboardShelfCardVisual: View {
         }
     }
 
-    private func relativeDate(relativeTo date: Date) -> String {
-        Self.relativeFormatter.localizedString(for: item.createdAt, relativeTo: date)
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
 }
 
 extension ClipboardShelfCardVisual: Equatable {
@@ -1809,9 +2048,9 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
     let rtfAssetID: String?
     let imageAssetID: String?
     let imageByteCount: Int?
-    let relativeDateMinuteBucket: Int
+    let timestamp: HistoryCardTimestampFormatter.Presentation
 
-    init(item: ClipboardItem, relativeDateReference: Date) {
+    init(item: ClipboardItem, timestamp: HistoryCardTimestampFormatter.Presentation) {
         id = item.id
         createdAt = item.createdAt
         updatedAt = item.updatedAt
@@ -1825,7 +2064,7 @@ private struct ClipboardShelfCardRenderSignature: Equatable {
         rtfAssetID = item.payload.rtfAssetID
         imageAssetID = item.payload.imageAssetID
         imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
-        relativeDateMinuteBucket = Int(relativeDateReference.timeIntervalSinceReferenceDate / 60)
+        self.timestamp = timestamp
     }
 }
 

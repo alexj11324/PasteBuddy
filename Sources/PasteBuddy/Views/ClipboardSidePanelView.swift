@@ -33,11 +33,12 @@ struct ClipboardSidePanelView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @State private var sideScope: PasteScope = .history
-    @State private var sideItems: [ClipboardItem] = []
-    @State private var sideItemTotalCount = 0
+    @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardSidePanelQueryState>()
     @State private var interaction = ShelfInteractionModel()
+    @State private var preparedPreview: ClipboardPreparedPreview?
+    @State private var previewRequestID: UUID?
     @State private var pinnedState: Bool?
-
+    @State private var timestampReference = Date()
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -51,7 +52,6 @@ struct ClipboardSidePanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
-        .background(sidePanelKeyboardShortcuts)
         .onAppear {
             store.searchQuery = ""
             store.clearFilters()
@@ -63,44 +63,53 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
         }
         .onChange(of: queryState) {
             refreshSideItems()
         }
         .onChange(of: store.searchQuery) {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
         }
-        .onMoveCommand(perform: handleSidePanelMoveCommand)
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
         .focusEffectDisabled()
         .focused($isListFocused)
+        .onCopyCommand {
+            let items = selectedItemsInDisplayOrder
+            return ClipboardPanelCopyCoordinator.itemProviders(
+                for: items,
+                sourceWindow: NSApp.keyWindow
+            ) { item in
+                await store.hydratedItem(for: item)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection)) { _ in
+            copySelectedItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
+            pasteSelected(format: store.defaultPasteFormat)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
+            guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
+            handlePanelArrowKey(request)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelPreviewKey)) { notification in
+            guard let request = notification.object as? ClipboardPanelPreviewKeyRequest,
+                  !isSearchFocused else { return }
+            toggleSelectedItemPreview()
+            request.markHandled()
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
         }
+        .task {
+            await HistoryCardTimestampTicker.run {
+                timestampReference = $0
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
-    }
-
-    private var sidePanelKeyboardShortcuts: some View {
-        Group {
-            keyboardShortcut(.leftArrow) { moveSelection(.left) }
-            keyboardShortcut(.rightArrow) { moveSelection(.right) }
-            keyboardShortcut(.upArrow) { moveSelection(.up) }
-            keyboardShortcut(.downArrow) { moveSelection(.down) }
-        }
-        .disabled(isSearchFocused || interaction.previewedID != nil)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
-    }
-
-    private func keyboardShortcut(_ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Color.clear
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(key, modifiers: [])
     }
 
     private var toolbar: some View {
@@ -262,7 +271,13 @@ struct ClipboardSidePanelView: View {
 
     private var itemList: some View {
         VStack(spacing: 8) {
-            if renderedItems.isEmpty {
+            if renderedItems.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
+            } else if renderedItems.isEmpty {
                 ContentUnavailableView(
                     emptyTitle,
                     systemImage: emptySystemImage,
@@ -280,7 +295,7 @@ struct ClipboardSidePanelView: View {
                     previewedID: interaction.previewedID,
                     previewArrowEdge: .trailing,
                     onPreviewDismiss: { id in
-                        interaction.dismissPreview(for: id)
+                        dismissPreparedPreview(for: id)
                     },
                     isSelectable: { _ in true },
                     content: { item, isSelected in
@@ -288,6 +303,7 @@ struct ClipboardSidePanelView: View {
                             item: item,
                             imageDataProvider: store.imageData,
                             isSelected: isSelected,
+                            timestampReference: timestampReference,
                             onPaste: { format in
                                 pasteItem(item, format: format)
                             },
@@ -297,6 +313,13 @@ struct ClipboardSidePanelView: View {
                             onPin: { pinboardID in
                                 store.pinItem(item.id, to: pinboardID)
                             },
+                            onScreenPin: {
+                                Task { @MainActor in
+                                    ScreenPinController.shared.pin(
+                                        await store.hydratedItem(for: item)
+                                    )
+                                }
+                            },
                             onDelete: {
                                 store.removeItem(item.id)
                             },
@@ -305,14 +328,16 @@ struct ClipboardSidePanelView: View {
                         .frame(width: 324, height: ClipboardSidePanelMetrics.rowHeight)
                     },
                     previewContent: { item in
-                        AnyView(
+                        guard let preparedPreview,
+                              preparedPreview.item.id == item.id else {
+                            return AnyView(EmptyView())
+                        }
+                        return AnyView(
                             ShelfExpandedPreview(
-                                item: item,
-                                imageDataProvider: store.imageData,
-                                tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                                preparedPreview: preparedPreview,
                                 maxWidth: ClipboardSidePanelMetrics.previewMaxWidth,
                                 onDismiss: {
-                                    interaction.dismissPreview()
+                                    dismissPreparedPreview()
                                 },
                                 onMove: moveSelection,
                                 onTextInput: beginSearch
@@ -332,6 +357,9 @@ struct ClipboardSidePanelView: View {
                     onDoubleClick: { id in
                         guard let item = renderedItems.first(where: { $0.id == id }) else { return }
                         pasteItem(item, format: store.defaultPasteFormat)
+                    },
+                    onLastItemAppear: {
+                        loadNextSidePage()
                     }
                 )
             }
@@ -341,12 +369,21 @@ struct ClipboardSidePanelView: View {
     }
 
     private var footer: some View {
-        Text(localized("format.items", sideItemTotalCount))
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .frame(height: 32)
-            .padding(.horizontal, 4)
+        Group {
+            if paging.items.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
+            } else {
+                Text(localized("format.items", paging.totalCount))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 32)
+        .padding(.horizontal, 4)
     }
 
     private var queryState: ClipboardSidePanelQueryState {
@@ -364,7 +401,11 @@ struct ClipboardSidePanelView: View {
     }
 
     private var renderedItems: [ClipboardItem] {
-        sideItems
+        ClipboardPanelHistoryAvailability.visibleItems(
+            paging.items,
+            scope: sideScope,
+            errorMessage: store.historyQueryErrorMessage
+        )
     }
 
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -400,24 +441,37 @@ struct ClipboardSidePanelView: View {
     }
 
     private var emptyTitle: String {
-        sideScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
+        if sideScope != .pasteStack, let error = store.historyQueryErrorMessage {
+            return error
+        }
+        return sideScope == .pasteStack ? localized("action.paste_stack_is_empty") : localized("label.no_clipboard_items")
     }
 
     private var emptySystemImage: String {
-        sideScope == .pasteStack ? "tray" : "doc.on.clipboard"
+        if sideScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return "exclamationmark.triangle"
+        }
+        return sideScope == .pasteStack ? "tray" : "doc.on.clipboard"
     }
 
     private var emptyDescription: String {
+        if sideScope != .pasteStack, store.historyQueryErrorMessage != nil {
+            return ""
+        }
         if sideScope == .pasteStack {
             return store.isPasteStackActive ? localized("message.new_copies_will_appear_here") : localized("message.start_collecting_copied_items")
         }
-        return localized("message.copy_text_links_screenshots_or_files_to")
+        return localized("message.copy_text_links_images_or_files_to")
     }
 
     private func refreshSideItems() {
-        let items = store.filteredItems(for: sideScope)
-        sideItems = items
-        sideItemTotalCount = store.filteredItemCount(for: sideScope)
+        let queryID = queryState
+        let items = store.filteredItemsPage(for: sideScope, offset: 0)
+        paging.reset(
+            with: items,
+            totalCount: store.filteredItemCount(for: sideScope),
+            queryID: queryID
+        )
         interaction.replaceItems(
             items,
             storeSelectedIDs: store.selectedItemIDs,
@@ -425,9 +479,31 @@ struct ClipboardSidePanelView: View {
         )
     }
 
+    private func loadNextSidePage() {
+        guard paging.canLoadMore else { return }
+        let queryID = queryState
+        guard let request = paging.nextPageRequest(for: queryID) else { return }
+        let page = store.filteredItemsPage(
+            for: sideScope,
+            offset: request.offset
+        )
+        guard !page.isEmpty else { return }
+        guard paging.append(
+            page,
+            totalCount: store.filteredItemCount(for: sideScope),
+            for: request,
+            currentQueryID: queryState
+        ) else { return }
+        interaction.replaceItems(
+            paging.items,
+            storeSelectedIDs: store.selectedItemIDs,
+            storePrimarySelectedID: store.selectedItemID
+        )
+    }
+
     private func setSideScope(_ scope: PasteScope) {
         if sideScope != scope {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
             sideScope = scope
         }
         if store.hasActiveFilters {
@@ -474,23 +550,18 @@ struct ClipboardSidePanelView: View {
         }
     }
 
-    private func handleSidePanelMoveCommand(_ direction: MoveCommandDirection) {
-        moveSelection(direction)
-        Task { @MainActor in
-            await Task.yield()
-            if !isSearchFocused {
-                isListFocused = true
-            }
-        }
-    }
-
     private func selectOffset(_ offset: Int) {
         let items = renderedItems
         guard !items.isEmpty else { return }
+        let keepsPreviewOpen = interaction.previewedID != nil
         let currentID = interaction.primarySelectedID ?? interaction.selectedIDs.first
         let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         let nextIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
-        selectSingleItem(items[nextIndex].id, keepsPreviewOpen: interaction.previewedID != nil)
+        let nextItem = items[nextIndex]
+        selectSingleItem(nextItem.id)
+        if keepsPreviewOpen {
+            prepareAndPresentPreview(for: nextItem)
+        }
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
@@ -499,25 +570,6 @@ struct ClipboardSidePanelView: View {
         if keyPress.key == .space, modifiers.isEmpty, !isSearchFocused {
             toggleSelectedItemPreview()
             return .handled
-        }
-
-        if modifiers.isEmpty, !isSearchFocused {
-            switch keyPress.key {
-            case .upArrow:
-                moveSelection(.up)
-                return .handled
-            case .downArrow:
-                moveSelection(.down)
-                return .handled
-            case .leftArrow:
-                moveSelection(.left)
-                return .handled
-            case .rightArrow:
-                moveSelection(.right)
-                return .handled
-            default:
-                break
-            }
         }
 
         if keyPress.key == .return {
@@ -538,6 +590,10 @@ struct ClipboardSidePanelView: View {
                 return .handled
             }
             if let index = Int(characters), (1...9).contains(index),
+               ClipboardPanelHistoryAvailability.allowsActions(
+                   scope: sideScope,
+                   errorMessage: store.historyQueryErrorMessage
+               ),
                let item = store.quickPasteItem(atOneBasedIndex: index, in: sideScope) {
                 pasteItem(item, format: store.defaultPasteFormat)
                 return .handled
@@ -551,9 +607,19 @@ struct ClipboardSidePanelView: View {
         return .ignored
     }
 
+    private func handlePanelArrowKey(_ request: ClipboardPanelArrowKeyRequest) {
+        guard !isSearchFocused, interaction.previewedID == nil else { return }
+        if request.command.extendsSelection {
+            interaction.extendSelection(by: request.command.offset)
+        } else {
+            selectOffset(request.command.offset)
+        }
+        request.markHandled()
+    }
+
     private func beginSearch(with characters: String) -> Bool {
         guard ClipboardPanelSearchInput.accepts(characters) else { return false }
-        interaction.dismissPreview()
+        dismissPreparedPreview()
         store.searchQuery += characters
         setSearchFocused(true)
         return true
@@ -562,24 +628,58 @@ struct ClipboardSidePanelView: View {
     private func toggleSelectedItemPreview() {
         guard let item = selectedItemsInDisplayOrder.first else { return }
         setSearchFocused(false)
-        if interaction.togglePreview(for: item.id) {
+        if interaction.previewedID == item.id {
+            dismissPreparedPreview()
+        } else {
             selectSingleItem(item.id)
+            prepareAndPresentPreview(for: item)
         }
+    }
+
+    private func prepareAndPresentPreview(for item: ClipboardItem) {
+        dismissPreparedPreview()
+        let requestID = UUID()
+        previewRequestID = requestID
+        Task { @MainActor in
+            let prepared = await ClipboardPreparedPreview.prepare(
+                item: item,
+                hydrateItem: store.hydratedItem
+            )
+            guard !Task.isCancelled,
+                  prepared.canPresent(
+                    requestID: requestID,
+                    currentRequestID: previewRequestID,
+                    selectedItemID: interaction.primarySelectedID
+                  ) else { return }
+            preparedPreview = prepared
+            interaction.presentPreview(for: item.id)
+        }
+    }
+
+    private func dismissPreparedPreview(for id: UUID? = nil) {
+        guard id == nil || interaction.previewedID == id else { return }
+        interaction.dismissPreview(for: id)
+        previewRequestID = nil
+        preparedPreview = nil
     }
 
     private func pasteSelected(format: PasteFormat) {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
         let shouldDismissBeforePaste = !effectivePinned
+        let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
-            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
                 dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
+                guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }
                 return await directPasteItems(hydratedItems, format)
             }
-            store.recordDirectPasteResult(result)
+            if let result {
+                store.recordDirectPasteResult(result)
+            }
         }
     }
 
@@ -599,9 +699,26 @@ struct ClipboardSidePanelView: View {
     }
 
     private func copyItem(_ item: ClipboardItem, format: PasteFormat) {
+        let sourceWindow = NSApp.keyWindow
         Task { @MainActor in
             let hydratedItem = await store.hydratedItem(for: item)
-            PasteboardWriter.copy(hydratedItem, format: format)
+            ClipboardPanelCopyCoordinator.copy(
+                hydratedItem,
+                format: format,
+                sourceWindow: sourceWindow
+            )
+        }
+    }
+
+    private func copySelectedItems() {
+        let items = selectedItemsInDisplayOrder
+        guard !items.isEmpty else { return }
+        let sourceWindow = NSApp.keyWindow
+        let request = ClipboardPanelCopyGate.begin()
+        Task { @MainActor in
+            let hydratedItems = await store.hydratedItems(for: items)
+            guard ClipboardPanelCopyGate.shouldWrite(request) else { return }
+            ClipboardPanelCopyCoordinator.copy(hydratedItems, sourceWindow: sourceWindow)
         }
     }
 
@@ -615,7 +732,7 @@ struct ClipboardSidePanelView: View {
             return
         }
         if interaction.previewedID != nil {
-            interaction.dismissPreview()
+            dismissPreparedPreview()
             return
         }
         onDismiss()
@@ -671,13 +788,23 @@ private struct ClipboardSidePanelListRow: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
     let isSelected: Bool
+    let timestampReference: Date
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
+    let onScreenPin: () -> Void
     let onDelete: () -> Void
     let pinboards: [Pinboard]
 
     var body: some View {
+        let formatter = HistoryCardTimestampFormatter(
+            now: { timestampReference }
+        )
+        let timestamp = HistoryCardTimestampAdapter.presentation(
+            for: item.createdAt,
+            formatter: formatter
+        )
+
         HStack(spacing: 12) {
             SourceApplicationIconBadge(item: item, size: ClipboardSidePanelMetrics.thumbnailSize)
                 .frame(width: ClipboardSidePanelMetrics.thumbnailSize, height: ClipboardSidePanelMetrics.thumbnailSize)
@@ -686,9 +813,12 @@ private struct ClipboardSidePanelListRow: View {
 
             Spacer(minLength: 8)
 
-            Text(item.createdAt.formatted(date: .omitted, time: .shortened))
+            Text(timestamp.visibleText)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .layoutPriority(1)
 
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 16, weight: .medium))
@@ -724,6 +854,9 @@ private struct ClipboardSidePanelListRow: View {
                 }
             }
             Divider()
+            Button("action.pin_to_screen") {
+                onScreenPin()
+            }
             Menu("action.pin") {
                 ForEach(pinboards) { pinboard in
                     Button(pinboard.name) {
@@ -737,9 +870,10 @@ private struct ClipboardSidePanelListRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-side-panel-row-\(item.id.uuidString)")
-        .accessibilityLabel(item.title)
+        .accessibilityLabel("\(item.title), \(timestamp.accessibilityText)")
         .accessibilityValue(NSLocalizedString(isSelected ? "state.selected" : "label.not_selected", comment: ""))
     }
+
 }
 
 private struct ClipboardSidePanelContentPreview: View {

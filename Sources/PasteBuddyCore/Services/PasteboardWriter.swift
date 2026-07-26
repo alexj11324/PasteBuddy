@@ -1,9 +1,14 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 public enum PasteboardWriter {
+    public nonisolated static let internalCopyPasteboardType = NSPasteboard.PasteboardType(
+        "com.alexjiang.PasteBuddy.copy-feedback-receipt"
+    )
+
     public enum DirectPasteFallbackBehavior: Equatable, Sendable {
         case copyOnly
         case failWithoutCopying
@@ -50,68 +55,106 @@ public enum PasteboardWriter {
         userConfiguredDirectPasteOptions.pasteOnly
     }
 
-    public static func copy(_ item: ClipboardItem, format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
+    @discardableResult
+    public static func copy(
+        _ item: ClipboardItem,
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general
+    ) -> Bool {
         pasteboard.clearContents()
         if format == .plainText {
-            pasteboard.setString(plainText(for: item), forType: .string)
-            return
+            return finalizeInternalCopy(
+                pasteboard.setString(plainText(for: item), forType: .string),
+                on: pasteboard
+            )
         }
 
+        var succeeded = false
         switch item.contentType {
         case .text:
             if let text = item.payload.text {
-                pasteboard.setString(text, forType: .string)
+                succeeded = pasteboard.setString(text, forType: .string) || succeeded
             }
             if let html = item.payload.htmlString {
-                pasteboard.setString(html, forType: .html)
+                succeeded = pasteboard.setString(html, forType: .html) || succeeded
             }
             if let rtfData = item.payload.rtfData {
-                pasteboard.setData(rtfData, forType: .rtf)
+                succeeded = pasteboard.setData(rtfData, forType: .rtf) || succeeded
             }
         case .url:
             if let value = item.payload.urlString, let url = URL(string: value) {
-                pasteboard.writeObjects([url as NSURL])
+                succeeded = pasteboard.writeObjects([url as NSURL])
             } else if let value = item.payload.urlString {
-                pasteboard.setString(value, forType: .string)
+                succeeded = pasteboard.setString(value, forType: .string)
             }
         case .file:
             let urls = item.payload.allFileURLStrings.compactMap(URL.init(string:))
             if !urls.isEmpty {
-                pasteboard.writeObjects(urls.map { $0 as NSURL })
+                succeeded = pasteboard.writeObjects(urls.map { $0 as NSURL })
             }
         case .image:
             if let data = item.payload.imageData, let image = NSImage(data: data) {
-                pasteboard.writeObjects([image])
+                succeeded = pasteboard.writeObjects([image])
             }
         case .mixed:
             let urls = item.payload.allFileURLStrings.compactMap(URL.init(string:))
             if !urls.isEmpty {
-                pasteboard.writeObjects(urls.map { $0 as NSURL })
+                succeeded = pasteboard.writeObjects(urls.map { $0 as NSURL }) || succeeded
             }
             if let data = item.payload.imageData, let image = NSImage(data: data) {
-                pasteboard.writeObjects([image])
+                succeeded = pasteboard.writeObjects([image]) || succeeded
             }
-            pasteboard.setString(plainText(for: item), forType: .string)
+            succeeded = pasteboard.setString(plainText(for: item), forType: .string) || succeeded
             if let html = item.payload.htmlString {
-                pasteboard.setString(html, forType: .html)
+                succeeded = pasteboard.setString(html, forType: .html) || succeeded
             }
             if let rtfData = item.payload.rtfData {
-                pasteboard.setData(rtfData, forType: .rtf)
+                succeeded = pasteboard.setData(rtfData, forType: .rtf) || succeeded
             }
         }
+        return finalizeInternalCopy(succeeded, on: pasteboard)
     }
 
-    public static func copy(_ items: [ClipboardItem], format: PasteFormat = .original, to pasteboard: NSPasteboard = .general) {
+    @discardableResult
+    public static func copy(
+        _ items: [ClipboardItem],
+        format: PasteFormat = .original,
+        to pasteboard: NSPasteboard = .general
+    ) -> Bool {
         guard !items.isEmpty else {
-            return
+            return false
         }
         if items.count == 1, let item = items.first {
-            copy(item, format: format, to: pasteboard)
-            return
+            return copy(item, format: format, to: pasteboard)
         }
 
         pasteboard.clearContents()
-        pasteboard.setString(plainText(for: items), forType: .string)
+        return finalizeInternalCopy(
+            pasteboard.setString(plainText(for: items), forType: .string),
+            on: pasteboard
+        )
+    }
+
+    static func containsInternalCopyMarker(_ pasteboard: NSPasteboard) -> Bool {
+        pasteboard.availableType(from: [internalCopyPasteboardType]) != nil
+    }
+
+    private static func finalizeInternalCopy(
+        _ contentWriteSucceeded: Bool,
+        on pasteboard: NSPasteboard
+    ) -> Bool {
+        guard contentWriteSucceeded else { return false }
+        return pasteboard.setData(Data([1]), forType: internalCopyPasteboardType)
+    }
+
+    public static func itemProviders(
+        for items: [ClipboardItem],
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+    ) -> [NSItemProvider] {
+        guard items.count == 1, let item = items.first else {
+            return items.isEmpty ? [] : [NSItemProvider(object: plainText(for: items) as NSString)]
+        }
+        return itemProviders(for: item, hydrate: hydrate)
     }
 
     @discardableResult
@@ -332,6 +375,137 @@ public enum PasteboardWriter {
 
     public static func plainText(for items: [ClipboardItem]) -> String {
         ClipboardPlainTextRenderer.plainText(for: items)
+    }
+
+    private static func itemProviders(
+        for item: ClipboardItem,
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+    ) -> [NSItemProvider] {
+        switch item.contentType {
+        case .text:
+            return [textProvider(for: item, hydrate: hydrate)]
+        case .url:
+            if let value = item.payload.urlString, let url = URL(string: value) {
+                return [NSItemProvider(object: url as NSURL)]
+            }
+        case .file:
+            let providers = item.payload.allFileURLStrings
+                .compactMap(URL.init(string:))
+                .map { NSItemProvider(object: $0 as NSURL) }
+            if !providers.isEmpty {
+                return providers
+            }
+        case .image:
+            if let provider = imageProvider(for: item, hydrate: hydrate) {
+                return [provider]
+            }
+        case .mixed:
+            var providers = item.payload.allFileURLStrings
+                .compactMap(URL.init(string:))
+                .map { NSItemProvider(object: $0 as NSURL) }
+            let provider = textProvider(for: item, hydrate: hydrate)
+            registerImageRepresentation(for: item, on: provider, hydrate: hydrate)
+            providers.insert(provider, at: 0)
+            return providers
+        }
+        return [NSItemProvider(object: plainText(for: item) as NSString)]
+    }
+
+    private static func textProvider(
+        for item: ClipboardItem,
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+    ) -> NSItemProvider {
+        let provider = NSItemProvider(object: plainText(for: item) as NSString)
+        if let html = item.payload.htmlString {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.html.identifier,
+                visibility: .all
+            ) { completion in
+                completion(Data(html.utf8), nil)
+                return nil
+            }
+        }
+        if let rtfData = item.payload.rtfData {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.rtf.identifier,
+                visibility: .all
+            ) { completion in
+                completion(rtfData, nil)
+                return nil
+            }
+        } else if item.payload.rtfAssetID != nil {
+            registerHydratedDataRepresentation(
+                UTType.rtf,
+                for: item,
+                on: provider,
+                hydrate: hydrate,
+                data: \.payload.rtfData
+            )
+        }
+        return provider
+    }
+
+    private static func imageProvider(
+        for item: ClipboardItem,
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+    ) -> NSItemProvider? {
+        if let data = item.payload.imageData, let image = NSImage(data: data) {
+            return NSItemProvider(object: image)
+        }
+        guard item.payload.imageAssetID != nil else { return nil }
+        let provider = NSItemProvider()
+        registerImageRepresentation(for: item, on: provider, hydrate: hydrate)
+        return provider
+    }
+
+    private static func registerImageRepresentation(
+        for item: ClipboardItem,
+        on provider: NSItemProvider,
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+    ) {
+        if let data = item.payload.imageData,
+           let tiffData = NSImage(data: data)?.tiffRepresentation {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.tiff.identifier,
+                visibility: .all
+            ) { completion in
+                completion(tiffData, nil)
+                return nil
+            }
+        } else if item.payload.imageAssetID != nil {
+            registerHydratedDataRepresentation(
+                UTType.tiff,
+                for: item,
+                on: provider,
+                hydrate: hydrate
+            ) { hydratedItem in
+                hydratedItem.payload.imageData.flatMap { NSImage(data: $0)?.tiffRepresentation }
+            }
+        }
+    }
+
+    private static func registerHydratedDataRepresentation(
+        _ type: UTType,
+        for item: ClipboardItem,
+        on provider: NSItemProvider,
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem,
+        data: @escaping @MainActor (ClipboardItem) -> Data?
+    ) {
+        provider.registerDataRepresentation(
+            forTypeIdentifier: type.identifier,
+            visibility: .all
+        ) { completion in
+            let progress = Progress(totalUnitCount: 1)
+            Task { @MainActor in
+                if let hydratedData = data(await hydrate(item)) {
+                    completion(hydratedData, nil)
+                } else {
+                    completion(nil, CocoaError(.fileReadNoSuchFile))
+                }
+                progress.completedUnitCount = 1
+            }
+            return progress
+        }
     }
 
     private static func copyFallbackResult(

@@ -27,7 +27,7 @@ rest of the clipboard configuration.
   invoice calculation.
 - Team plan overview: purchase positioning distinct from personal plans,
   admin-visible seat/license state, billing/distribution summaries, and shared
-  pinboard value propositions around ideas, links, files, screenshots, snippets,
+  pinboard value propositions around ideas, links, files, images, snippets,
   and staying in sync.
 - Settings UI for plan status, trial actions, trial end outcome, personal plan
   options, same-account Mac/iPhone/iPad unlock behavior, restore state, restore

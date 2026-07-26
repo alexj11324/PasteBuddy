@@ -3,6 +3,52 @@ import Foundation
 import XCTest
 
 final class LocalizationResourceTests: XCTestCase {
+    func testStringCatalogIsTheOnlyAppLocalizationSource() throws {
+        let catalogURL = try stringCatalogURL()
+        let resourceDirectory = catalogURL.deletingLastPathComponent()
+        let legacyResources = try FileManager.default.contentsOfDirectory(
+            at: resourceDirectory,
+            includingPropertiesForKeys: nil
+        ).flatMap { directory -> [URL] in
+            guard directory.pathExtension == "lproj" else { return [] }
+            return [directory.appendingPathComponent("Localizable.strings")]
+        }.filter { FileManager.default.fileExists(atPath: $0.path) }
+
+        XCTAssertTrue(legacyResources.isEmpty, "Localizable.xcstrings must be the only app localization source")
+
+        let packageURL = resourceDirectory
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Package.swift")
+        let package = try String(contentsOf: packageURL, encoding: .utf8)
+        XCTAssertFalse(package.contains("Localizable.strings"))
+
+        let projectURL = packageURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("PasteBuddyiOS.xcodeproj/project.pbxproj")
+        let project = try String(contentsOf: projectURL, encoding: .utf8)
+        XCTAssertFalse(project.contains("Localizable.strings"))
+    }
+
+    func testCatalogSyncNeverRebuildsAuthoritativeCatalog() throws {
+        let rootURL = try stringCatalogURL()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let workflow = try String(
+            contentsOf: rootURL.appendingPathComponent("script/localization_catalog_workflow.py"),
+            encoding: .utf8
+        )
+        let syncStart = try XCTUnwrap(workflow.range(of: "def run_sync"))
+        let checkStart = try XCTUnwrap(workflow.range(of: "def run_check", range: syncStart.upperBound..<workflow.endIndex))
+        let syncBody = workflow[syncStart.lowerBound..<checkStart.lowerBound]
+
+        XCTAssertFalse(syncBody.contains("STRING_CATALOG.write_text"))
+        XCTAssertFalse(syncBody.contains("write_catalog"))
+    }
+
     func testEnglishAndSimplifiedChineseResourcesHaveMatchingKeys() throws {
         let english = try localizedStrings(locale: "en")
         let simplifiedChinese = try localizedStrings(locale: "zh-Hans")
@@ -10,7 +56,7 @@ final class LocalizationResourceTests: XCTestCase {
         XCTAssertEqual(Set(english.keys), Set(simplifiedChinese.keys))
     }
 
-    func testStringCatalogMatchesLegacyResourcesAndContainsReviewedChinese() throws {
+    func testStringCatalogContainsReviewedEnglishAndSimplifiedChinese() throws {
         let english = try localizedStrings(locale: "en")
         let simplifiedChinese = try localizedStrings(locale: "zh-Hans")
         let catalog = try stringCatalog()
@@ -35,10 +81,10 @@ final class LocalizationResourceTests: XCTestCase {
             let catalogEntry = try XCTUnwrap(strings[key] as? [String: Any], "Missing catalog entry for \(key)")
             let catalogEnglish = try catalogValue(catalogEntry, locale: "en", key: key)
             let catalogChinese = try catalogValue(catalogEntry, locale: "zh-Hans", key: key)
-            let stringsChinese = try XCTUnwrap(simplifiedChinese[key], "Missing zh-Hans strings value for \(key)")
+            let stringsChinese = try XCTUnwrap(simplifiedChinese[key], "Missing zh-Hans catalog value for \(key)")
 
-            XCTAssertEqual(catalogEnglish, englishValue, "\(key) catalog English must match Localizable.strings")
-            XCTAssertEqual(catalogChinese, stringsChinese, "\(key) catalog zh-Hans must match Localizable.strings")
+            XCTAssertEqual(catalogEnglish, englishValue, "\(key) catalog English must match its source value")
+            XCTAssertEqual(catalogChinese, stringsChinese, "\(key) catalog zh-Hans must match its source value")
             XCTAssertFalse(catalogChinese.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "\(key) has empty zh-Hans catalog value")
             if catalogChinese == catalogEnglish {
                 XCTAssertTrue(
@@ -62,6 +108,14 @@ final class LocalizationResourceTests: XCTestCase {
             "label.template",
             "label.asset",
             "label.custom_capture_rules",
+            "label.capture_and_privacy",
+            "label.advanced_capture_rules",
+            "action.save_clipboard_history",
+            "action.save_copied_text",
+            "action.save_copied_links",
+            "action.save_copied_files",
+            "action.save_copied_images",
+            "action.recognize_text_in_copied_images",
             "action.add_rule",
             "label.rule_pattern",
             "label.contains_text",
@@ -104,6 +158,8 @@ final class LocalizationResourceTests: XCTestCase {
             "message.agent_connection_is_ready",
             "label.mcp_ai_tools",
             "action.enable_mcp",
+            "action.allow_local_agent_connection",
+            "action.agent_privacy_and_access",
             "message.mcp_allows_ai_apps_to_connect",
             "label.connected_ai_tools",
             "action.connect_ai_tool",
@@ -214,7 +270,7 @@ final class LocalizationResourceTests: XCTestCase {
             "label.more_actions",
             "message.new_copies_will_appear_here",
             "message.start_collecting_copied_items",
-            "message.copy_text_links_screenshots_or_files_to",
+            "message.copy_text_links_images_or_files_to",
             "action.stop_paste_stack",
             "action.start_paste_stack",
             "action.reverse_paste_stack",
@@ -362,8 +418,12 @@ final class LocalizationResourceTests: XCTestCase {
     }
 
     private func localizedStrings(locale: String) throws -> [String: String] {
-        let url = try resourceURL(locale: locale)
-        return try stringsDictionary(at: url)
+        let catalog = try stringCatalog()
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
+        return try strings.reduce(into: [:]) { values, pair in
+            let entry = try XCTUnwrap(pair.value as? [String: Any])
+            values[pair.key] = try catalogValue(entry, locale: locale, key: pair.key)
+        }
     }
 
     private func stringCatalog() throws -> [String: Any] {
@@ -386,23 +446,6 @@ final class LocalizationResourceTests: XCTestCase {
         let data = try Data(contentsOf: url)
         let object = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
         return try XCTUnwrap(object as? [String: String], "Unable to parse \(url.path) as a strings dictionary")
-    }
-
-    private func resourceURL(locale: String) throws -> URL {
-        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        for _ in 0..<8 {
-            let candidate = directory
-                .appendingPathComponent("Sources", isDirectory: true)
-                .appendingPathComponent("PasteBuddy", isDirectory: true)
-                .appendingPathComponent("Resources", isDirectory: true)
-                .appendingPathComponent("\(locale).lproj", isDirectory: true)
-                .appendingPathComponent("Localizable.strings")
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-            directory.deleteLastPathComponent()
-        }
-        throw XCTSkip("Could not locate PasteBuddy localization resources from \(FileManager.default.currentDirectoryPath)")
     }
 
     private func stringCatalogURL() throws -> URL {

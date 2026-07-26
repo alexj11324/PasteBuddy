@@ -6,6 +6,8 @@ enum PasteBuddyDiagnosticCategory: String, Sendable {
     case hotKey
     case shelf
     case directPaste
+    case capture
+    case pin
 }
 
 struct PasteBuddyDiagnosticEvent: Equatable, Sendable {

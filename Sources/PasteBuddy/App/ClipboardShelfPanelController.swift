@@ -4,6 +4,114 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 
+extension Notification.Name {
+    static let pasteBuddyCopyPanelSelection = Notification.Name("PasteBuddyCopyPanelSelection")
+    static let pasteBuddyPastePanelSelection = Notification.Name("PasteBuddyPastePanelSelection")
+    static let pasteBuddyPanelArrowKey = Notification.Name("PasteBuddyPanelArrowKey")
+    static let pasteBuddyPanelPreviewKey = Notification.Name("PasteBuddyPanelPreviewKey")
+}
+
+@MainActor
+enum ClipboardPanelPasteCommandRouter {
+    static func shouldRouteSelectionPaste(firstResponder: NSResponder?) -> Bool {
+        if let textView = firstResponder as? NSTextView {
+            return !textView.isEditable
+        }
+        if let textField = firstResponder as? NSTextField {
+            return !textField.isEditable || !textField.isEnabled
+        }
+        return true
+    }
+
+    static func forwardNativePaste(firstResponder: NSResponder?, sender: Any?) {
+        if let textView = firstResponder as? NSTextView {
+            textView.paste(sender)
+        } else if let textField = firstResponder as? NSTextField {
+            textField.selectText(sender)
+            (textField.currentEditor() as? NSTextView)?.paste(sender)
+        }
+    }
+}
+
+struct ClipboardPanelArrowKeyCommand: Equatable {
+    let offset: Int
+    let extendsSelection: Bool
+
+    static func resolve(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> ClipboardPanelArrowKeyCommand? {
+        let offset: Int
+        switch Int(keyCode) {
+        case kVK_LeftArrow, kVK_UpArrow:
+            offset = -1
+        case kVK_RightArrow, kVK_DownArrow:
+            offset = 1
+        default:
+            return nil
+        }
+        let modifiers = modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        guard modifiers.isEmpty || modifiers == .shift else { return nil }
+        return ClipboardPanelArrowKeyCommand(offset: offset, extendsSelection: modifiers == .shift)
+    }
+}
+
+enum ClipboardPanelPreviewKeyCommand {
+    static func matches(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> Bool {
+        let modifiers = modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        return Int(keyCode) == kVK_Space && modifiers.isEmpty
+    }
+}
+
+@MainActor
+final class ClipboardPanelArrowKeyRequest {
+    let command: ClipboardPanelArrowKeyCommand
+    private(set) var isHandled = false
+
+    init(command: ClipboardPanelArrowKeyCommand) {
+        self.command = command
+    }
+
+    func markHandled() {
+        isHandled = true
+    }
+}
+
+@MainActor
+final class ClipboardPanelPreviewKeyRequest {
+    private(set) var isHandled = false
+
+    func markHandled() {
+        isHandled = true
+    }
+}
+
+@MainActor
+enum ClipboardPanelCopyGate {
+    struct Request {
+        let generation: Int
+        let pasteboardChangeCount: Int
+    }
+
+    private static var generation = 0
+
+    static func begin(pasteboard: NSPasteboard = .general) -> Request {
+        generation += 1
+        return Request(generation: generation, pasteboardChangeCount: pasteboard.changeCount)
+    }
+
+    static func shouldWrite(_ request: Request, pasteboard: NSPasteboard = .general) -> Bool {
+        request.generation == generation && request.pasteboardChangeCount == pasteboard.changeCount
+    }
+}
+
 enum ClipboardShelfPlacement: String, CaseIterable, Identifiable {
     case top
     case bottom
@@ -84,6 +192,7 @@ final class ClipboardShelfPanelController {
     }
     private var panel: ClipboardShelfPanel?
     private var localMouseDownMonitor: Any?
+    private var localKeyDownMonitor: Any?
     private var globalMouseDownMonitor: Any?
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appResignActiveObserver: NSObjectProtocol?
@@ -152,6 +261,7 @@ final class ClipboardShelfPanelController {
         guard let panel, panel.isVisible else { return }
         PasteBuddyDiagnostics.record(.shelf, "hideImmediate")
         stopOutsideClickMonitoring()
+        stopPanelKeyMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
         closeShelfAuxiliaryWindows()
@@ -168,6 +278,7 @@ final class ClipboardShelfPanelController {
         guard !isAnimatingPanelOut else { return }
         PasteBuddyDiagnostics.record(.shelf, "hideRequested")
         stopOutsideClickMonitoring()
+        stopPanelKeyMonitoring()
         stopFocusMonitoring()
         stopScreenParameterMonitoring()
         closeShelfAuxiliaryWindows()
@@ -261,6 +372,7 @@ final class ClipboardShelfPanelController {
             AnyView(
                 ClipboardShelfPanelView(
                     store: store,
+                    isPinned: panelPinnedBinding(),
                     directPasteItem: directPasteItem,
                     directPasteItems: directPasteItems,
                     reloadClipboardHistory: { [store] in
@@ -277,7 +389,7 @@ final class ClipboardShelfPanelController {
             AnyView(
                 ClipboardSidePanelView(
                     store: store,
-                    isPinned: sidePanelPinnedBinding(),
+                    isPinned: panelPinnedBinding(),
                     directPasteItem: directPasteItem,
                     directPasteItems: directPasteItems
                 ) { [weak self] in
@@ -425,7 +537,40 @@ final class ClipboardShelfPanelController {
 
     private func startDismissalMonitoring(for panel: NSPanel) {
         startOutsideClickMonitoring(for: panel)
+        startPanelKeyMonitoring(for: panel)
         startFocusMonitoring(for: panel)
+    }
+
+    private func startPanelKeyMonitoring(for panel: NSPanel) {
+        stopPanelKeyMonitoring()
+        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak panel] event in
+            guard let panel, panel.isVisible, event.window === panel else {
+                return event
+            }
+            if let command = ClipboardPanelArrowKeyCommand.resolve(
+                      keyCode: event.keyCode,
+                      modifierFlags: event.modifierFlags
+                  ) {
+                let request = ClipboardPanelArrowKeyRequest(command: command)
+                NotificationCenter.default.post(name: .pasteBuddyPanelArrowKey, object: request)
+                return request.isHandled ? nil : event
+            }
+            guard ClipboardPanelPreviewKeyCommand.matches(
+                keyCode: event.keyCode,
+                modifierFlags: event.modifierFlags
+            ) else {
+                return event
+            }
+            let request = ClipboardPanelPreviewKeyRequest()
+            NotificationCenter.default.post(name: .pasteBuddyPanelPreviewKey, object: request)
+            return request.isHandled ? nil : event
+        }
+    }
+
+    private func stopPanelKeyMonitoring() {
+        guard let localKeyDownMonitor else { return }
+        NSEvent.removeMonitor(localKeyDownMonitor)
+        self.localKeyDownMonitor = nil
     }
 
     private func startOutsideClickMonitoring(for panel: NSPanel) {
@@ -583,7 +728,7 @@ final class ClipboardShelfPanelController {
         hideImmediately()
     }
 
-    private func sidePanelPinnedBinding() -> Binding<Bool> {
+    private func panelPinnedBinding() -> Binding<Bool> {
         Binding(
             get: { [weak self] in self?.isPinned ?? false },
             set: { [weak self] value in
@@ -652,7 +797,7 @@ final class ClipboardShelfPanelController {
     }
 }
 
-private final class ClipboardShelfPanel: NSPanel {
+final class ClipboardShelfPanel: NSPanel {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
@@ -661,9 +806,26 @@ private final class ClipboardShelfPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
+
+    @objc func paste(_ sender: Any?) {
+        guard ClipboardPanelPasteCommandRouter.shouldRouteSelectionPaste(
+            firstResponder: firstResponder
+        ) else {
+            ClipboardPanelPasteCommandRouter.forwardNativePaste(
+                firstResponder: firstResponder,
+                sender: sender
+            )
+            return
+        }
+        NotificationCenter.default.post(name: .pasteBuddyPastePanelSelection, object: self)
+    }
 }
 
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    @objc func copy(_ sender: Any?) {
+        NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
+    }
+
     func configureForRoundedTransparentPanel(cornerRadius: CGFloat) {
         wantsLayer = true
         layer?.cornerRadius = cornerRadius
@@ -686,8 +848,9 @@ private extension NSRect {
 
 @MainActor
 final class PasteBuddyPanelHotKeyController {
-    private let onToggle: @MainActor () -> Void
-    private let onShelfMode: @MainActor () -> Void
+    private let onSidePanel: @MainActor () -> Void
+    private let onShelf: @MainActor () -> Void
+    private let onPinClipboard: @MainActor () -> Void
     private var registration: PasteBuddyCarbonHotKeyRegistration?
     private var eventTap: PasteBuddyPanelHotKeyEventTap?
     private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
@@ -695,11 +858,13 @@ final class PasteBuddyPanelHotKeyController {
     private var isShortcutRecordingActive = false
 
     init(
-        onToggle: @escaping @MainActor () -> Void,
-        onShelfMode: @escaping @MainActor () -> Void
+        onSidePanel: @escaping @MainActor () -> Void,
+        onShelf: @escaping @MainActor () -> Void,
+        onPinClipboard: @escaping @MainActor () -> Void
     ) {
-        self.onToggle = onToggle
-        self.onShelfMode = onShelfMode
+        self.onSidePanel = onSidePanel
+        self.onShelf = onShelf
+        self.onPinClipboard = onPinClipboard
         let handler: @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void = { [weak self] action, source in
             self?.trigger(action: action, source: source)
         }
@@ -724,10 +889,12 @@ final class PasteBuddyPanelHotKeyController {
         }
         guard triggerGate.shouldTrigger(action: action, source: source) else { return }
         switch action {
-        case .showHide:
-            onToggle()
-        case .shelfMode:
-            onShelfMode()
+        case .sidePanel:
+            onSidePanel()
+        case .shelf:
+            onShelf()
+        case .pinClipboard:
+            onPinClipboard()
         }
     }
 
@@ -740,8 +907,9 @@ final class PasteBuddyPanelHotKeyController {
 }
 
 enum PasteBuddyPanelHotKeyAction: String, Sendable {
-    case showHide
-    case shelfMode
+    case sidePanel
+    case shelf
+    case pinClipboard
 }
 
 enum PasteBuddyPanelHotKeySource: String, Sendable {
@@ -754,7 +922,7 @@ struct PasteBuddyPanelHotKeyTriggerGate {
     var duplicateInterval: TimeInterval = 0.25
 
     mutating func shouldTrigger(source: PasteBuddyPanelHotKeySource, now: Date = Date()) -> Bool {
-        shouldTrigger(action: .showHide, source: source, now: now)
+        shouldTrigger(action: .sidePanel, source: source, now: now)
     }
 
     mutating func shouldTrigger(
@@ -845,8 +1013,9 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 
     private func registerHotKeys() {
         unregisterHotKeys()
-        registerHotKey(id: pasteBuddyShowHideHotKeyID, keyCode: UInt32(kVK_ANSI_V))
-        registerHotKey(id: pasteBuddyShelfModeHotKeyID, keyCode: UInt32(kVK_ANSI_B))
+        registerHotKey(id: pasteBuddySidePanelHotKeyID, keyCode: UInt32(kVK_ANSI_V))
+        registerHotKey(id: pasteBuddyShelfHotKeyID, keyCode: UInt32(kVK_ANSI_S))
+        registerHotKey(id: pasteBuddyPinClipboardHotKeyID, keyCode: UInt32(kVK_ANSI_P))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32) {
@@ -881,10 +1050,12 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 
     private static func action(for hotKeyID: UInt32) -> PasteBuddyPanelHotKeyAction? {
         switch hotKeyID {
-        case pasteBuddyShowHideHotKeyID:
-            return .showHide
-        case pasteBuddyShelfModeHotKeyID:
-            return .shelfMode
+        case pasteBuddySidePanelHotKeyID:
+            return .sidePanel
+        case pasteBuddyShelfHotKeyID:
+            return .shelf
+        case pasteBuddyPinClipboardHotKeyID:
+            return .pinClipboard
         default:
             return nil
         }
@@ -975,7 +1146,7 @@ final class PasteBuddyPanelHotKeyEventTap {
 
 enum PasteBuddyPanelHotKeyMatcher {
     static func matches(keyCode: Int64, flags: CGEventFlags) -> Bool {
-        action(keyCode: keyCode, flags: flags) == .showHide
+        action(keyCode: keyCode, flags: flags) == .sidePanel
     }
 
     static func action(keyCode: Int64, flags: CGEventFlags) -> PasteBuddyPanelHotKeyAction? {
@@ -987,9 +1158,11 @@ enum PasteBuddyPanelHotKeyMatcher {
         }
         switch keyCode {
         case Int64(kVK_ANSI_V):
-            return .showHide
-        case Int64(kVK_ANSI_B):
-            return .shelfMode
+            return .sidePanel
+        case Int64(kVK_ANSI_S):
+            return .shelf
+        case Int64(kVK_ANSI_P):
+            return .pinClipboard
         default:
             return nil
         }
@@ -997,5 +1170,6 @@ enum PasteBuddyPanelHotKeyMatcher {
 }
 
 private let pasteBuddyHotKeySignature: OSType = 0x50425348
-private let pasteBuddyShowHideHotKeyID: UInt32 = 1
-private let pasteBuddyShelfModeHotKeyID: UInt32 = 2
+private let pasteBuddySidePanelHotKeyID: UInt32 = 1
+private let pasteBuddyShelfHotKeyID: UInt32 = 2
+private let pasteBuddyPinClipboardHotKeyID: UInt32 = 4

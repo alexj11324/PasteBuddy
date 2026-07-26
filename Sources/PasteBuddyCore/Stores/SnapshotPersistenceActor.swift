@@ -83,4 +83,8 @@ public actor ClipboardRepositorySyncActor {
     public func exportSnapshot() throws -> PasteBuddySnapshot {
         try repository.exportSnapshot()
     }
+
+    public func hasStoredSnapshot() throws -> Bool {
+        try repository.hasStoredSnapshot()
+    }
 }

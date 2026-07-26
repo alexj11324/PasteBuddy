@@ -72,6 +72,25 @@ final class ShelfInteractionModel {
         clearPreviewUnlessSelected()
     }
 
+    func extendSelection(by offset: Int) {
+        guard !items.isEmpty else { return }
+        let currentID = primarySelectedID ?? selectedIDs.first
+        let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
+        let targetIndex = min(max(currentIndex + offset, items.startIndex), items.index(before: items.endIndex))
+        extendSelection(to: items[targetIndex].id)
+    }
+
+    func extendSelection(to id: UUID) {
+        guard let targetIndex = items.firstIndex(where: { $0.id == id }) else { return }
+        let anchorID = selectionAnchorID ?? primarySelectedID ?? id
+        guard let anchorIndex = items.firstIndex(where: { $0.id == anchorID }) else { return }
+        let range = min(anchorIndex, targetIndex)...max(anchorIndex, targetIndex)
+        selectedIDs = Set(items[range].map(\.id))
+        primarySelectedID = id
+        selectionAnchorID = anchorID
+        clearPreviewUnlessSelected()
+    }
+
     @discardableResult
     func presentPreview(for id: UUID) -> Bool {
         guard itemIDs.contains(id) else { return false }

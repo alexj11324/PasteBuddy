@@ -35,7 +35,7 @@ PasteBuddy treats clipboard history as high-sensitivity local user data.
   capture rules, user titles, item labels, and reusable content categories are
   inside the encrypted snapshot.
 - Search uses decrypted in-memory data after local authorization; no plaintext search index is written to disk.
-- Screenshots and images trigger local Apple Vision OCR after capture when OCR is enabled.
+- Clipboard images trigger local Apple Vision OCR after capture when OCR is enabled.
 - Sensitive app capture exclusion supports both app display names and bundle identifiers, with default password-manager exclusions.
 - Capture can be paused indefinitely or for a timed local window, and text, links, files, and images can be disabled independently.
 - Custom capture rules run locally before new items enter history. Rules can block text, regex matches, source app names, source bundle identifiers, URL hosts, and file extensions, and are stored only inside the encrypted snapshot.

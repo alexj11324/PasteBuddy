@@ -1,6 +1,24 @@
 import Foundation
 
 @MainActor
+enum ClipboardPanelPasteGate {
+    struct Request {
+        let generation: Int
+    }
+
+    private static var generation = 0
+
+    static func begin() -> Request {
+        generation += 1
+        return Request(generation: generation)
+    }
+
+    static func shouldPaste(_ request: Request) -> Bool {
+        request.generation == generation
+    }
+}
+
+@MainActor
 enum ClipboardShelfDirectPasteCoordinator {
     static func runAfterImmediateDismissal<T>(
         dismissBeforePaste: Bool = true,

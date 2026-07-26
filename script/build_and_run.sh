@@ -23,8 +23,13 @@ BUNDLE_ID="${PASTEBUDDY_BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
 MIN_SYSTEM_VERSION="14.5"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INTEGRATION_BRANCH="codex/integrated-delivery"
+STABLE_DEVELOPMENT_BUNDLE="/Applications/PasteBuddy Dev.app"
+SOURCE_BRANCH="$(/usr/bin/git -C "$ROOT_DIR" symbolic-ref --short -q HEAD || true)"
+SOURCE_COMMIT="$(/usr/bin/git -C "$ROOT_DIR" rev-parse HEAD)"
 DIST_DIR="$ROOT_DIR/dist"
-STAGE_ROOT="${PASTEBUDDY_STAGE_ROOT:-/private/tmp/pastebuddy-build}"
+DEFAULT_STAGE_ROOT="/private/tmp/pastebuddy-build-$SOURCE_COMMIT-$$"
+STAGE_ROOT="${PASTEBUDDY_STAGE_ROOT:-$DEFAULT_STAGE_ROOT}"
 APP_BUNDLE="$STAGE_ROOT/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
@@ -33,7 +38,8 @@ APP_BINARY="$APP_MACOS/$EXECUTABLE_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Support/AppIcon.icns"
 APP_ICON_NAME="AppIcon.icns"
-INSTALL_BUNDLE="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
+INSTALL_BUNDLE_RAW="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
+INSTALL_BUNDLE="$(cd "$(dirname "$INSTALL_BUNDLE_RAW")" && pwd -P)/$(basename "$INSTALL_BUNDLE_RAW")"
 PACKAGE_ZIP="$DIST_DIR/$APP_NAME-installable.zip"
 SENTRY_KEYCHAIN_SERVICE="${PASTEBUDDY_SENTRY_KEYCHAIN_SERVICE:-PasteBuddy Sentry DSN}"
 SENTRY_KEYCHAIN_ACCOUNT="${PASTEBUDDY_SENTRY_KEYCHAIN_ACCOUNT:-$BUNDLE_ID}"
@@ -43,6 +49,77 @@ die() {
   echo "$*" >&2
   exit 1
 }
+
+running_pids_for_bundle_id() {
+  local pid details
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    details="$(/usr/bin/lsappinfo info -only bundleID -app "$pid" 2>/dev/null || true)"
+    [[ "$details" == *"bundleID=\"$BUNDLE_ID\""* ]] && printf '%s\n' "$pid"
+  done < <(pgrep -x "$EXECUTABLE_NAME" 2>/dev/null || true)
+}
+
+wait_for_single_installed_app() {
+  local binary="$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
+  local pids=()
+  local pid command
+  for _ in {1..20}; do
+    pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(running_pids_for_bundle_id)
+    if [[ ${#pids[@]} -eq 1 ]]; then
+      command="$(/bin/ps -p "${pids[0]}" -o command= 2>/dev/null || true)"
+      command="${command#"${command%%[![:space:]]*}"}"
+      [[ "$command" == "$binary" ]] || die "Running $APP_NAME instance is not the stable installed app: $command"
+      printf 'runningInstanceCount=1 pid=%s bundlePath=%s\n' "${pids[0]}" "$INSTALL_BUNDLE"
+      return 0
+    fi
+    [[ ${#pids[@]} -lt 2 ]] || die "Expected one running $APP_NAME instance; found ${#pids[@]}."
+    sleep 0.5
+  done
+  die "$APP_NAME did not appear as one stable installed process after launch."
+}
+
+verify_development_control_target() {
+  [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]] \
+    || die "The development control is available only for com.alexjiang.PasteBuddy.dev."
+  [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] \
+    || die "The development control may target only $STABLE_DEVELOPMENT_BUNDLE."
+  [[ "$SOURCE_BRANCH" == "$INTEGRATION_BRANCH" ]] \
+    || die "The development control must run from $INTEGRATION_BRANCH."
+  local installed_info_plist="$STABLE_DEVELOPMENT_BUNDLE/Contents/Info.plist"
+  [[ -f "$installed_info_plist" ]] || die "Stable development app is not installed: $STABLE_DEVELOPMENT_BUNDLE"
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$installed_info_plist" 2>/dev/null || true)" == "$BUNDLE_ID" ]] \
+    || die "Stable development app has the wrong bundle identity."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceBranch' "$installed_info_plist" 2>/dev/null || true)" == "$INTEGRATION_BRANCH" ]] \
+    || die "Stable development app was not delivered from $INTEGRATION_BRANCH."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceCommit' "$installed_info_plist" 2>/dev/null || true)" == "$SOURCE_COMMIT" ]] \
+    || die "Stable development app does not match the current integrated commit; install it through --verify first."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$installed_info_plist" 2>/dev/null || true)" == "pastebuddy-dev" ]] \
+    || die "Stable development app does not expose the development control URL."
+}
+
+open_development_panel() {
+  verify_development_control_target
+  local panel="${2:-}"
+  case "$panel" in
+    shelf|side-panel)
+      ;;
+    *)
+      die "usage: $0 --open-panel [shelf|side-panel]"
+      ;;
+  esac
+  /usr/bin/open -a "$STABLE_DEVELOPMENT_BUNDLE" "pastebuddy-dev://panel/$panel"
+  wait_for_single_installed_app
+}
+
+case "$MODE" in
+  --open-panel|open-panel)
+    open_development_panel "$@"
+    exit 0
+    ;;
+esac
 
 is_adhoc_sign_identity() {
   local identity="$1"
@@ -197,16 +274,93 @@ resolve_sentry_dsn() {
 
 CODESIGN_IDENTITY="$(resolve_code_sign_identity)"
 
-kill_binary() {
-  local binary="$1"
+mode_installs_app() {
+  case "$MODE" in
+    run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--install|install|--install-package|install-package)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+assert_coordinated_install_source() {
+  mode_installs_app || return 0
+  [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
+  [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]] \
+    || die "The stable development app may only use the development signing channel and bundle identity."
+  [[ "$SOURCE_BRANCH" == "$INTEGRATION_BRANCH" ]] \
+    || die "Refusing to overwrite $STABLE_DEVELOPMENT_BUNDLE from '$SOURCE_BRANCH'. Use $INTEGRATION_BRANCH."
+  [[ -z "$(/usr/bin/git -C "$ROOT_DIR" status --porcelain --untracked-files=normal)" ]] \
+    || die "Refusing to install an uncommitted source state into $STABLE_DEVELOPMENT_BUNDLE."
+  [[ "$STAGE_ROOT" == "$DEFAULT_STAGE_ROOT" ]] \
+    || die "Refusing shared or caller-controlled staging for $STABLE_DEVELOPMENT_BUNDLE."
+}
+
+run_coordinated_install_gate_tests() {
+  mode_installs_app || return 0
+  [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
+  python3 Tests/test_localization_catalog_workflow.py --quiet
+  bash Tests/test_copy_compiled_localizations.sh
+  run_required_test_filter PasteBuddyAppRuntimeTests/testDevelopmentPanel
+  run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
+  run_required_test_filter PasteBuddyAppRuntimeTests/testShelfShiftSelectionExtendsFromTheExistingAnchor
+  run_required_test_filter PasteBuddyAppRuntimeTests/testShelfAndSidePanelRouteShiftArrowToRangeSelection
+  run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelArrowKeyCommandUsesExactEventModifiers
+  run_required_test_filter PasteBuddyAppRuntimeTests/testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection
+  run_required_test_filter PasteBuddyAppRuntimeTests/testPanelPasteCommandRoutesCardsButPreservesEditableFieldPaste
+  run_required_test_filter PasteBuddyAppRuntimeTests/testPanelWindowOwnsNativePasteResponder
+  run_required_test_filter PasteBuddyAppRuntimeTests/testPanelPasteGateRejectsStaleAsyncSelection
+  run_required_test_filter PasteBuddyAppRuntimeTests/testBothPanelModesShareNativeCommandVPasteRoute
+  run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelPagingStateReachesAll501ItemsWithoutDuplicates
+  run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelPagingRejectsOldQueryResponseAfterReset
+  run_required_test_filter PasteBuddyAppRuntimeTests/testBothPanelModesLoadSubsequentPagesThroughSharedPagingState
+  run_required_test_filter PasteBuddyAppRuntimeTests/testBothPanelModesUseSharedPinStateAndPinnedPastePolicy
+  run_required_test_filter PasteBuddyAppRuntimeTests/testPinnedShelfAndSidePanelDoNotDismissForOutsideClick
+  run_required_test_filter HistoryCardTimestampFormatterTests
+  run_required_test_filter PasteBuddyStoreTests/testCaptureAndSyncRetainItem501AcrossSaveAndRelaunch
+  run_required_test_filter PasteBuddyStoreTests/testPanelPagingMakesAll501RepositoryItemsReachableWithFiltersAndScopes
+  run_required_test_filter PasteBuddyStoreTests/testStorageConfigurationDropsLegacyCountCapWithoutChangingAgePolicy
+  run_required_test_filter PasteBuddyStoreTests/testRepositoryPagingUsesUniqueTieBreakerForEqualTimestamps
+  run_required_test_filter PasteBuddyStoreTests/testRepositoryPagingUsesEffectiveContentTypeAcrossMultipleBoundaries
+  run_required_test_filter PasteBuddyStoreTests/testConfiguredStaleRepositoryFailsClosedWithoutSnapshotFallback
+  run_required_test_filter PasteBuddyStoreTests/testRepositorySyncInFlightKeepsEveryHistoryTransitionOnLastCoherentRevision
+  run_required_test_filter PasteBuddyStoreTests/testRepositorySyncReadinessAdvancesQueryRevisionAndReloadsHistory
+  run_required_test_filter PasteBuddyStoreTests/testFlushDoesNotMarkRepositoryCurrentWhenSnapshotChangesDuringSync
+  run_required_test_filter ClipboardMonitorTests/testPasteBuddyCopyDoesNotInvalidateRepositoryBackedHistory
+  run_required_test_filter PasteBuddyStoreTests/testSharedImportRetainsItem501AcrossSaveAndRelaunch
+  run_required_test_filter PasteBuddyStoreTests/testSnapshotDatabaseMigratorRetainsItem501
+  run_required_test_filter PasteBuddyStoreTests/testEffectiveContentTypesMigrationBackfillsLegacySQLiteAcross501Rows
+  run_required_test_filter PasteBuddyStoreTests/testRepositorySyncRepairsStaleEffectiveContentTypes
+  run_required_test_filter PasteBuddyStoreTests/testInMemoryStoreDoesNotTruncateHistoryAtRepositoryPageSize
+  run_required_test_filter PasteBuddyAppRuntimeTests/testBothClipboardPanelsShowRepositoryQueryFailure
+  run_required_test_filter PasteBuddyAppRuntimeTests/testBothClipboardPanelsUseNeutralLoadingInsteadOfUnavailableOrZeroDuringRepositoryTransition
+  run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelHistoryAvailabilityFailsClosed
+  run_required_test_filter LocalizationResourceTests
+  run_required_test_filter CopyConfirmationFeedbackTests
+  run_required_test_filter PasteboardWriterTests/testCopyReportsPasteboardWriteSuccess
+  run_required_test_filter PasteboardWriterTests/testNativeCopyCommand
+  run_required_test_filter PasteboardWriterTests/testDirectPaste
+}
+
+run_required_test_filter() {
+  local filter="$1"
+  local output
+  output="$(mktemp /private/tmp/pastebuddy-required-test.XXXXXX)"
+  if ! swift test --filter "$filter" 2>&1 | /usr/bin/tee "$output"; then
+    rm -f "$output"
+    return 1
+  fi
+  /usr/bin/grep -Eq 'Executed [1-9][0-9]* tests?' "$output" \
+    || die "Required integration test filter matched no XCTest cases: $filter"
+  rm -f "$output"
+}
+
+kill_existing_app() {
   local pids=()
   local pid
-  if [[ -x "$binary" ]]; then
-    while IFS= read -r pid; do
-      [[ -z "$pid" ]] && continue
-      pids+=("$pid")
-    done < <(pgrep -f "$binary" 2>/dev/null || true)
-  fi
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && pids+=("$pid")
+  done < <(running_pids_for_bundle_id)
   [[ ${#pids[@]} -gt 0 ]] || return 0
   kill "${pids[@]}" >/dev/null 2>&1 || true
   for _ in {1..50}; do
@@ -223,14 +377,8 @@ kill_binary() {
   kill -9 "${pids[@]}" >/dev/null 2>&1 || true
 }
 
-kill_existing_app() {
-  kill_binary "$APP_BINARY"
-  kill_binary "$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
-  kill_binary "$STAGE_ROOT/PasteBuddy.app/Contents/MacOS/$EXECUTABLE_NAME"
-  kill_binary "$STAGE_ROOT/PasteBuddy Dev.app/Contents/MacOS/$EXECUTABLE_NAME"
-}
-
-kill_existing_app
+assert_coordinated_install_source
+run_coordinated_install_gate_tests
 
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
@@ -241,13 +389,10 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 /usr/bin/ditto --norsrc --noextattr "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
-if [[ -d "$RESOURCE_BUNDLE" ]]; then
-  /usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE" "$APP_RESOURCES/$(basename "$RESOURCE_BUNDLE")"
-  for localization_dir in "$RESOURCE_BUNDLE"/*.lproj; do
-    [[ -d "$localization_dir" ]] || continue
-    /usr/bin/ditto --norsrc --noextattr "$localization_dir" "$APP_RESOURCES/$(basename "$localization_dir")"
-  done
-fi
+[[ -d "$RESOURCE_BUNDLE" ]] || die "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE"
+/usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE" "$APP_RESOURCES/$(basename "$RESOURCE_BUNDLE")"
+"$ROOT_DIR/script/copy_compiled_localizations.sh" "$RESOURCE_BUNDLE" "$APP_RESOURCES" \
+  || die "Failed to copy compiled localizations into the app bundle."
 if [[ -f "$APP_ICON_SOURCE" ]]; then
   /usr/bin/ditto --norsrc --noextattr "$APP_ICON_SOURCE" "$APP_RESOURCES/$APP_ICON_NAME"
 fi
@@ -281,6 +426,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$CODESIGN_IDENTITY</string>
   <key>PasteBuddyStableAppPath</key>
   <string>$INSTALL_BUNDLE</string>
+  <key>PasteBuddySourceBranch</key>
+  <string>$SOURCE_BRANCH</string>
+  <key>PasteBuddySourceCommit</key>
+  <string>$SOURCE_COMMIT</string>
 </dict>
 </plist>
 PLIST
@@ -292,6 +441,11 @@ if [[ -n "$CONFIGURED_SENTRY_DSN" ]]; then
 fi
 if [[ -n "$CONFIGURED_SENTRY_ENVIRONMENT" ]]; then
   /usr/bin/plutil -insert PasteBuddySentryEnvironment -string "$CONFIGURED_SENTRY_ENVIRONMENT" "$INFO_PLIST"
+fi
+if [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]]; then
+  /usr/bin/plutil -insert CFBundleURLTypes -json \
+    '[{"CFBundleURLName":"com.alexjiang.PasteBuddy.dev.panel","CFBundleURLSchemes":["pastebuddy-dev"]}]' \
+    "$INFO_PLIST"
 fi
 
 assert_safe_bundle_path() {
@@ -347,16 +501,30 @@ package_app() {
 }
 
 install_app() {
+  assert_coordinated_install_source
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceBranch' "$INFO_PLIST")" == "$SOURCE_BRANCH" ]] \
+    || die "Staged app source branch does not match the coordinated source."
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceCommit' "$INFO_PLIST")" == "$(/usr/bin/git -C "$ROOT_DIR" rev-parse HEAD)" ]] \
+    || die "Staged app source commit does not match the current coordinated HEAD."
   kill_existing_app
   assert_safe_bundle_path "$INSTALL_BUNDLE"
+  if [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" && -d "$INSTALL_BUNDLE" ]]; then
+    /usr/bin/chflags nouchg "$INSTALL_BUNDLE"
+  fi
+  trap '[[ -d "$INSTALL_BUNDLE" ]] && /usr/bin/chflags uchg "$INSTALL_BUNDLE" || true' EXIT
   rm -rf "$INSTALL_BUNDLE"
   /usr/bin/ditto --norsrc --noextattr "$APP_BUNDLE" "$INSTALL_BUNDLE"
   sign_app "$INSTALL_BUNDLE"
+  if [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]]; then
+    /usr/bin/chflags uchg "$INSTALL_BUNDLE"
+  fi
+  trap - EXIT
   printf 'Installed %s signed with %s (%s, %s)\n' "$INSTALL_BUNDLE" "$CODESIGN_IDENTITY" "$SIGNING_CHANNEL" "$BUNDLE_ID"
 }
 
 open_app() {
-  /usr/bin/open -n "$INSTALL_BUNDLE"
+  /usr/bin/open "$INSTALL_BUNDLE"
+  wait_for_single_installed_app
 }
 
 print_runtime_diagnostics() {
@@ -392,22 +560,10 @@ case "$MODE" in
   --verify|verify)
     install_app
     print_runtime_diagnostics
-    /usr/bin/open -n -W "$INSTALL_BUNDLE" &
+    /usr/bin/open -W "$INSTALL_BUNDLE" &
     OPEN_PID="$!"
-    for _ in {1..20}; do
-      if pgrep -x "$EXECUTABLE_NAME" >/dev/null || pgrep -f "$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME" >/dev/null; then
-        kill "$OPEN_PID" >/dev/null 2>&1 || true
-        exit 0
-      fi
-      if ! kill -0 "$OPEN_PID" >/dev/null 2>&1; then
-        echo "$APP_NAME exited before verify could observe a running process" >&2
-        exit 1
-      fi
-      sleep 0.5
-    done
+    wait_for_single_installed_app
     kill "$OPEN_PID" >/dev/null 2>&1 || true
-    echo "$EXECUTABLE_NAME did not appear in the process table after launch" >&2
-    exit 1
     ;;
   --install|install)
     install_app
@@ -420,7 +576,7 @@ case "$MODE" in
     package_app "$INSTALL_BUNDLE"
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package|--open-panel [shelf|side-panel]]" >&2
     exit 2
     ;;
 esac

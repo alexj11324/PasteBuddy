@@ -1,19 +1,16 @@
 # Localization Workflow
 
-PasteBuddy follows Apple's Xcode 15+ localization path: user-facing app strings
-are materialized into `Localizable.xcstrings`, and iOS targets consume that
-String Catalog directly. The repo still keeps `.strings` files as reviewed Dify
-interchange and SwiftPM compatibility resources, but they are not the iOS target
-resource source.
+PasteBuddy follows Apple's String Catalog localization path. User-facing app
+strings live in one authoritative `Localizable.xcstrings`, consumed directly by
+the macOS SwiftPM app and every iOS target. Dify uses temporary `.strings`
+interchange files outside the repository; they are never app resources.
 
 The maintained resources are:
 
-- `Sources/PasteBuddy/Resources/en.lproj/Localizable.strings`
-- `Sources/PasteBuddy/Resources/zh-Hans.lproj/Localizable.strings`
 - `Sources/PasteBuddy/Resources/Localizable.xcstrings`
 
 Use semantic keys in code. Do not use complete English sentences as keys.
-Do not add `Localizable.strings` back to iOS target resource phases.
+Do not add `Localizable.strings` back to any target or package resource.
 
 ## Daily Commands
 
@@ -30,7 +27,7 @@ the result:
 python3 script/localize_string_catalog_with_dify.py
 ```
 
-Regenerate local catalog files after editing reviewed `.strings` values by hand:
+Validate the catalog and optionally rewrite Swift call sites without calling Dify:
 
 ```sh
 python3 script/localize_string_catalog_with_dify.py --skip-dify
@@ -117,12 +114,13 @@ swift test
 
 The catalog checker verifies:
 
-- English and Simplified Chinese `.strings` key parity.
+- English and Simplified Chinese catalog coverage.
 - Placeholder parity across locales.
-- `Localizable.xcstrings` JSON shape and value parity with `.strings`.
+- `Localizable.xcstrings` JSON shape and semantic keys.
 - Apple `xcstringstool` can compile `Localizable.xcstrings` for `en` and
   `zh-Hans`.
-- iOS targets use `Localizable.xcstrings` in resource phases.
+- no duplicate `Localizable.strings` source or SwiftPM resource declaration exists.
+- all targets use `Localizable.xcstrings` in resource phases.
 - Swift call sites use semantic keys instead of raw English UI literals.
 - `PasteBuddyLocalization` fallbacks match the English catalog value.
 

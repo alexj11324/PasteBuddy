@@ -1107,6 +1107,13 @@ public struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var effectiveContentTypes: Set<ClipboardContentType> {
+        Self.effectiveContentTypes(contentType: contentType, payload: payload)
+    }
+
+    static func effectiveContentTypes(
+        contentType: ClipboardContentType,
+        payload: ClipboardPayload
+    ) -> Set<ClipboardContentType> {
         var types: Set<ClipboardContentType> = []
         let hasPresentationURL = payload.presentationURLString != nil
         let hasTextContent = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -1776,13 +1783,13 @@ public struct TeamPlanOverview: Codable, Equatable, Sendable {
         distributionSummary = team.managedDistributionEnabled
             ? "Managed distribution enabled for team deployment."
             : "Managed distribution is off; members install individually."
-        primaryValueStatement = "Team plans center on shared pinboards for reusable ideas, links, files, screenshots, and snippets that stay in sync for collaborators."
+        primaryValueStatement = "Team plans center on shared pinboards for reusable ideas, links, files, images, and snippets that stay in sync for collaborators."
         purchasePositioning = "Team is a business plan distinct from personal monthly, annual, lifetime, and family plans, with seat billing and admin-visible license state."
         valuePropositions = [
             TeamPlanValueProposition(
                 id: "shared-pinboards",
                 title: "Shared pinboards",
-                detail: "Collect team ideas, links, files, screenshots, and reusable snippets in shared boards.",
+                detail: "Collect team ideas, links, files, images, and reusable snippets in shared boards.",
                 systemImageName: "pin.2"
             ),
             TeamPlanValueProposition(
@@ -2644,31 +2651,24 @@ public struct SyncConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct StorageConfiguration: Codable, Equatable, Sendable {
-    public var maxHistoryItems: Int
     public var retentionDays: Int
     public var maxStorageBytes: Int
 
     public init(
-        maxHistoryItems: Int = 500,
         retentionDays: Int = 90,
         maxStorageBytes: Int = 512 * 1_024 * 1_024
     ) {
-        self.maxHistoryItems = Self.clampMaxHistoryItems(maxHistoryItems)
         self.retentionDays = Self.clampRetentionDays(retentionDays)
         self.maxStorageBytes = Self.clampMaxStorageBytes(maxStorageBytes)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case maxHistoryItems
         case retentionDays
         case maxStorageBytes
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        maxHistoryItems = Self.clampMaxHistoryItems(
-            try container.decodeIfPresent(Int.self, forKey: .maxHistoryItems) ?? 500
-        )
         retentionDays = Self.clampRetentionDays(
             try container.decodeIfPresent(Int.self, forKey: .retentionDays) ?? 90
         )
@@ -2679,17 +2679,12 @@ public struct StorageConfiguration: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(maxHistoryItems, forKey: .maxHistoryItems)
         try container.encode(retentionDays, forKey: .retentionDays)
         try container.encode(maxStorageBytes, forKey: .maxStorageBytes)
     }
 
     public var keepsHistoryForever: Bool {
         retentionDays == 0
-    }
-
-    public static func clampMaxHistoryItems(_ value: Int) -> Int {
-        min(max(value, 1), 10_000)
     }
 
     public static func clampRetentionDays(_ value: Int) -> Int {
@@ -3328,7 +3323,7 @@ public struct PrivacyPostureReport: Equatable, Sendable {
         excludedBundleIdentifierCount = privacy.excludedBundleIdentifiers.count
         activeCustomCaptureRuleCount = privacy.customCaptureRules.filter(\.isEnabled).count
         sensitiveTextBlockingEnabled = privacy.blockLikelySensitiveText
-        localBoundaryStatement = "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy"
+        localBoundaryStatement = "message.clipboard_payloads_images_ocr_metadata_thumbnails_privacy"
         vendorServerStatement = "PasteBuddy does not send clipboard payloads to vendor servers for capture, search, OCR, keyboard insertion, Shortcuts, or local MCP access."
         mcpBoundaryStatement = snapshot.mcp.isServerEnabled
             ? "MCP Agent connection is on. Connected local Agents can use PasteBuddy on this Mac."

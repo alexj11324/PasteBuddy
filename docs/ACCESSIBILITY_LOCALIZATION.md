@@ -15,8 +15,10 @@ VoiceOver, Dark Mode, and localization workflows.
 - Active filter chips expose VoiceOver labels and can clear one structured
   filter at a time.
 - Editable text previews and save actions expose labels and hints.
-- Image previews expose an accessibility label and point users toward local OCR
-  text when available.
+- Image previews expose an accessibility label and a contextual
+  `text.viewfinder` action that enables native VisionKit Live Text selection
+  directly over the hydrated image. The action is absent from persistent
+  Shelf, Side Panel, and Settings chrome.
 - Pinboard color choices expose VoiceOver labels and selected state, and the
   color picker adds a checkmark in Differentiate Without Color mode.
 - Custom capture rule controls in Settings use labeled fields, toggles, and
@@ -41,16 +43,16 @@ VoiceOver, Dark Mode, and localization workflows.
   Shortcuts-facing strings.
 - Localization is maintained through the Dify-backed String Catalog workflow in
   `docs/LOCALIZATION_WORKFLOW.md`.
-- The Apple-facing iOS app and extensions consume `Localizable.xcstrings`; the
-  SwiftPM app target keeps expanded `Localizable.strings` only as a compatibility
-  copy generated from the same workflow.
+- The macOS SwiftPM app, iOS app, and extensions consume the same authoritative
+  `Localizable.xcstrings`; duplicate `Localizable.strings` app resources are
+  prohibited.
 - Core-generated mobile guidance and keyboard status copy uses semantic
   localization keys through `PasteBuddyLocalization` rather than hard-coded
   English strings.
-- Tests assert English and Simplified Chinese resource keys stay in sync,
-  priority user-facing strings have Simplified Chinese translations,
-  `Localizable.xcstrings` matches the reviewed `.strings` values, and the
-  quality report covers the release criteria areas.
+- Tests assert English and Simplified Chinese catalog coverage, priority
+  user-facing strings have Simplified Chinese translations, no duplicate
+  localization source exists, and the quality report covers the release
+  criteria areas.
 
 ## Required Before Release
 

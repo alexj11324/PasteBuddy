@@ -6,7 +6,7 @@ Current focus:
 
 - standard local clipboard history with optional AES-GCM encryption and Touch ID history lock
 - configurable retention, storage size limits, pinned/unpinned usage reporting, and safe clear-history controls
-- text, URL, multi-file, image, screenshot, rich text, and mixed payload capture
+- text, URL, multi-file, image, rich text, and mixed clipboard payload capture
 - visual history rows with image thumbnails, readable text/link/file previews, labels, source app, copied time, and device metadata
 - local Apple Vision OCR immediately after image capture
 - search, generated filter suggestions, active filter chips, and structured filters over decrypted in-memory history and OCR metadata
@@ -18,7 +18,7 @@ Current focus:
 - Shortcuts/App Intents actions for local search, encrypted text/URL/file item creation, copy-or-paste-first-match, pinboard creation, and save-match-to-pinboard automation
 - local stdio MCP server with per-tool opt-in for summary search, explicit item retrieval, pinboard actions, encrypted metadata-only access audit logging, and generated client setup snippets
 - local entitlement model and Settings overview for trial reminders, trial end behavior, monthly, annual, lifetime, family, restore purchases, same-account Mac/iPhone/iPad unlocks, and team seat packaging with shared-pinboard team positioning
-- native Mac utility controls including active/paused menu bar status, quick capture actions, launch-at-login preference, and menu bar entry points for General, Shortcuts, Privacy, Sync, and Storage settings
+- native Mac utility controls including active/paused menu bar status, launch-at-login preference, and menu bar entry points for General, Shortcuts, Privacy, Sync, and Storage settings
 - VoiceOver-oriented labels for core history rows, filters, previews, and OCR image surfaces
 - expanded English and Simplified Chinese localization resources with parity tests, a Settings Quality Bar report, plus Differentiate Without Color support for pinboard color selection
 - paste as plain text globally or per item without changing the saved original item

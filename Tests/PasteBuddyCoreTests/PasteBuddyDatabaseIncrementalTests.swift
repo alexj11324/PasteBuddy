@@ -76,7 +76,7 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         )
     }
 
-    func testRepositorySearchUsesNormalizedTokenPrefixesWithDocumentedSubstringBoundary() throws {
+    func testRepositorySearchUsesNormalizedInteriorSubstrings() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -104,10 +104,53 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
             try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "vip cli")).map(\.id),
             [item.id]
         )
-        XCTAssertTrue(
-            try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "oadmap")).isEmpty,
-            "Token-prefix search should not match a substring from the middle of a token."
+        XCTAssertEqual(
+            try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "oadmap")).map(\.id),
+            [item.id]
         )
+    }
+
+    @MainActor
+    func testLinkMetadataEnrichmentPersistsAuthoritativeImageReference() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        defer {
+            ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil
+            ClipboardLinkMetadataFetcher.resetFetchStateForTesting()
+        }
+
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("link-preview.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: EncryptedSnapshotStore(
+                fileURL: harness.directory.appendingPathComponent("link-preview.pbstore"),
+                storageMode: .standard
+            ),
+            clipboardRepository: repository
+        )
+        let previewImage = Data([0x89, 0x50, 0x4E, 0x47])
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
+            ClipboardLinkPreviewMetadata(title: "Recovered preview", imageData: previewImage)
+        }
+        let captured = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "example.com",
+            payload: ClipboardPayload(urlString: "https://example.com/preview")
+        ))
+
+        await store.enrichLinkPreviewMetadataIfNeeded(for: captured)
+        await store.flushPendingSave()
+
+        let persisted = try XCTUnwrap(repository.fetchPage().first)
+        let references = try database.indexedAssetReferencesForTesting(itemID: captured.id)
+        XCTAssertEqual(persisted.title, "Recovered preview")
+        XCTAssertEqual(try repository.imageData(for: persisted), previewImage)
+        XCTAssertEqual(references.image, persisted.payload.imageAssetID)
+        XCTAssertNil(references.rtf)
     }
 
     func testRepositorySynchronizesDistinctItemsWithSameDedupeHash() throws {
