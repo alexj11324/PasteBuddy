@@ -76,6 +76,20 @@
 - IMPORTANT: link preview title、image asset ID 与 SQLite indexed asset reference 必须由同一次 store/repository save 提交；UI 只从共享 store/repository hydration 读取，禁止 surface 自建第二份 metadata cache。
 - IMPORTANT: accessory app 必须在任何 history/database `await` 之前创建 status item；生命周期回归必须验证调用顺序和稳定安装后的存活。
 
+## PasteBuddy 截图、贴图、OCR 与翻译共享所有权（IMPORTANT）
+- IMPORTANT: 静态截图与长截图只能由 `ScreenshotCaptureCoordinator` / `ScreenCaptureService` 进入，捕获结果必须经 `CapturedImageHistoryWriter` 写入现有 store、asset 与 SQLite 路径；禁止创建第二个截图历史、图片缓存或并行窗口体系。
+- IMPORTANT: ScreenCaptureKit 的权限和截图验收必须针对稳定安装的 `/Applications/PasteBuddy Dev.app`、`com.alexjiang.PasteBuddy.dev` 与稳定签名 requirement；`script/build_and_run.sh --open-capture static|long|pin-clipboard` 只能唤醒同一个已安装进程，禁止用裸可执行文件、临时 bundle 或第二个菜单栏实例冒充 TCC 证据。
+- IMPORTANT: 屏幕内容贴图与 Shelf 自身固定是两种不同状态。屏幕贴图只能由 `ScreenPinController` / `ScreenPinRegistry` 管理原生 overlay panel、close/destroy/recent restore、always-on-top、lock、click-through recovery、group 与全局批量动作；不得复用或污染 `ClipboardShelfPanelController.isPinned`。
+- IMPORTANT: 图片贴图 OCR 必须共用 `OCRService` 的本地 Vision 路径；识别文本和 QR/条码复制必须走共享 `PasteboardWriter`/复制 HUD receipt，避免自捕获。翻译仅使用系统原生 Translation，系统不支持时必须可见失败，禁止无用户决定接入付费云服务、API key 或秘密。
+- IMPORTANT: 长截图必须增量匹配且对动态、重复、多个滚动区域和不匹配帧可见失败；默认安全上限为 64,000,000 输出像素、单边 80,000 px、500 帧、累计 96,000,000 输入像素，修改上限必须有内存/导出测量证据。禁止把外部产品的 2,000,000 px 宣传值当作 PasteBuddy 已验证能力。
+- IMPORTANT: Screen recording 明确不在这套所有权内；禁止顺手新增录屏菜单、录屏状态机或录屏数据管道。功能边界与已知差距以 `docs/SCREEN_CAPTURE_FEATURE_MATRIX.md` 为准。
+
+## PasteBuddy Onboarding、权限与 Paywall 图标（IMPORTANT）
+- IMPORTANT: onboarding、权限设置、OCR/翻译 how-to、paywall 以及相关状态/动作只能使用 Apple SF Symbols 与现有原生 SwiftUI/AppKit 控件；禁止自绘图标、emoji 图标、PNG/JPG/WebP 位图符号、自制 SVG symbol 或新图标资产包。
+- IMPORTANT: 每个 SF Symbol 必须有本地化文字与独立辅助功能标签，状态不得只靠图标或颜色表达；新增 symbol 必须验证 `NSImage(systemSymbolName:)` 非空并确认其 SF Symbols 首发版本不晚于最低支持的 macOS 14.5（2023）。
+- IMPORTANT: onboarding/permission UI 必须复用现有 ScreenCaptureKit、Accessibility、Vision OCR、Translation 与 Settings 状态 owner；paywall 必须复用 `AppleStoreKitEntitlementProvider`、`purchasePersonalPlan`、`restorePurchases` 和已验证 transaction update，禁止新建 entitlement/store 或继续把本地模拟激活冒充真实购买。
+- IMPORTANT: 实施顺序与固定 symbol mapping 以 `docs/ONBOARDING_PAYWALL_SF_SYMBOL_PLAN.md` 为准；在该计划之外新增或替换图标前先更新审计与最低系统可用性证据。
+
 ## iOS TestFlight 发布固定流程（IMPORTANT）
 - IMPORTANT: PasteBuddy iOS/TestFlight 发布必须使用 `script/push_testflight.sh`；不要只手动 `git push`，也不要绕过 CI 手动上传 App Store Connect。
 - IMPORTANT: 固定顺序是本地 `swift test` + iOS simulator compile 通过后，push 当前 `main` HEAD；`.github/workflows/testflight.yml` 随 push 接管 archive、签名、上传 App Store Connect/TestFlight，并写入 `ios-build-*` tag。

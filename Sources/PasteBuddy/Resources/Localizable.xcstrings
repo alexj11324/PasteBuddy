@@ -7713,6 +7713,54 @@
         }
       }
     },
+    "action.capture_after_3_seconds": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture After 3 Seconds"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3 秒后截图"
+          }
+        }
+      }
+    },
+    "action.capture_after_5_seconds": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture After 5 Seconds"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5 秒后截图"
+          }
+        }
+      }
+    },
+    "action.capture_screenshot": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture Screenshot"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图"
+          }
+        }
+      }
+    },
     "action.clear_all_history": {
       "localizations": {
         "en": {
@@ -7889,6 +7937,22 @@
         }
       }
     },
+    "action.close_all_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close All Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭所有贴图"
+          }
+        }
+      }
+    },
     "action.connect": {
       "localizations": {
         "en": {
@@ -7937,6 +8001,22 @@
         }
       }
     },
+    "action.copy_all_recognized_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy All Recognized Text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制全部识别文字"
+          }
+        }
+      }
+    },
     "action.copy_as_plain_text": {
       "localizations": {
         "en": {
@@ -7949,6 +8029,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "复制为纯文本"
+          }
+        }
+      }
+    },
+    "action.copy_color": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Color"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制颜色"
           }
         }
       }
@@ -8113,6 +8209,22 @@
         }
       }
     },
+    "action.copy_translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Translation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制译文"
+          }
+        }
+      }
+    },
     "action.create": {
       "localizations": {
         "en": {
@@ -8193,6 +8305,70 @@
         }
       }
     },
+    "action.destroy_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destroy Pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "销毁贴图"
+          }
+        }
+      }
+    },
+    "action.disable_always_on_top": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable Always on Top"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消始终置顶"
+          }
+        }
+      }
+    },
+    "action.disable_click_through": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable Click-Through"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭鼠标穿透"
+          }
+        }
+      }
+    },
+    "action.disable_click_through_all_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable Click-Through for All Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭所有贴图的鼠标穿透"
+          }
+        }
+      }
+    },
     "action.disable_launch_at_login": {
       "localizations": {
         "en": {
@@ -8237,6 +8413,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "完成"
+          }
+        }
+      }
+    },
+    "action.enable_always_on_top": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Always on Top"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "始终置顶"
+          }
+        }
+      }
+    },
+    "action.enable_click_through": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Click-Through"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启鼠标穿透"
           }
         }
       }
@@ -8301,6 +8509,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "生成服务器配置"
+          }
+        }
+      }
+    },
+    "action.hide_all_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide All Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏所有贴图"
           }
         }
       }
@@ -8385,6 +8609,38 @@
         }
       }
     },
+    "action.lock_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lock Pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "锁定贴图"
+          }
+        }
+      }
+    },
+    "action.long_screenshot": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Long Screenshot"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长截图"
+          }
+        }
+      }
+    },
     "action.manage_apps": {
       "localizations": {
         "en": {
@@ -8397,6 +8653,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "管理应用"
+          }
+        }
+      }
+    },
+    "action.more": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More Actions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多操作"
+          }
+        }
+      }
+    },
+    "action.move_capture_region_backward": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Capture Region Backward"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向后移动截取区域"
+          }
+        }
+      }
+    },
+    "action.move_capture_region_forward": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Capture Region Forward"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向前移动截取区域"
+          }
+        }
+      }
+    },
+    "action.new_pin_group": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Pin Group"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建贴图组"
           }
         }
       }
@@ -8897,6 +9217,22 @@
         }
       }
     },
+    "action.pick_color": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pick Color"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拾取颜色"
+          }
+        }
+      }
+    },
     "action.pin": {
       "localizations": {
         "en": {
@@ -8909,6 +9245,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "固定"
+          }
+        }
+      }
+    },
+    "action.pin_clipboard_to_screen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin Clipboard to Screen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将剪贴板贴到屏幕"
           }
         }
       }
@@ -8945,6 +9297,38 @@
         }
       }
     },
+    "action.pin_to_screen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin to Screen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "贴到屏幕"
+          }
+        }
+      }
+    },
+    "action.pin_translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin Translation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将译文贴到屏幕"
+          }
+        }
+      }
+    },
     "action.quit_app": {
       "localizations": {
         "en": {
@@ -8957,6 +9341,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出 PasteBuddy"
+          }
+        }
+      }
+    },
+    "action.recall_region": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recall Region"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复区域"
+          }
+        }
+      }
+    },
+    "action.recognize_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognize Text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "识别文字"
           }
         }
       }
@@ -9057,6 +9473,22 @@
         }
       }
     },
+    "action.rename": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重命名"
+          }
+        }
+      }
+    },
     "action.request_accessibility_access": {
       "localizations": {
         "en": {
@@ -9069,6 +9501,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "请求辅助功能权限"
+          }
+        }
+      }
+    },
+    "action.reset_pin_appearance": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Size and Opacity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置大小和透明度"
           }
         }
       }
@@ -9101,6 +9549,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "恢复购买"
+          }
+        }
+      }
+    },
+    "action.restore_recent_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Recently Closed Pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复最近关闭的贴图"
           }
         }
       }
@@ -9245,6 +9709,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "保存"
+          }
+        }
+      }
+    },
+    "action.save_all_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save All Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存所有贴图"
           }
         }
       }
@@ -9425,6 +9905,22 @@
         }
       }
     },
+    "action.show_all_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show All Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示所有贴图"
+          }
+        }
+      }
+    },
     "action.show_clipboard_shelf": {
       "localizations": {
         "en": {
@@ -9485,6 +9981,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "关闭 MCP 服务器"
+          }
+        }
+      }
+    },
+    "action.start": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始"
           }
         }
       }
@@ -9565,6 +10077,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "开始试用"
+          }
+        }
+      }
+    },
+    "action.stop": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
           }
         }
       }
@@ -9697,6 +10225,38 @@
         }
       }
     },
+    "action.toggle_thumbnail_crop": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toggle Thumbnail Crop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换缩略裁剪"
+          }
+        }
+      }
+    },
+    "action.translate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻译"
+          }
+        }
+      }
+    },
     "action.undo_delete": {
       "localizations": {
         "en": {
@@ -9741,6 +10301,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "解锁历史"
+          }
+        }
+      }
+    },
+    "action.unlock_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlock Pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解锁贴图"
           }
         }
       }
@@ -10065,6 +10641,23 @@
         }
       }
     },
+    "device.this_mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.this_mac. Prefer the semantic key in code."
+    },
     "dialog.clear_all_history": {
       "localizations": {
         "en": {
@@ -10113,6 +10706,54 @@
         }
       }
     },
+    "dialog.new_pin_group": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Pin Group"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建贴图组"
+          }
+        }
+      }
+    },
+    "dialog.rename_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename Pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重命名贴图"
+          }
+        }
+      }
+    },
+    "dialog.save_all_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save All Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存所有贴图"
+          }
+        }
+      }
+    },
     "error.clipboard_database_out_of_sync": {
       "localizations": {
         "en": {
@@ -10129,6 +10770,278 @@
         }
       },
       "comment": "Legacy alias for message.clipboard_history_is_temporarily_unavailable. Prefer the semantic key in code."
+    },
+    "error.long_capture_ambiguous": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The scrolling overlap is ambiguous (score %.2f). Try a region with more distinctive content."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滚动重叠区域不明确（分数 %.2f）。请尝试包含更多独特内容的区域。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_scrolling_overlap_is_ambiguous_score_2f. Prefer the semantic key in code."
+    },
+    "error.long_capture_limit_reached": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The long screenshot reached its safe memory or dimension limit."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长截图已达到安全内存或尺寸上限。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_long_screenshot_reached_its_safe_memory. Prefer the semantic key in code."
+    },
+    "error.long_capture_no_match": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The next frame could not be matched (best score %.2f). Dynamic, repetitive, or multiple scrolling regions are not supported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法匹配下一帧（最佳分数 %.2f）。暂不支持动态、重复或包含多个滚动区域的内容。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_next_frame_could_not_be_matched. Prefer the semantic key in code."
+    },
+    "error.ocr_requires_image": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text recognition requires an image pin."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字识别需要图片贴图。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.text_recognition_requires_an_image_pin. Prefer the semantic key in code."
+    },
+    "error.pin_clipboard_empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The clipboard does not contain supported image, text, file, color, or LaTeX content."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板中没有支持的图片、文本、文件、颜色或 LaTeX 内容。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_clipboard_does_not_contain_supported_image. Prefer the semantic key in code."
+    },
+    "error.pin_image_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The pinned image is unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "贴图图片不可用。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_pinned_image_is_unavailable. Prefer the semantic key in code."
+    },
+    "error.pin_restore_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recently closed pin can no longer be restored from history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法再从历史中恢复最近关闭的贴图。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_recently_closed_pin_can_no_longer. Prefer the semantic key in code."
+    },
+    "error.screen_capture_empty_region": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a non-empty screenshot region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请选择非空的截图区域。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.select_a_non_empty_screenshot_region. Prefer the semantic key in code."
+    },
+    "error.screen_capture_encoding_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The screenshot could not be encoded as PNG."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将截图编码为 PNG。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_screenshot_could_not_be_encoded_as. Prefer the semantic key in code."
+    },
+    "error.screen_capture_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The screenshot could not be captured."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法截取屏幕。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_screenshot_could_not_be_captured. Prefer the semantic key in code."
+    },
+    "error.screen_capture_no_display": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy could not identify the display for this capture."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 无法识别本次截图所在的显示器。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.pastebuddy_could_not_identify_the_display_for. Prefer the semantic key in code."
+    },
+    "error.screen_capture_permission_required": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screen Recording permission is required for screenshots. Grant it to the stable PasteBuddy app in System Settings, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图需要“屏幕与系统音频录制”权限。请在系统设置中授予稳定版 PasteBuddy 后重试。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.screen_recording_permission_is_required_for_screenshots. Prefer the semantic key in code."
+    },
+    "error.translation_empty_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is no text to translate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可翻译的文本。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.there_is_no_text_to_translate. Prefer the semantic key in code."
+    },
+    "error.translation_language_detection_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The source language could not be detected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法检测源语言。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.the_source_language_could_not_be_detected. Prefer the semantic key in code."
+    },
+    "error.translation_pair_unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This language pair is not supported by macOS Translation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 翻译不支持此语言组合。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.this_language_pair_is_not_supported_by. Prefer the semantic key in code."
+    },
+    "error.translation_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Native translation is unavailable on this version of macOS."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前 macOS 版本不支持原生翻译。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.native_translation_is_unavailable_on_this_version. Prefer the semantic key in code."
     },
     "format.added_mcp_client": {
       "localizations": {
@@ -10510,6 +11423,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "上次撤销时间：%@。"
+          }
+        }
+      }
+    },
+    "format.long_capture_match": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matched %d px overlap (score %.2f)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已匹配 %d px 重叠（分数 %.2f）"
+          }
+        }
+      }
+    },
+    "format.long_capture_progress": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d frames · %d × %d px"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d 帧 · %d × %d px"
           }
         }
       }
@@ -11282,6 +12227,54 @@
         }
       }
     },
+    "label.aspect_current": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前比例"
+          }
+        }
+      }
+    },
+    "label.aspect_free": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自由"
+          }
+        }
+      }
+    },
+    "label.aspect_square": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1:1"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正方形 1:1"
+          }
+        }
+      }
+    },
     "label.asset": {
       "localizations": {
         "en": {
@@ -11410,6 +12403,22 @@
         }
       }
     },
+    "label.border": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Border"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "边框"
+          }
+        }
+      }
+    },
     "label.bottom_to_top": {
       "localizations": {
         "en": {
@@ -11490,6 +12499,22 @@
         }
       }
     },
+    "label.capture_direction": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture Direction"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捕获方向"
+          }
+        }
+      }
+    },
     "label.capture_files": {
       "localizations": {
         "en": {
@@ -11566,6 +12591,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "捕获链接"
+          }
+        }
+      }
+    },
+    "label.capture_options": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot Options"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图选项"
           }
         }
       }
@@ -12098,6 +13139,22 @@
         }
       }
     },
+    "label.corner_radius": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Corner Radius"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圆角"
+          }
+        }
+      }
+    },
     "label.created": {
       "localizations": {
         "en": {
@@ -12114,6 +13171,38 @@
         }
       }
     },
+    "label.crop_leading": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crop Start"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裁剪开头"
+          }
+        }
+      }
+    },
+    "label.crop_trailing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crop End"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裁剪结尾"
+          }
+        }
+      }
+    },
     "label.current_plan": {
       "localizations": {
         "en": {
@@ -12126,6 +13215,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前套餐"
+          }
+        }
+      }
+    },
+    "label.cursor": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cursor"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "光标"
           }
         }
       }
@@ -12174,6 +13279,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "默认权限"
+          }
+        }
+      }
+    },
+    "label.default_pin_group": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认"
           }
         }
       }
@@ -12610,6 +13731,22 @@
         }
       }
     },
+    "label.height": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Height"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高度"
+          }
+        }
+      }
+    },
     "label.history": {
       "localizations": {
         "en": {
@@ -12702,6 +13839,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "历史已解锁"
+          }
+        }
+      }
+    },
+    "label.horizontal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Horizontal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "水平"
           }
         }
       }
@@ -13294,6 +14447,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "本地化"
+          }
+        }
+      }
+    },
+    "label.long_capture_preview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Long Screenshot Preview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长截图预览"
+          }
+        }
+      }
+    },
+    "label.long_screenshot": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Long Screenshot"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长截图"
+          }
+        }
+      }
+    },
+    "label.long_screenshot_controls": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Long Screenshot Controls"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长截图控制"
           }
         }
       }
@@ -13970,6 +15171,22 @@
         }
       }
     },
+    "label.pastebuddy_color_picker": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy Color Picker"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 取色器"
+          }
+        }
+      }
+    },
     "label.pastebuddy_menu_bar_item": {
       "localizations": {
         "en": {
@@ -13986,6 +15203,22 @@
         }
       }
     },
+    "label.pastebuddy_ocr": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy OCR"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 文字识别"
+          }
+        }
+      }
+    },
     "label.pastebuddy_paused": {
       "localizations": {
         "en": {
@@ -13998,6 +15231,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 已暂停"
+          }
+        }
+      }
+    },
+    "label.pastebuddy_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy Pin"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 贴图"
+          }
+        }
+      }
+    },
+    "label.pastebuddy_translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy Translation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 翻译"
           }
         }
       }
@@ -14046,6 +15311,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "权限"
+          }
+        }
+      }
+    },
+    "label.pin_group_name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group Name"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "组名称"
+          }
+        }
+      }
+    },
+    "label.pin_groups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin Groups"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "贴图组"
           }
         }
       }
@@ -14370,6 +15667,22 @@
         }
       }
     },
+    "label.recognized_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognized Text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "识别文字"
+          }
+        }
+      }
+    },
     "label.recording": {
       "localizations": {
         "en": {
@@ -14546,6 +15859,54 @@
         }
       }
     },
+    "label.screen_pins": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screen Pins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕贴图"
+          }
+        }
+      }
+    },
+    "label.screenshot": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图"
+          }
+        }
+      }
+    },
+    "label.screenshot_capture_overlay": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot Capture Overlay"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图选择界面"
+          }
+        }
+      }
+    },
     "label.search": {
       "localizations": {
         "en": {
@@ -14674,6 +16035,22 @@
         }
       }
     },
+    "label.selection_target": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selection Target"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择目标"
+          }
+        }
+      }
+    },
     "label.sensitive_text": {
       "localizations": {
         "en": {
@@ -14766,6 +16143,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要设置"
+          }
+        }
+      }
+    },
+    "label.shadow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shadow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阴影"
           }
         }
       }
@@ -15298,6 +16691,22 @@
         }
       }
     },
+    "label.this_mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac"
+          }
+        }
+      }
+    },
     "label.title": {
       "localizations": {
         "en": {
@@ -15346,6 +16755,22 @@
         }
       }
     },
+    "label.translation_target": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation Target"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻译目标语言"
+          }
+        }
+      }
+    },
     "label.trial": {
       "localizations": {
         "en": {
@@ -15390,6 +16815,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "类型"
+          }
+        }
+      }
+    },
+    "label.ui_element": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UI Element"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "界面元素"
           }
         }
       }
@@ -15490,6 +16931,22 @@
         }
       }
     },
+    "label.vertical": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vertical"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "垂直"
+          }
+        }
+      }
+    },
     "label.visible": {
       "localizations": {
         "en": {
@@ -15518,6 +16975,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "旁白"
+          }
+        }
+      }
+    },
+    "label.width": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Width"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "宽度"
+          }
+        }
+      }
+    },
+    "label.window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "窗口"
           }
         }
       }
@@ -15726,6 +17215,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "当你的 Mac 重新启动时，自动启动 PasteBuddy。"
+          }
+        }
+      }
+    },
+    "message.capture_stopped_crop_copy_save_or_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture stopped. Crop, copy, save, or pin the result."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捕获已停止。可裁剪、复制、保存或贴到屏幕。"
           }
         }
       }
@@ -16082,6 +17587,22 @@
         }
       }
     },
+    "message.native_translation_is_unavailable_on_this_version": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Native translation is unavailable on this version of macOS."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前 macOS 版本不支持原生翻译。"
+          }
+        }
+      }
+    },
     "message.new_copies_will_appear_here": {
       "localizations": {
         "en": {
@@ -16158,6 +17679,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有可排除的外部应用。"
+          }
+        }
+      }
+    },
+    "message.no_frames_were_captured": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No frames were captured."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未捕获任何帧。"
           }
         }
       }
@@ -16270,6 +17807,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 无法创建此项目。"
+          }
+        }
+      }
+    },
+    "message.pastebuddy_could_not_identify_the_display_for": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy could not identify the display for this capture."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 无法识别本次截图所在的显示器。"
           }
         }
       }
@@ -16562,6 +18115,54 @@
         }
       }
     },
+    "message.screen_recording_permission_is_required_for_screenshots": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screen Recording permission is required for screenshots. Grant it to the stable PasteBuddy app in System Settings, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图需要“屏幕与系统音频录制”权限。请在系统设置中授予稳定版 PasteBuddy 后重试。"
+          }
+        }
+      }
+    },
+    "message.scroll_the_selected_region_to_continue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scroll the selected region to continue."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滚动所选区域以继续。"
+          }
+        }
+      }
+    },
+    "message.select_a_non_empty_screenshot_region": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a non-empty screenshot region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请选择非空的截图区域。"
+          }
+        }
+      }
+    },
     "message.select_to_preview_or_use_the_context": {
       "localizations": {
         "en": {
@@ -16722,6 +18323,102 @@
         }
       }
     },
+    "message.text_recognition_requires_an_image_pin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text recognition requires an image pin."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字识别需要图片贴图。"
+          }
+        }
+      }
+    },
+    "message.the_clipboard_does_not_contain_supported_image": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The clipboard does not contain supported image, text, file, color, or LaTeX content."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板中没有支持的图片、文本、文件、颜色或 LaTeX 内容。"
+          }
+        }
+      }
+    },
+    "message.the_long_screenshot_reached_its_safe_memory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The long screenshot reached its safe memory or dimension limit."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长截图已达到安全内存或尺寸上限。"
+          }
+        }
+      }
+    },
+    "message.the_next_frame_could_not_be_matched": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The next frame could not be matched (best score %.2f). Dynamic, repetitive, or multiple scrolling regions are not supported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法匹配下一帧（最佳分数 %.2f）。暂不支持动态、重复或包含多个滚动区域的内容。"
+          }
+        }
+      }
+    },
+    "message.the_pinned_image_is_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The pinned image is unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "贴图图片不可用。"
+          }
+        }
+      }
+    },
+    "message.the_recently_closed_pin_can_no_longer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recently closed pin can no longer be restored from history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法再从历史中恢复最近关闭的贴图。"
+          }
+        }
+      }
+    },
     "message.the_same_local_privacy_boundary_covers_history": {
       "localizations": {
         "en": {
@@ -16734,6 +18431,102 @@
           "stringUnit": {
             "state": "translated",
             "value": "相同的本地隐私边界适用于历史记录、收藏板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
+          }
+        }
+      }
+    },
+    "message.the_screenshot_could_not_be_captured": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The screenshot could not be captured."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法截取屏幕。"
+          }
+        }
+      }
+    },
+    "message.the_screenshot_could_not_be_encoded_as": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The screenshot could not be encoded as PNG."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将截图编码为 PNG。"
+          }
+        }
+      }
+    },
+    "message.the_scrolling_overlap_is_ambiguous_score_2f": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The scrolling overlap is ambiguous (score %.2f). Try a region with more distinctive content."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滚动重叠区域不明确（分数 %.2f）。请尝试包含更多独特内容的区域。"
+          }
+        }
+      }
+    },
+    "message.the_source_language_could_not_be_detected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The source language could not be detected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法检测源语言。"
+          }
+        }
+      }
+    },
+    "message.there_is_no_text_to_translate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is no text to translate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可翻译的文本。"
+          }
+        }
+      }
+    },
+    "message.this_language_pair_is_not_supported_by": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This language pair is not supported by macOS Translation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 翻译不支持此语言组合。"
           }
         }
       }
@@ -18610,6 +20403,74 @@
         }
       }
     },
+    "source.clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板"
+          }
+        }
+      },
+      "comment": "Legacy alias for automation.destination.clipboard. Prefer the semantic key in code."
+    },
+    "source.pastebuddy_color_picker": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy Color Picker"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 取色器"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.pastebuddy_color_picker. Prefer the semantic key in code."
+    },
+    "source.pastebuddy_ocr": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy OCR"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 文字识别"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.pastebuddy_ocr. Prefer the semantic key in code."
+    },
+    "source.pastebuddy_translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy Translation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PasteBuddy 翻译"
+          }
+        }
+      },
+      "comment": "Legacy alias for label.pastebuddy_translation. Prefer the semantic key in code."
+    },
     "state.available": {
       "localizations": {
         "en": {
@@ -18801,6 +20662,57 @@
           }
         }
       }
+    },
+    "status.long_capture_no_frames": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No frames were captured."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未捕获任何帧。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.no_frames_were_captured. Prefer the semantic key in code."
+    },
+    "status.long_capture_stopped": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture stopped. Crop, copy, save, or pin the result."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捕获已停止。可裁剪、复制、保存或贴到屏幕。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.capture_stopped_crop_copy_save_or_pin. Prefer the semantic key in code."
+    },
+    "status.long_capture_waiting_for_scroll": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scroll the selected region to continue."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滚动所选区域以继续。"
+          }
+        }
+      },
+      "comment": "Legacy alias for message.scroll_the_selected_region_to_continue. Prefer the semantic key in code."
     }
   },
   "version": "1.0"

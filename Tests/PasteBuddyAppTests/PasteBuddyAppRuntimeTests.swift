@@ -17,7 +17,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testDevelopmentPanelCommandAcceptsOnlyTheDevShelfAndSidePanelURLs() throws {
+    func testDevelopmentCommandAcceptsOnlyStablePanelCaptureAndPinURLs() throws {
         let shelf = try XCTUnwrap(PasteBuddyDevelopmentCommand(
             url: URL(string: "pastebuddy-dev://panel/shelf")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
@@ -26,9 +26,24 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             url: URL(string: "pastebuddy-dev://panel/side-panel")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
         ))
+        let screenshot = try XCTUnwrap(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://capture/static")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        let longScreenshot = try XCTUnwrap(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://capture/long")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        let pinClipboard = try XCTUnwrap(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://capture/pin-clipboard")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
 
         XCTAssertEqual(shelf.displayMode.rawValue, ClipboardPanelDisplayMode.shelf.rawValue)
         XCTAssertEqual(sidePanel.displayMode.rawValue, ClipboardPanelDisplayMode.sidePanel.rawValue)
+        XCTAssertEqual(screenshot, .openCapture(.static))
+        XCTAssertEqual(longScreenshot, .openCapture(.long))
+        XCTAssertEqual(pinClipboard, .pinClipboard)
         XCTAssertNil(PasteBuddyDevelopmentCommand(
             url: URL(string: "pastebuddy-dev://panel/shelf")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy"
@@ -39,6 +54,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         ))
         XCTAssertNil(PasteBuddyDevelopmentCommand(
             url: URL(string: "https://panel/shelf")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        XCTAssertNil(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://capture/recording")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
         ))
     }
@@ -55,15 +74,24 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(handledURLs, [url])
     }
 
-    func testDevelopmentPanelCLIReusesTheInstalledDevAppWithoutBuildingOrInstalling() throws {
+    func testDevelopmentControlsReuseTheInstalledDevAppWithoutBuildingOrInstalling() throws {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
+        let englishPurpose = try sourceFileContents(
+            "Sources/PasteBuddy/Resources/en.lproj/InfoPlist.strings"
+        )
+        let chinesePurpose = try sourceFileContents(
+            "Sources/PasteBuddy/Resources/zh-Hans.lproj/InfoPlist.strings"
+        )
         let openMode = try XCTUnwrap(buildScript.range(of: "--open-panel|open-panel)"))
+        let captureMode = try XCTUnwrap(buildScript.range(of: "--open-capture|open-capture)"))
         let signingSetup = try XCTUnwrap(buildScript.range(of: "CODESIGN_KEYCHAIN=\"$(resolve_code_sign_keychain)\""))
         let build = try XCTUnwrap(buildScript.range(of: "swift build"))
 
         XCTAssertLessThan(openMode.lowerBound, signingSetup.lowerBound)
         XCTAssertLessThan(openMode.lowerBound, build.lowerBound)
+        XCTAssertLessThan(captureMode.lowerBound, signingSetup.lowerBound)
+        XCTAssertLessThan(captureMode.lowerBound, build.lowerBound)
         XCTAssertTrue(buildScript.contains(
             "/usr/bin/open -a \"$STABLE_DEVELOPMENT_BUNDLE\" \"pastebuddy-dev://panel/$panel\""
         ))
@@ -71,16 +99,30 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(buildScript.contains("PasteBuddySourceBranch"))
         XCTAssertTrue(buildScript.contains("PasteBuddySourceCommit"))
         XCTAssertTrue(buildScript.contains(
-            "The development panel control may target only $STABLE_DEVELOPMENT_BUNDLE."
+            "The development control may target only $STABLE_DEVELOPMENT_BUNDLE."
         ))
         XCTAssertTrue(buildScript.contains("Stable development app does not match the current integrated commit"))
         XCTAssertTrue(buildScript.contains("shelf|side-panel)"))
+        XCTAssertTrue(buildScript.contains("static|long|pin-clipboard)"))
+        XCTAssertTrue(buildScript.contains(
+            "/usr/bin/open -a \"$STABLE_DEVELOPMENT_BUNDLE\" \"pastebuddy-dev://capture/$capture\""
+        ))
         XCTAssertTrue(buildScript.contains("CFBundleURLTypes"))
         XCTAssertTrue(buildScript.contains("\"CFBundleURLSchemes\":[\"pastebuddy-dev\"]"))
+        XCTAssertTrue(buildScript.contains("<key>NSScreenCaptureUsageDescription</key>"))
+        XCTAssertTrue(buildScript.contains("PasteBuddy captures screenshots you explicitly select."))
+        XCTAssertTrue(englishPurpose.contains("\"NSScreenCaptureUsageDescription\""))
+        XCTAssertTrue(chinesePurpose.contains("\"NSScreenCaptureUsageDescription\""))
         XCTAssertFalse(buildScript.contains("/usr/bin/open \"pastebuddy-dev://panel/$panel\""))
         XCTAssertFalse(buildScript.contains("/usr/bin/open -n \"pastebuddy-dev://panel/$panel\""))
         XCTAssertTrue(appSource.contains("func application(_ application: NSApplication, open urls: [URL])"))
-        XCTAssertTrue(appSource.contains("showClipboardPanel(command.displayMode)"))
+        XCTAssertTrue(appSource.contains("case .openPanel(let displayMode):"))
+        XCTAssertTrue(appSource.contains("case .openCapture(let mode):"))
+        XCTAssertTrue(appSource.contains("case .pinClipboard:"))
+        XCTAssertEqual(
+            appSource.components(separatedBy: "await startRuntimeIfNeeded()").count - 1,
+            10
+        )
     }
 
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
@@ -97,6 +139,48 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(launchSource.contains("NSApp.setActivationPolicy(.accessory)"))
         XCTAssertFalse(launchSource.contains("NSApp.setActivationPolicy(.regular)"))
         XCTAssertFalse(settingsSource.contains("NSApp.setActivationPolicy(.regular)"))
+    }
+
+    func testCapturePinAndOnboardingSymbolsExistOnTheSupportedSystem() {
+        let symbols = [
+            "doc.on.clipboard",
+            "hand.raised.fill",
+            "viewfinder",
+            "accessibility",
+            "text.viewfinder",
+            "character.bubble",
+            "checkmark.circle.fill",
+            "exclamationmark.triangle.fill",
+            "lock.open.fill",
+            "calendar",
+            "calendar.badge.clock",
+            "infinity",
+            "person.2.fill",
+            "arrow.clockwise",
+            "arrow.right",
+            "xmark",
+            "camera.viewfinder",
+            "timer",
+            "rectangle.expand.vertical",
+            "pin.square",
+            "pin.square.fill",
+            "eye",
+            "eye.slash",
+            "arrow.uturn.backward",
+            "square.and.arrow.down",
+            "xmark.rectangle",
+            "cursorarrow.rays",
+            "square.stack.3d.up",
+            "photo",
+            "rectangle.dashed",
+        ]
+
+        for symbol in symbols {
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: symbol, accessibilityDescription: symbol),
+                "Missing SF Symbol: \(symbol)"
+            )
+        }
     }
 
     func testRuntimeLoadGateInvokesAsyncLoadOnlyOnce() async {
@@ -1311,6 +1395,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 flags: [.maskCommand, .maskShift]
             ),
             .shelf
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_2),
+                flags: [.maskCommand, .maskShift]
+            ),
+            .screenshot
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_P),
+                flags: [.maskCommand, .maskShift]
+            ),
+            .pinClipboard
         )
 
         XCTAssertFalse(

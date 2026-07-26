@@ -24,10 +24,104 @@ public enum OCRServiceError: LocalizedError {
     }
 }
 
+public struct OCRTextObservation: Equatable, Sendable {
+    public var text: String
+    public var normalizedBoundingBox: CGRect
+
+    public init(text: String, normalizedBoundingBox: CGRect) {
+        self.text = text
+        self.normalizedBoundingBox = normalizedBoundingBox
+    }
+}
+
+public struct OCRBarcodeObservation: Equatable, Sendable {
+    public var payload: String
+    public var symbology: String
+    public var normalizedBoundingBox: CGRect
+
+    public init(payload: String, symbology: String, normalizedBoundingBox: CGRect) {
+        self.payload = payload
+        self.symbology = symbology
+        self.normalizedBoundingBox = normalizedBoundingBox
+    }
+
+    public var url: URL? {
+        guard let url = URL(string: payload),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url
+    }
+}
+
+public struct OCRAnalysis: Equatable, Sendable {
+    public var textObservations: [OCRTextObservation]
+    public var barcodes: [OCRBarcodeObservation]
+    public var supportedRecognitionLanguages: [String]
+
+    public init(
+        textObservations: [OCRTextObservation],
+        barcodes: [OCRBarcodeObservation],
+        supportedRecognitionLanguages: [String]
+    ) {
+        self.textObservations = textObservations
+        self.barcodes = barcodes
+        self.supportedRecognitionLanguages = supportedRecognitionLanguages
+    }
+
+    public var transcript: String {
+        textObservations.map(\.text).joined(separator: "\n")
+    }
+}
+
 public struct OCRService: Sendable {
-    static let preferredRecognitionLanguageIdentifiers = ["zh-Hans", "zh-Hant", "en-US"]
+    static let fallbackRecognitionLanguageIdentifiers = ["zh-Hans", "zh-Hant", "en-US"]
 
     public init() {}
+
+    public func analyze(in imageData: Data) async throws -> OCRAnalysis {
+        try await Task.detached(priority: .utility) {
+            let cgImage = try Self.makeCGImage(from: imageData)
+            let textRequest = try Self.configuredVNRecognizeTextRequest()
+            if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+                textRequest.automaticallyDetectsLanguage = true
+            }
+            let barcodeRequest = VNDetectBarcodesRequest()
+            barcodeRequest.revision = VNDetectBarcodesRequest.currentRevision
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            try handler.perform([textRequest, barcodeRequest])
+
+            let textObservations = textRequest.results?.compactMap { observation -> OCRTextObservation? in
+                guard let text = Self.preferredRecognizedText(
+                    from: observation.topCandidates(3).map(\.string)
+                ) else {
+                    return nil
+                }
+                return OCRTextObservation(
+                    text: text,
+                    normalizedBoundingBox: observation.boundingBox
+                )
+            } ?? []
+            let barcodes = barcodeRequest.results?.compactMap { observation -> OCRBarcodeObservation? in
+                guard let payload = observation.payloadStringValue?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !payload.isEmpty else {
+                    return nil
+                }
+                return OCRBarcodeObservation(
+                    payload: payload,
+                    symbology: observation.symbology.rawValue,
+                    normalizedBoundingBox: observation.boundingBox
+                )
+            } ?? []
+            return OCRAnalysis(
+                textObservations: textObservations,
+                barcodes: barcodes,
+                supportedRecognitionLanguages: try textRequest.supportedRecognitionLanguages()
+            )
+        }.value
+    }
 
     public func recognizeText(in imageData: Data) async throws -> String {
         try await Task.detached(priority: .utility) {
@@ -65,8 +159,7 @@ public struct OCRService: Sendable {
     }
 
     static func preferredLiveTextLocales(from supportedLocales: [String]) -> [String] {
-        let supported = Set(supportedLocales)
-        return preferredRecognitionLanguageIdentifiers.filter { supported.contains($0) }
+        recognitionLanguageIdentifiers(from: supportedLocales)
     }
     #endif
 
@@ -103,17 +196,33 @@ public struct OCRService: Sendable {
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
         if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
-            request.automaticallyDetectsLanguage = false
+            request.automaticallyDetectsLanguage = true
         }
         let supportedLanguages = try request.supportedRecognitionLanguages()
-        request.recognitionLanguages = preferredRecognitionLanguageIdentifiers.filter {
-            supportedLanguages.contains($0)
-        }
+        request.recognitionLanguages = recognitionLanguageIdentifiers(from: supportedLanguages)
         return request
     }
 
+    static func recognitionLanguageIdentifiers(
+        from supportedLanguages: [String],
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> [String] {
+        var result: [String] = []
+        for preferred in preferredLanguages + fallbackRecognitionLanguageIdentifiers {
+            let preferredLanguage = Locale(identifier: preferred).language.languageCode?.identifier
+            guard let match = supportedLanguages.first(where: { supported in
+                supported == preferred
+                    || Locale(identifier: supported).language.languageCode?.identifier == preferredLanguage
+            }), !result.contains(match) else {
+                continue
+            }
+            result.append(match)
+        }
+        return result
+    }
+
     private static var preferredLocaleLanguages: [Locale.Language] {
-        preferredRecognitionLanguageIdentifiers.map { Locale.Language(identifier: $0) }
+        fallbackRecognitionLanguageIdentifiers.map { Locale.Language(identifier: $0) }
     }
 
     static func preferredRecognizedText(from candidates: [String]) -> String? {
@@ -189,7 +298,19 @@ public struct OCRService: Sendable {
     }
 
     private static func isPreferredContentScalar(_ scalar: Unicode.Scalar) -> Bool {
-        isASCIIAlphanumeric(scalar) || isCJKIdeograph(scalar) || isFullwidthAlphanumeric(scalar)
+        switch scalar.properties.generalCategory {
+        case .uppercaseLetter,
+             .lowercaseLetter,
+             .titlecaseLetter,
+             .modifierLetter,
+             .otherLetter,
+             .decimalNumber,
+             .letterNumber,
+             .otherNumber:
+            true
+        default:
+            false
+        }
     }
 
     private static func isASCIIAlphanumeric(_ scalar: Unicode.Scalar) -> Bool {

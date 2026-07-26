@@ -73,6 +73,7 @@ struct PasteBuddyApp: App {
     @State private var storeLoadGate = PasteBuddyRuntimeLoadGate()
     @State private var shelfPanelController: ClipboardShelfPanelController?
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
+    @State private var screenshotCaptureCoordinator: ScreenshotCaptureCoordinator?
     @State private var statusItemController: PasteBuddyStatusItemController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
     @State private var irohSync = IrohClipboardSyncService()
@@ -106,7 +107,16 @@ struct PasteBuddyApp: App {
                 return
             }
             Task { @MainActor in
-                await showClipboardPanel(command.displayMode)
+                switch command {
+                case .openPanel(let displayMode):
+                    await showClipboardPanel(displayMode)
+                case .openCapture(let mode):
+                    await startRuntimeIfNeeded()
+                    screenshotCaptureCoordinator?.start(mode: mode)
+                case .pinClipboard:
+                    await startRuntimeIfNeeded()
+                    ScreenPinController.shared.pinClipboard()
+                }
             }
         }
     }
@@ -158,6 +168,69 @@ struct PasteBuddyApp: App {
 
     private func makeStatusItemMenu() -> NSMenu {
         let menu = NSMenu(title: localized("brand.pastebuddy"))
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.capture_screenshot"),
+            systemImageName: "viewfinder",
+            keyEquivalent: "2",
+            keyEquivalentModifierMask: [.command, .shift]
+        ) {
+            Task { @MainActor in
+                await startRuntimeIfNeeded()
+                screenshotCaptureCoordinator?.start()
+            }
+        })
+        let captureOptionsItem = NSMenuItem(
+            title: localized("label.capture_options"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        captureOptionsItem.image = NSImage(
+            systemSymbolName: "camera.viewfinder",
+            accessibilityDescription: localized("label.capture_options")
+        )
+        let captureOptionsMenu = NSMenu(title: localized("label.capture_options"))
+        captureOptionsMenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.capture_after_3_seconds"),
+            systemImageName: "timer"
+        ) {
+            Task { @MainActor in
+                await startRuntimeIfNeeded()
+                screenshotCaptureCoordinator?.start(delay: .seconds(3))
+            }
+        })
+        captureOptionsMenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.capture_after_5_seconds"),
+            systemImageName: "timer"
+        ) {
+            Task { @MainActor in
+                await startRuntimeIfNeeded()
+                screenshotCaptureCoordinator?.start(delay: .seconds(5))
+            }
+        })
+        captureOptionsMenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.long_screenshot"),
+            systemImageName: "rectangle.expand.vertical"
+        ) {
+            Task { @MainActor in
+                await startRuntimeIfNeeded()
+                screenshotCaptureCoordinator?.start(mode: .long)
+            }
+        })
+        captureOptionsItem.submenu = captureOptionsMenu
+        menu.addItem(captureOptionsItem)
+        menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.pin_clipboard_to_screen"),
+            systemImageName: "pin.square",
+            keyEquivalent: "p",
+            keyEquivalentModifierMask: [.command, .shift]
+        ) {
+            Task { @MainActor in
+                await startRuntimeIfNeeded()
+                ScreenPinController.shared.pinClipboard()
+            }
+        })
+        menu.addItem(screenPinsMenuItem())
+        menu.addItem(.separator())
         menu.addItem(PasteBuddyStatusItemController.actionMenuItem(
             localized(store.snapshot.general.launchAtLoginEnabled ? "action.disable_launch_at_login" : "action.enable_launch_at_login"),
             systemImageName: "poweron",
@@ -240,6 +313,127 @@ struct PasteBuddyApp: App {
         return menu
     }
 
+    private func screenPinsMenuItem() -> NSMenuItem {
+        let controller = ScreenPinController.shared
+        let item = NSMenuItem(
+            title: localized("label.screen_pins"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.image = NSImage(
+            systemSymbolName: "pin.square.fill",
+            accessibilityDescription: localized("label.screen_pins")
+        )
+        let submenu = NSMenu(title: localized("label.screen_pins"))
+        submenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.show_all_pins"),
+            systemImageName: "eye"
+        ) {
+            controller.showAll()
+        })
+        submenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.hide_all_pins"),
+            systemImageName: "eye.slash"
+        ) {
+            controller.hideAll()
+        })
+        submenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.restore_recent_pin"),
+            systemImageName: "arrow.uturn.backward"
+        ) {
+            controller.restoreMostRecent()
+        })
+        submenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.save_all_pins"),
+            systemImageName: "square.and.arrow.down"
+        ) {
+            controller.saveAll()
+        })
+        submenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.close_all_pins"),
+            systemImageName: "xmark.rectangle"
+        ) {
+            controller.closeAll()
+        })
+        if controller.hasRecoverableClickThroughPins {
+            submenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+                localized("action.disable_click_through_all_pins"),
+                systemImageName: "cursorarrow.rays"
+            ) {
+                controller.disableClickThroughOnAllPins()
+            })
+        }
+        submenu.addItem(.separator())
+        let groupsItem = NSMenuItem(
+            title: localized("label.pin_groups"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        let groupsMenu = NSMenu(title: localized("label.pin_groups"))
+        for group in controller.groups {
+            let groupItem = PasteBuddyStatusItemController.actionMenuItem(
+                group.name,
+                systemImageName: "square.stack.3d.up"
+            ) {
+                controller.selectGroup(group.id)
+            }
+            groupItem.state = group.id == controller.activeGroupID ? .on : .off
+            groupsMenu.addItem(groupItem)
+        }
+        groupsMenu.addItem(.separator())
+        groupsMenu.addItem(PasteBuddyStatusItemController.actionMenuItem(
+            localized("action.new_pin_group"),
+            systemImageName: "plus"
+        ) {
+            createScreenPinGroup()
+        })
+        groupsItem.submenu = groupsMenu
+        submenu.addItem(groupsItem)
+
+        let translationItem = NSMenuItem(
+            title: localized("label.translation_target"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        let translationMenu = NSMenu(title: localized("label.translation_target"))
+        let currentTarget = UserDefaults.standard.string(
+            forKey: "PasteBuddyTranslationTargetLanguage"
+        )
+        for identifier in NativeTranslationService.commonTargetLanguageIdentifiers {
+            let title = Locale.current.localizedString(forLanguageCode: identifier) ?? identifier
+            let languageItem = PasteBuddyStatusItemController.actionMenuItem(title) {
+                UserDefaults.standard.set(
+                    identifier,
+                    forKey: "PasteBuddyTranslationTargetLanguage"
+                )
+            }
+            languageItem.state = currentTarget == identifier ? .on : .off
+            translationMenu.addItem(languageItem)
+        }
+        translationItem.submenu = translationMenu
+        submenu.addItem(translationItem)
+        item.submenu = submenu
+        return item
+    }
+
+    private func createScreenPinGroup() {
+        let alert = NSAlert()
+        alert.messageText = localized("dialog.new_pin_group")
+        let field = NSTextField()
+        field.placeholderString = localized("label.pin_group_name")
+        field.frame.size = CGSize(width: 280, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: localized("action.create"))
+        alert.addButton(withTitle: localized("action.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let group = ScreenPinController.shared.createGroup(
+                  name: field.stringValue
+              ) else {
+            return
+        }
+        ScreenPinController.shared.selectGroup(group.id)
+    }
+
     private func toggleClipboardShelf() async {
         await startRuntimeIfNeeded()
         PasteBuddyDiagnostics.recordAccessibilityTrust(
@@ -275,6 +469,10 @@ struct PasteBuddyApp: App {
         configureStatusItemIfNeeded()
         await storeLoadGate.loadIfNeeded {
             await store.loadAsync()
+        }
+        ScreenPinController.shared.configure(store: store)
+        if screenshotCaptureCoordinator == nil {
+            screenshotCaptureCoordinator = ScreenshotCaptureCoordinator(store: store)
         }
         irohSync.onItemReceived = { [store] item in
             _ = store.addSyncedItem(item)
@@ -332,6 +530,12 @@ struct PasteBuddyApp: App {
                     Task { @MainActor in
                         await showClipboardPanel(.shelf)
                     }
+                },
+                onScreenshot: {
+                    screenshotCaptureCoordinator?.start()
+                },
+                onPinClipboard: {
+                    ScreenPinController.shared.pinClipboard()
                 }
             )
         }
@@ -495,18 +699,25 @@ struct PasteBuddyApp: App {
 
 enum PasteBuddyDevelopmentCommand: Equatable {
     case openPanel(ClipboardPanelDisplayMode)
+    case openCapture(ScreenshotCaptureMode)
+    case pinClipboard
 
     init?(url: URL, bundleIdentifier: String?) {
         guard bundleIdentifier == "com.alexjiang.PasteBuddy.dev",
-              url.scheme == "pastebuddy-dev",
-              url.host == "panel" else {
+              url.scheme == "pastebuddy-dev" else {
             return nil
         }
-        switch url.path {
-        case "/shelf":
+        switch (url.host, url.path) {
+        case ("panel", "/shelf"):
             self = .openPanel(.shelf)
-        case "/side-panel":
+        case ("panel", "/side-panel"):
             self = .openPanel(.sidePanel)
+        case ("capture", "/static"):
+            self = .openCapture(.static)
+        case ("capture", "/long"):
+            self = .openCapture(.long)
+        case ("capture", "/pin-clipboard"):
+            self = .pinClipboard
         default:
             return nil
         }
@@ -516,6 +727,8 @@ enum PasteBuddyDevelopmentCommand: Equatable {
         switch self {
         case let .openPanel(displayMode):
             displayMode
+        case .openCapture, .pinClipboard:
+            .sidePanel
         }
     }
 }

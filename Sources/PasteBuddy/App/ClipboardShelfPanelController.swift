@@ -818,6 +818,8 @@ private extension NSRect {
 final class PasteBuddyPanelHotKeyController {
     private let onSidePanel: @MainActor () -> Void
     private let onShelf: @MainActor () -> Void
+    private let onScreenshot: @MainActor () -> Void
+    private let onPinClipboard: @MainActor () -> Void
     private var registration: PasteBuddyCarbonHotKeyRegistration?
     private var eventTap: PasteBuddyPanelHotKeyEventTap?
     private var triggerGate = PasteBuddyPanelHotKeyTriggerGate()
@@ -826,10 +828,14 @@ final class PasteBuddyPanelHotKeyController {
 
     init(
         onSidePanel: @escaping @MainActor () -> Void,
-        onShelf: @escaping @MainActor () -> Void
+        onShelf: @escaping @MainActor () -> Void,
+        onScreenshot: @escaping @MainActor () -> Void,
+        onPinClipboard: @escaping @MainActor () -> Void
     ) {
         self.onSidePanel = onSidePanel
         self.onShelf = onShelf
+        self.onScreenshot = onScreenshot
+        self.onPinClipboard = onPinClipboard
         let handler: @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void = { [weak self] action, source in
             self?.trigger(action: action, source: source)
         }
@@ -858,6 +864,10 @@ final class PasteBuddyPanelHotKeyController {
             onSidePanel()
         case .shelf:
             onShelf()
+        case .screenshot:
+            onScreenshot()
+        case .pinClipboard:
+            onPinClipboard()
         }
     }
 
@@ -872,6 +882,8 @@ final class PasteBuddyPanelHotKeyController {
 enum PasteBuddyPanelHotKeyAction: String, Sendable {
     case sidePanel
     case shelf
+    case screenshot
+    case pinClipboard
 }
 
 enum PasteBuddyPanelHotKeySource: String, Sendable {
@@ -977,6 +989,8 @@ private final class PasteBuddyCarbonHotKeyRegistration {
         unregisterHotKeys()
         registerHotKey(id: pasteBuddySidePanelHotKeyID, keyCode: UInt32(kVK_ANSI_V))
         registerHotKey(id: pasteBuddyShelfHotKeyID, keyCode: UInt32(kVK_ANSI_S))
+        registerHotKey(id: pasteBuddyScreenshotHotKeyID, keyCode: UInt32(kVK_ANSI_2))
+        registerHotKey(id: pasteBuddyPinClipboardHotKeyID, keyCode: UInt32(kVK_ANSI_P))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32) {
@@ -1015,6 +1029,10 @@ private final class PasteBuddyCarbonHotKeyRegistration {
             return .sidePanel
         case pasteBuddyShelfHotKeyID:
             return .shelf
+        case pasteBuddyScreenshotHotKeyID:
+            return .screenshot
+        case pasteBuddyPinClipboardHotKeyID:
+            return .pinClipboard
         default:
             return nil
         }
@@ -1120,6 +1138,10 @@ enum PasteBuddyPanelHotKeyMatcher {
             return .sidePanel
         case Int64(kVK_ANSI_S):
             return .shelf
+        case Int64(kVK_ANSI_2):
+            return .screenshot
+        case Int64(kVK_ANSI_P):
+            return .pinClipboard
         default:
             return nil
         }
@@ -1129,3 +1151,5 @@ enum PasteBuddyPanelHotKeyMatcher {
 private let pasteBuddyHotKeySignature: OSType = 0x50425348
 private let pasteBuddySidePanelHotKeyID: UInt32 = 1
 private let pasteBuddyShelfHotKeyID: UInt32 = 2
+private let pasteBuddyScreenshotHotKeyID: UInt32 = 3
+private let pasteBuddyPinClipboardHotKeyID: UInt32 = 4

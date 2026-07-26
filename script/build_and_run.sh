@@ -81,22 +81,14 @@ wait_for_single_installed_app() {
   die "$APP_NAME did not appear as one stable installed process after launch."
 }
 
-open_development_panel() {
+verify_development_control_target() {
   [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.PasteBuddy.dev" ]] \
-    || die "The development panel control is available only for com.alexjiang.PasteBuddy.dev."
+    || die "The development control is available only for com.alexjiang.PasteBuddy.dev."
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] \
-    || die "The development panel control may target only $STABLE_DEVELOPMENT_BUNDLE."
+    || die "The development control may target only $STABLE_DEVELOPMENT_BUNDLE."
   [[ "$SOURCE_BRANCH" == "$INTEGRATION_BRANCH" ]] \
-    || die "The development panel control must run from $INTEGRATION_BRANCH."
-  local panel="${2:-}"
+    || die "The development control must run from $INTEGRATION_BRANCH."
   local installed_info_plist="$STABLE_DEVELOPMENT_BUNDLE/Contents/Info.plist"
-  case "$panel" in
-    shelf|side-panel)
-      ;;
-    *)
-      die "usage: $0 --open-panel [shelf|side-panel]"
-      ;;
-  esac
   [[ -f "$installed_info_plist" ]] || die "Stable development app is not installed: $STABLE_DEVELOPMENT_BUNDLE"
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$installed_info_plist" 2>/dev/null || true)" == "$BUNDLE_ID" ]] \
     || die "Stable development app has the wrong bundle identity."
@@ -105,14 +97,44 @@ open_development_panel() {
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :PasteBuddySourceCommit' "$installed_info_plist" 2>/dev/null || true)" == "$SOURCE_COMMIT" ]] \
     || die "Stable development app does not match the current integrated commit; install it through --verify first."
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$installed_info_plist" 2>/dev/null || true)" == "pastebuddy-dev" ]] \
-    || die "Stable development app does not expose the development panel URL."
+    || die "Stable development app does not expose the development control URL."
+}
+
+open_development_panel() {
+  verify_development_control_target
+  local panel="${2:-}"
+  case "$panel" in
+    shelf|side-panel)
+      ;;
+    *)
+      die "usage: $0 --open-panel [shelf|side-panel]"
+      ;;
+  esac
   /usr/bin/open -a "$STABLE_DEVELOPMENT_BUNDLE" "pastebuddy-dev://panel/$panel"
+  wait_for_single_installed_app
+}
+
+open_development_capture() {
+  verify_development_control_target
+  local capture="${2:-}"
+  case "$capture" in
+    static|long|pin-clipboard)
+      ;;
+    *)
+      die "usage: $0 --open-capture [static|long|pin-clipboard]"
+      ;;
+  esac
+  /usr/bin/open -a "$STABLE_DEVELOPMENT_BUNDLE" "pastebuddy-dev://capture/$capture"
   wait_for_single_installed_app
 }
 
 case "$MODE" in
   --open-panel|open-panel)
     open_development_panel "$@"
+    exit 0
+    ;;
+  --open-capture|open-capture)
+    open_development_capture "$@"
     exit 0
     ;;
 esac
@@ -416,6 +438,8 @@ cat >"$INFO_PLIST" <<PLIST
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>PasteBuddy captures screenshots you explicitly select.</string>
   <key>PasteBuddySigningChannel</key>
   <string>$SIGNING_CHANNEL</string>
   <key>PasteBuddyCodeSigningIdentity</key>
@@ -572,7 +596,7 @@ case "$MODE" in
     package_app "$INSTALL_BUNDLE"
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package|--open-panel [shelf|side-panel]]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package|--open-panel [shelf|side-panel]|--open-capture [static|long|pin-clipboard]]" >&2
     exit 2
     ;;
 esac

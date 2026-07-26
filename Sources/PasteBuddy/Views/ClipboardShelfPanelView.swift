@@ -692,6 +692,13 @@ struct ClipboardShelfPanelView: View {
                     onPin: { pinboardID in
                         store.pinItem(item.id, to: pinboardID)
                     },
+                    onScreenPin: {
+                        Task { @MainActor in
+                            ScreenPinController.shared.pin(
+                                await store.hydratedItem(for: item)
+                            )
+                        }
+                    },
                     onDelete: {
                         store.removeItem(item.id)
                     }
@@ -1321,6 +1328,7 @@ private struct ClipboardShelfCard: View {
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
+    let onScreenPin: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -1375,6 +1383,9 @@ private struct ClipboardShelfCard: View {
                 }
             }
             Divider()
+            Button("action.pin_to_screen") {
+                onScreenPin()
+            }
             Menu("action.pin") {
                 ForEach(pinboards) { pinboard in
                     Button(pinboard.name) {

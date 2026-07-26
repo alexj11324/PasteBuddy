@@ -119,7 +119,7 @@ public final class ClipboardMonitor {
         }.value
     }
 
-    static func makeItem(
+    public static func makeItem(
         from pasteboard: NSPasteboard,
         sourceApp: String,
         sourceBundleIdentifier: String?,
