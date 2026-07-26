@@ -101,6 +101,17 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
         } catch {
             throw SnapshotStoreError.unreadableStore(error)
         }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            if attributes[.protectionKey] as? FileProtectionType == .complete {
+                try FileManager.default.setAttributes(
+                    [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                    ofItemAtPath: fileURL.path
+                )
+            }
+        } catch {
+            NSLog("PasteBuddy loaded its store but could not update file protection: %@", error.localizedDescription)
+        }
 
         let envelope: EncryptedEnvelope
         do {
@@ -148,7 +159,7 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
             data = try JSONEncoder.pasteBuddy.encode(standardSnapshot)
         }
         do {
-            try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+            try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         } catch {
             // Some macOS locations reject file-protection writes. Encrypted mode remains AES-GCM protected.
             try data.write(to: fileURL, options: [.atomic])

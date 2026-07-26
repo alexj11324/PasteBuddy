@@ -123,10 +123,23 @@ final class EncryptionServiceTests: XCTestCase {
 
         let raw = try Data(contentsOf: fileURL)
         let rawString = String(decoding: raw, as: UTF8.self)
+        try FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: fileURL.path
+        )
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: fileURL.path)[.protectionKey] as? FileProtectionType,
+            .complete
+        )
         let loaded = try store.load()
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
 
         XCTAssertTrue(rawString.contains("Standard Storage Item"))
         XCTAssertTrue(rawString.contains("standard local storage is explicit"))
+        XCTAssertEqual(
+            attributes[.protectionKey] as? FileProtectionType,
+            .completeUntilFirstUserAuthentication
+        )
         XCTAssertEqual(loaded.security.storageMode, .standard)
         XCTAssertEqual(store.lastLoadedStorageMode, .standard)
         XCTAssertEqual(loaded.items.first?.payload.text, "standard local storage is explicit")
