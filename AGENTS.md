@@ -18,9 +18,9 @@
 ## PasteBuddy 国际化/本地化工作流（IMPORTANT）
 - IMPORTANT: PasteBuddy 新增用户可见文案必须使用语义 key（例如 `action.save_text`、`label.mobile_setup`、`format.items_count`），不要把完整英文句子直接写成 UI key。
 - IMPORTANT: `PasteBuddyCore` 或非 SwiftUI view 层生成的用户可见文案必须使用 `PasteBuddyLocalization.string/format`，并提供与英文 catalog 值一致的 `defaultValue`。
-- IMPORTANT: 翻译维护必须优先走 `script/localize_string_catalog_with_dify.py`；Dify 负责翻译/审稿，`script/localization_catalog_workflow.py` 负责同步 `Localizable.strings` 与 `Localizable.xcstrings`。
+- IMPORTANT: `Sources/PasteBuddy/Resources/Localizable.xcstrings` 是应用文案唯一权威源；禁止新增或处理重复的 `Localizable.strings`。翻译维护必须优先走 `script/localize_string_catalog_with_dify.py`；Dify 只通过临时 `.strings` interchange 翻译/审稿，结果写回 String Catalog。
 - IMPORTANT: 只做本地同步时运行 `python3 script/localize_string_catalog_with_dify.py --skip-dify`；提交前至少运行 `python3 script/localization_catalog_workflow.py check` 和 `swift test --filter LocalizationResourceTests`。
-- IMPORTANT: iOS target 必须继续使用 `Sources/PasteBuddy/Resources/Localizable.xcstrings`；不要重新把 iOS 资源阶段切回 `Localizable.strings`。
+- IMPORTANT: macOS SwiftPM 与全部 iOS targets 必须共同使用 `Sources/PasteBuddy/Resources/Localizable.xcstrings`；不要重新引入 `Localizable.strings` 资源或第二份 localization table。
 - IMPORTANT: Dify API key 只能从 `DIFY_WORKFLOW_API_KEY` 或 Google Secret Manager `general-secrets-store/dify-pastebuddy-localization-workflow-api-key` 读取，禁止写入仓库、`.env`、临时脚本常量或长期本地文件。
 
 ## macOS UI/HID 验证（IMPORTANT）

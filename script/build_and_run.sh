@@ -299,6 +299,7 @@ assert_coordinated_install_source() {
 run_coordinated_install_gate_tests() {
   mode_installs_app || return 0
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
+  python3 Tests/test_localization_catalog_workflow.py --quiet
   run_required_test_filter PasteBuddyAppRuntimeTests/testDevelopmentPanel
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes
   run_required_test_filter PasteBuddyAppRuntimeTests/testShelfShiftSelectionExtendsFromTheExistingAnchor
@@ -333,6 +334,7 @@ run_coordinated_install_gate_tests() {
   run_required_test_filter PasteBuddyAppRuntimeTests/testBothClipboardPanelsShowRepositoryQueryFailure
   run_required_test_filter PasteBuddyAppRuntimeTests/testBothClipboardPanelsUseNeutralLoadingInsteadOfUnavailableOrZeroDuringRepositoryTransition
   run_required_test_filter PasteBuddyAppRuntimeTests/testSharedPanelHistoryAvailabilityFailsClosed
+  run_required_test_filter LocalizationResourceTests
   run_required_test_filter CopyConfirmationFeedbackTests
   run_required_test_filter PasteboardWriterTests/testCopyReportsPasteboardWriteSuccess
   run_required_test_filter PasteboardWriterTests/testNativeCopyCommand

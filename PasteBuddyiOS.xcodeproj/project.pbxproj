@@ -89,8 +89,6 @@
 		A10000000000000000000033 /* PasteBuddyShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PasteBuddyShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000034 /* PasteBuddyActionExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PasteBuddyActionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000101 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A10000000000000000000120 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Sources/PasteBuddy/Resources/en.lproj/Localizable.strings; sourceTree = SOURCE_ROOT; };
-		A10000000000000000000121 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Sources/PasteBuddy/Resources/zh-Hans.lproj/Localizable.strings"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000122 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyiOS/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000123 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Support/InfoPlist/PasteBuddyiOS/zh-Hans.lproj/InfoPlist.strings"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000124 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Support/InfoPlist/PasteBuddyKeyboard/en.lproj/InfoPlist.strings; sourceTree = SOURCE_ROOT; };
@@ -177,7 +175,6 @@
 			children = (
 				A10000000000000000000101 /* Assets.xcassets */,
 				A10000000000000000000140 /* Localizable.xcstrings */,
-				A10000000000000000000130 /* Localizable.strings */,
 				A10000000000000000000087 /* InfoPlist */,
 				A10000000000000000000088 /* Entitlements */,
 			);
@@ -558,15 +555,6 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
-		A10000000000000000000130 /* Localizable.strings */ = {
-			isa = PBXVariantGroup;
-			children = (
-				A10000000000000000000120 /* en */,
-				A10000000000000000000121 /* zh-Hans */,
-			);
-			name = Localizable.strings;
-			sourceTree = "<group>";
-		};
 		A10000000000000000000131 /* PasteBuddyiOS InfoPlist.strings */ = {
 			isa = PBXVariantGroup;
 			children = (

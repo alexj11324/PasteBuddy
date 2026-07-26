@@ -17,8 +17,6 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SOURCE = ROOT / "Sources/PasteBuddy/Resources/en.lproj/Localizable.strings"
-DEFAULT_TARGET = ROOT / "Sources/PasteBuddy/Resources/zh-Hans.lproj/Localizable.strings"
 DEFAULT_DIFY_URL = "https://dify.nebula-spaces.com/v1/workflows/run"
 DEFAULT_SECRET_NAME = "dify-pastebuddy-localization-workflow-api-key"
 DEFAULT_SECRET_PROJECT = "general-secrets-store"
@@ -235,8 +233,8 @@ def build_payload(
                 "key": entry.key,
                 "source": entry.value,
                 "existing_target": target_values.get(entry.key),
-                "context": f"Localizable.strings:{entry.line}",
-                "file": DEFAULT_SOURCE.relative_to(ROOT).as_posix(),
+                "context": f"Localizable.xcstrings:{entry.line}",
+                "file": "Localizable.xcstrings",
                 "line": entry.line,
             }
     if include_code_candidates:
@@ -371,8 +369,8 @@ def apply_translations(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
-    parser.add_argument("--target", type=Path, default=DEFAULT_TARGET)
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--target-locale", default="zh-Hans")
     parser.add_argument("--mode", choices=["scan", "translate", "apply"], default="scan")
     parser.add_argument("--workflow-mode", choices=["incremental", "full_app", "review_only"], default="incremental")

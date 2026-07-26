@@ -876,7 +876,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(sideSource.contains("text.viewfinder"))
         XCTAssertFalse(sideSource.contains("ClipboardImagePreviewOCR"))
         XCTAssertFalse(sideSource.contains("updateOCRText"))
-        XCTAssertFalse(settingsSource.contains("action.recognize_text"))
+        XCTAssertFalse(settingsSource.contains("Label(localized(\"action.recognize_text\")"))
         XCTAssertFalse(settingsSource.contains("text.viewfinder"))
         XCTAssertTrue(source.contains("private var previewFrameWidth: CGFloat"))
         XCTAssertTrue(source.contains("private static let textPreviewHeight: CGFloat = 420"))

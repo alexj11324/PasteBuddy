@@ -185,9 +185,20 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
         for _ in 0..<8 {
             let candidate = directory
                 .appendingPathComponent("Sources/PasteBuddy/Resources")
-                .appendingPathComponent("\(locale).lproj/Localizable.strings")
-            if let values = NSDictionary(contentsOf: candidate) as? [String: String] {
-                return values
+                .appendingPathComponent("Localizable.xcstrings")
+            if let data = try? Data(contentsOf: candidate),
+               let catalog = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let strings = catalog["strings"] as? [String: Any] {
+                return strings.reduce(into: [:]) { values, pair in
+                    guard let entry = pair.value as? [String: Any],
+                          let localizations = entry["localizations"] as? [String: Any],
+                          let localized = localizations[locale] as? [String: Any],
+                          let unit = localized["stringUnit"] as? [String: Any],
+                          let value = unit["value"] as? String else {
+                        return
+                    }
+                    values[pair.key] = value
+                }
             }
             directory.deleteLastPathComponent()
         }

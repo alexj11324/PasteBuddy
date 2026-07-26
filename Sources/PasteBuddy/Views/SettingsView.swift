@@ -1085,7 +1085,7 @@ struct SettingsView: View {
         if isRestoringPurchases {
             return localized("state.restoring_purchases")
         }
-        switch store.snapshot.entitlement.restoreState {
+        return switch store.snapshot.entitlement.restoreState {
         case .notStarted:
             nil
         case .inProgress:
