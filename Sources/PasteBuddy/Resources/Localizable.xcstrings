@@ -10799,6 +10799,22 @@
         }
       }
     },
+    "dialog.remove_capture_rule": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove Capture Rule?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除捕获规则？"
+          }
+        }
+      }
+    },
     "dialog.rename_pin": {
       "localizations": {
         "en": {
@@ -10811,6 +10827,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "重命名贴图"
+          }
+        }
+      }
+    },
+    "dialog.reset_all_shortcuts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset All Shortcuts?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置所有快捷键？"
           }
         }
       }
@@ -11220,6 +11252,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "已检测到：%@"
+          }
+        }
+      }
+    },
+    "format.enable_capture_rule": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用%@"
           }
         }
       }
@@ -11656,6 +11704,22 @@
         }
       }
     },
+    "format.remove_capture_rule": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除%@"
+          }
+        }
+      }
+    },
     "format.remove_label": {
       "localizations": {
         "en": {
@@ -11668,6 +11732,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "移除标签 %@"
+          }
+        }
+      }
+    },
+    "format.removing_capture_rule_cannot_be_undone": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The capture rule \"%@\" will be removed. This action cannot be undone."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将移除捕获规则“%@”。此操作无法撤销。"
           }
         }
       }
@@ -13284,6 +13364,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "直接粘贴"
+          }
+        }
+      }
+    },
+    "label.direct_paste_permission": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direct Paste Permission"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直接粘贴权限"
           }
         }
       }
@@ -16472,6 +16568,22 @@
         }
       }
     },
+    "label.temporary_capture_pause": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temporary Pause"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "临时暂停"
+          }
+        }
+      }
+    },
     "label.text": {
       "localizations": {
         "en": {
@@ -17704,6 +17816,22 @@
         }
       }
     },
+    "message.press_key_combination_to_record": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press the key combination to record."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请按下要录制的组合键。"
+          }
+        }
+      }
+    },
     "message.press_space_to_preview_press_return_to": {
       "localizations": {
         "en": {
@@ -17764,6 +17892,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。"
+          }
+        }
+      }
+    },
+    "message.resetting_shortcuts_restores_every_default": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This restores every shortcut to its default."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会将所有快捷键恢复为默认值。"
           }
         }
       }
@@ -20327,6 +20471,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在识别文字…"
+          }
+        }
+      }
+    },
+    "state.recording_shortcut": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording Shortcut"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在录制快捷键"
           }
         }
       }
