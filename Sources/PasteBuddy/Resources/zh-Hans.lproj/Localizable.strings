@@ -1,8 +1,11 @@
 /* Canonical semantic keys. Prefer these keys in SwiftUI and code. */
 "action.add_app" = "添加应用";
+"action.add_device_ellipsis" = "添加设备…";
 "action.add_item_or_pinboard" = "添加项目或收藏板";
 "action.add_rule" = "添加规则";
+"action.agent_privacy_and_access" = "Agent 隐私与访问…";
 "action.allow_local_agent_connection" = "允许本地 Agent 连接";
+"action.apply_storage_limit" = "应用限制";
 "action.cancel" = "取消";
 "action.cancel_trial" = "取消试用";
 "action.clear_all_history" = "清除所有历史";
@@ -45,6 +48,7 @@
 "action.disable_click_through" = "关闭鼠标穿透";
 "action.disable_click_through_all_pins" = "关闭所有贴图的鼠标穿透";
 "action.disable_launch_at_login" = "关闭登录时启动";
+"action.disable_shared_pinboards" = "关闭共享收藏板";
 "action.dismiss" = "关闭";
 "action.done" = "完成";
 "action.enable_always_on_top" = "始终置顶";
@@ -192,8 +196,12 @@
 "dialog.clear_all_history" = "清除所有历史？";
 "dialog.clear_unpinned_history" = "清除未固定历史？";
 "dialog.delete_pinboard" = "删除收藏板？";
+"dialog.disable_shared_pinboards" = "关闭共享收藏板？";
 "dialog.new_pin_group" = "新建贴图组";
+"dialog.reduce_history_retention" = "缩短历史保留期？";
+"dialog.reduce_storage_limit" = "降低存储上限？";
 "dialog.rename_pin" = "重命名贴图";
+"dialog.reset_sync_to_local_only" = "将同步重置为仅本地？";
 "dialog.save_all_pins" = "保存所有贴图";
 "format.added_mcp_client" = "已将 PasteBuddy 添加到 %@。如果客户端已在运行，请刷新 MCP 服务器或重启客户端。";
 "format.assigned" = "已分配：%d";
@@ -232,6 +240,8 @@
 "format.pinboard_color" = "收藏板颜色 %@";
 "format.quick_paste_index" = "快速粘贴 %d";
 "format.quick_paste_index_as_plain_text" = "以纯文本快速粘贴 %d";
+"format.reducing_retention_may_remove_history" = "将历史保留 %d 天可能会立即移除更早的未固定项目。";
+"format.reducing_storage_may_remove_history" = "使用 %@ 上限可能会立即移除更早的未固定项目。";
 "format.refine_search_or_filters_to_see_more" = "优化搜索或筛选条件以查看更多 %d 项。";
 "format.remove" = "移除 %@";
 "format.remove_label" = "移除标签 %@";
@@ -331,6 +341,7 @@
 "label.destination" = "目标位置";
 "label.detected_ai_tools" = "已检测到的 AI 工具";
 "label.device" = "设备";
+"label.device_connections" = "设备连接";
 "label.device_filter" = "设备过滤器";
 "label.device_unlock" = "设备解锁";
 "label.digits_only" = "仅数字键";
@@ -529,6 +540,8 @@
 "label.storage_usage" = "存储用量";
 "label.supported_ai_tools" = "支持的 AI 工具";
 "label.supported_locales" = "支持的语言";
+"label.sync_recovery_and_sharing" = "同步恢复与共享";
+"label.sync_status" = "同步状态";
 "label.team" = "团队";
 "label.team_name" = "团队名称";
 "label.template" = "模板";
@@ -574,6 +587,7 @@
 "message.copy_text_links_images_or_files_to" = "复制文本、链接、图片或文件即可开始建立本地历史。";
 "message.custom_rules_run_locally_before_capture_and" = "自定义规则会在捕获前于本地运行，并随本地历史设置保存。";
 "message.direct_paste_copies_the_selected_item_first" = "直接粘贴会先复制所选项目，然后仅在已授予 macOS 辅助功能访问权限时发送 Command-V。";
+"message.disabling_shared_pinboards_removes_sharing_metadata" = "这会移除所有收藏板的共享元数据。剪贴板历史和本地收藏板内容仍保留在这台 Mac 上。";
 "message.double_click_or_press_return_to_paste" = "双击或按 Return 即可粘贴。";
 "message.drag_to_reorder_items" = "拖动以重新排序项目。";
 "message.drop_clipboard_items_here_to_pin_them" = "将剪贴板项目拖到这里即可固定。";
@@ -612,6 +626,7 @@
 "message.recognized_local_ocr_text_appears_below_the" = "可用时，识别到的本地 OCR 文本会显示在图片下方。";
 "message.removes_all_active_clipboard_filters" = "移除所有已启用的剪贴板过滤器。";
 "message.removes_this_clipboard_item_from_history_and" = "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。";
+"message.resetting_sync_to_local_only_disables_cloud" = "这会关闭云同步并重置其本地配置。本地剪贴板历史仍保留在这台 Mac 上。";
 "message.retrieve_item_requires_explicit_mcp_opt_in" = "默认不允许读取完整剪贴板内容。仅对你信任的 AI 工具开启“读取剪贴板项目”。";
 "message.run_local_apple_ocr_after_image_capture" = "图片捕获后运行 Apple 本地 OCR";
 "message.saves_edits_back_to_clipboard_history" = "将编辑保存回剪贴板历史。";
@@ -765,9 +780,11 @@
 "state.none" = "无";
 "state.off" = "关闭";
 "state.optional" = "可选";
+"state.purchases_restored" = "购买项目已恢复。";
 "state.ready" = "就绪";
 "state.recognizing_text" = "正在识别文字…";
 "state.required" = "必需";
+"state.restoring_purchases" = "正在恢复购买项目…";
 "state.selected" = "已选择";
 
 /* Legacy compatibility aliases for model displayName values and older persisted flows. */

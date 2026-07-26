@@ -7582,6 +7582,22 @@
         }
       }
     },
+    "action.add_device_ellipsis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Device..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加设备…"
+          }
+        }
+      }
+    },
     "action.add_item_or_pinboard": {
       "localizations": {
         "en": {
@@ -7614,6 +7630,22 @@
         }
       }
     },
+    "action.agent_privacy_and_access": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Privacy & Access..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 隐私与访问…"
+          }
+        }
+      }
+    },
     "action.allow_local_agent_connection": {
       "localizations": {
         "en": {
@@ -7626,6 +7658,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "允许本地 Agent 连接"
+          }
+        }
+      }
+    },
+    "action.apply_storage_limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply Limit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用限制"
           }
         }
       }
@@ -8298,6 +8346,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "关闭登录时启动"
+          }
+        }
+      }
+    },
+    "action.disable_shared_pinboards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable Shared Pinboards"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭共享收藏板"
           }
         }
       }
@@ -10671,6 +10735,22 @@
         }
       }
     },
+    "dialog.disable_shared_pinboards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable Shared Pinboards?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭共享收藏板？"
+          }
+        }
+      }
+    },
     "dialog.new_pin_group": {
       "localizations": {
         "en": {
@@ -10687,6 +10767,38 @@
         }
       }
     },
+    "dialog.reduce_history_retention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reduce History Retention?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缩短历史保留期？"
+          }
+        }
+      }
+    },
+    "dialog.reduce_storage_limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reduce Storage Limit?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "降低存储上限？"
+          }
+        }
+      }
+    },
     "dialog.rename_pin": {
       "localizations": {
         "en": {
@@ -10699,6 +10811,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "重命名贴图"
+          }
+        }
+      }
+    },
+    "dialog.reset_sync_to_local_only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Sync to Local Only?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将同步重置为仅本地？"
           }
         }
       }
@@ -11460,6 +11588,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "以纯文本快速粘贴 %d"
+          }
+        }
+      }
+    },
+    "format.reducing_retention_may_remove_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keeping history for %d days may immediately remove older unpinned items."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将历史保留 %d 天可能会立即移除更早的未固定项目。"
+          }
+        }
+      }
+    },
+    "format.reducing_storage_may_remove_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Using a %@ limit may immediately remove older unpinned items."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 %@ 上限可能会立即移除更早的未固定项目。"
           }
         }
       }
@@ -13044,6 +13204,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "设备"
+          }
+        }
+      }
+    },
+    "label.device_connections": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Device Connections"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设备连接"
           }
         }
       }
@@ -16216,6 +16392,38 @@
         }
       }
     },
+    "label.sync_recovery_and_sharing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Recovery & Sharing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步恢复与共享"
+          }
+        }
+      }
+    },
+    "label.sync_status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步状态"
+          }
+        }
+      }
+    },
     "label.team": {
       "localizations": {
         "en": {
@@ -16936,6 +17144,22 @@
         }
       }
     },
+    "message.disabling_shared_pinboards_removes_sharing_metadata": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This removes sharing metadata from every Pinboard. Clipboard history and local Pinboard contents stay on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会移除所有收藏板的共享元数据。剪贴板历史和本地收藏板内容仍保留在这台 Mac 上。"
+          }
+        }
+      }
+    },
     "message.double_click_or_press_return_to_paste": {
       "localizations": {
         "en": {
@@ -17540,6 +17764,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "从历史和收藏板中移除此剪贴板项目。可使用撤销删除恢复。"
+          }
+        }
+      }
+    },
+    "message.resetting_sync_to_local_only_disables_cloud": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This disables cloud sync and resets its local configuration. Local clipboard history stays on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会关闭云同步并重置其本地配置。本地剪贴板历史仍保留在这台 Mac 上。"
           }
         }
       }
@@ -20043,6 +20283,22 @@
         }
       }
     },
+    "state.purchases_restored": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purchases restored."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "购买项目已恢复。"
+          }
+        }
+      }
+    },
     "state.ready": {
       "localizations": {
         "en": {
@@ -20087,6 +20343,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "必需"
+          }
+        }
+      }
+    },
+    "state.restoring_purchases": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restoring purchases..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在恢复购买项目…"
           }
         }
       }

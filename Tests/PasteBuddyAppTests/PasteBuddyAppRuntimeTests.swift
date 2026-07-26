@@ -1299,15 +1299,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let syncStart = try XCTUnwrap(source.range(of: "Section(\"action.sync_sharing\")"))
         let mcpSource = String(source[mcpStart.lowerBound..<syncStart.lowerBound])
 
-        XCTAssertTrue(mcpSource.contains("action.enable_mcp"))
-        XCTAssertTrue(mcpSource.contains("action.generate_server_config"))
+        XCTAssertTrue(mcpSource.contains("action.allow_local_agent_connection"))
         XCTAssertTrue(mcpSource.contains("action.connect_ai_tool"))
+        XCTAssertTrue(mcpSource.contains("action.agent_privacy_and_access"))
         XCTAssertTrue(mcpSource.contains("detectedMCPClientCandidates"))
         XCTAssertTrue(mcpSource.contains("supportedMCPClientCandidates"))
         XCTAssertTrue(source.contains("struct MCPClientDetector"))
         XCTAssertFalse(source.contains("MCPClientConfigurationTarget.settingsMenuTargets"))
-        XCTAssertTrue(mcpSource.contains("action.shut_down_mcp_server"))
         XCTAssertTrue(mcpSource.contains("label.connected_ai_tools"))
+        XCTAssertFalse(mcpSource.contains("action.generate_server_config"))
+        XCTAssertFalse(mcpSource.contains("action.shut_down_mcp_server"))
+        XCTAssertFalse(mcpSource.contains("mcpServerCommandSummary"))
         XCTAssertTrue(source.contains("struct MCPClientConfigurationSheet"))
         XCTAssertTrue(source.contains("struct MCPClientCommandRunner"))
         XCTAssertTrue(source.contains("runMCPInstallationCommand"))
@@ -1318,6 +1320,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("setMCPTool(tool, enabled: $0)"))
         XCTAssertTrue(source.contains("action.revoke_mcp_access"))
         XCTAssertTrue(source.contains("message.retrieve_item_requires_explicit_mcp_opt_in"))
+        let advancedStart = try XCTUnwrap(source.range(of: "private struct MCPAdvancedSettingsSheet"))
+        let excludedAppsStart = try XCTUnwrap(source.range(of: "private struct ExcludedApplicationsSheet"))
+        let advancedSource = String(source[advancedStart.lowerBound..<excludedAppsStart.lowerBound])
+        XCTAssertFalse(advancedSource.contains("action.enable_mcp"))
         XCTAssertFalse(mcpSource.contains("127.0.0.1"))
     }
 
@@ -1567,12 +1573,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(storageSource.contains("label.storage_usage"))
         XCTAssertTrue(storageSource.contains("DisclosureGroup(\"label.history_access\")"))
         XCTAssertTrue(storageSource.contains("DisclosureGroup(\"label.advanced_storage\")"))
-        XCTAssertTrue(storageSource.contains("store.updateMaxStorageBytes"))
+        XCTAssertTrue(storageSource.contains("requestRetentionDaysChange"))
+        XCTAssertTrue(storageSource.contains("requestMaxStorageBytesChange"))
         XCTAssertTrue(storageSource.contains("Menu(\"action.clear_history_ellipsis\")"))
         XCTAssertTrue(storageSource.contains("destructiveConfirmation = .clearUnpinnedHistory"))
         XCTAssertTrue(storageSource.contains("destructiveConfirmation = .clearAllHistory"))
         XCTAssertFalse(storageSource.contains("Section(\"action.paste\")"))
         XCTAssertFalse(storageSource.contains("Paste as plain text by default"))
+        XCTAssertTrue(source.contains("destructiveConfirmation = .reduceRetentionDays(value)"))
+        XCTAssertTrue(source.contains("destructiveConfirmation = .reduceStorageLimit(value)"))
+        XCTAssertTrue(source.contains("case .reduceRetentionDays(let days):"))
+        XCTAssertTrue(source.contains("case .reduceStorageLimit(let bytes):"))
     }
 
     func testPanelHotKeyControllerPausesGlobalHotKeysWhileRecordingShortcuts() throws {
@@ -1593,6 +1604,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let plansSource = String(source[plansStart.lowerBound..<shortcutsStart.lowerBound])
 
         XCTAssertTrue(plansSource.contains("action.restore_purchases"))
+        XCTAssertTrue(plansSource.contains("AppleStoreKitEntitlementProvider()"))
+        XCTAssertTrue(plansSource.contains("await store.flushPendingSave()"))
+        XCTAssertFalse(plansSource.contains("action.start_trial"))
+        XCTAssertFalse(plansSource.contains("action.cancel_trial"))
+        XCTAssertFalse(plansSource.contains("store.activatePersonalPlan"))
+        XCTAssertFalse(plansSource.contains("markRestorePurchasesFailed"))
         XCTAssertFalse(plansSource.contains("statusName"))
         XCTAssertFalse(plansSource.contains("accessState"))
         XCTAssertFalse(plansSource.contains("trialState.displayName"))
@@ -1606,6 +1623,23 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(plansSource.contains("StoreKit restore"))
         XCTAssertFalse(plansSource.contains("option.detail"))
         XCTAssertFalse(plansSource.contains("option.unlockSummary"))
+    }
+
+    func testIntegrationSettingsMovesImmediateActionsIntoDisclosures() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let integrationsStart = try XCTUnwrap(source.range(of: "private var integrationsSettingsForm"))
+        let confirmationStart = try XCTUnwrap(source.range(of: "private var isShowingDestructiveConfirmation"))
+        let integrationsSource = String(source[integrationsStart.lowerBound..<confirmationStart.lowerBound])
+
+        XCTAssertTrue(integrationsSource.contains("DisclosureGroup(\"label.sync_recovery_and_sharing\")"))
+        XCTAssertTrue(integrationsSource.contains("DisclosureGroup(\"action.add_device_ellipsis\")"))
+        XCTAssertTrue(integrationsSource.contains("destructiveConfirmation = .disableSharedPinboards"))
+        XCTAssertTrue(integrationsSource.contains("destructiveConfirmation = .disableCloudSync"))
+        XCTAssertFalse(integrationsSource.contains("action.send_latest_clipboard_item"))
+        XCTAssertFalse(integrationsSource.contains("Section(\"label.direct_paste\")"))
+        XCTAssertFalse(integrationsSource.contains("label.last_imported_package"))
+        XCTAssertTrue(source.contains("case .disableSharedPinboards:"))
+        XCTAssertTrue(source.contains("case .disableCloudSync:"))
     }
 
     func testPanelHotKeyMatcherSeparatesSidePanelAndShelfActions() {

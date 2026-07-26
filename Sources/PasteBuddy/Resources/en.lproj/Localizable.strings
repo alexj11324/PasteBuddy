@@ -1,8 +1,11 @@
 /* Canonical semantic keys. Prefer these keys in SwiftUI and code. */
 "action.add_app" = "Add App";
+"action.add_device_ellipsis" = "Add Device...";
 "action.add_item_or_pinboard" = "Add item or pinboard";
 "action.add_rule" = "Add Rule";
+"action.agent_privacy_and_access" = "Agent Privacy & Access...";
 "action.allow_local_agent_connection" = "Allow local Agent connection";
+"action.apply_storage_limit" = "Apply Limit";
 "action.cancel" = "Cancel";
 "action.cancel_trial" = "Cancel Trial";
 "action.clear_all_history" = "Clear All History";
@@ -45,6 +48,7 @@
 "action.disable_click_through" = "Disable Click-Through";
 "action.disable_click_through_all_pins" = "Disable Click-Through for All Pins";
 "action.disable_launch_at_login" = "Disable Launch at Login";
+"action.disable_shared_pinboards" = "Disable Shared Pinboards";
 "action.dismiss" = "Dismiss";
 "action.done" = "Done";
 "action.enable_always_on_top" = "Enable Always on Top";
@@ -192,8 +196,12 @@
 "dialog.clear_all_history" = "Clear All History?";
 "dialog.clear_unpinned_history" = "Clear Unpinned History?";
 "dialog.delete_pinboard" = "Delete Pinboard?";
+"dialog.disable_shared_pinboards" = "Disable Shared Pinboards?";
 "dialog.new_pin_group" = "New Pin Group";
+"dialog.reduce_history_retention" = "Reduce History Retention?";
+"dialog.reduce_storage_limit" = "Reduce Storage Limit?";
 "dialog.rename_pin" = "Rename Pin";
+"dialog.reset_sync_to_local_only" = "Reset Sync to Local Only?";
 "dialog.save_all_pins" = "Save All Pins";
 "format.added_mcp_client" = "Added PasteBuddy to %@. If the client is already running, refresh MCP servers or restart the client.";
 "format.assigned" = "Assigned: %d";
@@ -232,6 +240,8 @@
 "format.pinboard_color" = "Pinboard color %@";
 "format.quick_paste_index" = "Quick Paste %d";
 "format.quick_paste_index_as_plain_text" = "Quick Paste %d as Plain Text";
+"format.reducing_retention_may_remove_history" = "Keeping history for %d days may immediately remove older unpinned items.";
+"format.reducing_storage_may_remove_history" = "Using a %@ limit may immediately remove older unpinned items.";
 "format.refine_search_or_filters_to_see_more" = "Refine search or filters to see %d more.";
 "format.remove" = "Remove %@";
 "format.remove_label" = "Remove label %@";
@@ -331,6 +341,7 @@
 "label.destination" = "Destination";
 "label.detected_ai_tools" = "Detected AI Tools";
 "label.device" = "Device";
+"label.device_connections" = "Device Connections";
 "label.device_filter" = "Device filter";
 "label.device_unlock" = "Device Unlock";
 "label.digits_only" = "Digits only";
@@ -529,6 +540,8 @@
 "label.storage_usage" = "Storage Usage";
 "label.supported_ai_tools" = "Supported AI Tools";
 "label.supported_locales" = "Supported Locales";
+"label.sync_recovery_and_sharing" = "Sync Recovery & Sharing";
+"label.sync_status" = "Sync Status";
 "label.team" = "Team";
 "label.team_name" = "Team Name";
 "label.template" = "Template";
@@ -574,6 +587,7 @@
 "message.copy_text_links_images_or_files_to" = "Copy text, links, images, or files to start building local history.";
 "message.custom_rules_run_locally_before_capture_and" = "Custom rules run locally before capture and are stored with local history settings.";
 "message.direct_paste_copies_the_selected_item_first" = "Direct paste copies the selected item first, then sends Command-V only when macOS Accessibility access is granted.";
+"message.disabling_shared_pinboards_removes_sharing_metadata" = "This removes sharing metadata from every Pinboard. Clipboard history and local Pinboard contents stay on this Mac.";
 "message.double_click_or_press_return_to_paste" = "Double-click or press Return to paste.";
 "message.drag_to_reorder_items" = "Drag to reorder items.";
 "message.drop_clipboard_items_here_to_pin_them" = "Drop clipboard items here to pin them.";
@@ -612,6 +626,7 @@
 "message.recognized_local_ocr_text_appears_below_the" = "Recognized local OCR text appears below the image when available.";
 "message.removes_all_active_clipboard_filters" = "Removes all active clipboard filters.";
 "message.removes_this_clipboard_item_from_history_and" = "Removes this clipboard item from history and pinboards. Use Undo Delete to restore it.";
+"message.resetting_sync_to_local_only_disables_cloud" = "This disables cloud sync and resets its local configuration. Local clipboard history stays on this Mac.";
 "message.retrieve_item_requires_explicit_mcp_opt_in" = "Retrieving full clipboard payloads is off by default. Turn on Retrieve Clipboard Item only for AI tools you trust.";
 "message.run_local_apple_ocr_after_image_capture" = "Run local Apple OCR after image capture";
 "message.saves_edits_back_to_clipboard_history" = "Saves edits back to clipboard history.";
@@ -765,9 +780,11 @@
 "state.none" = "None";
 "state.off" = "Off";
 "state.optional" = "Optional";
+"state.purchases_restored" = "Purchases restored.";
 "state.ready" = "Ready";
 "state.recognizing_text" = "Recognizing text…";
 "state.required" = "Required";
+"state.restoring_purchases" = "Restoring purchases...";
 "state.selected" = "Selected";
 
 /* Legacy compatibility aliases for model displayName values and older persisted flows. */

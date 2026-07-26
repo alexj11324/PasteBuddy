@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var mcpClientCandidates: [MCPClientCandidate] = []
     @State private var isRunningMCPClientInstall = false
     @State private var mcpStatusMessage: String?
+    @State private var isRestoringPurchases = false
 
     var body: some View {
         settingsSplitView
@@ -463,7 +464,7 @@ struct SettingsView: View {
                 Stepper(
                     value: Binding(
                         get: { store.snapshot.storage.retentionDays },
-                        set: { store.updateRetentionDays($0) }
+                        set: { requestRetentionDaysChange($0) }
                     ),
                     in: 0...730,
                     step: 7
@@ -490,7 +491,7 @@ struct SettingsView: View {
                     Stepper(
                         value: Binding(
                             get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
-                            set: { store.updateMaxStorageBytes($0 * 1_024 * 1_024) }
+                            set: { requestMaxStorageBytesChange($0 * 1_024 * 1_024) }
                         ),
                         in: 1...102_400,
                         step: 50
@@ -515,7 +516,7 @@ struct SettingsView: View {
     }
 
     private var plansSettingsForm: some View {
-            Form {
+        Form {
             Section("label.plan") {
                 LabeledContent("label.current_plan") {
                     Text(localizedPlanName(for: store.snapshot.entitlement.plan))
@@ -533,45 +534,25 @@ struct SettingsView: View {
                     }
                 }
 
-                HStack {
-                    Button("action.start_trial") {
-                        store.startFreeTrial()
-                    }
-
-                    Button("action.cancel_trial") {
-                        store.cancelFreeTrial()
-                    }
-                    .disabled(!store.snapshot.entitlement.isTrialActive())
-                }
-
-                HStack {
-                    Button("label.monthly") {
-                        store.activatePersonalPlan(.monthly, currentPeriodEndsAt: oneMonthFromNow)
-                    }
-
-                    Button("label.annual") {
-                        store.activatePersonalPlan(.annual, currentPeriodEndsAt: oneYearFromNow)
-                    }
-
-                    Button("label.lifetime") {
-                        store.activatePersonalPlan(.lifetime)
-                    }
-
-                    Button("label.family") {
-                        store.activatePersonalPlan(.family, currentPeriodEndsAt: oneYearFromNow)
-                    }
-                }
-
                 Button("action.restore_purchases") {
-                    let now = Date()
-                    store.markRestorePurchasesStarted(at: now)
-                    store.markRestorePurchasesFailed("Restore purchases is not available in this build.", at: now)
+                    isRestoringPurchases = true
+                    Task {
+                        await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
+                        await store.flushPendingSave()
+                        isRestoringPurchases = false
+                    }
                 }
+                .disabled(isRestoringPurchases)
 
+                if let restoreStatusMessage {
+                    Text(restoreStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            }
-            .formStyle(.grouped)
-            .scenePadding()
+        }
+        .formStyle(.grouped)
+        .scenePadding()
     }
 
     private var shortcutsSettingsForm: some View {
@@ -619,83 +600,26 @@ struct SettingsView: View {
     }
 
     private var integrationsSettingsForm: some View {
-            Form {
+        Form {
             Section("label.mcp_ai_tools") {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Toggle(
-                                "action.enable_mcp",
-                                isOn: Binding(
-                                    get: { store.snapshot.mcp.isServerEnabled },
-                                    set: { store.setMCPServerEnabled($0) }
-                                )
-                            )
-                            .font(.headline)
+                Toggle(
+                    "action.allow_local_agent_connection",
+                    isOn: Binding(
+                        get: { store.snapshot.mcp.isServerEnabled },
+                        set: { store.setMCPServerEnabled($0) }
+                    )
+                )
 
-                            Text("message.mcp_allows_ai_apps_to_connect")
-                                .foregroundStyle(.secondary)
-                        }
+                Text("message.mcp_allows_ai_apps_to_connect")
+                    .foregroundStyle(.secondary)
 
-                        Spacer()
-
-                        Label(
-                            store.snapshot.mcp.isServerEnabled ? "state.enabled" : "state.off",
-                            systemImage: store.snapshot.mcp.isServerEnabled ? "checkmark.circle.fill" : "pause.circle"
-                        )
-                        .foregroundStyle(store.snapshot.mcp.isServerEnabled ? .green : .secondary)
-                    }
-
-                    Divider()
-
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(store.snapshot.mcp.isServerEnabled ? .green : .secondary)
-                            .frame(width: 8, height: 8)
-
-                        Text(mcpServerCommandSummary)
-                            .font(.caption.monospaced())
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-
-                        Spacer()
-
-                        Button {
-                            copyMCPServerCommand(for: .custom)
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("action.copy_server_command")
-
-                        Button("label.advanced_ellipsis") {
-                            showingMCPAdvancedSettings = true
-                        }
-                    }
-
-                    HStack(spacing: 10) {
-                        Button("action.generate_server_config") {
-                            selectedMCPClient = .custom
-                        }
-
-                        Menu {
-                            if detectedMCPClientCandidates.isEmpty {
-                                Text("message.no_detected_mcp_clients")
-                            } else {
-                                Section("label.detected_ai_tools") {
-                                    ForEach(detectedMCPClientCandidates) { candidate in
-                                        Button {
-                                            selectedMCPClient = candidate.target
-                                        } label: {
-                                            Label(candidate.displayName, systemImage: candidate.target.systemImageName)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Section("label.supported_ai_tools") {
-                                ForEach(supportedMCPClientCandidates) { candidate in
+                HStack(spacing: 10) {
+                    Menu {
+                        if detectedMCPClientCandidates.isEmpty {
+                            Text("message.no_detected_mcp_clients")
+                        } else {
+                            Section("label.detected_ai_tools") {
+                                ForEach(detectedMCPClientCandidates) { candidate in
                                     Button {
                                         selectedMCPClient = candidate.target
                                     } label: {
@@ -703,41 +627,46 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+                        }
 
-                            Divider()
-
-                            Button {
-                                reloadMCPClientCandidates()
-                            } label: {
-                                Label("action.refresh_detected_ai_tools", systemImage: "arrow.clockwise")
+                        Section("label.supported_ai_tools") {
+                            ForEach(supportedMCPClientCandidates) { candidate in
+                                Button {
+                                    selectedMCPClient = candidate.target
+                                } label: {
+                                    Label(candidate.displayName, systemImage: candidate.target.systemImageName)
+                                }
                             }
+                        }
 
-                            Button {
-                                selectedMCPClient = .custom
-                            } label: {
-                                Label("action.custom_ai_tool", systemImage: "wrench.and.screwdriver")
-                            }
+                        Divider()
+
+                        Button {
+                            reloadMCPClientCandidates()
                         } label: {
-                            Label("action.connect_ai_tool", systemImage: "plus.circle")
+                            Label("action.refresh_detected_ai_tools", systemImage: "arrow.clockwise")
                         }
 
-                        Spacer()
-
-                        Button("action.shut_down_mcp_server", role: .destructive) {
-                            shutdownMCPServer()
+                        Button {
+                            selectedMCPClient = .custom
+                        } label: {
+                            Label("action.custom_ai_tool", systemImage: "wrench.and.screwdriver")
                         }
-                        .disabled(!store.snapshot.mcp.isServerEnabled)
+                    } label: {
+                        Label("action.connect_ai_tool", systemImage: "plus.circle")
                     }
 
-                    Text(mcpClientDetectionSummary)
+                    Button("action.agent_privacy_and_access") {
+                        showingMCPAdvancedSettings = true
+                    }
+
+                    Spacer()
+                }
+
+                if let mcpStatusMessage {
+                    Text(mcpStatusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    if let mcpStatusMessage {
-                        Text(mcpStatusMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
 
@@ -760,13 +689,13 @@ struct SettingsView: View {
             }
 
             Section("action.sync_sharing") {
-                LabeledContent("label.mode") {
-                    Text(localized(store.snapshot.sync.provider.displayName))
-                }
-
-                LabeledContent("label.readiness") {
-                    Text(localized(store.syncReadiness.displayName))
-                        .foregroundStyle(syncStatusColor)
+                LabeledContent("label.sync_status") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(localized(store.snapshot.sync.provider.displayName))
+                        Text(localized(store.syncReadiness.displayName))
+                            .font(.caption)
+                            .foregroundStyle(syncStatusColor)
+                    }
                 }
 
                 if let lastSyncAt = store.snapshot.sync.lastSyncAt {
@@ -775,31 +704,10 @@ struct SettingsView: View {
                     }
                 }
 
-                if let lastImportedPackageID = store.snapshot.sync.lastImportedPackageID {
-                    LabeledContent("label.last_imported_package") {
-                        Text(String(lastImportedPackageID.uuidString.prefix(8)) + "...")
-                    }
-                }
-
                 if store.snapshot.sync.lastSyncConflictCount > 0 {
                     LabeledContent("label.last_conflicts") {
                         Text("\(store.snapshot.sync.lastSyncConflictCount)")
                             .foregroundStyle(.orange)
-                    }
-                }
-
-                Toggle(
-                    "label.shared_pinboards",
-                    isOn: Binding(
-                        get: { store.snapshot.sync.isSharedPinboardsEnabled },
-                        set: { store.setSharedPinboardsEnabled($0) }
-                    )
-                )
-                .disabled(!store.syncReadiness.canAttemptCloudSync)
-
-                if store.snapshot.sync.provider != .none {
-                    Button("label.reset_to_local_only") {
-                        store.disableCloudSync()
                     }
                 }
 
@@ -811,58 +719,73 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                DisclosureGroup("label.sync_recovery_and_sharing") {
+                    Toggle(
+                        "label.shared_pinboards",
+                        isOn: Binding(
+                            get: { store.snapshot.sync.isSharedPinboardsEnabled },
+                            set: { isEnabled in
+                                if isEnabled {
+                                    store.setSharedPinboardsEnabled(true)
+                                } else {
+                                    destructiveConfirmation = .disableSharedPinboards
+                                }
+                            }
+                        )
+                    )
+                    .disabled(!store.syncReadiness.canAttemptCloudSync)
+
+                    if store.snapshot.sync.provider != .none {
+                        Button("label.reset_to_local_only", role: .destructive) {
+                            destructiveConfirmation = .disableCloudSync
+                        }
+                    }
+                }
             }
 
-            Section("label.iroh_clipboard_sync") {
+            Section("label.device_connections") {
                 LabeledContent("label.status") {
                     Text(irohStatusText)
                         .foregroundStyle(irohStatusColor)
                 }
 
-                if !irohSync.endpointId.isEmpty {
-                    LabeledContent("label.this_device") {
-                        Text(irohSync.endpointId)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
+                DisclosureGroup("action.add_device_ellipsis") {
+                    if !irohSync.endpointId.isEmpty {
+                        LabeledContent("label.this_device") {
+                            Text(irohSync.endpointId)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
                     }
-                }
 
-                if let pairingURL = irohSync.pairingURL {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .top, spacing: 12) {
-                            IrohPairingQRCodeView(value: pairingURL.absoluteString)
-                                .frame(width: 132, height: 132)
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("message.scan_pairing_qr_from_iphone")
-                                    .foregroundStyle(.secondary)
-                                Text(pairingURL.absoluteString)
-                                    .font(.caption.monospaced())
-                                    .textSelection(.enabled)
-                                Button("action.copy_pairing_link") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(pairingURL.absoluteString, forType: .string)
+                    if let pairingURL = irohSync.pairingURL {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .top, spacing: 12) {
+                                IrohPairingQRCodeView(value: pairingURL.absoluteString)
+                                    .frame(width: 132, height: 132)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("message.scan_pairing_qr_from_iphone")
+                                        .foregroundStyle(.secondary)
+                                    Text(pairingURL.absoluteString)
+                                        .font(.caption.monospaced())
+                                        .textSelection(.enabled)
+                                    Button("action.copy_pairing_link") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(pairingURL.absoluteString, forType: .string)
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption.monospaced())
+                    TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption.monospaced())
 
-                HStack {
                     Button("action.connect") {
                         Task { await irohSync.connectToPeer() }
                     }
                     .disabled(irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                    Button("action.send_latest_clipboard_item") {
-                        if let item = store.snapshot.items.first {
-                            Task { await irohSync.send(item) }
-                        }
-                    }
-                    .disabled(!irohSync.connectionState.isConnected || store.snapshot.items.isEmpty)
                 }
 
                 if let lastReceivedTitle = irohSync.lastReceivedTitle {
@@ -873,34 +796,9 @@ struct SettingsView: View {
                 Text("message.iroh_clipboard_sync_local_peer")
                     .foregroundStyle(.secondary)
             }
-
-            Section("label.direct_paste") {
-                LabeledContent("label.accessibility_access") {
-                    Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
-                        .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
-                }
-
-                Button("action.request_accessibility_access") {
-                    AccessibilityPermissionService.requestTrustPrompt()
-                }
-
-                if let result = store.lastDirectPasteResult {
-                    LabeledContent("label.last_direct_paste") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(result.statusMessage)
-                            if let guidance = result.permissionGuidance {
-                                Text(guidance.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-
-            }
-            .formStyle(.grouped)
-            .scenePadding()
+        }
+        .formStyle(.grouped)
+        .scenePadding()
     }
 
     private var isShowingDestructiveConfirmation: Binding<Bool> {
@@ -920,6 +818,34 @@ struct SettingsView: View {
             store.clearUnpinnedHistory()
         case .clearAllHistory:
             store.clearAllHistoryIncludingPinnedItems()
+        case .disableSharedPinboards:
+            store.setSharedPinboardsEnabled(false)
+        case .disableCloudSync:
+            store.disableCloudSync()
+        case .reduceRetentionDays(let days):
+            store.updateRetentionDays(days)
+        case .reduceStorageLimit(let bytes):
+            store.updateMaxStorageBytes(bytes)
+        }
+    }
+
+    private func requestRetentionDaysChange(_ value: Int) {
+        let value = StorageConfiguration.clampRetentionDays(value)
+        let current = store.snapshot.storage.retentionDays
+        let removesHistory = value != 0 && (current == 0 || value < current)
+        if removesHistory {
+            destructiveConfirmation = .reduceRetentionDays(value)
+        } else {
+            store.updateRetentionDays(value)
+        }
+    }
+
+    private func requestMaxStorageBytesChange(_ value: Int) {
+        let value = StorageConfiguration.clampMaxStorageBytes(value)
+        if value < store.snapshot.storage.maxStorageBytes {
+            destructiveConfirmation = .reduceStorageLimit(value)
+        } else {
+            store.updateMaxStorageBytes(value)
         }
     }
 
@@ -966,26 +892,12 @@ struct SettingsView: View {
         }
     }
 
-    private var mcpServerCommandSummary: String {
-        commandSummary(for: mcpClientGuide(for: .custom))
-    }
-
     private var detectedMCPClientCandidates: [MCPClientCandidate] {
         mcpClientCandidates.filter(\.isDetected)
     }
 
     private var supportedMCPClientCandidates: [MCPClientCandidate] {
         mcpClientCandidates.filter { !$0.isDetected }
-    }
-
-    private var mcpClientDetectionSummary: String {
-        guard !detectedMCPClientCandidates.isEmpty else {
-            return localized("message.no_detected_mcp_clients")
-        }
-        let names = detectedMCPClientCandidates
-            .map(\.displayName)
-            .joined(separator: ", ")
-        return localized("format.detected_mcp_clients", names)
     }
 
     private func reloadMCPClientCandidates() {
@@ -1080,11 +992,6 @@ struct SettingsView: View {
         mcpStatusMessage = localized("format.copied_mcp_install_link_for", target.displayName)
     }
 
-    private func shutdownMCPServer() {
-        store.setMCPServerEnabled(false)
-        mcpStatusMessage = localized("message.mcp_server_shut_down")
-    }
-
     private func commandSummary(for guide: MCPClientConfigurationGuide) -> String {
         ([guide.command] + guide.arguments).joined(separator: " ")
     }
@@ -1122,10 +1029,6 @@ struct SettingsView: View {
         localized("format.settings", localized(destination.displayName))
     }
 
-    private var personalOverview: PersonalEntitlementOverview {
-        store.snapshot.entitlement.personalOverview()
-    }
-
     private func localizedPlanName(for plan: ProductAccessPlan) -> String {
         switch plan {
         case .free:
@@ -1145,12 +1048,17 @@ struct SettingsView: View {
         }
     }
 
-    private var oneMonthFromNow: Date {
-        Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date().addingTimeInterval(30 * 24 * 60 * 60)
-    }
-
-    private var oneYearFromNow: Date {
-        Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date().addingTimeInterval(365 * 24 * 60 * 60)
+    private var restoreStatusMessage: String? {
+        switch store.snapshot.entitlement.restoreState {
+        case .notStarted:
+            nil
+        case .inProgress:
+            localized("state.restoring_purchases")
+        case .restored:
+            localized("state.purchases_restored")
+        case .failed(_, let message):
+            message
+        }
     }
 
     private var retentionDescription: String {
@@ -1331,14 +1239,6 @@ private struct MCPAdvancedSettingsSheet: View {
                     dismiss()
                 }
             }
-
-            Toggle(
-                "action.enable_mcp",
-                isOn: Binding(
-                    get: { store.snapshot.mcp.isServerEnabled },
-                    set: { store.setMCPServerEnabled($0) }
-                )
-            )
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("label.mcp_tools")
@@ -1781,6 +1681,10 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
 private enum SettingsDestructiveAction {
     case clearUnpinnedHistory
     case clearAllHistory
+    case disableSharedPinboards
+    case disableCloudSync
+    case reduceRetentionDays(Int)
+    case reduceStorageLimit(Int)
 
     var title: String {
         switch self {
@@ -1788,6 +1692,14 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("dialog.clear_unpinned_history", comment: "")
         case .clearAllHistory:
             NSLocalizedString("dialog.clear_all_history", comment: "")
+        case .disableSharedPinboards:
+            NSLocalizedString("dialog.disable_shared_pinboards", comment: "")
+        case .disableCloudSync:
+            NSLocalizedString("dialog.reset_sync_to_local_only", comment: "")
+        case .reduceRetentionDays:
+            NSLocalizedString("dialog.reduce_history_retention", comment: "")
+        case .reduceStorageLimit:
+            NSLocalizedString("dialog.reduce_storage_limit", comment: "")
         }
     }
 
@@ -1797,6 +1709,22 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("message.this_removes_every_unpinned_clipboard_item_from", comment: "")
         case .clearAllHistory:
             NSLocalizedString("message.this_removes_all_local_clipboard_history_including", comment: "")
+        case .disableSharedPinboards:
+            NSLocalizedString("message.disabling_shared_pinboards_removes_sharing_metadata", comment: "")
+        case .disableCloudSync:
+            NSLocalizedString("message.resetting_sync_to_local_only_disables_cloud", comment: "")
+        case .reduceRetentionDays(let days):
+            String(
+                format: NSLocalizedString("format.reducing_retention_may_remove_history", comment: ""),
+                locale: Locale.current,
+                days
+            )
+        case .reduceStorageLimit(let bytes):
+            String(
+                format: NSLocalizedString("format.reducing_storage_may_remove_history", comment: ""),
+                locale: Locale.current,
+                ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+            )
         }
     }
 
@@ -1806,6 +1734,12 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("action.clear_unpinned_history", comment: "")
         case .clearAllHistory:
             NSLocalizedString("action.clear_all_history", comment: "")
+        case .disableSharedPinboards:
+            NSLocalizedString("action.disable_shared_pinboards", comment: "")
+        case .disableCloudSync:
+            NSLocalizedString("label.reset_to_local_only", comment: "")
+        case .reduceRetentionDays, .reduceStorageLimit:
+            NSLocalizedString("action.apply_storage_limit", comment: "")
         }
     }
 }
