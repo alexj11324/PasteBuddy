@@ -88,7 +88,14 @@ struct PasteBuddyApp: App {
     var body: some Scene {
         let _ = configureAppDelegate()
         Settings {
-            SettingsView(store: store, irohSync: irohSync)
+            SettingsView(
+                store: store,
+                irohSync: irohSync,
+                panelDisplayMode: Binding(
+                    get: { panelDisplayMode },
+                    set: { panelDisplayMode = $0 }
+                )
+            )
         }
     }
 

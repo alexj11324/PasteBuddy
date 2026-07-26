@@ -9198,6 +9198,22 @@
         }
       }
     },
+    "action.recognize_text_in_copied_images": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognize text in copied images"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "识别已复制图片中的文字"
+          }
+        }
+      }
+    },
     "action.refresh_detected_ai_tools": {
       "localizations": {
         "en": {
@@ -9546,6 +9562,86 @@
           "stringUnit": {
             "state": "translated",
             "value": "保存所有贴图"
+          }
+        }
+      }
+    },
+    "action.save_clipboard_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save clipboard history"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存剪贴板历史"
+          }
+        }
+      }
+    },
+    "action.save_copied_files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save copied files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存已复制文件"
+          }
+        }
+      }
+    },
+    "action.save_copied_images": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save copied images"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存已复制图片"
+          }
+        }
+      }
+    },
+    "action.save_copied_links": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save copied links"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存已复制链接"
+          }
+        }
+      }
+    },
+    "action.save_copied_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save copied text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存已复制文本"
           }
         }
       }
@@ -11688,6 +11784,22 @@
         }
       }
     },
+    "label.advanced_capture_rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced Capture Rules"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高级捕获规则"
+          }
+        }
+      }
+    },
     "label.advanced_ellipsis": {
       "localizations": {
         "en": {
@@ -12100,6 +12212,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "捕获已开启"
+          }
+        }
+      }
+    },
+    "label.capture_and_privacy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture & Privacy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捕获与隐私"
           }
         }
       }
@@ -16616,6 +16744,38 @@
         }
       }
     },
+    "message.copied_image_ocr_requires_image_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on copied image history to recognize text."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先开启已复制图片历史，才能识别文字。"
+          }
+        }
+      }
+    },
+    "message.copied_image_ocr_runs_on_device": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text recognition uses Apple Vision on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字识别使用本机 Apple Vision 处理。"
+          }
+        }
+      }
+    },
     "message.copy_text_links_images_or_files_to": {
       "localizations": {
         "en": {
@@ -16776,22 +16936,6 @@
         }
       }
     },
-    "message.live_text_unavailable": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Live Text is unavailable on this Mac."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此 Mac 不支持实况文本。"
-          }
-        }
-      }
-    },
     "message.iroh_clipboard_sync_local_peer": {
       "localizations": {
         "en": {
@@ -16836,6 +16980,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "此构建版本不支持登录时启动"
+          }
+        }
+      }
+    },
+    "message.live_text_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live Text is unavailable on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Mac 不支持实况文本。"
           }
         }
       }

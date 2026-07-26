@@ -101,6 +101,7 @@
 "action.pin_translation" = "Pin Translation";
 "action.quit_app" = "Quit PasteBuddy";
 "action.recognize_text" = "Recognize Text";
+"action.recognize_text_in_copied_images" = "Recognize text in copied images";
 "action.refresh_detected_ai_tools" = "Refresh Detected Tools";
 "action.reload_clipboard_history" = "Reload clipboard history";
 "action.remove" = "Remove";
@@ -123,6 +124,11 @@
 "action.run_install_command" = "Run Install Command";
 "action.save" = "Save";
 "action.save_all_pins" = "Save All Pins";
+"action.save_clipboard_history" = "Save clipboard history";
+"action.save_copied_files" = "Save copied files";
+"action.save_copied_images" = "Save copied images";
+"action.save_copied_links" = "Save copied links";
+"action.save_copied_text" = "Save copied text";
 "action.save_labels" = "Save Labels";
 "action.save_text" = "Save Text";
 "action.save_title" = "Save Title";
@@ -246,6 +252,7 @@
 "label.active_rules" = "Active Rules";
 "label.admin" = "Admin";
 "label.admin_email" = "Admin Email";
+"label.advanced_capture_rules" = "Advanced Capture Rules";
 "label.advanced_ellipsis" = "Advanced...";
 "label.agent_connection" = "Agent Connection (MCP)";
 "label.agent_connection_status" = "Agent Connection";
@@ -272,6 +279,7 @@
 "label.capture" = "Capture";
 "label.capture_active" = "Capture Active";
 "label.capture_active.d7a4a72f" = "Capture active";
+"label.capture_and_privacy" = "Capture & Privacy";
 "label.capture_files" = "Capture files";
 "label.capture_images" = "Capture images";
 "label.capture_is_active" = "Capture is active";
@@ -554,6 +562,8 @@
 "message.clipboard_history_is_temporarily_unavailable" = "Clipboard history is temporarily unavailable.";
 "message.clipboard_payloads_images_ocr_metadata_thumbnails_privacy" = "Clipboard data stays on this Mac unless you turn on sync, sharing, or MCP.";
 "message.configure_cloudkit_sync_and_turn_on_shared" = "Configure CloudKit sync and turn on Shared Pinboards before sharing.";
+"message.copied_image_ocr_requires_image_history" = "Turn on copied image history to recognize text.";
+"message.copied_image_ocr_runs_on_device" = "Text recognition uses Apple Vision on this Mac.";
 "message.copy_text_links_images_or_files_to" = "Copy text, links, images, or files to start building local history.";
 "message.custom_rules_run_locally_before_capture_and" = "Custom rules run locally before capture and are stored with local history settings.";
 "message.direct_paste_copies_the_selected_item_first" = "Direct paste copies the selected item first, then sends Command-V only when macOS Accessibility access is granted.";
@@ -564,10 +574,10 @@
 "message.encrypts_clipboard_history_ocr_metadata_thumbnails_and" = "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain.";
 "message.image_data_unavailable_for_preview" = "The full image is unavailable.";
 "message.image_data_unavailable_for_text_recognition" = "The selected image data is unavailable for text recognition.";
-"message.live_text_unavailable" = "Live Text is unavailable on this Mac.";
 "message.iroh_clipboard_sync_local_peer" = "Uses iroh peer-to-peer transport. Clipboard payloads are sent only to the connected peer.";
 "message.items_stay_in_clipboard_history_only_this" = "Items stay in clipboard history. Only this pinboard collection is removed.";
 "message.launch_at_login_is_unavailable_in_this" = "Launch at login is unavailable in this build";
+"message.live_text_unavailable" = "Live Text is unavailable on this Mac.";
 "message.local_only_cloudkit_sync_is_disabled" = "Local only: CloudKit sync is disabled.";
 "message.mcp_allows_ai_apps_to_connect" = "Allow approved AI apps to read and organize your local clipboard history and pinboards through PasteBuddy MCP.";
 "message.mcp_server_shut_down" = "MCP access is off.";
