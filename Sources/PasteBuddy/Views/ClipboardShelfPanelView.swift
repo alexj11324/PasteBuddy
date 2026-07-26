@@ -40,6 +40,7 @@ private struct ClipboardShelfQueryState: Equatable {
 
 private enum ClipboardShelfDisplayItem: Identifiable {
     case launchAtLoginPrompt
+    case loading
     case empty(title: String, detail: String, systemImageName: String)
     case clipboard(ClipboardItem)
 
@@ -47,6 +48,8 @@ private enum ClipboardShelfDisplayItem: Identifiable {
         switch self {
         case .launchAtLoginPrompt:
             UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        case .loading:
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         case .empty:
             UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         case .clipboard(let item):
@@ -79,6 +82,7 @@ struct ClipboardShelfPanelView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var store: PasteBuddyStore
+    @Binding var isPinned: Bool
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let reloadClipboardHistory: @MainActor () async -> Void
@@ -93,6 +97,7 @@ struct ClipboardShelfPanelView: View {
     @State private var isSearchRailPresented = false
     @State private var timestampReference = Date()
     @State private var shelfScope: PasteScope = .history
+    @State private var pinnedState: Bool?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -165,6 +170,17 @@ struct ClipboardShelfPanelView: View {
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
+                Button {
+                    setPinned(!effectivePinned)
+                } label: {
+                    ShelfToolbarCircleIcon(systemName: effectivePinned ? "pin.fill" : "pin")
+                        .rotationEffect(.degrees(45))
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .help(localized("action.pin"))
+                .accessibilityLabel(localized("action.pin"))
+
                 searchControl
                     .layoutPriority(3)
                     .zIndex(20)
@@ -432,6 +448,15 @@ struct ClipboardShelfPanelView: View {
         selectedItemsInDisplayOrder.count
     }
 
+    private var effectivePinned: Bool {
+        pinnedState ?? isPinned
+    }
+
+    private func setPinned(_ value: Bool) {
+        pinnedState = value
+        isPinned = value
+    }
+
     private var renderedShelfItems: [ClipboardItem] {
         ClipboardPanelHistoryAvailability.visibleItems(
             paging.items,
@@ -452,6 +477,9 @@ struct ClipboardShelfPanelView: View {
         }
         if isShowingLaunchAtLoginPrompt {
             return [.launchAtLoginPrompt]
+        }
+        if renderedShelfItems.isEmpty, store.isHistoryQueryTransitioning, shelfScope != .pasteStack {
+            return [.loading]
         }
         if renderedShelfItems.isEmpty {
             return [
@@ -628,6 +656,12 @@ struct ClipboardShelfPanelView: View {
                     }
                 }
                 .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+            case .loading:
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
             case .empty(let title, let detail, let systemImageName):
                 VStack {
                     Spacer(minLength: 0)
@@ -795,9 +829,11 @@ struct ClipboardShelfPanelView: View {
     private func pasteSelected(format: PasteFormat) {
         let items = selectedItemsInDisplayOrder
         guard !items.isEmpty else { return }
+        let shouldDismissBeforePaste = !effectivePinned
         let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
             let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItems = await store.hydratedItems(for: items)
@@ -812,8 +848,10 @@ struct ClipboardShelfPanelView: View {
 
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
+        let shouldDismissBeforePaste = !effectivePinned
         Task { @MainActor in
             let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+                dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItem = await store.hydratedItem(for: item)

@@ -50,6 +50,11 @@ public final class PasteBuddyStore {
     public private(set) var dataRevision: Int
     public private(set) var queryRevision: Int
     public private(set) var repositorySyncedDataRevision: Int?
+    public var isHistoryQueryTransitioning: Bool {
+        clipboardRepository != nil
+            && isRepositorySyncInFlight
+            && repositorySyncedDataRevision != dataRevision
+    }
 
     private var diskStore: EncryptedSnapshotStore?
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
@@ -59,6 +64,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored private let defaultPersistenceInitializationErrorMessage: String?
     @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
     @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var isRepositorySyncInFlight = false
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
     @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
@@ -250,15 +256,23 @@ public final class PasteBuddyStore {
             if let repositorySyncActor {
                 let snapshotToSync = snapshot
                 let dataRevisionToSync = dataRevision
+                isRepositorySyncInFlight = true
                 try await repositorySyncActor.synchronize(with: snapshotToSync)
                 beforeRepositorySyncCommitForTesting?()
-                guard dataRevision == dataRevisionToSync else { return }
+                guard dataRevision == dataRevisionToSync else {
+                    isRepositorySyncInFlight = false
+                    return
+                }
                 markClipboardRepositorySynced(to: dataRevisionToSync)
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
         } catch {
-            historyQueryErrorMessage = error.localizedDescription
+            isRepositorySyncInFlight = false
+            if repositorySyncActor != nil {
+                repositorySyncedDataRevision = nil
+                historyQueryErrorMessage = error.localizedDescription
+            }
             lastErrorMessage = error.localizedDescription
         }
     }
@@ -291,6 +305,7 @@ public final class PasteBuddyStore {
         let snapshotToSave = snapshot
         let dataRevisionToSync = dataRevision
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
+        isRepositorySyncInFlight = repositorySyncActor != nil
         let snapshotToPersist = await Task.detached(priority: .utility) {
             Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
         }.value
@@ -298,12 +313,20 @@ public final class PasteBuddyStore {
             if let repositorySyncActor {
                 try await repositorySyncActor.synchronize(with: snapshotToSave)
                 beforeRepositorySyncCommitForTesting?()
-                guard dataRevision == dataRevisionToSync else { return }
+                guard dataRevision == dataRevisionToSync else {
+                    isRepositorySyncInFlight = false
+                    return
+                }
                 markClipboardRepositorySynced(to: dataRevisionToSync)
             }
             try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
             diskStore?.storageMode = snapshotToSave.security.storageMode
         } catch {
+            isRepositorySyncInFlight = false
+            if repositorySyncActor != nil {
+                repositorySyncedDataRevision = nil
+                historyQueryErrorMessage = error.localizedDescription
+            }
             lastErrorMessage = error.localizedDescription
         }
     }
@@ -337,6 +360,8 @@ public final class PasteBuddyStore {
         let dataRevisionToSync = dataRevision
         let hasRepository = repositorySyncActor != nil || clipboardRepository != nil
         pendingSaveTask?.cancel()
+        isRepositorySyncInFlight = repositorySyncActor != nil
+        historyQueryErrorMessage = nil
         pendingSaveTask = Task { [persistenceActor, repositorySyncActor] in
             if delayNanoseconds > 0 {
                 do {
@@ -368,6 +393,7 @@ public final class PasteBuddyStore {
             } catch {
                 await MainActor.run {
                     guard !Task.isCancelled else { return }
+                    self.isRepositorySyncInFlight = false
                     self.repositorySyncedDataRevision = nil
                     self.historyQueryErrorMessage = error.localizedDescription
                     self.pendingSaveTask = nil
@@ -2676,11 +2702,13 @@ public final class PasteBuddyStore {
     @discardableResult
     private func syncClipboardRepositoryFromSnapshot() -> Bool {
         guard let clipboardRepository else { return true }
+        isRepositorySyncInFlight = true
         do {
             try clipboardRepository.synchronize(with: snapshot)
             markClipboardRepositorySynced(to: dataRevision)
             return true
         } catch {
+            isRepositorySyncInFlight = false
             repositorySyncedDataRevision = nil
             historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
@@ -2690,6 +2718,7 @@ public final class PasteBuddyStore {
 
     private func markClipboardRepositorySynced(to revision: Int) {
         let readinessChanged = repositorySyncedDataRevision != revision
+        isRepositorySyncInFlight = false
         repositorySyncedDataRevision = revision
         historyQueryErrorMessage = nil
         presentationCache = PasteBuddyPresentationCache()
@@ -2701,6 +2730,9 @@ public final class PasteBuddyStore {
     private var isClipboardRepositoryReadyForHistoryQuery: Bool {
         guard clipboardRepository != nil else { return true }
         guard repositorySyncedDataRevision == dataRevision else {
+            // Keep serving the last coherent SQLite revision while a known
+            // synchronization is in flight. A settled mismatch still fails closed.
+            guard !isHistoryQueryTransitioning else { return true }
             let message = PasteBuddyDatabaseError.repositoryOutOfSync.localizedDescription
             historyQueryErrorMessage = message
             lastErrorMessage = message

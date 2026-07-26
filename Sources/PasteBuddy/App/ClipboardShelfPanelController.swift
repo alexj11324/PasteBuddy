@@ -350,6 +350,7 @@ final class ClipboardShelfPanelController {
             AnyView(
                 ClipboardShelfPanelView(
                     store: store,
+                    isPinned: panelPinnedBinding(),
                     directPasteItem: directPasteItem,
                     directPasteItems: directPasteItems,
                     reloadClipboardHistory: { [store] in
@@ -366,7 +367,7 @@ final class ClipboardShelfPanelController {
             AnyView(
                 ClipboardSidePanelView(
                     store: store,
-                    isPinned: sidePanelPinnedBinding(),
+                    isPinned: panelPinnedBinding(),
                     directPasteItem: directPasteItem,
                     directPasteItems: directPasteItems
                 ) { [weak self] in
@@ -695,7 +696,7 @@ final class ClipboardShelfPanelController {
         hideImmediately()
     }
 
-    private func sidePanelPinnedBinding() -> Binding<Bool> {
+    private func panelPinnedBinding() -> Binding<Bool> {
         Binding(
             get: { [weak self] in self?.isPinned ?? false },
             set: { [weak self] value in

@@ -264,7 +264,13 @@ struct ClipboardSidePanelView: View {
 
     private var itemList: some View {
         VStack(spacing: 8) {
-            if renderedItems.isEmpty {
+            if renderedItems.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
+            } else if renderedItems.isEmpty {
                 ContentUnavailableView(
                     emptyTitle,
                     systemImage: emptySystemImage,
@@ -347,12 +353,21 @@ struct ClipboardSidePanelView: View {
     }
 
     private var footer: some View {
-        Text(localized("format.items", paging.totalCount))
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .frame(height: 32)
-            .padding(.horizontal, 4)
+        Group {
+            if paging.items.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
+            } else {
+                Text(localized("format.items", paging.totalCount))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 32)
+        .padding(.horizontal, 4)
     }
 
     private var queryState: ClipboardSidePanelQueryState {

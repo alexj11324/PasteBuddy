@@ -432,7 +432,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testPinnedSidePanelDoesNotDismissForOutsideClick() {
+    func testPinnedShelfAndSidePanelDoNotDismissForOutsideClick() {
         XCTAssertFalse(
             ClipboardShelfPanelController.shouldDismissForOutsideClick(
                 at: CGPoint(x: 800, y: 500),
@@ -442,6 +442,25 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 isPinned: true
             )
         )
+    }
+
+    func testBothPanelModesUseSharedPinStateAndPinnedPastePolicy() throws {
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        let sources = try [
+            sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift"),
+            sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        ]
+
+        XCTAssertEqual(controllerSource.components(separatedBy: "isPinned: panelPinnedBinding()").count - 1, 2)
+        XCTAssertTrue(controllerSource.contains("private func panelPinnedBinding() -> Binding<Bool>"))
+        XCTAssertTrue(controllerSource.contains("guard !isPinned else { return }"))
+        for source in sources {
+            XCTAssertTrue(source.contains("@Binding var isPinned: Bool"))
+            XCTAssertTrue(source.contains("setPinned(!effectivePinned)"))
+            XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: effectivePinned ? \"pin.fill\" : \"pin\")"))
+            XCTAssertTrue(source.contains("let shouldDismissBeforePaste = !effectivePinned"))
+            XCTAssertTrue(source.contains("dismissBeforePaste: shouldDismissBeforePaste"))
+        }
     }
 
     func testSidePanelDisplayModeFramesAsRightAnchoredFloatingHistoryList() {
@@ -1113,6 +1132,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
+    func testBothClipboardPanelsUseNeutralLoadingInsteadOfUnavailableOrZeroDuringRepositoryTransition() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains("store.isHistoryQueryTransitioning"))
+            XCTAssertTrue(source.contains("ProgressView()"))
+            XCTAssertTrue(source.contains("sideScope != .pasteStack") || source.contains("shelfScope != .pasteStack"))
+        }
+        XCTAssertTrue(shelfSource.contains("case loading"))
+        XCTAssertTrue(sideSource.contains("if paging.items.isEmpty, store.isHistoryQueryTransitioning"))
+    }
+
     func testSharedPanelHistoryAvailabilityFailsClosed() {
         let item = ClipboardItem(
             sourceAppName: "Notes",
@@ -1443,8 +1475,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("isPinned.toggle()"))
         XCTAssertTrue(source.contains("ClipboardImageCache.fittedDisplaySize("))
         XCTAssertTrue(source.contains(".frame(width: previewSize.width, height: previewSize.height)"))
-        XCTAssertTrue(controllerSource.contains("isPinned: sidePanelPinnedBinding()"))
-        XCTAssertTrue(controllerSource.contains("private func sidePanelPinnedBinding() -> Binding<Bool>"))
+        XCTAssertTrue(controllerSource.contains("isPinned: panelPinnedBinding()"))
+        XCTAssertTrue(controllerSource.contains("private func panelPinnedBinding() -> Binding<Bool>"))
         XCTAssertFalse(source.contains(".frame(width: 72, height: 54)"))
         XCTAssertFalse(source.contains("square.grid.2x2"))
         XCTAssertFalse(source.contains("onTapGesture(count: 2)"))

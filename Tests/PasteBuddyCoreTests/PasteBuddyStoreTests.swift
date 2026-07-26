@@ -3819,15 +3819,15 @@ final class PasteBuddyStoreTests: XCTestCase {
             store.searchQuery = query
             XCTAssertTrue(store.filteredItems.isEmpty)
             XCTAssertEqual(store.filteredItemCount(for: .history), 0)
+            XCTAssertTrue(store.isHistoryQueryTransitioning)
+            XCTAssertNil(store.historyQueryErrorMessage)
         }
-        XCTAssertEqual(
-            store.lastErrorMessage,
-            PasteBuddyDatabaseError.repositoryOutOfSync.localizedDescription
-        )
+        XCTAssertNil(store.lastErrorMessage)
 
         await store.flushPendingSave()
 
         XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertFalse(store.isHistoryQueryTransitioning)
         for (query, expectedIDs) in expectedIDsByQuery {
             store.searchQuery = query
             XCTAssertEqual(store.filteredItems.map(\.id), expectedIDs)
@@ -4198,6 +4198,141 @@ final class PasteBuddyStoreTests: XCTestCase {
             store.lastErrorMessage,
             PasteBuddyDatabaseError.repositoryOutOfSync.localizedDescription
         )
+    }
+
+    func testRepositorySyncInFlightKeepsEveryHistoryTransitionOnLastCoherentRevision() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date()
+        let items = (0..<125).map { index in
+            let isLink = index.isMultiple(of: 3)
+            return ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: isLink ? "Safari" : "Notes",
+                deviceName: "Test Mac",
+                contentType: isLink ? .url : .text,
+                title: isLink ? "Link \(index)" : "Note \(index)",
+                payload: isLink
+                    ? ClipboardPayload(urlString: "https://example.com/\(index)")
+                    : ClipboardPayload(text: index == 1 ? "unique transition needle" : "body \(index)")
+            )
+        }
+        let links = items.filter { $0.contentType == .url }
+        let favorites = Pinboard(
+            name: "Favorites",
+            colorHex: "#4EA7FC",
+            itemIDs: [items[0].id, items[1].id]
+        )
+        let smartLinks = Pinboard(
+            name: SmartPinboardCategory.links.pinboardName,
+            colorHex: SmartPinboardCategory.links.colorHex,
+            itemIDs: links.map(\.id)
+        )
+        try harness.snapshotStore.save(
+            PasteBuddySnapshot(items: items, pinboards: [favorites, smartLinks])
+        )
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        store.load()
+        let lastCoherentRevision = try XCTUnwrap(store.repositorySyncedDataRevision)
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pending capture",
+            payload: ClipboardPayload(text: "not in the last coherent revision")
+        ))
+        XCTAssertNotEqual(store.dataRevision, lastCoherentRevision)
+
+        struct Transition {
+            let name: String
+            let scope: PasteScope
+            let expectedCount: Int
+            let configure: @MainActor (PasteBuddyStore) -> Void
+        }
+        let transitions = [
+            Transition(name: "category Links", scope: .history, expectedCount: links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+                $0.contentTypeFilter = .url
+            },
+            Transition(name: "search typing", scope: .history, expectedCount: 1) {
+                $0.clearFilters()
+                $0.searchQuery = "unique transition needle"
+            },
+            Transition(name: "search clearing", scope: .history, expectedCount: items.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            },
+            Transition(name: "source app filter", scope: .history, expectedCount: links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+                $0.sourceAppFilter = "Safari"
+            },
+            Transition(name: "content type filter", scope: .history, expectedCount: items.count - links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+                $0.contentTypeFilter = .text
+            },
+            Transition(name: "favorites pinboard", scope: .pinboard(favorites.id), expectedCount: 2) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            },
+            Transition(name: "smart Links pinboard", scope: .pinboard(smartLinks.id), expectedCount: links.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            },
+            Transition(name: "app activation refresh", scope: .history, expectedCount: items.count) {
+                $0.clearFilters()
+                $0.searchQuery = ""
+            }
+        ]
+
+        for panelMode in ["Shelf", "Side Panel"] {
+            for transition in transitions {
+                transition.configure(store)
+                let page = store.filteredItemsPage(for: transition.scope, offset: 0)
+                XCTAssertNil(store.historyQueryErrorMessage, "\(panelMode): \(transition.name)")
+                XCTAssertEqual(
+                    store.filteredItemCount(for: transition.scope),
+                    transition.expectedCount,
+                    "\(panelMode): \(transition.name)"
+                )
+                XCTAssertEqual(
+                    page.count,
+                    min(transition.expectedCount, 100),
+                    "\(panelMode): \(transition.name)"
+                )
+            }
+        }
+
+        store.clearFilters()
+        store.searchQuery = ""
+        for panelMode in ["Shelf", "Side Panel"] {
+            let firstPage = store.filteredItemsPage(for: .history, offset: 0)
+            let nextPage = store.filteredItemsPage(for: .history, offset: firstPage.count)
+            XCTAssertEqual(firstPage.count, 100, "\(panelMode): first page")
+            XCTAssertEqual(nextPage.count, 25, "\(panelMode): load more")
+            XCTAssertEqual(store.filteredItemCount(for: .history), 125, "\(panelMode): total")
+            XCTAssertNil(store.historyQueryErrorMessage, "\(panelMode): pagination")
+        }
+
+        store.pasteStackItems = [items[1]]
+        XCTAssertEqual(store.filteredItemsPage(for: .pasteStack, offset: 0).map(\.id), [items[1].id])
+        XCTAssertNil(store.historyQueryErrorMessage)
+
+        await store.flushPendingSave()
+        XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
+        XCTAssertEqual(store.filteredItemCount(for: .history), 126)
+        XCTAssertNil(store.historyQueryErrorMessage)
     }
 
     func testRepositorySyncReadinessAdvancesQueryRevisionAndReloadsHistory() async throws {
