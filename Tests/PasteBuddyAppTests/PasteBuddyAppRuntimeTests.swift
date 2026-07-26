@@ -1496,6 +1496,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".background(SettingsSidebarToggleRemover())"))
         XCTAssertTrue(source.contains("$0.itemIdentifier == .toggleSidebar"))
         XCTAssertTrue(source.contains("toolbar.removeItem(at: index)"))
+        XCTAssertTrue(source.contains("NSToolbar.willAddItemNotification"))
+        XCTAssertTrue(source.contains("toolbarWillAddItem"))
         XCTAssertFalse(source.contains(".toolbar(removing: .sidebarToggle)"))
         XCTAssertTrue(source.contains("case capture"))
         XCTAssertTrue(source.contains("case .privacy:"))
@@ -1517,6 +1519,46 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
+    }
+
+    func testSettingsSidebarToggleRemovalTracksToolbarLifecycle() async {
+        func drainMainQueue() async {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async {
+                    continuation.resume()
+                }
+            }
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let firstToolbar = NSToolbar(identifier: "settings-first")
+        firstToolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
+        window.toolbar = firstToolbar
+
+        let remover = SettingsSidebarToggleRemovalView()
+        window.contentView = remover
+        await drainMainQueue()
+        XCTAssertFalse(firstToolbar.items.contains { $0.itemIdentifier == .toggleSidebar })
+
+        firstToolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
+        await drainMainQueue()
+        XCTAssertFalse(firstToolbar.items.contains { $0.itemIdentifier == .toggleSidebar })
+
+        let replacementToolbar = NSToolbar(identifier: "settings-replacement")
+        window.toolbar = replacementToolbar
+        window.update()
+        replacementToolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
+        await drainMainQueue()
+        XCTAssertFalse(replacementToolbar.items.contains { $0.itemIdentifier == .toggleSidebar })
+        XCTAssertTrue(remover.observedToolbar === replacementToolbar)
+
+        window.contentView = NSView()
+        XCTAssertNil(remover.observedToolbar)
     }
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {

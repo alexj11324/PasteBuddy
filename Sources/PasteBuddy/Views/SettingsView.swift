@@ -1123,10 +1123,13 @@ private struct SettingsSidebarToggleRemover: NSViewRepresentable {
     }
 }
 
-private final class SettingsSidebarToggleRemovalView: NSView {
+final class SettingsSidebarToggleRemovalView: NSView {
+    private(set) weak var observedToolbar: NSToolbar?
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         NotificationCenter.default.removeObserver(self)
+        observedToolbar = nil
         if let window {
             NotificationCenter.default.addObserver(
                 self,
@@ -1135,11 +1138,40 @@ private final class SettingsSidebarToggleRemovalView: NSView {
                 object: window
             )
         }
+        observeToolbarIfNeeded()
         removeSidebarToggle()
+        DispatchQueue.main.async { [weak self] in
+            self?.removeSidebarToggle()
+        }
     }
 
     @objc private func windowDidUpdate(_ notification: Notification) {
+        observeToolbarIfNeeded()
         removeSidebarToggle()
+    }
+
+    @objc private func toolbarWillAddItem(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.removeSidebarToggle()
+        }
+    }
+
+    private func observeToolbarIfNeeded() {
+        guard let toolbar = window?.toolbar, toolbar !== observedToolbar else { return }
+        if let observedToolbar {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSToolbar.willAddItemNotification,
+                object: observedToolbar
+            )
+        }
+        observedToolbar = toolbar
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(toolbarWillAddItem),
+            name: NSToolbar.willAddItemNotification,
+            object: toolbar
+        )
     }
 
     fileprivate func removeSidebarToggle() {
