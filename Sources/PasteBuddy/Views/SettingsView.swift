@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var store: PasteBuddyStore
     @Bindable var irohSync: IrohClipboardSyncService
+    @Binding var panelDisplayMode: ClipboardPanelDisplayMode
     @State private var newCaptureRuleName = ""
     @State private var newCaptureRulePattern = ""
     @State private var newCaptureRuleCondition: CaptureRuleCondition = .containsText
@@ -119,6 +120,8 @@ struct SettingsView: View {
         switch effectiveSettingsSection {
         case .general:
             generalSettingsForm
+        case .capture:
+            captureSettingsForm
         case .storage:
             storageSettingsForm
         case .plans:
@@ -144,19 +147,9 @@ struct SettingsView: View {
 
     private var generalSettingsForm: some View {
         Form {
-            if let destination = store.requestedSettingsDestination {
-                Section("label.settings_entry_point") {
-                    Label(localizedSettingsTitle(destination), systemImage: destination.systemImageName)
-
-                    Button("action.clear_settings_focus") {
-                        store.clearRequestedSettingsDestination()
-                    }
-                }
-            }
-
             Section("label.general") {
                 Toggle(
-                    "Launch at login",
+                    "label.launch_at_login",
                     isOn: Binding(
                         get: { store.snapshot.general.launchAtLoginEnabled },
                         set: { store.setLaunchAtLoginEnabled($0) }
@@ -164,19 +157,49 @@ struct SettingsView: View {
                 )
                 .disabled(!LaunchAtLoginService.isAvailable)
 
-                LabeledContent("label.menu_bar") {
-                    Text("label.visible")
+                if !LaunchAtLoginService.isAvailable {
+                    Text("message.launch_at_login_is_unavailable_in_this")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                if let error = store.lastErrorMessage {
-                    Text(error)
-                        .foregroundStyle(.orange)
+                Picker("label.panel_style", selection: $panelDisplayMode) {
+                    ForEach(ClipboardPanelDisplayMode.allCases) { mode in
+                        Label(localized(mode.menuTitleKey), systemImage: mode.systemImageName)
+                            .tag(mode)
+                    }
                 }
+                .pickerStyle(.radioGroup)
+
+                Toggle(
+                    "action.paste_as_plain_text_by",
+                    isOn: Binding(
+                        get: { store.snapshot.paste.alwaysPasteAsPlainText },
+                        set: { store.setAlwaysPasteAsPlainText($0) }
+                    )
+                )
             }
 
-            Section("label.capture") {
+            Section("label.direct_paste") {
+                LabeledContent("label.accessibility_access") {
+                    Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
+                        .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
+                }
+
+                Button("action.request_accessibility_access") {
+                    AccessibilityPermissionService.requestTrustPrompt()
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+    }
+
+    private var captureSettingsForm: some View {
+        Form {
+            Section("label.capture_and_privacy") {
                 Toggle(
-                    store.isCapturePaused ? "Capture is paused" : "Capture is active",
+                    "action.save_clipboard_history",
                     isOn: Binding(
                         get: { !store.isCapturePaused },
                         set: { isActive in
@@ -191,67 +214,61 @@ struct SettingsView: View {
 
                 if let pauseUntil = store.activeCapturePauseUntil {
                     Text(localized("format.capture_resumes_at", pauseUntil.formatted(date: .omitted, time: .shortened)))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                HStack {
-                    Button("action.pause_15m") {
-                        store.pauseCapture(for: 15 * 60)
-                    }
-
-                    Button("action.pause_1h") {
-                        store.pauseCapture(for: 60 * 60)
-                    }
-
-                    Button("action.resume") {
-                        store.resumeCapture()
-                    }
-                    .disabled(!store.isCapturePaused)
-                }
-
                 Toggle(
-                    "Capture text",
+                    "action.save_copied_text",
                     isOn: Binding(
                         get: { store.snapshot.privacy.captureText },
                         set: { _ in store.toggleTextCapture() }
                     )
                 )
                 Toggle(
-                    "Capture links",
+                    "action.save_copied_links",
                     isOn: Binding(
                         get: { store.snapshot.privacy.captureURLs },
                         set: { _ in store.toggleURLCapture() }
                     )
                 )
                 Toggle(
-                    "Capture files",
+                    "action.save_copied_files",
                     isOn: Binding(
                         get: { store.snapshot.privacy.captureFiles },
                         set: { _ in store.toggleFileCapture() }
                     )
                 )
                 Toggle(
-                    "label.capture_images",
+                    "action.save_copied_images",
                     isOn: Binding(
                         get: { store.snapshot.privacy.captureImages },
                         set: { _ in store.toggleImageCapture() }
                     )
                 )
                 Toggle(
-                    "Block likely sensitive text locally",
+                    "label.block_likely_sensitive_text_locally",
                     isOn: Binding(
                         get: { store.snapshot.privacy.blockLikelySensitiveText },
                         set: { _ in store.toggleSensitiveTextBlocking() }
                     )
                 )
                 Toggle(
-                    "Run local Apple OCR after image capture",
+                    "action.recognize_text_in_copied_images",
                     isOn: Binding(
                         get: { store.snapshot.privacy.runLocalOCRAfterImageCapture },
                         set: { _ in store.toggleOCR() }
                     )
                 )
                 .disabled(!store.snapshot.privacy.captureImages)
+
+                Text(
+                    store.snapshot.privacy.captureImages
+                        ? "message.copied_image_ocr_runs_on_device"
+                        : "message.copied_image_ocr_requires_image_history"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Section("label.excluded_apps") {
@@ -262,7 +279,19 @@ struct SettingsView: View {
                 }
             }
 
-            Section("label.custom_capture_rules") {
+            Section {
+                DisclosureGroup("label.advanced_capture_rules") {
+                    captureRulesEditor
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+    }
+
+    @ViewBuilder
+    private var captureRulesEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
                 if store.snapshot.privacy.customCaptureRules.isEmpty {
                     Text("label.no_custom_capture_rules")
                         .foregroundStyle(.secondary)
@@ -368,10 +397,7 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(captureRulePatternForSubmit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            }
-            .formStyle(.grouped)
-            .scenePadding()
+        }
     }
 
     private var storageSettingsForm: some View {
@@ -1691,15 +1717,18 @@ private extension CaptureRuleCondition {
 
 private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashable {
     case general
-    case storage
-    case plans
+    case capture
     case shortcuts
     case integrations
+    case storage
+    case plans
 
     init(_ destination: MacSettingsDestination) {
         switch destination {
-        case .general, .privacy:
+        case .general:
             self = .general
+        case .privacy:
+            self = .capture
         case .storage:
             self = .storage
         case .shortcuts:
@@ -1715,14 +1744,16 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         switch self {
         case .general:
             "label.general"
-        case .storage:
-            "label.storage"
-        case .plans:
-            "label.plans"
+        case .capture:
+            "label.capture_and_privacy"
         case .shortcuts:
             "label.shortcuts"
         case .integrations:
             "label.integrations"
+        case .storage:
+            "label.storage"
+        case .plans:
+            "label.plans"
         }
     }
 
@@ -1730,14 +1761,16 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         switch self {
         case .general:
             "gearshape"
-        case .storage:
-            "externaldrive"
-        case .plans:
-            "creditcard"
+        case .capture:
+            "hand.raised"
         case .shortcuts:
             "keyboard"
         case .integrations:
             "point.3.connected.trianglepath.dotted"
+        case .storage:
+            "externaldrive"
+        case .plans:
+            "creditcard"
         }
     }
 }
