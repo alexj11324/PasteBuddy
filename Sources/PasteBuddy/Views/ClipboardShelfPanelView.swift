@@ -3,7 +3,6 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
-import VisionKit
 
 private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
@@ -1700,10 +1699,7 @@ private struct ShelfExpandedImagePreview: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            ShelfLiveTextImagePreview(
-                image: image,
-                analysisID: analysisID
-            )
+            ShelfImagePreview(image: image)
             .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityLabel(localized("label.captured_image_preview"))
@@ -1748,10 +1744,6 @@ private struct ShelfExpandedImagePreview: View {
 
     private var resolvedDisplaySize: CGSize {
         displaySize ?? CGSize(width: 612, height: 420)
-    }
-
-    private var analysisID: String {
-        ClipboardImagePreviewRequest.assetIdentity(for: item)
     }
 
     private func recognizeText() {
@@ -1807,6 +1799,20 @@ private struct ShelfExpandedImagePreview: View {
     }
 }
 
+private struct ShelfImagePreview: NSViewRepresentable {
+    let image: NSImage
+
+    func makeNSView(context: Context) -> NSImageView {
+        let imageView = NSImageView()
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        return imageView
+    }
+
+    func updateNSView(_ imageView: NSImageView, context: Context) {
+        imageView.image = image
+    }
+}
+
 private struct ClipboardImagePreviewOCRResultView: View {
     let state: ClipboardImagePreviewOCRState
     let onCopy: (String) -> Void
@@ -1858,140 +1864,6 @@ private struct ClipboardImagePreviewOCRResultView: View {
         .frame(width: 360, height: 260, alignment: .topLeading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NSLocalizedString("label.recognized_text", comment: ""))
-    }
-}
-
-private struct ShelfLiveTextImagePreview: NSViewRepresentable {
-    let image: NSImage
-    let analysisID: String
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> ShelfLiveTextImagePreviewContainer {
-        let view = ShelfLiveTextImagePreviewContainer()
-        view.overlayView.delegate = context.coordinator
-        context.coordinator.imageView = view.imageView
-        context.coordinator.overlayView = view.overlayView
-        return view
-    }
-
-    func updateNSView(_ nsView: ShelfLiveTextImagePreviewContainer, context: Context) {
-        nsView.imageView.image = image
-        context.coordinator.imageView = nsView.imageView
-        context.coordinator.overlayView = nsView.overlayView
-        context.coordinator.analyze(image: image, analysisID: analysisID)
-    }
-
-    static func dismantleNSView(_ nsView: ShelfLiveTextImagePreviewContainer, coordinator: Coordinator) {
-        coordinator.cancelAnalysis()
-        nsView.overlayView.analysis = nil
-    }
-
-    final class Coordinator: NSObject, ImageAnalysisOverlayViewDelegate {
-        weak var imageView: NSImageView?
-        weak var overlayView: ImageAnalysisOverlayView?
-        private var analysisTask: Task<Void, Never>?
-        private var activeAnalysisID: String?
-
-        func analyze(image: NSImage, analysisID: String) {
-            guard ImageAnalyzer.isSupported else { return }
-            guard activeAnalysisID != analysisID else { return }
-            activeAnalysisID = analysisID
-            analysisTask?.cancel()
-            overlayView?.analysis = nil
-
-            analysisTask = Task { @MainActor [weak self, image] in
-                let configuration = ImageAnalyzer.Configuration(.text)
-                do {
-                    let analysis = try await ImageAnalyzer().analyze(
-                        image,
-                        orientation: .up,
-                        configuration: configuration
-                    )
-                    guard !Task.isCancelled else { return }
-                    self?.overlayView?.analysis = analysis
-                } catch {
-                    self?.overlayView?.analysis = nil
-                }
-            }
-        }
-
-        func cancelAnalysis() {
-            analysisTask?.cancel()
-            analysisTask = nil
-            activeAnalysisID = nil
-        }
-
-        func contentsRect(for overlayView: ImageAnalysisOverlayView) -> CGRect {
-            guard let imageView else { return .zero }
-            return Self.imageContentRect(in: imageView)
-        }
-
-        func contentView(for overlayView: ImageAnalysisOverlayView) -> NSView? {
-            imageView
-        }
-
-        private static func imageContentRect(in imageView: NSImageView) -> CGRect {
-            let bounds = imageView.bounds
-            guard let image = imageView.image,
-                  image.size.width > 0,
-                  image.size.height > 0,
-                  bounds.width > 0,
-                  bounds.height > 0 else {
-                return bounds
-            }
-
-            let imageAspect = image.size.width / image.size.height
-            let boundsAspect = bounds.width / bounds.height
-            if imageAspect > boundsAspect {
-                let width = bounds.width
-                let height = width / imageAspect
-                return CGRect(x: 0, y: (bounds.height - height) / 2, width: width, height: height)
-            }
-
-            let height = bounds.height
-            let width = height * imageAspect
-            return CGRect(x: (bounds.width - width) / 2, y: 0, width: width, height: height)
-        }
-    }
-}
-
-private final class ShelfLiveTextImagePreviewContainer: NSView {
-    let imageView = NSImageView()
-    let overlayView = ImageAnalysisOverlayView(frame: .zero)
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        addSubview(imageView)
-
-        overlayView.translatesAutoresizingMaskIntoConstraints = false
-        overlayView.trackingImageView = imageView
-        overlayView.preferredInteractionTypes = .automaticTextOnly
-        overlayView.selectableItemsHighlighted = true
-        imageView.addSubview(overlayView)
-
-        NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            imageView.topAnchor.constraint(equalTo: topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            overlayView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
-            overlayView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
-            overlayView.topAnchor.constraint(equalTo: imageView.topAnchor),
-            overlayView.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
-        ])
-    }
-
-    required init?(coder: NSCoder) {
-        nil
     }
 }
 
