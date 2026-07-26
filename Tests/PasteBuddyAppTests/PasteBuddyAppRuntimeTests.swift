@@ -796,22 +796,28 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let previewContentSource = String(source[previewStart.lowerBound..<imageStart.lowerBound])
         let imagePreviewSource = String(source[imageStart.lowerBound..<nextViewStart.lowerBound])
 
-        XCTAssertFalse(source.contains("import VisionKit"))
-        XCTAssertFalse(imagePreviewSource.contains("ImageAnalyzer"))
-        XCTAssertTrue(imagePreviewSource.contains("ShelfImagePreview(image: image)"))
-        XCTAssertTrue(imagePreviewSource.contains("imageView.imageScaling = .scaleProportionallyUpOrDown"))
+        XCTAssertTrue(source.contains("import VisionKit"))
+        XCTAssertTrue(imagePreviewSource.contains("ShelfLiveTextImagePreview("))
+        XCTAssertTrue(imagePreviewSource.contains("ImageAnalysisOverlayView"))
+        XCTAssertTrue(imagePreviewSource.contains("ImageAnalyzer().analyze"))
+        XCTAssertTrue(imagePreviewSource.contains("analysis.hasResults(for: .text)"))
+        XCTAssertTrue(imagePreviewSource.contains("preferredInteractionTypes = .textSelection"))
+        XCTAssertTrue(imagePreviewSource.contains("trackingImageView = imageView"))
+        XCTAssertTrue(imagePreviewSource.contains("imageView.addSubview(overlayView)"))
+        XCTAssertTrue(imagePreviewSource.contains("selectableItemsHighlighted = true"))
         XCTAssertTrue(expandedPreviewSource.contains("let hydrated = await hydrateItemProvider(item)"))
         XCTAssertTrue(expandedPreviewSource.contains("NSImage(data: data)"))
         XCTAssertTrue(expandedPreviewSource.contains("ProgressView(localized(\"state.loading_image\"))"))
         XCTAssertTrue(expandedPreviewSource.contains("message.image_data_unavailable_for_preview"))
         XCTAssertFalse(expandedPreviewSource.contains("cachedThumbnail(for: item"))
         XCTAssertTrue(imagePreviewSource.contains("Label(localized(\"action.recognize_text\"), systemImage: \"text.viewfinder\")"))
-        XCTAssertTrue(imagePreviewSource.contains("OCRService().analyze(in: imageData)"))
-        XCTAssertTrue(imagePreviewSource.contains("ClipboardImagePreviewOCRResultView("))
+        XCTAssertFalse(imagePreviewSource.contains("OCRService().analyze"))
+        XCTAssertFalse(imagePreviewSource.contains("ClipboardImagePreviewOCRResultView"))
+        XCTAssertFalse(imagePreviewSource.contains("ClipboardImagePreviewOCR.copyRecognizedText"))
+        XCTAssertFalse(imagePreviewSource.contains(".popover(isPresented:"))
         XCTAssertTrue(imagePreviewSource.contains(".textSelection(.enabled)"))
-        XCTAssertTrue(imagePreviewSource.contains("ClipboardImagePreviewOCR.copyRecognizedText("))
         XCTAssertEqual(
-            imagePreviewSource.components(separatedBy: "Button {\n                recognizeText()").count - 1,
+            imagePreviewSource.components(separatedBy: "liveTextActivation += 1").count - 1,
             1
         )
         XCTAssertFalse(persistentShelfSource.contains("action.recognize_text"))
@@ -1501,22 +1507,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testImagePreviewOCRPreservesBarcodeOnlyResults() {
-        let analysis = OCRAnalysis(
-            textObservations: [],
-            barcodes: [
-                OCRBarcodeObservation(
-                    payload: "https://example.com",
-                    symbology: "QR",
-                    normalizedBoundingBox: .zero
-                )
-            ],
-            supportedRecognitionLanguages: []
-        )
-
-        XCTAssertTrue(ClipboardImagePreviewOCR.hasContent(analysis))
-    }
-
     func testImagePreviewRejectsStaleAsyncResultsAfterDismissOrItemChange() async {
         let requestID = UUID()
         let replacementRequestID = UUID()
@@ -1533,25 +1523,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 requestID,
                 currentRequestID: nil
             )
-        )
-    }
-
-    func testImagePreviewCopiesRecognizedResultThroughPasteboardWriter() throws {
-        let pasteboard = NSPasteboard(name: .init("PasteBuddyImagePreviewOCRTests"))
-        pasteboard.clearContents()
-        var copiedCount = 0
-
-        XCTAssertTrue(
-            ClipboardImagePreviewOCR.copyRecognizedText(
-                "Recognized preview text",
-                to: pasteboard,
-                reportSuccess: { copiedCount = $0 }
-            )
-        )
-        XCTAssertEqual(copiedCount, 1)
-        XCTAssertEqual(pasteboard.string(forType: .string), "Recognized preview text")
-        XCTAssertNotNil(
-            pasteboard.availableType(from: [PasteboardWriter.internalCopyPasteboardType])
         )
     }
 

@@ -564,6 +564,7 @@
 "message.encrypts_clipboard_history_ocr_metadata_thumbnails_and" = "加密剪贴板历史、OCR 元数据、缩略图和收藏板。本地密钥保存在 Keychain 中。";
 "message.image_data_unavailable_for_preview" = "完整图片不可用。";
 "message.image_data_unavailable_for_text_recognition" = "所选图片数据不可用于文字识别。";
+"message.live_text_unavailable" = "此 Mac 不支持实况文本。";
 "message.iroh_clipboard_sync_local_peer" = "使用 iroh 点对点传输。剪贴板内容只会发送给已连接的对端。";
 "message.items_stay_in_clipboard_history_only_this" = "项目会保留在剪贴板历史中，只移除此收藏板集合。";
 "message.launch_at_login_is_unavailable_in_this" = "此构建版本不支持登录时启动";

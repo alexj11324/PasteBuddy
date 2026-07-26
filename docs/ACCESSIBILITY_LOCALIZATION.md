@@ -15,8 +15,10 @@ VoiceOver, Dark Mode, and localization workflows.
 - Active filter chips expose VoiceOver labels and can clear one structured
   filter at a time.
 - Editable text previews and save actions expose labels and hints.
-- Image previews expose an accessibility label and point users toward local OCR
-  text when available.
+- Image previews expose an accessibility label and a contextual
+  `text.viewfinder` action that enables native VisionKit Live Text selection
+  directly over the hydrated image. The action is absent from persistent
+  Shelf, Side Panel, and Settings chrome.
 - Pinboard color choices expose VoiceOver labels and selected state, and the
   color picker adds a checkmark in Differentiate Without Color mode.
 - Custom capture rule controls in Settings use labeled fields, toggles, and

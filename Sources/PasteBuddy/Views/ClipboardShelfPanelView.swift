@@ -3,6 +3,7 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
+import VisionKit
 
 private enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
@@ -1405,7 +1406,7 @@ private struct ClipboardShelfCard: View {
 
 struct ShelfExpandedPreview: View {
     private static let textPreviewHeight: CGFloat = 420
-    private static let imageActionAreaHeight: CGFloat = 42
+    private static let imageActionAreaHeight: CGFloat = 70
 
     @FocusState private var isPreviewFocused: Bool
     @State private var hydratedImageItem: ClipboardItem?
@@ -1625,68 +1626,16 @@ enum ClipboardImagePreviewRequest {
     }
 }
 
-enum ClipboardImagePreviewOCR {
-    static func hasContent(_ analysis: OCRAnalysis) -> Bool {
-        !analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !analysis.barcodes.isEmpty
-    }
-
-    @MainActor
-    static func recognizedTextItem(_ text: String) -> ClipboardItem {
-        ClipboardItem(
-            sourceAppName: PasteBuddyLocalization.string(
-                "source.pastebuddy_ocr",
-                defaultValue: "PasteBuddy OCR"
-            ),
-            sourceBundleIdentifier: Bundle.main.bundleIdentifier,
-            deviceName: Host.current().localizedName ?? PasteBuddyLocalization.string(
-                "label.this_mac",
-                defaultValue: "This Mac"
-            ),
-            contentType: .text,
-            title: PasteBuddyLocalization.string(
-                "label.recognized_text",
-                defaultValue: "Recognized Text"
-            ),
-            payload: ClipboardPayload(text: text)
-        )
-    }
-
-    @MainActor
-    @discardableResult
-    static func copyRecognizedText(
-        _ text: String,
-        to pasteboard: NSPasteboard = .general,
-        sourceWindow: NSWindow? = nil,
-        reportSuccess: ((Int) -> Void)? = nil
-    ) -> Bool {
-        ClipboardPanelCopyCoordinator.copy(
-            recognizedTextItem(text),
-            to: pasteboard,
-            sourceWindow: sourceWindow,
-            reportSuccess: reportSuccess
-        )
-    }
-}
-
-private enum ClipboardImagePreviewOCRState: Equatable {
+private enum ClipboardImagePreviewLiveTextState: Equatable {
     case idle
     case loading
-    case result(OCRAnalysis)
+    case ready
     case empty
+    case unsupported
     case failed(String)
 
     var isLoading: Bool {
         self == .loading
-    }
-
-    var presentsResult: Bool {
-        switch self {
-        case .result, .empty, .failed:
-            true
-        case .idle, .loading:
-            false
-        }
     }
 }
 
@@ -1694,20 +1643,26 @@ private struct ShelfExpandedImagePreview: View {
     let item: ClipboardItem
     let image: NSImage
     let displaySize: CGSize?
-    @State private var ocrState: ClipboardImagePreviewOCRState = .idle
-    @State private var ocrRequestID: UUID?
+    @State private var liveTextState: ClipboardImagePreviewLiveTextState = .idle
+    @State private var liveTextActivation = 0
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            ShelfImagePreview(image: image)
-            .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .accessibilityLabel(localized("label.captured_image_preview"))
+            ShelfLiveTextImagePreview(
+                image: image,
+                analysisID: ClipboardImagePreviewRequest.assetIdentity(for: item),
+                activation: liveTextActivation,
+                onStateChange: { liveTextState = $0 }
+            )
+                .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityLabel(localized("label.captured_image_preview"))
 
             Button {
-                recognizeText()
+                liveTextState = .loading
+                liveTextActivation += 1
             } label: {
-                if ocrState.isLoading {
+                if liveTextState.isLoading {
                     ProgressView()
                         .controlSize(.small)
                     Text(localized("state.recognizing_text"))
@@ -1715,75 +1670,42 @@ private struct ShelfExpandedImagePreview: View {
                     Label(localized("action.recognize_text"), systemImage: "text.viewfinder")
                 }
             }
-            .disabled(ocrState.isLoading)
+            .disabled(liveTextState.isLoading)
             .accessibilityLabel(localized("action.recognize_text"))
-            .accessibilityValue(ocrState.isLoading ? localized("state.recognizing_text") : "")
-            .popover(isPresented: ocrPresentationBinding, arrowEdge: .bottom) {
-                ClipboardImagePreviewOCRResultView(
-                    state: ocrState,
-                    onCopy: copyRecognizedText
-                )
-            }
-        }
-        .onDisappear {
-            ocrRequestID = nil
-            ocrState = .idle
-        }
-    }
+            .accessibilityValue(liveTextState.isLoading ? localized("state.recognizing_text") : "")
 
-    private var ocrPresentationBinding: Binding<Bool> {
-        Binding(
-            get: { ocrState.presentsResult },
-            set: { isPresented in
-                if !isPresented {
-                    ocrState = .idle
-                }
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(statusMessageIsError ? .red : .secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        )
+        }
     }
 
     private var resolvedDisplaySize: CGSize {
         displaySize ?? CGSize(width: 612, height: 420)
     }
 
-    private func recognizeText() {
-        guard let imageData = item.payload.imageData else {
-            ocrState = .failed(localized("message.image_data_unavailable_for_text_recognition"))
-            return
-        }
-        let requestID = UUID()
-        ocrRequestID = requestID
-        ocrState = .loading
-
-        Task { @MainActor in
-            do {
-                let analysis = try await OCRService().analyze(in: imageData)
-                guard ClipboardImagePreviewRequest.isCurrent(
-                    requestID,
-                    currentRequestID: ocrRequestID
-                ) else {
-                    return
-                }
-                ocrState = ClipboardImagePreviewOCR.hasContent(analysis)
-                    ? .result(analysis)
-                    : .empty
-            } catch {
-                guard ClipboardImagePreviewRequest.isCurrent(
-                    requestID,
-                    currentRequestID: ocrRequestID
-                ) else {
-                    return
-                }
-                ocrState = .failed(localized("format.text_recognition_failed", error.localizedDescription))
-            }
+    private var statusMessage: String? {
+        switch liveTextState {
+        case .empty:
+            localized("message.no_text_was_recognized")
+        case .unsupported:
+            localized("message.live_text_unavailable")
+        case .failed(let message):
+            localized("format.text_recognition_failed", message)
+        case .idle, .loading, .ready:
+            nil
         }
     }
 
-    private func copyRecognizedText(_ text: String) {
-        ClipboardImagePreviewOCR.copyRecognizedText(
-            text,
-            sourceWindow: NSApp.keyWindow
-        )
+    private var statusMessageIsError: Bool {
+        if case .failed = liveTextState {
+            return true
+        }
+        return false
     }
 
     private func localized(_ key: String) -> String {
@@ -1799,71 +1721,157 @@ private struct ShelfExpandedImagePreview: View {
     }
 }
 
-private struct ShelfImagePreview: NSViewRepresentable {
+private struct ShelfLiveTextImagePreview: NSViewRepresentable {
     let image: NSImage
+    let analysisID: String
+    let activation: Int
+    let onStateChange: (ClipboardImagePreviewLiveTextState) -> Void
 
-    func makeNSView(context: Context) -> NSImageView {
-        let imageView = NSImageView()
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        return imageView
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
 
-    func updateNSView(_ imageView: NSImageView, context: Context) {
-        imageView.image = image
+    func makeNSView(context: Context) -> ShelfLiveTextImagePreviewContainer {
+        let view = ShelfLiveTextImagePreviewContainer()
+        view.overlayView.delegate = context.coordinator
+        context.coordinator.imageView = view.imageView
+        context.coordinator.overlayView = view.overlayView
+        return view
+    }
+
+    func updateNSView(_ nsView: ShelfLiveTextImagePreviewContainer, context: Context) {
+        nsView.imageView.image = image
+        context.coordinator.imageView = nsView.imageView
+        context.coordinator.overlayView = nsView.overlayView
+        context.coordinator.activate(
+            image: image,
+            requestID: "\(analysisID):\(activation)",
+            activation: activation,
+            onStateChange: onStateChange
+        )
+    }
+
+    static func dismantleNSView(_ nsView: ShelfLiveTextImagePreviewContainer, coordinator: Coordinator) {
+        coordinator.cancelAnalysis()
+        nsView.overlayView.analysis = nil
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, ImageAnalysisOverlayViewDelegate {
+        weak var imageView: NSImageView?
+        weak var overlayView: ImageAnalysisOverlayView?
+        private var analysisTask: Task<Void, Never>?
+        private var activeRequestID: String?
+
+        func activate(
+            image: NSImage,
+            requestID: String,
+            activation: Int,
+            onStateChange: @escaping (ClipboardImagePreviewLiveTextState) -> Void
+        ) {
+            guard activation > 0, activeRequestID != requestID else { return }
+            activeRequestID = requestID
+            analysisTask?.cancel()
+            overlayView?.analysis = nil
+            overlayView?.preferredInteractionTypes = []
+
+            guard ImageAnalyzer.isSupported else {
+                Task { @MainActor in
+                    onStateChange(.unsupported)
+                }
+                return
+            }
+
+            analysisTask = Task { @MainActor [weak self, image] in
+                do {
+                    let analysis = try await ImageAnalyzer().analyze(
+                        image,
+                        orientation: .up,
+                        configuration: ImageAnalyzer.Configuration(.text)
+                    )
+                    guard !Task.isCancelled, self?.activeRequestID == requestID else { return }
+                    guard analysis.hasResults(for: .text) else {
+                        onStateChange(.empty)
+                        return
+                    }
+                    self?.overlayView?.analysis = analysis
+                    self?.overlayView?.preferredInteractionTypes = .textSelection
+                    self?.overlayView?.selectableItemsHighlighted = true
+                    onStateChange(.ready)
+                } catch {
+                    guard !Task.isCancelled, self?.activeRequestID == requestID else { return }
+                    onStateChange(.failed(error.localizedDescription))
+                }
+            }
+        }
+
+        func cancelAnalysis() {
+            analysisTask?.cancel()
+            analysisTask = nil
+            activeRequestID = nil
+        }
+
+        func contentsRect(for overlayView: ImageAnalysisOverlayView) -> CGRect {
+            guard let imageView else { return .zero }
+            return Self.imageContentRect(in: imageView)
+        }
+
+        func contentView(for overlayView: ImageAnalysisOverlayView) -> NSView? {
+            imageView
+        }
+
+        private static func imageContentRect(in imageView: NSImageView) -> CGRect {
+            let bounds = imageView.bounds
+            guard let image = imageView.image,
+                  image.size.width > 0,
+                  image.size.height > 0,
+                  bounds.width > 0,
+                  bounds.height > 0 else {
+                return bounds
+            }
+
+            let imageAspect = image.size.width / image.size.height
+            let boundsAspect = bounds.width / bounds.height
+            if imageAspect > boundsAspect {
+                let width = bounds.width
+                let height = width / imageAspect
+                return CGRect(x: 0, y: (bounds.height - height) / 2, width: width, height: height)
+            }
+
+            let height = bounds.height
+            let width = height * imageAspect
+            return CGRect(x: (bounds.width - width) / 2, y: 0, width: width, height: height)
+        }
     }
 }
 
-private struct ClipboardImagePreviewOCRResultView: View {
-    let state: ClipboardImagePreviewOCRState
-    let onCopy: (String) -> Void
+private final class ShelfLiveTextImagePreviewContainer: NSView {
+    let imageView = NSImageView()
+    let overlayView = ImageAnalysisOverlayView(frame: .zero)
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(NSLocalizedString("label.recognized_text", comment: ""))
-                .font(.headline)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        overlayView.translatesAutoresizingMaskIntoConstraints = false
+        overlayView.trackingImageView = imageView
+        addSubview(imageView)
+        imageView.addSubview(overlayView)
 
-            switch state {
-            case .result(let analysis):
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        let transcript = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !transcript.isEmpty {
-                            Text(transcript)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Button(NSLocalizedString("action.copy_all_recognized_text", comment: "")) {
-                                onCopy(transcript)
-                            }
-                        }
-                        ForEach(Array(analysis.barcodes.enumerated()), id: \.offset) { _, barcode in
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(barcode.payload)
-                                    .textSelection(.enabled)
-                                Spacer()
-                                Button(NSLocalizedString("action.copy", comment: "")) {
-                                    onCopy(barcode.payload)
-                                }
-                                .accessibilityLabel(NSLocalizedString("action.copy_recognized_code", comment: ""))
-                                .accessibilityValue(barcode.payload)
-                            }
-                        }
-                    }
-                }
-            case .empty:
-                Text(NSLocalizedString("message.no_text_was_recognized", comment: ""))
-                    .foregroundStyle(.secondary)
-            case .failed(let message):
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-            case .idle, .loading:
-                EmptyView()
-            }
-        }
-        .padding(16)
-        .frame(width: 360, height: 260, alignment: .topLeading)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(NSLocalizedString("label.recognized_text", comment: ""))
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            overlayView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
+            overlayView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+            overlayView.topAnchor.constraint(equalTo: imageView.topAnchor),
+            overlayView.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        nil
     }
 }
 

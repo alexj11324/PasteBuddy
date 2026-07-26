@@ -80,7 +80,7 @@
 - IMPORTANT: 截图捕获、长截图、滚动截图、屏幕取色和录屏均不在 PasteBuddy 产品范围内；禁止新增 ScreenCaptureKit、Screen Recording 权限、截图菜单/快捷键/设置、截图 overlay/editor 或平行 capture engine。
 - IMPORTANT: 普通剪贴板图片/文件捕获、已有图片历史与 asset/SQLite 路径必须保留；不得删除或迁移用户已有图片数据。
 - IMPORTANT: 从剪贴板或历史卡片发起的贴图由 `ScreenPinController` / `ScreenPinRegistry` 管理；不得复用或污染 `ClipboardShelfPanelController.isPinned`。
-- IMPORTANT: 剪贴板图片 OCR 必须共用 `OCRService` 的本地 Vision 路径；识别文本和 QR/条码复制必须走共享 `PasteboardWriter`/复制 HUD receipt，避免自捕获。翻译仅使用系统原生 Translation，系统不支持时必须可见失败。
+- IMPORTANT: 剪贴板捕获后的 OCR 元数据/搜索索引必须共用 `OCRService` 的本地 Vision 路径；图片预览中的 `text.viewfinder` 动作必须仅在单张图片预览内启用原生 VisionKit `ImageAnalyzer` + `ImageAnalysisOverlayView` Live Text，让用户直接在图片上选择/复制文字，禁止自定义 OCR 结果弹层或在 persistent Shelf/Side/Settings chrome 添加入口。翻译仅使用系统原生 Translation，系统不支持时必须可见失败。
 
 ## PasteBuddy Onboarding、权限与 Paywall 图标（IMPORTANT）
 - IMPORTANT: onboarding、权限设置、OCR/翻译 how-to、paywall 以及相关状态/动作只能使用 Apple SF Symbols 与现有原生 SwiftUI/AppKit 控件；禁止自绘图标、emoji 图标、PNG/JPG/WebP 位图符号、自制 SVG symbol 或新图标资产包。

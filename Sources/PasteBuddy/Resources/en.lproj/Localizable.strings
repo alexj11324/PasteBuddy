@@ -564,6 +564,7 @@
 "message.encrypts_clipboard_history_ocr_metadata_thumbnails_and" = "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain.";
 "message.image_data_unavailable_for_preview" = "The full image is unavailable.";
 "message.image_data_unavailable_for_text_recognition" = "The selected image data is unavailable for text recognition.";
+"message.live_text_unavailable" = "Live Text is unavailable on this Mac.";
 "message.iroh_clipboard_sync_local_peer" = "Uses iroh peer-to-peer transport. Clipboard payloads are sent only to the connected peer.";
 "message.items_stay_in_clipboard_history_only_this" = "Items stay in clipboard history. Only this pinboard collection is removed.";
 "message.launch_at_login_is_unavailable_in_this" = "Launch at login is unavailable in this build";

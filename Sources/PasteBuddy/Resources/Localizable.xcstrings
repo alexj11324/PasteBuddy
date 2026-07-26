@@ -16776,6 +16776,22 @@
         }
       }
     },
+    "message.live_text_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live Text is unavailable on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Mac 不支持实况文本。"
+          }
+        }
+      }
+    },
     "message.iroh_clipboard_sync_local_peer": {
       "localizations": {
         "en": {
