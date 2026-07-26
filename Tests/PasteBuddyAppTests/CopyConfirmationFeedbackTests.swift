@@ -18,6 +18,13 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
         XCTAssertEqual(state.presentation, presentation)
     }
 
+    func testNativeCopyReceiptUsesSharedInternalCopyMarker() {
+        XCTAssertEqual(
+            ClipboardNativeCopyFeedbackReceipt.pasteboardType,
+            PasteboardWriter.internalCopyPasteboardType
+        )
+    }
+
     func testFeedbackMessageLocalizesSingularAndPluralCounts() {
         var requestedKeys: [String] = []
         let localize: (String, String) -> String = { key, defaultValue in

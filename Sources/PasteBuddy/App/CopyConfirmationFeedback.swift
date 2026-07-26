@@ -72,7 +72,7 @@ final class CopyConfirmationFeedbackLifecycle {
 }
 
 struct ClipboardNativeCopyFeedbackReceipt {
-    static let pasteboardType = NSPasteboard.PasteboardType("com.alexjiang.PasteBuddy.copy-feedback-receipt")
+    static let pasteboardType = PasteboardWriter.internalCopyPasteboardType
 
     let data = Data(UUID().uuidString.utf8)
 

@@ -49,6 +49,7 @@ public final class ClipboardMonitor {
     func pollOnce() {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
+        guard !PasteboardWriter.containsInternalCopyMarker(pasteboard) else { return }
         let privacy = store.snapshot.privacy
         guard !privacy.isCaptureCurrentlyPaused() else { return }
 

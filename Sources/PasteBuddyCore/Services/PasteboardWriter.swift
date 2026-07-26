@@ -5,6 +5,10 @@ import UniformTypeIdentifiers
 
 @MainActor
 public enum PasteboardWriter {
+    public nonisolated static let internalCopyPasteboardType = NSPasteboard.PasteboardType(
+        "com.alexjiang.PasteBuddy.copy-feedback-receipt"
+    )
+
     public enum DirectPasteFallbackBehavior: Equatable, Sendable {
         case copyOnly
         case failWithoutCopying
@@ -59,7 +63,10 @@ public enum PasteboardWriter {
     ) -> Bool {
         pasteboard.clearContents()
         if format == .plainText {
-            return pasteboard.setString(plainText(for: item), forType: .string)
+            return finalizeInternalCopy(
+                pasteboard.setString(plainText(for: item), forType: .string),
+                on: pasteboard
+            )
         }
 
         var succeeded = false
@@ -105,7 +112,7 @@ public enum PasteboardWriter {
                 succeeded = pasteboard.setData(rtfData, forType: .rtf) || succeeded
             }
         }
-        return succeeded
+        return finalizeInternalCopy(succeeded, on: pasteboard)
     }
 
     @discardableResult
@@ -122,7 +129,22 @@ public enum PasteboardWriter {
         }
 
         pasteboard.clearContents()
-        return pasteboard.setString(plainText(for: items), forType: .string)
+        return finalizeInternalCopy(
+            pasteboard.setString(plainText(for: items), forType: .string),
+            on: pasteboard
+        )
+    }
+
+    static func containsInternalCopyMarker(_ pasteboard: NSPasteboard) -> Bool {
+        pasteboard.availableType(from: [internalCopyPasteboardType]) != nil
+    }
+
+    private static func finalizeInternalCopy(
+        _ contentWriteSucceeded: Bool,
+        on pasteboard: NSPasteboard
+    ) -> Bool {
+        guard contentWriteSucceeded else { return false }
+        return pasteboard.setData(Data([1]), forType: internalCopyPasteboardType)
     }
 
     public static func itemProviders(

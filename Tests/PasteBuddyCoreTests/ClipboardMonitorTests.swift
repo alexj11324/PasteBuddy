@@ -104,6 +104,51 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(store.snapshot.items.first?.id, firstCapture.id)
     }
 
+    func testPasteBuddyCopyDoesNotInvalidateRepositoryBackedHistory() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Existing history card",
+            payload: ClipboardPayload(text: "copy without invalidating history")
+        ))
+        await store.flushPendingSave()
+        store.markHistoryUnlockedForTesting()
+
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("PasteBuddyMonitorTests-\(UUID().uuidString)")
+        )
+        defer { pasteboard.releaseGlobally() }
+        let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
+        let readyRevision = store.dataRevision
+        ClipboardMonitor.makeItemOverrideForTesting = { item }
+        defer { ClipboardMonitor.makeItemOverrideForTesting = nil }
+
+        XCTAssertEqual(store.filteredItemsPage(for: .history, offset: 0).map(\.id), [item.id])
+        XCTAssertTrue(PasteboardWriter.copy(item, to: pasteboard))
+        XCTAssertEqual(store.dataRevision, readyRevision)
+        XCTAssertEqual(store.filteredItemsPage(for: .history, offset: 0).map(\.id), [item.id])
+        monitor.pollOnce()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(store.dataRevision, readyRevision)
+        XCTAssertEqual(store.repositorySyncedDataRevision, readyRevision)
+        XCTAssertNil(store.historyQueryErrorMessage)
+        XCTAssertEqual(store.filteredItemsPage(for: .history, offset: 0).map(\.id), [item.id])
+    }
+
     func testDistinctSlowCapturesSerializeInsteadOfDroppingEarlierCopy() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
