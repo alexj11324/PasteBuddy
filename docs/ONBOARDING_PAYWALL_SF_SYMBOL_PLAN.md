@@ -5,10 +5,9 @@
 - PasteBuddy has no dedicated onboarding or paywall view. The only Mac scene is
   native SwiftUI Settings, organized with `NavigationSplitView`, `Form`, `Section`,
   `Toggle`, `Button`, and SF Symbol sidebar labels.
-- Accessibility permission is exposed in Settings for direct paste. Screen capture
-  currently requests the stable app's Screen Recording permission only after an
-  explicit capture action. OCR has a Settings toggle; OCR and translation do not yet
-  have first-run/how-to pages.
+- Accessibility permission is exposed in Settings for direct paste. OCR has a
+  Settings toggle; OCR and translation do not yet have first-run/how-to pages.
+  Screenshot capture and Screen Recording permission are out of scope.
 - The Plans form currently mutates local trial/entitlement state and presents an
   unavailable restore action. The core already has `AppleStoreKitEntitlementProvider`,
   verified transactions, product fetch/purchase/restore, and transaction updates,
@@ -26,7 +25,6 @@ the existing settings, permission, and StoreKit owners above.
 |---|---|---|
 | Welcome / clipboard history | `doc.on.clipboard` | “Welcome to PasteBuddy”; explain local history in text |
 | Local privacy | `hand.raised.fill` | “Clipboard data stays under your selected local/sync policy” |
-| Screenshot permission | `viewfinder` | “Allow Screen Recording for screenshots”; never imply screen recording is a feature |
 | Direct-paste Accessibility | `accessibility` | “Allow Accessibility for direct paste”; show current trusted/not-trusted text |
 | OCR how-to | `text.viewfinder` | “Recognize selectable text and QR/barcodes locally with Vision” |
 | Translation how-to | `character.bubble` | “Translate text with macOS Translation”; show unavailable/download/error text |
@@ -51,7 +49,7 @@ use a symbol as the only accessible name or state cue.
 1. Add one SwiftUI-owned first-run state model persisted in the existing snapshot or
    preferences owner; do not add a second store.
 2. Present native pages/sheets using the existing design system. Permission buttons
-   call the current ScreenCaptureKit and Accessibility owners and display live state.
+   call the current Accessibility owner and display live state.
 3. Route the paywall through product fetch, `purchasePersonalPlan`, verified
    transaction updates, and `restorePurchases`; remove the current simulated plan
    activation buttons when the real UI is implemented.

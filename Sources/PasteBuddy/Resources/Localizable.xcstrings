@@ -868,23 +868,6 @@
       },
       "comment": "Legacy alias for label.capture_files. Prefer the semantic key in code."
     },
-    "Capture images and screenshots": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture images and screenshots"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "捕获图片和截图"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.capture_images_and_screenshots. Prefer the semantic key in code."
-    },
     "Capture is active": {
       "localizations": {
         "en": {
@@ -1819,23 +1802,6 @@
         }
       },
       "comment": "Legacy alias for message.copy_text_links_images_or_files_to. Prefer the semantic key in code."
-    },
-    "Copy text, links, screenshots, or files to fill the shelf.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Copy text, links, screenshots, or files to fill the shelf."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "复制文本、链接、截图或文件即可填充剪贴板架。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.copy_text_links_screenshots_or_files_to. Prefer the semantic key in code."
     },
     "Copy to PasteBuddy": {
       "localizations": {
@@ -5390,23 +5356,6 @@
       },
       "comment": "Legacy alias for message.recognized_local_ocr_text_appears_below_the. Prefer the semantic key in code."
     },
-    "Recognized screenshot text will appear here after Apple's local Vision OCR finishes.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recognized screenshot text will appear here after Apple's local Vision OCR finishes."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Apple 本地 Vision OCR 完成后，识别到的截图文字会显示在这里。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.recognized_screenshot_text_will_appear_here_after. Prefer the semantic key in code."
-    },
     "Recording": {
       "localizations": {
         "en": {
@@ -7713,54 +7662,6 @@
         }
       }
     },
-    "action.capture_after_3_seconds": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture After 3 Seconds"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "3 秒后截图"
-          }
-        }
-      }
-    },
-    "action.capture_after_5_seconds": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture After 5 Seconds"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "5 秒后截图"
-          }
-        }
-      }
-    },
-    "action.capture_screenshot": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture Screenshot"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图"
-          }
-        }
-      }
-    },
     "action.clear_all_history": {
       "localizations": {
         "en": {
@@ -8033,22 +7934,6 @@
         }
       }
     },
-    "action.copy_color": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Copy Color"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "复制颜色"
-          }
-        }
-      }
-    },
     "action.copy_import_configuration": {
       "localizations": {
         "en": {
@@ -8157,6 +8042,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "复制纯文本"
+          }
+        }
+      }
+    },
+    "action.copy_recognized_code": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy recognized code"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制识别出的代码"
           }
         }
       }
@@ -8625,22 +8526,6 @@
         }
       }
     },
-    "action.long_screenshot": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Long Screenshot"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长截图"
-          }
-        }
-      }
-    },
     "action.manage_apps": {
       "localizations": {
         "en": {
@@ -8669,38 +8554,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "更多操作"
-          }
-        }
-      }
-    },
-    "action.move_capture_region_backward": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move Capture Region Backward"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "向后移动截取区域"
-          }
-        }
-      }
-    },
-    "action.move_capture_region_forward": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move Capture Region Forward"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "向前移动截取区域"
           }
         }
       }
@@ -9217,22 +9070,6 @@
         }
       }
     },
-    "action.pick_color": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pick Color"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拾取颜色"
-          }
-        }
-      }
-    },
     "action.pin": {
       "localizations": {
         "en": {
@@ -9341,22 +9178,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出 PasteBuddy"
-          }
-        }
-      }
-    },
-    "action.recall_region": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recall Region"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "恢复区域"
           }
         }
       }
@@ -10771,57 +10592,6 @@
       },
       "comment": "Legacy alias for message.clipboard_history_is_temporarily_unavailable. Prefer the semantic key in code."
     },
-    "error.long_capture_ambiguous": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The scrolling overlap is ambiguous (score %.2f). Try a region with more distinctive content."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "滚动重叠区域不明确（分数 %.2f）。请尝试包含更多独特内容的区域。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.the_scrolling_overlap_is_ambiguous_score_2f. Prefer the semantic key in code."
-    },
-    "error.long_capture_limit_reached": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The long screenshot reached its safe memory or dimension limit."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长截图已达到安全内存或尺寸上限。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.the_long_screenshot_reached_its_safe_memory. Prefer the semantic key in code."
-    },
-    "error.long_capture_no_match": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The next frame could not be matched (best score %.2f). Dynamic, repetitive, or multiple scrolling regions are not supported."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法匹配下一帧（最佳分数 %.2f）。暂不支持动态、重复或包含多个滚动区域的内容。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.the_next_frame_could_not_be_matched. Prefer the semantic key in code."
-    },
     "error.ocr_requires_image": {
       "localizations": {
         "en": {
@@ -10889,91 +10659,6 @@
         }
       },
       "comment": "Legacy alias for message.the_recently_closed_pin_can_no_longer. Prefer the semantic key in code."
-    },
-    "error.screen_capture_empty_region": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select a non-empty screenshot region."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请选择非空的截图区域。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.select_a_non_empty_screenshot_region. Prefer the semantic key in code."
-    },
-    "error.screen_capture_encoding_failed": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The screenshot could not be encoded as PNG."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法将截图编码为 PNG。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.the_screenshot_could_not_be_encoded_as. Prefer the semantic key in code."
-    },
-    "error.screen_capture_failed": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The screenshot could not be captured."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法截取屏幕。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.the_screenshot_could_not_be_captured. Prefer the semantic key in code."
-    },
-    "error.screen_capture_no_display": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy could not identify the display for this capture."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy 无法识别本次截图所在的显示器。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.pastebuddy_could_not_identify_the_display_for. Prefer the semantic key in code."
-    },
-    "error.screen_capture_permission_required": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Screen Recording permission is required for screenshots. Grant it to the stable PasteBuddy app in System Settings, then try again."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图需要“屏幕与系统音频录制”权限。请在系统设置中授予稳定版 PasteBuddy 后重试。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.screen_recording_permission_is_required_for_screenshots. Prefer the semantic key in code."
     },
     "error.translation_empty_text": {
       "localizations": {
@@ -11427,38 +11112,6 @@
         }
       }
     },
-    "format.long_capture_match": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Matched %d px overlap (score %.2f)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已匹配 %d px 重叠（分数 %.2f）"
-          }
-        }
-      }
-    },
-    "format.long_capture_progress": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%d frames · %d × %d px"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%d 帧 · %d × %d px"
-          }
-        }
-      }
-    },
     "format.mcp_access_count": {
       "localizations": {
         "en": {
@@ -11823,6 +11476,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "智能分组 %@"
+          }
+        }
+      }
+    },
+    "format.text_recognition_failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text recognition failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字识别失败：%@"
           }
         }
       }
@@ -12227,54 +11896,6 @@
         }
       }
     },
-    "label.aspect_current": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Current"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当前比例"
-          }
-        }
-      }
-    },
-    "label.aspect_free": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Free"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自由"
-          }
-        }
-      }
-    },
-    "label.aspect_square": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "1:1"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正方形 1:1"
-          }
-        }
-      }
-    },
     "label.asset": {
       "localizations": {
         "en": {
@@ -12403,22 +12024,6 @@
         }
       }
     },
-    "label.border": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Border"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "边框"
-          }
-        }
-      }
-    },
     "label.bottom_to_top": {
       "localizations": {
         "en": {
@@ -12499,22 +12104,6 @@
         }
       }
     },
-    "label.capture_direction": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture Direction"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "捕获方向"
-          }
-        }
-      }
-    },
     "label.capture_files": {
       "localizations": {
         "en": {
@@ -12531,18 +12120,18 @@
         }
       }
     },
-    "label.capture_images_and_screenshots": {
+    "label.capture_images": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Capture images and screenshots"
+            "value": "Capture images"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "捕获图片和截图"
+            "value": "捕获图片"
           }
         }
       }
@@ -12591,22 +12180,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "捕获链接"
-          }
-        }
-      }
-    },
-    "label.capture_options": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Screenshot Options"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图选项"
           }
         }
       }
@@ -13139,22 +12712,6 @@
         }
       }
     },
-    "label.corner_radius": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Corner Radius"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "圆角"
-          }
-        }
-      }
-    },
     "label.created": {
       "localizations": {
         "en": {
@@ -13171,38 +12728,6 @@
         }
       }
     },
-    "label.crop_leading": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Crop Start"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "裁剪开头"
-          }
-        }
-      }
-    },
-    "label.crop_trailing": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Crop End"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "裁剪结尾"
-          }
-        }
-      }
-    },
     "label.current_plan": {
       "localizations": {
         "en": {
@@ -13215,22 +12740,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前套餐"
-          }
-        }
-      }
-    },
-    "label.cursor": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cursor"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "光标"
           }
         }
       }
@@ -13731,22 +13240,6 @@
         }
       }
     },
-    "label.height": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Height"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "高度"
-          }
-        }
-      }
-    },
     "label.history": {
       "localizations": {
         "en": {
@@ -13839,22 +13332,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "历史已解锁"
-          }
-        }
-      }
-    },
-    "label.horizontal": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Horizontal"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "水平"
           }
         }
       }
@@ -14447,54 +13924,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "本地化"
-          }
-        }
-      }
-    },
-    "label.long_capture_preview": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Long Screenshot Preview"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长截图预览"
-          }
-        }
-      }
-    },
-    "label.long_screenshot": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Long Screenshot"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长截图"
-          }
-        }
-      }
-    },
-    "label.long_screenshot_controls": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Long Screenshot Controls"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长截图控制"
           }
         }
       }
@@ -15167,22 +14596,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 剪贴板架"
-          }
-        }
-      }
-    },
-    "label.pastebuddy_color_picker": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy Color Picker"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy 取色器"
           }
         }
       }
@@ -15875,38 +15288,6 @@
         }
       }
     },
-    "label.screenshot": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Screenshot"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图"
-          }
-        }
-      }
-    },
-    "label.screenshot_capture_overlay": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Screenshot Capture Overlay"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图选择界面"
-          }
-        }
-      }
-    },
     "label.search": {
       "localizations": {
         "en": {
@@ -16031,22 +15412,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "选择一个项目"
-          }
-        }
-      }
-    },
-    "label.selection_target": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Selection Target"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择目标"
           }
         }
       }
@@ -16819,22 +16184,6 @@
         }
       }
     },
-    "label.ui_element": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "UI Element"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "界面元素"
-          }
-        }
-      }
-    },
     "label.unknown_error": {
       "localizations": {
         "en": {
@@ -16931,22 +16280,6 @@
         }
       }
     },
-    "label.vertical": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vertical"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "垂直"
-          }
-        }
-      }
-    },
     "label.visible": {
       "localizations": {
         "en": {
@@ -16975,38 +16308,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "旁白"
-          }
-        }
-      }
-    },
-    "label.width": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Width"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "宽度"
-          }
-        }
-      }
-    },
-    "label.window": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Window"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "窗口"
           }
         }
       }
@@ -17219,22 +16520,6 @@
         }
       }
     },
-    "message.capture_stopped_crop_copy_save_or_pin": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture stopped. Crop, copy, save, or pin the result."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "捕获已停止。可裁剪、复制、保存或贴到屏幕。"
-          }
-        }
-      }
-    },
     "message.cleared_shortcuts_remain_available_from_menus_but": {
       "localizations": {
         "en": {
@@ -17299,7 +16584,7 @@
         }
       }
     },
-    "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy": {
+    "message.clipboard_payloads_images_ocr_metadata_thumbnails_privacy": {
       "localizations": {
         "en": {
           "stringUnit": {
@@ -17343,22 +16628,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "复制文本、链接、图片或文件即可开始建立本地历史。"
-          }
-        }
-      }
-    },
-    "message.copy_text_links_screenshots_or_files_to": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Copy text, links, screenshots, or files to fill the shelf."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "复制文本、链接、截图或文件即可填充剪贴板架。"
           }
         }
       }
@@ -17471,6 +16740,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "加密剪贴板历史、OCR 元数据、缩略图和收藏板。本地密钥保存在 Keychain 中。"
+          }
+        }
+      }
+    },
+    "message.image_data_unavailable_for_text_recognition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected image data is unavailable for text recognition."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选图片数据不可用于文字识别。"
           }
         }
       }
@@ -17683,22 +16968,6 @@
         }
       }
     },
-    "message.no_frames_were_captured": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No frames were captured."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "尚未捕获任何帧。"
-          }
-        }
-      }
-    },
     "message.no_installed_apps_found": {
       "localizations": {
         "en": {
@@ -17743,6 +17012,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有匹配的应用。"
+          }
+        }
+      }
+    },
+    "message.no_text_was_recognized": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No text was recognized."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未识别到文字。"
           }
         }
       }
@@ -17807,22 +17092,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "PasteBuddy 无法创建此项目。"
-          }
-        }
-      }
-    },
-    "message.pastebuddy_could_not_identify_the_display_for": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy could not identify the display for this capture."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy 无法识别本次截图所在的显示器。"
           }
         }
       }
@@ -17935,22 +17204,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "可用时，识别到的本地 OCR 文本会显示在图片下方。"
-          }
-        }
-      }
-    },
-    "message.recognized_screenshot_text_will_appear_here_after": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recognized screenshot text will appear here after Apple's local Vision OCR finishes."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Apple 本地 Vision OCR 完成后，识别到的截图文字会显示在这里。"
           }
         }
       }
@@ -18111,54 +17364,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "扫描 Mac 版 PasteBuddy 中显示的二维码。"
-          }
-        }
-      }
-    },
-    "message.screen_recording_permission_is_required_for_screenshots": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Screen Recording permission is required for screenshots. Grant it to the stable PasteBuddy app in System Settings, then try again."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图需要“屏幕与系统音频录制”权限。请在系统设置中授予稳定版 PasteBuddy 后重试。"
-          }
-        }
-      }
-    },
-    "message.scroll_the_selected_region_to_continue": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scroll the selected region to continue."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "滚动所选区域以继续。"
-          }
-        }
-      }
-    },
-    "message.select_a_non_empty_screenshot_region": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select a non-empty screenshot region."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请选择非空的截图区域。"
           }
         }
       }
@@ -18355,38 +17560,6 @@
         }
       }
     },
-    "message.the_long_screenshot_reached_its_safe_memory": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The long screenshot reached its safe memory or dimension limit."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长截图已达到安全内存或尺寸上限。"
-          }
-        }
-      }
-    },
-    "message.the_next_frame_could_not_be_matched": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The next frame could not be matched (best score %.2f). Dynamic, repetitive, or multiple scrolling regions are not supported."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法匹配下一帧（最佳分数 %.2f）。暂不支持动态、重复或包含多个滚动区域的内容。"
-          }
-        }
-      }
-    },
     "message.the_pinned_image_is_unavailable": {
       "localizations": {
         "en": {
@@ -18431,54 +17604,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "相同的本地隐私边界适用于历史记录、收藏板、搜索、快捷指令、键盘插入、共享/操作导入以及 MCP 访问。"
-          }
-        }
-      }
-    },
-    "message.the_screenshot_could_not_be_captured": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The screenshot could not be captured."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法截取屏幕。"
-          }
-        }
-      }
-    },
-    "message.the_screenshot_could_not_be_encoded_as": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The screenshot could not be encoded as PNG."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法将截图编码为 PNG。"
-          }
-        }
-      }
-    },
-    "message.the_scrolling_overlap_is_ambiguous_score_2f": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The scrolling overlap is ambiguous (score %.2f). Try a region with more distinctive content."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "滚动重叠区域不明确（分数 %.2f）。请尝试包含更多独特内容的区域。"
           }
         }
       }
@@ -20420,23 +19545,6 @@
       },
       "comment": "Legacy alias for automation.destination.clipboard. Prefer the semantic key in code."
     },
-    "source.pastebuddy_color_picker": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy Color Picker"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PasteBuddy 取色器"
-          }
-        }
-      },
-      "comment": "Legacy alias for label.pastebuddy_color_picker. Prefer the semantic key in code."
-    },
     "source.pastebuddy_ocr": {
       "localizations": {
         "en": {
@@ -20631,6 +19739,22 @@
         }
       }
     },
+    "state.recognizing_text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognizing text…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在识别文字…"
+          }
+        }
+      }
+    },
     "state.required": {
       "localizations": {
         "en": {
@@ -20662,57 +19786,6 @@
           }
         }
       }
-    },
-    "status.long_capture_no_frames": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No frames were captured."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "尚未捕获任何帧。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.no_frames_were_captured. Prefer the semantic key in code."
-    },
-    "status.long_capture_stopped": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture stopped. Crop, copy, save, or pin the result."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "捕获已停止。可裁剪、复制、保存或贴到屏幕。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.capture_stopped_crop_copy_save_or_pin. Prefer the semantic key in code."
-    },
-    "status.long_capture_waiting_for_scroll": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scroll the selected region to continue."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "滚动所选区域以继续。"
-          }
-        }
-      },
-      "comment": "Legacy alias for message.scroll_the_selected_region_to_continue. Prefer the semantic key in code."
     }
   },
   "version": "1.0"

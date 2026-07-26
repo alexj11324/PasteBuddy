@@ -731,7 +731,7 @@ struct ClipboardShelfPanelView: View {
         if shelfScope == .pasteStack {
             return store.isPasteStackActive ? localized("message.new_copies_will_appear_here") : localized("message.start_collecting_copied_items")
         }
-        return localized("message.copy_text_links_screenshots_or_files_to")
+        return localized("message.copy_text_links_images_or_files_to")
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {

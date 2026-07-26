@@ -6,7 +6,7 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
 ## Implemented In The Local macOS MVP
 
 - DAY123-26: Automatic clipboard history capture for text, links, images,
-  screenshots, multiple files, rich text variants, and mixed pasteboard
+  multiple files, rich text variants, and mixed pasteboard
   payloads, with normalized metadata, deduplication, and quiet unsupported-type
   handling.
 - DAY123-27: Configurable max item count, max age, max encrypted history bytes,
@@ -35,7 +35,7 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
 - DAY123-36: Filters by source app, content type, copied date, and device,
   including generated search suggestions and visible removable active-filter
   chips on Mac and mobile browsing surfaces.
-- DAY123-37: Local Apple Vision OCR after image/screenshot capture, with OCR
+- DAY123-37: Local Apple Vision OCR after clipboard image capture, with OCR
   text saved as searchable encrypted metadata.
 - DAY123-38: User-editable item titles and labels, with labels normalized,
   encrypted, searchable, persisted through paste-stack edits, and visible on
@@ -67,7 +67,7 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
   writing to history, pinboards, or search, and `PrivacyPostureReport` exposes
   paused state plus protected-surface coverage for history, pinboards, search,
   Shortcuts, keyboard, Share/Action, and MCP access.
-- DAY123-50: Menu bar status, launch-at-login preference, capture controls, and
+- DAY123-50: Menu bar status, launch-at-login preference, and
   Settings sections. The menu bar now uses a tested `MacMenuBarStatus` model for
   active/paused title, icon, capture action, launch-at-login state, quick access
   to the main window, and Settings entry points for General, Shortcuts, Privacy,
@@ -91,7 +91,7 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
   distribution, single invoice, admin state, and team positioning. The team
   overview model and Settings copy distinguish Team from personal plans and
   center the value proposition on shared pinboards for ideas, links, files,
-  screenshots, snippets, and staying in sync.
+  images, snippets, and staying in sync.
 - DAY123-53: Trial, monthly, annual, lifetime, family, restore, all-devices
   entitlement model, StoreKit product configuration, StoreKit 2 purchase/restore
   adapter, transaction update observer, verified entitlement mapping, and a

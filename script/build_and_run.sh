@@ -114,27 +114,9 @@ open_development_panel() {
   wait_for_single_installed_app
 }
 
-open_development_capture() {
-  verify_development_control_target
-  local capture="${2:-}"
-  case "$capture" in
-    static|long|pin-clipboard)
-      ;;
-    *)
-      die "usage: $0 --open-capture [static|long|pin-clipboard]"
-      ;;
-  esac
-  /usr/bin/open -a "$STABLE_DEVELOPMENT_BUNDLE" "pastebuddy-dev://capture/$capture"
-  wait_for_single_installed_app
-}
-
 case "$MODE" in
   --open-panel|open-panel)
     open_development_panel "$@"
-    exit 0
-    ;;
-  --open-capture|open-capture)
-    open_development_capture "$@"
     exit 0
     ;;
 esac
@@ -438,8 +420,6 @@ cat >"$INFO_PLIST" <<PLIST
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>PasteBuddy captures screenshots you explicitly select.</string>
   <key>PasteBuddySigningChannel</key>
   <string>$SIGNING_CHANNEL</string>
   <key>PasteBuddyCodeSigningIdentity</key>
@@ -596,7 +576,7 @@ case "$MODE" in
     package_app "$INSTALL_BUNDLE"
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package|--open-panel [shelf|side-panel]|--open-capture [static|long|pin-clipboard]]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install|--package|--install-package|--open-panel [shelf|side-panel]]" >&2
     exit 2
     ;;
 esac

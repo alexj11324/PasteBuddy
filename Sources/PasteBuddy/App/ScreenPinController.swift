@@ -19,7 +19,6 @@ enum ScreenPinAction {
     case save
     case recognize
     case translate
-    case pickColor
 }
 
 @MainActor
@@ -343,8 +342,6 @@ final class ScreenPinController {
             recognize(id: pinID)
         case .translate:
             translate(id: pinID)
-        case .pickColor:
-            pickColor(id: pinID)
         }
     }
 
@@ -510,40 +507,6 @@ final class ScreenPinController {
             } catch {
                 model.errorMessage = error.localizedDescription
                 PasteBuddyDiagnostics.record(.pin, "translationFailed", detail: "id=\(id) error=\(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func pickColor(id: UUID) {
-        let mouse = NSEvent.mouseLocation
-        let service = ScreenCaptureService()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let rect = try service.quartzRect(
-                    fromAppKit: CGRect(x: mouse.x, y: mouse.y, width: 1, height: 1)
-                )
-                let image = try await service.capture(
-                    quartzRect: rect,
-                    showsCursor: false
-                )
-                guard let color = image.centerPixelColor else {
-                    throw ScreenCaptureServiceError.captureFailed
-                }
-                let text = color.hexString
-                let item = ClipboardItem(
-                    sourceAppName: NSLocalizedString("source.pastebuddy_color_picker", comment: ""),
-                    sourceBundleIdentifier: Bundle.main.bundleIdentifier,
-                    deviceName: Host.current().localizedName
-                        ?? NSLocalizedString("label.this_mac", comment: ""),
-                    contentType: .text,
-                    title: text,
-                    payload: ClipboardPayload(text: text)
-                )
-                guard let stored = self.store?.addCapturedItem(item) else { return }
-                ClipboardPanelCopyCoordinator.copy(stored, sourceWindow: self.panels[id])
-            } catch {
-                self.models[id]?.errorMessage = error.localizedDescription
             }
         }
     }
@@ -904,9 +867,6 @@ private struct ScreenPinContentView: View {
             Button(NSLocalizedString("action.toggle_thumbnail_crop", comment: "")) {
                 model.onAction(.toggleThumbnail)
             }
-            Button(NSLocalizedString("action.pick_color", comment: "")) {
-                model.onAction(.pickColor)
-            }
         }
         Button(NSLocalizedString("action.reset_pin_appearance", comment: "")) {
             model.onAction(.resetAppearance)
@@ -985,36 +945,6 @@ private struct ScreenPinContentView: View {
         .padding(10)
         .frame(maxHeight: 220)
         .background(.regularMaterial)
-    }
-}
-
-private extension CGImage {
-    var centerPixelColor: ScreenPinColor? {
-        var pixel = [UInt8](repeating: 0, count: 4)
-        let rendered = pixel.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress,
-                width: 1,
-                height: 1,
-                bitsPerComponent: 8,
-                bytesPerRow: 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else {
-                return false
-            }
-            context.draw(self, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-            return true
-        }
-        guard rendered else {
-            return nil
-        }
-        return ScreenPinColor(
-            red: CGFloat(pixel[0]) / 255,
-            green: CGFloat(pixel[1]) / 255,
-            blue: CGFloat(pixel[2]) / 255,
-            alpha: CGFloat(pixel[3]) / 255
-        )
     }
 }
 

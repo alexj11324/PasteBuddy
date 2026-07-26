@@ -2159,7 +2159,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(report.coverageStatement.contains("Shortcuts"))
         XCTAssertTrue(report.coverageStatement.contains("keyboard"))
         XCTAssertTrue(report.coverageStatement.contains("MCP"))
-        XCTAssertEqual(report.localBoundaryStatement, "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy")
+        XCTAssertEqual(report.localBoundaryStatement, "message.clipboard_payloads_images_ocr_metadata_thumbnails_privacy")
         XCTAssertTrue(report.syncBoundaryStatement.contains("private iCloud"))
         XCTAssertFalse(report.syncBoundaryStatement.contains("encrypted records"))
         XCTAssertTrue(report.vendorServerStatement.contains("does not send clipboard payloads to vendor servers"))

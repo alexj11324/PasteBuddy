@@ -231,7 +231,7 @@ struct SettingsView: View {
                     )
                 )
                 Toggle(
-                    "Capture images and screenshots",
+                    "label.capture_images",
                     isOn: Binding(
                         get: { store.snapshot.privacy.captureImages },
                         set: { _ in store.toggleImageCapture() }

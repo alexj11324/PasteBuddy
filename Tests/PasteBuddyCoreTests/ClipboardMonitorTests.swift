@@ -104,6 +104,38 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(store.snapshot.items.first?.id, firstCapture.id)
     }
 
+    func testCopiedImageStillCreatesImageHistoryItemWithOCRPending() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteBuddyMonitorTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 1,
+            pixelsHigh: 1,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 4,
+            bitsPerPixel: 32
+        )
+        let png = try XCTUnwrap(bitmap?.representation(using: .png, properties: [:]))
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+
+        let item = try XCTUnwrap(ClipboardMonitor.makeItem(
+            from: pasteboard,
+            sourceApp: "Preview",
+            sourceBundleIdentifier: "com.apple.Preview",
+            privacy: PrivacyConfiguration()
+        ))
+
+        XCTAssertEqual(item.contentType, .image)
+        XCTAssertEqual(item.title, "Image")
+        XCTAssertEqual(item.payload.imageData, png)
+        XCTAssertTrue(item.ocrState.isPending)
+    }
+
     func testPasteBuddyCopyDoesNotInvalidateRepositoryBackedHistory() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

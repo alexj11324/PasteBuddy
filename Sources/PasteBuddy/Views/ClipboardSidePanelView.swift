@@ -21,6 +21,53 @@ private struct ClipboardSidePanelQueryState: Equatable {
     let pasteStackRevision: Int
 }
 
+enum ClipboardSidePanelOCRSelection {
+    static func item(from items: [ClipboardItem]) -> ClipboardItem? {
+        guard items.count == 1, items[0].presentationContentType == .image else {
+            return nil
+        }
+        return items[0]
+    }
+}
+
+enum ClipboardSidePanelOCRRequest {
+    static func isCurrent(
+        _ requestID: UUID,
+        currentRequestID: UUID?,
+        expectedItemID: UUID,
+        selectedItemID: UUID?
+    ) -> Bool {
+        requestID == currentRequestID && expectedItemID == selectedItemID
+    }
+
+    static func hasContent(_ analysis: OCRAnalysis) -> Bool {
+        !analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !analysis.barcodes.isEmpty
+    }
+}
+
+private enum ClipboardSidePanelOCRState: Equatable {
+    case idle
+    case loading(UUID)
+    case result(UUID, OCRAnalysis)
+    case empty(UUID)
+    case failed(UUID, String)
+
+    var isLoading: Bool {
+        if case .loading = self { return true }
+        return false
+    }
+
+    var presentsResult: Bool {
+        switch self {
+        case .result, .empty, .failed:
+            true
+        case .idle, .loading:
+            false
+        }
+    }
+}
+
 struct ClipboardSidePanelView: View {
     @Environment(\.openSettings) private var openSettings
     @Bindable var store: PasteBuddyStore
@@ -37,6 +84,8 @@ struct ClipboardSidePanelView: View {
     @State private var interaction = ShelfInteractionModel()
     @State private var pinnedState: Bool?
     @State private var timestampReference = Date()
+    @State private var ocrState: ClipboardSidePanelOCRState = .idle
+    @State private var ocrRequestID: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,12 +112,17 @@ struct ClipboardSidePanelView: View {
         }
         .onDisappear {
             interaction.dismissPreview()
+            ocrRequestID = nil
         }
         .onChange(of: queryState) {
             refreshSideItems()
         }
         .onChange(of: store.searchQuery) {
             interaction.dismissPreview()
+        }
+        .onChange(of: selectedItemsInDisplayOrder.map(\.id)) {
+            ocrRequestID = nil
+            ocrState = .idle
         }
         .onExitCommand(perform: handleExitCommand)
         .focusable(true)
@@ -360,7 +414,7 @@ struct ClipboardSidePanelView: View {
     }
 
     private var footer: some View {
-        Group {
+        HStack {
             if paging.items.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
                 ProgressView()
                     .controlSize(.small)
@@ -370,6 +424,33 @@ struct ClipboardSidePanelView: View {
                 Text(localized("format.items", paging.totalCount))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            if selectedImageForOCR != nil {
+                Button {
+                    recognizeSelectedImage()
+                } label: {
+                    if ocrState.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(localized("state.recognizing_text"))
+                    } else {
+                        Label(localized("action.recognize_text"), systemImage: "text.viewfinder")
+                    }
+                }
+                .disabled(ocrState.isLoading)
+                .accessibilityLabel(localized("action.recognize_text"))
+                .accessibilityValue(
+                    ocrState.isLoading ? localized("state.recognizing_text") : ""
+                )
+                .popover(isPresented: ocrPresentationBinding, arrowEdge: .bottom) {
+                    ClipboardSidePanelOCRResultView(
+                        state: ocrState,
+                        onCopy: copyRecognizedText
+                    )
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -405,6 +486,21 @@ struct ClipboardSidePanelView: View {
             return interaction.primarySelectedID.flatMap { id in renderedItems.first { $0.id == id } }.map { [$0] } ?? []
         }
         return renderedItems.filter { ids.contains($0.id) }
+    }
+
+    private var selectedImageForOCR: ClipboardItem? {
+        ClipboardSidePanelOCRSelection.item(from: selectedItemsInDisplayOrder)
+    }
+
+    private var ocrPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { ocrState.presentsResult },
+            set: { isPresented in
+                if !isPresented {
+                    ocrState = .idle
+                }
+            }
+        )
     }
 
     private var effectivePinned: Bool {
@@ -452,7 +548,7 @@ struct ClipboardSidePanelView: View {
         if sideScope == .pasteStack {
             return store.isPasteStackActive ? localized("message.new_copies_will_appear_here") : localized("message.start_collecting_copied_items")
         }
-        return localized("message.copy_text_links_screenshots_or_files_to")
+        return localized("message.copy_text_links_images_or_files_to")
     }
 
     private func refreshSideItems() {
@@ -678,6 +774,92 @@ struct ClipboardSidePanelView: View {
         }
     }
 
+    private func recognizeSelectedImage() {
+        guard let item = selectedImageForOCR else { return }
+        let requestID = UUID()
+        ocrRequestID = requestID
+        ocrState = .loading(item.id)
+
+        Task { @MainActor in
+            let hydrated = await store.hydratedItem(for: item)
+            guard ClipboardSidePanelOCRRequest.isCurrent(
+                requestID,
+                currentRequestID: ocrRequestID,
+                expectedItemID: item.id,
+                selectedItemID: selectedImageForOCR?.id
+            ) else {
+                return
+            }
+            let imageData: Data?
+            if let inlineImageData = hydrated.payload.imageData {
+                imageData = inlineImageData
+            } else {
+                imageData = await store.imageData(for: hydrated)
+            }
+            guard ClipboardSidePanelOCRRequest.isCurrent(
+                requestID,
+                currentRequestID: ocrRequestID,
+                expectedItemID: item.id,
+                selectedItemID: selectedImageForOCR?.id
+            ) else {
+                return
+            }
+            guard let imageData else {
+                ocrState = .failed(
+                    item.id,
+                    localized("message.image_data_unavailable_for_text_recognition")
+                )
+                return
+            }
+
+            do {
+                let analysis = try await OCRService().analyze(in: imageData)
+                guard ClipboardSidePanelOCRRequest.isCurrent(
+                    requestID,
+                    currentRequestID: ocrRequestID,
+                    expectedItemID: item.id,
+                    selectedItemID: selectedImageForOCR?.id
+                ) else {
+                    return
+                }
+                if ClipboardSidePanelOCRRequest.hasContent(analysis) {
+                    let transcript = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !transcript.isEmpty {
+                        store.updateOCRText(transcript, for: item.id)
+                    }
+                    ocrState = .result(item.id, analysis)
+                } else {
+                    ocrState = .empty(item.id)
+                }
+            } catch {
+                guard ClipboardSidePanelOCRRequest.isCurrent(
+                    requestID,
+                    currentRequestID: ocrRequestID,
+                    expectedItemID: item.id,
+                    selectedItemID: selectedImageForOCR?.id
+                ) else {
+                    return
+                }
+                ocrState = .failed(
+                    item.id,
+                    localized("format.text_recognition_failed", error.localizedDescription)
+                )
+            }
+        }
+    }
+
+    private func copyRecognizedText(_ text: String) {
+        let item = ClipboardItem(
+            sourceAppName: localized("source.pastebuddy_ocr"),
+            sourceBundleIdentifier: Bundle.main.bundleIdentifier,
+            deviceName: Host.current().localizedName ?? localized("label.this_mac"),
+            contentType: .text,
+            title: localized("label.recognized_text"),
+            payload: ClipboardPayload(text: text)
+        )
+        ClipboardPanelCopyCoordinator.copy(item, sourceWindow: NSApp.keyWindow)
+    }
+
     private func handleExitCommand() {
         if isSearchFocused {
             if !store.searchQuery.isEmpty {
@@ -706,6 +888,62 @@ struct ClipboardSidePanelView: View {
         )
     }
 
+}
+
+private struct ClipboardSidePanelOCRResultView: View {
+    let state: ClipboardSidePanelOCRState
+    let onCopy: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(NSLocalizedString("label.recognized_text", comment: ""), systemImage: "text.viewfinder")
+                .font(.headline)
+
+            switch state {
+            case .result(_, let analysis):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        let transcript = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !transcript.isEmpty {
+                            Text(transcript)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button(NSLocalizedString("action.copy_all_recognized_text", comment: "")) {
+                                onCopy(transcript)
+                            }
+                        }
+                        ForEach(Array(analysis.barcodes.enumerated()), id: \.offset) { _, barcode in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(barcode.payload)
+                                    .textSelection(.enabled)
+                                Spacer()
+                                Button(NSLocalizedString("action.copy", comment: "")) {
+                                    onCopy(barcode.payload)
+                                }
+                                .accessibilityLabel(NSLocalizedString("action.copy_recognized_code", comment: ""))
+                                .accessibilityValue(barcode.payload)
+                            }
+                        }
+                    }
+                }
+            case .empty:
+                ContentUnavailableView(
+                    NSLocalizedString("message.no_text_was_recognized", comment: ""),
+                    systemImage: "text.viewfinder"
+                )
+            case .failed(_, let message):
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            case .idle, .loading:
+                EmptyView()
+            }
+        }
+        .padding(16)
+        .frame(width: 360, height: 260, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(NSLocalizedString("label.recognized_text", comment: ""))
+    }
 }
 
 private struct ClipboardSidePanelFilterChip: View {

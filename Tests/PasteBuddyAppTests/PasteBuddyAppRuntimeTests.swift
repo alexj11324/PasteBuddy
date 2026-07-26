@@ -17,7 +17,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testDevelopmentCommandAcceptsOnlyStablePanelCaptureAndPinURLs() throws {
+    func testDevelopmentCommandAcceptsOnlyStablePanelURLs() throws {
         let shelf = try XCTUnwrap(PasteBuddyDevelopmentCommand(
             url: URL(string: "pastebuddy-dev://panel/shelf")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
@@ -26,24 +26,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             url: URL(string: "pastebuddy-dev://panel/side-panel")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
         ))
-        let screenshot = try XCTUnwrap(PasteBuddyDevelopmentCommand(
-            url: URL(string: "pastebuddy-dev://capture/static")!,
-            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
-        ))
-        let longScreenshot = try XCTUnwrap(PasteBuddyDevelopmentCommand(
-            url: URL(string: "pastebuddy-dev://capture/long")!,
-            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
-        ))
-        let pinClipboard = try XCTUnwrap(PasteBuddyDevelopmentCommand(
-            url: URL(string: "pastebuddy-dev://capture/pin-clipboard")!,
-            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
-        ))
-
         XCTAssertEqual(shelf.displayMode.rawValue, ClipboardPanelDisplayMode.shelf.rawValue)
         XCTAssertEqual(sidePanel.displayMode.rawValue, ClipboardPanelDisplayMode.sidePanel.rawValue)
-        XCTAssertEqual(screenshot, .openCapture(.static))
-        XCTAssertEqual(longScreenshot, .openCapture(.long))
-        XCTAssertEqual(pinClipboard, .pinClipboard)
         XCTAssertNil(PasteBuddyDevelopmentCommand(
             url: URL(string: "pastebuddy-dev://panel/shelf")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy"
@@ -57,7 +41,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
         ))
         XCTAssertNil(PasteBuddyDevelopmentCommand(
-            url: URL(string: "pastebuddy-dev://capture/recording")!,
+            url: URL(string: "pastebuddy-dev://capture/static")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        XCTAssertNil(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://capture/long")!,
+            bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
+        ))
+        XCTAssertNil(PasteBuddyDevelopmentCommand(
+            url: URL(string: "pastebuddy-dev://capture/pin-clipboard")!,
             bundleIdentifier: "com.alexjiang.PasteBuddy.dev"
         ))
     }
@@ -77,21 +69,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testDevelopmentControlsReuseTheInstalledDevAppWithoutBuildingOrInstalling() throws {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildScript = try sourceFileContents("script/build_and_run.sh")
-        let englishPurpose = try sourceFileContents(
-            "Sources/PasteBuddy/Resources/en.lproj/InfoPlist.strings"
-        )
-        let chinesePurpose = try sourceFileContents(
-            "Sources/PasteBuddy/Resources/zh-Hans.lproj/InfoPlist.strings"
-        )
         let openMode = try XCTUnwrap(buildScript.range(of: "--open-panel|open-panel)"))
-        let captureMode = try XCTUnwrap(buildScript.range(of: "--open-capture|open-capture)"))
         let signingSetup = try XCTUnwrap(buildScript.range(of: "CODESIGN_KEYCHAIN=\"$(resolve_code_sign_keychain)\""))
         let build = try XCTUnwrap(buildScript.range(of: "swift build"))
 
         XCTAssertLessThan(openMode.lowerBound, signingSetup.lowerBound)
         XCTAssertLessThan(openMode.lowerBound, build.lowerBound)
-        XCTAssertLessThan(captureMode.lowerBound, signingSetup.lowerBound)
-        XCTAssertLessThan(captureMode.lowerBound, build.lowerBound)
         XCTAssertTrue(buildScript.contains(
             "/usr/bin/open -a \"$STABLE_DEVELOPMENT_BUNDLE\" \"pastebuddy-dev://panel/$panel\""
         ))
@@ -103,26 +86,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         ))
         XCTAssertTrue(buildScript.contains("Stable development app does not match the current integrated commit"))
         XCTAssertTrue(buildScript.contains("shelf|side-panel)"))
-        XCTAssertTrue(buildScript.contains("static|long|pin-clipboard)"))
-        XCTAssertTrue(buildScript.contains(
-            "/usr/bin/open -a \"$STABLE_DEVELOPMENT_BUNDLE\" \"pastebuddy-dev://capture/$capture\""
-        ))
         XCTAssertTrue(buildScript.contains("CFBundleURLTypes"))
         XCTAssertTrue(buildScript.contains("\"CFBundleURLSchemes\":[\"pastebuddy-dev\"]"))
-        XCTAssertTrue(buildScript.contains("<key>NSScreenCaptureUsageDescription</key>"))
-        XCTAssertTrue(buildScript.contains("PasteBuddy captures screenshots you explicitly select."))
-        XCTAssertTrue(englishPurpose.contains("\"NSScreenCaptureUsageDescription\""))
-        XCTAssertTrue(chinesePurpose.contains("\"NSScreenCaptureUsageDescription\""))
+        XCTAssertFalse(buildScript.contains("--open-capture"))
+        XCTAssertFalse(buildScript.contains("NSScreenCaptureUsageDescription"))
         XCTAssertFalse(buildScript.contains("/usr/bin/open \"pastebuddy-dev://panel/$panel\""))
         XCTAssertFalse(buildScript.contains("/usr/bin/open -n \"pastebuddy-dev://panel/$panel\""))
         XCTAssertTrue(appSource.contains("func application(_ application: NSApplication, open urls: [URL])"))
         XCTAssertTrue(appSource.contains("case .openPanel(let displayMode):"))
-        XCTAssertTrue(appSource.contains("case .openCapture(let mode):"))
-        XCTAssertTrue(appSource.contains("case .pinClipboard:"))
-        XCTAssertEqual(
-            appSource.components(separatedBy: "await startRuntimeIfNeeded()").count - 1,
-            10
-        )
+        XCTAssertFalse(appSource.contains("ScreenshotCapture"))
+        XCTAssertFalse(appSource.contains("action.capture_screenshot"))
     }
 
     func testDockIconStaysHiddenForMenuBarRuntimeAndSettings() throws {
@@ -141,11 +114,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(settingsSource.contains("NSApp.setActivationPolicy(.regular)"))
     }
 
-    func testCapturePinAndOnboardingSymbolsExistOnTheSupportedSystem() {
+    func testPinAndOnboardingSymbolsExistOnTheSupportedSystem() {
         let symbols = [
             "doc.on.clipboard",
             "hand.raised.fill",
-            "viewfinder",
             "accessibility",
             "text.viewfinder",
             "character.bubble",
@@ -159,9 +131,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "arrow.clockwise",
             "arrow.right",
             "xmark",
-            "camera.viewfinder",
-            "timer",
-            "rectangle.expand.vertical",
             "pin.square",
             "pin.square.fill",
             "eye",
@@ -172,7 +141,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "cursorarrow.rays",
             "square.stack.3d.up",
             "photo",
-            "rectangle.dashed",
         ]
 
         for symbol in symbols {
@@ -1401,7 +1369,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 keyCode: Int64(kVK_ANSI_2),
                 flags: [.maskCommand, .maskShift]
             ),
-            .screenshot
+            nil
         )
         XCTAssertEqual(
             PasteBuddyPanelHotKeyMatcher.action(
@@ -1439,6 +1407,69 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             PasteBuddyPanelHotKeyMatcher.matches(
                 keyCode: Int64(kVK_ANSI_V),
                 flags: [.maskCommand, .maskShift, .maskControl]
+            )
+        )
+    }
+
+    func testSidePanelOCRRequiresExactlyOneImageSelection() {
+        let image = makeShelfItem(title: "Copied image", contentType: .image)
+        let mixedImage = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Copied mixed image",
+            payload: ClipboardPayload(text: "Caption", imageData: Data([0x01]))
+        )
+        let text = makeShelfItem(title: "Copied text", contentType: .text)
+
+        XCTAssertEqual(
+            ClipboardSidePanelOCRSelection.item(from: [image])?.id,
+            image.id
+        )
+        XCTAssertEqual(
+            ClipboardSidePanelOCRSelection.item(from: [mixedImage])?.id,
+            mixedImage.id
+        )
+        XCTAssertNil(ClipboardSidePanelOCRSelection.item(from: []))
+        XCTAssertNil(ClipboardSidePanelOCRSelection.item(from: [image, image]))
+        XCTAssertNil(ClipboardSidePanelOCRSelection.item(from: [text]))
+    }
+
+    func testSidePanelOCRPreservesBarcodeOnlyResults() {
+        let analysis = OCRAnalysis(
+            textObservations: [],
+            barcodes: [
+                OCRBarcodeObservation(
+                    payload: "https://example.com",
+                    symbology: "QR",
+                    normalizedBoundingBox: .zero
+                )
+            ],
+            supportedRecognitionLanguages: []
+        )
+
+        XCTAssertTrue(ClipboardSidePanelOCRRequest.hasContent(analysis))
+    }
+
+    func testSidePanelOCRRejectsResultAfterSelectionChanges() async {
+        let requestID = UUID()
+        let imageID = UUID()
+        await Task.yield()
+
+        XCTAssertFalse(
+            ClipboardSidePanelOCRRequest.isCurrent(
+                requestID,
+                currentRequestID: requestID,
+                expectedItemID: imageID,
+                selectedItemID: UUID()
+            )
+        )
+        XCTAssertFalse(
+            ClipboardSidePanelOCRRequest.isCurrent(
+                requestID,
+                currentRequestID: nil,
+                expectedItemID: imageID,
+                selectedItemID: imageID
             )
         )
     }
@@ -1975,13 +2006,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
     }
 
-    private func makeShelfItem(title: String) -> ClipboardItem {
+    private func makeShelfItem(
+        title: String,
+        contentType: ClipboardContentType = .text
+    ) -> ClipboardItem {
         ClipboardItem(
             sourceAppName: "Preview",
             deviceName: "Test Mac",
-            contentType: .text,
+            contentType: contentType,
             title: title,
-            payload: ClipboardPayload(text: title)
+            payload: contentType == .image
+                ? ClipboardPayload(imageData: Data([0x01]))
+                : ClipboardPayload(text: title)
         )
     }
 

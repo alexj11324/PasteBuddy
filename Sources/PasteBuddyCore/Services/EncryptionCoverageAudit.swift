@@ -4,7 +4,7 @@ public enum EncryptedDataSurface: String, CaseIterable, Codable, Identifiable, S
     case clipboardText
     case clipboardURLs
     case fileReferences
-    case imageAndScreenshotBytes
+    case imageBytes
     case ocrMetadata
     case thumbnails
     case pinboards
@@ -24,7 +24,7 @@ public enum EncryptedDataSurface: String, CaseIterable, Codable, Identifiable, S
         case .clipboardText: "Clipboard text"
         case .clipboardURLs: "Clipboard links"
         case .fileReferences: "File references"
-        case .imageAndScreenshotBytes: "Image and screenshot bytes"
+        case .imageBytes: "Image bytes"
         case .ocrMetadata: "OCR metadata"
         case .thumbnails: "Thumbnails"
         case .pinboards: "Pinboards"
@@ -88,7 +88,7 @@ public enum EncryptionCoverageAudit {
             protection: "Stored as local snapshot metadata; external file bytes are never copied without an explicit future blob vault."
         ),
         EncryptionCoverageItem(
-            surface: .imageAndScreenshotBytes,
+            surface: .imageBytes,
             protection: "Image data is stored in the local PasteBuddy snapshot."
         ),
         EncryptionCoverageItem(

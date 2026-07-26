@@ -329,7 +329,7 @@ public final class ClipboardMonitor {
                 .flatMap { URL(string: $0)?.lastPathComponent }
                 ?? "File"
         case .image:
-            return "Screenshot or image"
+            return PasteBuddyLocalization.string("label.image", defaultValue: "Image")
         case .mixed:
             return "Mixed Clipboard Item"
         }

@@ -1783,13 +1783,13 @@ public struct TeamPlanOverview: Codable, Equatable, Sendable {
         distributionSummary = team.managedDistributionEnabled
             ? "Managed distribution enabled for team deployment."
             : "Managed distribution is off; members install individually."
-        primaryValueStatement = "Team plans center on shared pinboards for reusable ideas, links, files, screenshots, and snippets that stay in sync for collaborators."
+        primaryValueStatement = "Team plans center on shared pinboards for reusable ideas, links, files, images, and snippets that stay in sync for collaborators."
         purchasePositioning = "Team is a business plan distinct from personal monthly, annual, lifetime, and family plans, with seat billing and admin-visible license state."
         valuePropositions = [
             TeamPlanValueProposition(
                 id: "shared-pinboards",
                 title: "Shared pinboards",
-                detail: "Collect team ideas, links, files, screenshots, and reusable snippets in shared boards.",
+                detail: "Collect team ideas, links, files, images, and reusable snippets in shared boards.",
                 systemImageName: "pin.2"
             ),
             TeamPlanValueProposition(
@@ -3323,7 +3323,7 @@ public struct PrivacyPostureReport: Equatable, Sendable {
         excludedBundleIdentifierCount = privacy.excludedBundleIdentifiers.count
         activeCustomCaptureRuleCount = privacy.customCaptureRules.filter(\.isEnabled).count
         sensitiveTextBlockingEnabled = privacy.blockLikelySensitiveText
-        localBoundaryStatement = "message.clipboard_payloads_screenshots_ocr_metadata_thumbnails_privacy"
+        localBoundaryStatement = "message.clipboard_payloads_images_ocr_metadata_thumbnails_privacy"
         vendorServerStatement = "PasteBuddy does not send clipboard payloads to vendor servers for capture, search, OCR, keyboard insertion, Shortcuts, or local MCP access."
         mcpBoundaryStatement = snapshot.mcp.isServerEnabled
             ? "MCP Agent connection is on. Connected local Agents can use PasteBuddy on this Mac."

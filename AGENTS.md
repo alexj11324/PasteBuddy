@@ -76,18 +76,16 @@
 - IMPORTANT: link preview title、image asset ID 与 SQLite indexed asset reference 必须由同一次 store/repository save 提交；UI 只从共享 store/repository hydration 读取，禁止 surface 自建第二份 metadata cache。
 - IMPORTANT: accessory app 必须在任何 history/database `await` 之前创建 status item；生命周期回归必须验证调用顺序和稳定安装后的存活。
 
-## PasteBuddy 截图、贴图、OCR 与翻译共享所有权（IMPORTANT）
-- IMPORTANT: 静态截图与长截图只能由 `ScreenshotCaptureCoordinator` / `ScreenCaptureService` 进入，捕获结果必须经 `CapturedImageHistoryWriter` 写入现有 store、asset 与 SQLite 路径；禁止创建第二个截图历史、图片缓存或并行窗口体系。
-- IMPORTANT: ScreenCaptureKit 的权限和截图验收必须针对稳定安装的 `/Applications/PasteBuddy Dev.app`、`com.alexjiang.PasteBuddy.dev` 与稳定签名 requirement；`script/build_and_run.sh --open-capture static|long|pin-clipboard` 只能唤醒同一个已安装进程，禁止用裸可执行文件、临时 bundle 或第二个菜单栏实例冒充 TCC 证据。
-- IMPORTANT: 屏幕内容贴图与 Shelf 自身固定是两种不同状态。屏幕贴图只能由 `ScreenPinController` / `ScreenPinRegistry` 管理原生 overlay panel、close/destroy/recent restore、always-on-top、lock、click-through recovery、group 与全局批量动作；不得复用或污染 `ClipboardShelfPanelController.isPinned`。
-- IMPORTANT: 图片贴图 OCR 必须共用 `OCRService` 的本地 Vision 路径；识别文本和 QR/条码复制必须走共享 `PasteboardWriter`/复制 HUD receipt，避免自捕获。翻译仅使用系统原生 Translation，系统不支持时必须可见失败，禁止无用户决定接入付费云服务、API key 或秘密。
-- IMPORTANT: 长截图必须增量匹配且对动态、重复、多个滚动区域和不匹配帧可见失败；默认安全上限为 64,000,000 输出像素、单边 80,000 px、500 帧、累计 96,000,000 输入像素，修改上限必须有内存/导出测量证据。禁止把外部产品的 2,000,000 px 宣传值当作 PasteBuddy 已验证能力。
-- IMPORTANT: Screen recording 明确不在这套所有权内；禁止顺手新增录屏菜单、录屏状态机或录屏数据管道。功能边界与已知差距以 `docs/SCREEN_CAPTURE_FEATURE_MATRIX.md` 为准。
+## PasteBuddy 图片、贴图、OCR 与翻译共享所有权（IMPORTANT）
+- IMPORTANT: 截图捕获、长截图、滚动截图、屏幕取色和录屏均不在 PasteBuddy 产品范围内；禁止新增 ScreenCaptureKit、Screen Recording 权限、截图菜单/快捷键/设置、截图 overlay/editor 或平行 capture engine。
+- IMPORTANT: 普通剪贴板图片/文件捕获、已有图片历史与 asset/SQLite 路径必须保留；不得删除或迁移用户已有图片数据。
+- IMPORTANT: 从剪贴板或历史卡片发起的贴图由 `ScreenPinController` / `ScreenPinRegistry` 管理；不得复用或污染 `ClipboardShelfPanelController.isPinned`。
+- IMPORTANT: 剪贴板图片 OCR 必须共用 `OCRService` 的本地 Vision 路径；识别文本和 QR/条码复制必须走共享 `PasteboardWriter`/复制 HUD receipt，避免自捕获。翻译仅使用系统原生 Translation，系统不支持时必须可见失败。
 
 ## PasteBuddy Onboarding、权限与 Paywall 图标（IMPORTANT）
 - IMPORTANT: onboarding、权限设置、OCR/翻译 how-to、paywall 以及相关状态/动作只能使用 Apple SF Symbols 与现有原生 SwiftUI/AppKit 控件；禁止自绘图标、emoji 图标、PNG/JPG/WebP 位图符号、自制 SVG symbol 或新图标资产包。
 - IMPORTANT: 每个 SF Symbol 必须有本地化文字与独立辅助功能标签，状态不得只靠图标或颜色表达；新增 symbol 必须验证 `NSImage(systemSymbolName:)` 非空并确认其 SF Symbols 首发版本不晚于最低支持的 macOS 14.5（2023）。
-- IMPORTANT: onboarding/permission UI 必须复用现有 ScreenCaptureKit、Accessibility、Vision OCR、Translation 与 Settings 状态 owner；paywall 必须复用 `AppleStoreKitEntitlementProvider`、`purchasePersonalPlan`、`restorePurchases` 和已验证 transaction update，禁止新建 entitlement/store 或继续把本地模拟激活冒充真实购买。
+- IMPORTANT: onboarding/permission UI 必须复用现有 Accessibility、Vision OCR、Translation 与 Settings 状态 owner；禁止新增截图或 Screen Recording 权限 UI。paywall 必须复用 `AppleStoreKitEntitlementProvider`、`purchasePersonalPlan`、`restorePurchases` 和已验证 transaction update，禁止新建 entitlement/store 或继续把本地模拟激活冒充真实购买。
 - IMPORTANT: 实施顺序与固定 symbol mapping 以 `docs/ONBOARDING_PAYWALL_SF_SYMBOL_PLAN.md` 为准；在该计划之外新增或替换图标前先更新审计与最低系统可用性证据。
 
 ## iOS TestFlight 发布固定流程（IMPORTANT）

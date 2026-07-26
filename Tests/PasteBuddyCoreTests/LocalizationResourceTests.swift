@@ -214,7 +214,7 @@ final class LocalizationResourceTests: XCTestCase {
             "label.more_actions",
             "message.new_copies_will_appear_here",
             "message.start_collecting_copied_items",
-            "message.copy_text_links_screenshots_or_files_to",
+            "message.copy_text_links_images_or_files_to",
             "action.stop_paste_stack",
             "action.start_paste_stack",
             "action.reverse_paste_stack",
