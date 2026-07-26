@@ -209,6 +209,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
                 arrowEdge: previewArrowEdge
             ) {
                 previewContent(item)
+                    .id("\(itemID.uuidString):\(previewPresentationGeneration)")
             }
             .onAppear {
                 if itemID == items.last?.id {
@@ -236,6 +237,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             },
             set: { isPresented in
                 if !isPresented, presentedPreviewID == id {
+                    previewPresentationGeneration &+= 1
                     presentedPreviewID = nil
                     onPreviewDismiss(id)
                 }
@@ -257,7 +259,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         let targetID = validPreviewedID
         guard presentedPreviewID != targetID else { return }
 
-        previewPresentationGeneration += 1
+        previewPresentationGeneration &+= 1
         let generation = previewPresentationGeneration
         if presentedPreviewID != nil, targetID != nil {
             presentedPreviewID = nil

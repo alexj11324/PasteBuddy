@@ -562,6 +562,7 @@
 "message.drop_clipboard_items_here_to_pin_them" = "Drop clipboard items here to pin them.";
 "message.edit_the_saved_text_then_choose_save" = "Edit the saved text, then choose Save Text.";
 "message.encrypts_clipboard_history_ocr_metadata_thumbnails_and" = "Encrypts clipboard history, OCR metadata, thumbnails, and pinboards. The local key stays in Keychain.";
+"message.image_data_unavailable_for_preview" = "The full image is unavailable.";
 "message.image_data_unavailable_for_text_recognition" = "The selected image data is unavailable for text recognition.";
 "message.iroh_clipboard_sync_local_peer" = "Uses iroh peer-to-peer transport. Clipboard payloads are sent only to the connected peer.";
 "message.items_stay_in_clipboard_history_only_this" = "Items stay in clipboard history. Only this pinboard collection is removed.";
@@ -742,6 +743,7 @@
 "state.enabled" = "Enabled";
 "state.idle" = "Idle";
 "state.installing" = "Installing...";
+"state.loading_image" = "Loading image…";
 "state.none" = "None";
 "state.off" = "Off";
 "state.optional" = "Optional";

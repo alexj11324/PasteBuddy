@@ -16744,6 +16744,22 @@
         }
       }
     },
+    "message.image_data_unavailable_for_preview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The full image is unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完整图片不可用。"
+          }
+        }
+      }
+    },
     "message.image_data_unavailable_for_text_recognition": {
       "localizations": {
         "en": {
@@ -19671,6 +19687,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在安装..."
+          }
+        }
+      }
+    },
+    "state.loading_image": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading image…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载图片…"
           }
         }
       }

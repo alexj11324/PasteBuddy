@@ -4548,6 +4548,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertNil(lightweightItem.payload.rtfData)
         XCTAssertNotNil(lightweightItem.payload.imageAssetID)
         XCTAssertNotNil(lightweightItem.payload.rtfAssetID)
+        let dataRevision = store.dataRevision
+        let historyCount = store.filteredItemCount(for: .history)
 
         let hydratedImageData = await store.imageData(for: lightweightItem)
         XCTAssertEqual(hydratedImageData, imageData)
@@ -4556,6 +4558,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(hydratedItem.payload.imageData, imageData)
         XCTAssertEqual(hydratedItem.payload.rtfData, rtfData)
         XCTAssertTrue(hydratedItem.matches("asset ocr"))
+        XCTAssertEqual(store.dataRevision, dataRevision)
+        XCTAssertEqual(store.filteredItemCount(for: .history), historyCount)
     }
 
     func testRepositoryBackedStoreWritesAssetReferencesToDiskSnapshotAndHydratesOnReload() throws {

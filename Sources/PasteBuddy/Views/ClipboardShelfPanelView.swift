@@ -613,8 +613,7 @@ struct ClipboardShelfPanelView: View {
             return AnyView(
                 ShelfExpandedPreview(
                     item: item,
-                    imageDataProvider: store.imageData,
-                    tint: SourceApplicationIconResolver.themeColor(for: item, fallback: item.presentationContentType.shelfTint),
+                    hydrateItemProvider: store.hydratedItem,
                     onDismiss: {
                         shelfInteraction.dismissPreview()
                     },
@@ -1407,12 +1406,16 @@ private struct ClipboardShelfCard: View {
 
 struct ShelfExpandedPreview: View {
     private static let textPreviewHeight: CGFloat = 420
+    private static let imageActionAreaHeight: CGFloat = 42
 
     @FocusState private var isPreviewFocused: Bool
+    @State private var hydratedImageItem: ClipboardItem?
+    @State private var fullImage: NSImage?
+    @State private var imageLoadError: String?
+    @State private var imageLoadRequestID: UUID?
 
     let item: ClipboardItem
-    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
-    let tint: Color
+    let hydrateItemProvider: @MainActor (ClipboardItem) async -> ClipboardItem
     var maxWidth: CGFloat = 640
     let onDismiss: () -> Void
     let onMove: (MoveCommandDirection) -> Void
@@ -1430,6 +1433,15 @@ struct ShelfExpandedPreview: View {
         .onAppear {
             requestPreviewFocus()
         }
+        .task(id: imageLoadIdentity) {
+            await loadFullImageIfNeeded()
+        }
+        .onDisappear {
+            imageLoadRequestID = nil
+            hydratedImageItem = nil
+            fullImage = nil
+            imageLoadError = nil
+        }
         .onMoveCommand(perform: handlePreviewMoveCommand)
         .onExitCommand(perform: onDismiss)
         .onKeyPress(phases: .down, action: handlePreviewKeyPress)
@@ -1443,13 +1455,25 @@ struct ShelfExpandedPreview: View {
         switch item.presentationContentType {
         case .image:
             if item.payload.hasImageAsset {
-                ShelfExpandedImagePreview(
-                    item: item,
-                    imageDataProvider: imageDataProvider,
-                    tint: tint,
-                    displaySize: imagePreviewDisplaySize
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
+                if let hydratedImageItem, let fullImage {
+                    ShelfExpandedImagePreview(
+                        item: hydratedImageItem,
+                        image: fullImage,
+                        displaySize: imagePreviewDisplaySize
+                    )
+                    .frame(maxWidth: .infinity, alignment: .center)
+                } else if let imageLoadError {
+                    ContentUnavailableView(
+                        imageLoadError,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .frame(width: imagePreviewBounds.width, height: imagePreviewBounds.height)
+                } else {
+                    ProgressView(localized("state.loading_image"))
+                        .controlSize(.large)
+                        .frame(width: imagePreviewBounds.width, height: imagePreviewBounds.height)
+                        .accessibilityLabel(localized("state.loading_image"))
+                }
             } else {
                 previewText(ClipboardPlainTextRenderer.plainText(for: item))
                     .frame(height: Self.textPreviewHeight)
@@ -1476,7 +1500,7 @@ struct ShelfExpandedPreview: View {
 
     private var previewFrameHeight: CGFloat {
         if let imagePreviewDisplaySize {
-            return imagePreviewDisplaySize.height + 28
+            return imagePreviewDisplaySize.height + Self.imageActionAreaHeight + 28
         }
         return Self.textPreviewHeight + 28
     }
@@ -1491,14 +1515,42 @@ struct ShelfExpandedPreview: View {
 
     private var imagePreviewDisplaySize: CGSize? {
         guard item.presentationContentType == .image,
-              item.payload.hasImageAsset,
-              let imageSize = ClipboardImageCache.imageSize(for: item) else {
+              let hydratedImageItem,
+              let imageSize = ClipboardImageCache.imageSize(for: hydratedImageItem) else {
             return nil
         }
         return ClipboardImageCache.fittedDisplaySize(
             for: imageSize,
             within: imagePreviewBounds
         )
+    }
+
+    private var imageLoadIdentity: String {
+        ClipboardImagePreviewRequest.assetIdentity(for: item)
+    }
+
+    private func loadFullImageIfNeeded() async {
+        guard item.presentationContentType == .image, item.payload.hasImageAsset else { return }
+        let requestID = UUID()
+        imageLoadRequestID = requestID
+        hydratedImageItem = nil
+        fullImage = nil
+        imageLoadError = nil
+
+        let hydrated = await hydrateItemProvider(item)
+        guard ClipboardImagePreviewRequest.isCurrent(
+            requestID,
+            currentRequestID: imageLoadRequestID
+        ), !Task.isCancelled else {
+            return
+        }
+        guard let data = hydrated.payload.imageData,
+              let image = NSImage(data: data) else {
+            imageLoadError = localized("message.image_data_unavailable_for_preview")
+            return
+        }
+        hydratedImageItem = hydrated
+        fullImage = image
     }
 
     private func previewText(_ text: String) -> some View {
@@ -1557,62 +1609,141 @@ struct ShelfExpandedPreview: View {
     }
 }
 
+enum ClipboardImagePreviewRequest {
+    static func assetIdentity(for item: ClipboardItem) -> String {
+        [
+            item.id.uuidString,
+            item.payload.imageAssetID ?? "inline",
+            String(item.updatedAt.timeIntervalSince1970)
+        ].joined(separator: ":")
+    }
+
+    static func isCurrent(
+        _ requestID: UUID,
+        currentRequestID: UUID?
+    ) -> Bool {
+        requestID == currentRequestID
+    }
+}
+
+enum ClipboardImagePreviewOCR {
+    static func hasContent(_ analysis: OCRAnalysis) -> Bool {
+        !analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !analysis.barcodes.isEmpty
+    }
+
+    @MainActor
+    static func recognizedTextItem(_ text: String) -> ClipboardItem {
+        ClipboardItem(
+            sourceAppName: PasteBuddyLocalization.string(
+                "source.pastebuddy_ocr",
+                defaultValue: "PasteBuddy OCR"
+            ),
+            sourceBundleIdentifier: Bundle.main.bundleIdentifier,
+            deviceName: Host.current().localizedName ?? PasteBuddyLocalization.string(
+                "label.this_mac",
+                defaultValue: "This Mac"
+            ),
+            contentType: .text,
+            title: PasteBuddyLocalization.string(
+                "label.recognized_text",
+                defaultValue: "Recognized Text"
+            ),
+            payload: ClipboardPayload(text: text)
+        )
+    }
+
+    @MainActor
+    @discardableResult
+    static func copyRecognizedText(
+        _ text: String,
+        to pasteboard: NSPasteboard = .general,
+        sourceWindow: NSWindow? = nil,
+        reportSuccess: ((Int) -> Void)? = nil
+    ) -> Bool {
+        ClipboardPanelCopyCoordinator.copy(
+            recognizedTextItem(text),
+            to: pasteboard,
+            sourceWindow: sourceWindow,
+            reportSuccess: reportSuccess
+        )
+    }
+}
+
+private enum ClipboardImagePreviewOCRState: Equatable {
+    case idle
+    case loading
+    case result(OCRAnalysis)
+    case empty
+    case failed(String)
+
+    var isLoading: Bool {
+        self == .loading
+    }
+
+    var presentsResult: Bool {
+        switch self {
+        case .result, .empty, .failed:
+            true
+        case .idle, .loading:
+            false
+        }
+    }
+}
+
 private struct ShelfExpandedImagePreview: View {
     let item: ClipboardItem
-    let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
-    let tint: Color
+    let image: NSImage
     let displaySize: CGSize?
-    @State private var liveTextImage: NSImage?
-    @State private var fallbackImage: NSImage?
+    @State private var ocrState: ClipboardImagePreviewOCRState = .idle
+    @State private var ocrRequestID: UUID?
 
     var body: some View {
-        ZStack {
-            if let liveTextImage {
-                ShelfLiveTextImagePreview(
-                    image: liveTextImage,
-                    analysisID: analysisID
+        VStack(alignment: .trailing, spacing: 10) {
+            ShelfLiveTextImagePreview(
+                image: image,
+                analysisID: analysisID
+            )
+            .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .accessibilityLabel(localized("label.captured_image_preview"))
+
+            Button {
+                recognizeText()
+            } label: {
+                if ocrState.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(localized("state.recognizing_text"))
+                } else {
+                    Label(localized("action.recognize_text"), systemImage: "text.viewfinder")
+                }
+            }
+            .disabled(ocrState.isLoading)
+            .accessibilityLabel(localized("action.recognize_text"))
+            .accessibilityValue(ocrState.isLoading ? localized("state.recognizing_text") : "")
+            .popover(isPresented: ocrPresentationBinding, arrowEdge: .bottom) {
+                ClipboardImagePreviewOCRResultView(
+                    state: ocrState,
+                    onCopy: copyRecognizedText
                 )
-            } else if let image = fallbackImage ?? ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(tint.opacity(0.10))
-                Image(systemName: "photo")
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(tint)
             }
         }
-        .frame(width: resolvedDisplaySize.width, height: resolvedDisplaySize.height)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .accessibilityLabel(localized("label.captured_image_preview"))
-        .task(id: ClipboardImageCache.thumbnailCacheKey(for: item, maxPixelSize: maxPixelSize)) {
-            let cachedImage = ClipboardImageCache.cachedThumbnail(for: item, maxPixelSize: maxPixelSize)
-            fallbackImage = cachedImage
-
-            let imageData = await imageDataProvider(item)
-
-            if let imageData, let image = NSImage(data: imageData) {
-                guard !Task.isCancelled else { return }
-                liveTextImage = image
-                fallbackImage = image
-                return
-            }
-
-            guard cachedImage == nil else { return }
-            let loadedImage = await ClipboardImageCache.thumbnail(
-                for: item,
-                imageData: imageData,
-                maxPixelSize: maxPixelSize
-            )
-            guard !Task.isCancelled else { return }
-            fallbackImage = loadedImage
+        .onDisappear {
+            ocrRequestID = nil
+            ocrState = .idle
         }
     }
 
-    private var maxPixelSize: Int {
-        1_600
+    private var ocrPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { ocrState.presentsResult },
+            set: { isPresented in
+                if !isPresented {
+                    ocrState = .idle
+                }
+            }
+        )
     }
 
     private var resolvedDisplaySize: CGSize {
@@ -1620,14 +1751,113 @@ private struct ShelfExpandedImagePreview: View {
     }
 
     private var analysisID: String {
-        ClipboardImageCache.thumbnailCacheKey(
-            for: item,
-            maxPixelSize: maxPixelSize
-        ) ?? item.id.uuidString
+        ClipboardImagePreviewRequest.assetIdentity(for: item)
+    }
+
+    private func recognizeText() {
+        guard let imageData = item.payload.imageData else {
+            ocrState = .failed(localized("message.image_data_unavailable_for_text_recognition"))
+            return
+        }
+        let requestID = UUID()
+        ocrRequestID = requestID
+        ocrState = .loading
+
+        Task { @MainActor in
+            do {
+                let analysis = try await OCRService().analyze(in: imageData)
+                guard ClipboardImagePreviewRequest.isCurrent(
+                    requestID,
+                    currentRequestID: ocrRequestID
+                ) else {
+                    return
+                }
+                ocrState = ClipboardImagePreviewOCR.hasContent(analysis)
+                    ? .result(analysis)
+                    : .empty
+            } catch {
+                guard ClipboardImagePreviewRequest.isCurrent(
+                    requestID,
+                    currentRequestID: ocrRequestID
+                ) else {
+                    return
+                }
+                ocrState = .failed(localized("format.text_recognition_failed", error.localizedDescription))
+            }
+        }
+    }
+
+    private func copyRecognizedText(_ text: String) {
+        ClipboardImagePreviewOCR.copyRecognizedText(
+            text,
+            sourceWindow: NSApp.keyWindow
+        )
     }
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        String(
+            format: NSLocalizedString(key, comment: ""),
+            locale: Locale.current,
+            arguments: arguments
+        )
+    }
+}
+
+private struct ClipboardImagePreviewOCRResultView: View {
+    let state: ClipboardImagePreviewOCRState
+    let onCopy: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(NSLocalizedString("label.recognized_text", comment: ""))
+                .font(.headline)
+
+            switch state {
+            case .result(let analysis):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        let transcript = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !transcript.isEmpty {
+                            Text(transcript)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button(NSLocalizedString("action.copy_all_recognized_text", comment: "")) {
+                                onCopy(transcript)
+                            }
+                        }
+                        ForEach(Array(analysis.barcodes.enumerated()), id: \.offset) { _, barcode in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(barcode.payload)
+                                    .textSelection(.enabled)
+                                Spacer()
+                                Button(NSLocalizedString("action.copy", comment: "")) {
+                                    onCopy(barcode.payload)
+                                }
+                                .accessibilityLabel(NSLocalizedString("action.copy_recognized_code", comment: ""))
+                                .accessibilityValue(barcode.payload)
+                            }
+                        }
+                    }
+                }
+            case .empty:
+                Text(NSLocalizedString("message.no_text_was_recognized", comment: ""))
+                    .foregroundStyle(.secondary)
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            case .idle, .loading:
+                EmptyView()
+            }
+        }
+        .padding(16)
+        .frame(width: 360, height: 260, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(NSLocalizedString("label.recognized_text", comment: ""))
     }
 }
 
