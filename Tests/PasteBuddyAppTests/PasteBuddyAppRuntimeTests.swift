@@ -654,6 +654,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testApplyingShelfFrameKeepsHostingContentInsidePanelBounds() {
+        let frame = CGRect(x: -1512, y: -215, width: 1512, height: 350)
+        let panel = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentView = NSHostingView(
+            rootView: VStack {
+                Text("Header")
+                Spacer()
+                Text("Footer")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("shelf-geometry-probe")
+        )
+        panel.contentView?.setFrameSize(CGSize(width: 1512, height: 440))
+        panel.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(panel.frame, frame)
+        XCTAssertEqual(panel.contentView?.frame.height, 440)
+
+        ClipboardShelfPanelController.applyPanelFrame(frame, to: panel, display: false)
+
+        XCTAssertEqual(panel.frame, frame)
+        XCTAssertEqual(panel.contentView?.frame, CGRect(origin: .zero, size: frame.size))
+        XCTAssertTrue(panel.accessibilityFrame().contains(panel.contentView?.accessibilityFrame() ?? .null))
+    }
+
     func testShelfLayoutPolicyContainsEveryRegionAndCardAcrossDisplays() {
         let shelfSource = try? sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let controllerSource = try? sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
@@ -669,6 +700,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             (
                 CGRect(x: -1920, y: -120, width: 1920, height: 1080),
                 CGRect(x: -1920, y: -80, width: 1920, height: 1010)
+            ),
+            (
+                CGRect(x: -1512, y: -278, width: 1512, height: 982),
+                CGRect(x: -1512, y: -215, width: 1512, height: 887)
             ),
             (
                 CGRect(x: 1440, y: 0, width: 2560, height: 1440),

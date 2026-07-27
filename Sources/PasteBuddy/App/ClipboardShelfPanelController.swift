@@ -246,7 +246,7 @@ final class ClipboardShelfPanelController {
         isAnimatingPanelOut = false
         panelAnimationGeneration += 1
         panel.animationBehavior = .none
-        panel.setFrame(finalFrame, display: false)
+        Self.applyPanelFrame(finalFrame, to: panel, display: false)
         preparePanelContentForPresentation(panel)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
@@ -543,7 +543,13 @@ final class ClipboardShelfPanelController {
 
     private func positionVisiblePanel(_ panel: NSPanel) {
         let finalFrame = attachedFrame(for: panel)
-        panel.setFrame(finalFrame, display: panel.isVisible)
+        Self.applyPanelFrame(finalFrame, to: panel, display: panel.isVisible)
+    }
+
+    static func applyPanelFrame(_ frame: NSRect, to panel: NSPanel, display: Bool) {
+        panel.setFrame(frame, display: display)
+        panel.contentView?.setFrameSize(frame.size)
+        panel.contentView?.layoutSubtreeIfNeeded()
     }
 
     private func startDismissalMonitoring(for panel: NSPanel) {
