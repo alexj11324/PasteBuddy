@@ -164,7 +164,6 @@ enum ClipboardPanelDisplayMode: String, CaseIterable, Identifiable {
 
 @MainActor
 final class ClipboardShelfPanelController {
-    private static let panelCornerRadius: CGFloat = 28
     private static let shelfEntranceDuration: CFTimeInterval = 0.18
     private static let shelfExitDuration: CFTimeInterval = 0.12
     private static let sidePanelPreferredSize = CGSize(width: 360, height: 697)
@@ -335,7 +334,7 @@ final class ClipboardShelfPanelController {
             self?.hide()
         }
         let hostingView = FirstMouseHostingView(rootView: panelContentView())
-        hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
+        hostingView.configureForTransparentPanel()
         panel.contentView = hostingView
         return panel
     }
@@ -344,7 +343,7 @@ final class ClipboardShelfPanelController {
         guard let hostingView = panel.contentView as? FirstMouseHostingView<AnyView> else { return }
         closeShelfAuxiliaryWindows()
         hostingView.rootView = panelContentView()
-        hostingView.configureForRoundedTransparentPanel(cornerRadius: Self.panelCornerRadius)
+        hostingView.configureForTransparentPanel()
     }
 
     private func resetPanelPresentationState() {
@@ -843,11 +842,8 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
         NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
     }
 
-    func configureForRoundedTransparentPanel(cornerRadius: CGFloat) {
+    func configureForTransparentPanel() {
         wantsLayer = true
-        layer?.cornerRadius = cornerRadius
-        layer?.cornerCurve = .continuous
-        layer?.masksToBounds = true
         layer?.backgroundColor = NSColor.clear.cgColor
     }
 

@@ -2440,6 +2440,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(smallNativeGlassBranch.contains(".background"))
     }
 
+    func testPanelHostingViewDoesNotAddSecondRoundedClip() throws {
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+
+        XCTAssertTrue(controllerSource.contains("hostingView.configureForTransparentPanel()"))
+        XCTAssertFalse(controllerSource.contains("configureForRoundedTransparentPanel"))
+        XCTAssertFalse(controllerSource.contains("layer?.cornerRadius"))
+        XCTAssertFalse(controllerSource.contains("layer?.masksToBounds"))
+    }
+
     func testClipboardSidePanelReusesShelfGlassAndActions() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
