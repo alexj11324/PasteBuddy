@@ -4,6 +4,29 @@ import PasteBuddyCore
 import QuartzCore
 import SwiftUI
 
+extension Notification.Name {
+    static let pasteBuddyCopyPanelSelection = Notification.Name("PasteBuddyCopyPanelSelection")
+}
+
+@MainActor
+enum ClipboardPanelCopyGate {
+    struct Request {
+        let generation: Int
+        let pasteboardChangeCount: Int
+    }
+
+    private static var generation = 0
+
+    static func begin(pasteboard: NSPasteboard = .general) -> Request {
+        generation += 1
+        return Request(generation: generation, pasteboardChangeCount: pasteboard.changeCount)
+    }
+
+    static func shouldWrite(_ request: Request, pasteboard: NSPasteboard = .general) -> Bool {
+        request.generation == generation && request.pasteboardChangeCount == pasteboard.changeCount
+    }
+}
+
 enum ClipboardShelfPlacement: String, CaseIterable, Identifiable {
     case top
     case bottom
@@ -664,6 +687,10 @@ private final class ClipboardShelfPanel: NSPanel {
 }
 
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    @objc func copy(_ sender: Any?) {
+        NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)
+    }
+
     func configureForRoundedTransparentPanel(cornerRadius: CGFloat) {
         wantsLayer = true
         layer?.cornerRadius = cornerRadius

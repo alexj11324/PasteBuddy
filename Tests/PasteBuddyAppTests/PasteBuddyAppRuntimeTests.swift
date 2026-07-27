@@ -362,8 +362,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(collectionSource.contains("var dragItemProvider: ((Item) -> NSItemProvider?)?"))
         XCTAssertFalse(collectionSource.contains(".onDrag { provider }"))
         XCTAssertTrue(collectionSource.contains(".draggable(payload)"))
-        XCTAssertTrue(collectionSource.contains(".onTapGesture {"))
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         XCTAssertFalse(collectionSource.contains("NSViewRepresentable"))
         XCTAssertFalse(collectionSource.contains("NSCollectionView"))
         XCTAssertFalse(collectionSource.contains("NSScrollView"))
@@ -1210,9 +1211,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
-        XCTAssertTrue(collectionSource.contains(".onTapGesture {"))
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
-        XCTAssertFalse(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
+        XCTAssertTrue(collectionSource.contains("TapGesture().onEnded"))
+        XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains(".background(shelfKeyboardShortcuts)") || source.contains(".background(sidePanelKeyboardShortcuts)"))
             XCTAssertTrue(source.contains("keyboardShortcut(.leftArrow) { moveSelection(.left) }"))
@@ -1223,6 +1225,68 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
         XCTAssertTrue(shelfSource.contains(".disabled(isSearchFocused || shelfInteraction.previewedID != nil)"))
         XCTAssertTrue(sideSource.contains(".disabled(isSearchFocused || interaction.previewedID != nil)"))
+    }
+
+    func testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
+        let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
+        let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
+        let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
+        let draggable = try XCTUnwrap(itemSource.range(of: "itemView.draggable(payload)"))
+        let doubleTap = try XCTUnwrap(itemSource.range(of: ".onTapGesture(count: 2)"))
+        let doubleClick = try XCTUnwrap(itemSource.range(of: "onDoubleClick(itemID)"))
+        let simultaneousTap = try XCTUnwrap(itemSource.range(of: ".simultaneousGesture("))
+        let suppressScroll = try XCTUnwrap(itemSource.range(of: "lastScrolledPrimarySelectedID = itemID"))
+        let select = try XCTUnwrap(itemSource.range(of: "onSelect(itemID)"))
+        let popover = try XCTUnwrap(itemSource.range(of: ".popover("))
+
+        XCTAssertLessThan(draggable.lowerBound, doubleTap.lowerBound)
+        XCTAssertLessThan(doubleTap.lowerBound, doubleClick.lowerBound)
+        XCTAssertLessThan(doubleClick.lowerBound, simultaneousTap.lowerBound)
+        XCTAssertLessThan(simultaneousTap.lowerBound, suppressScroll.lowerBound)
+        XCTAssertLessThan(suppressScroll.lowerBound, select.lowerBound)
+        XCTAssertLessThan(select.lowerBound, popover.lowerBound)
+        XCTAssertFalse(itemSource.contains(".onTapGesture {"))
+        XCTAssertFalse(itemSource.contains(".exclusively(before: TapGesture())"))
+    }
+
+    func testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+
+        for source in [shelfSource, sideSource] {
+            XCTAssertTrue(source.contains(".onCopyCommand {"))
+            XCTAssertTrue(source.contains("PasteboardWriter.itemProviders(for: selectedItemsInDisplayOrder) { item in"))
+            XCTAssertTrue(source.contains("await store.hydratedItem(for: item)"))
+            XCTAssertTrue(source.contains(".onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCopyPanelSelection))"))
+            XCTAssertTrue(source.contains("let request = ClipboardPanelCopyGate.begin()"))
+            XCTAssertTrue(source.contains("let hydratedItems = await store.hydratedItems(for: items)"))
+            XCTAssertTrue(source.contains("guard ClipboardPanelCopyGate.shouldWrite(request) else { return }"))
+            XCTAssertTrue(source.contains("PasteboardWriter.copy(hydratedItems)"))
+            XCTAssertFalse(source.contains("characters == \"c\""))
+        }
+        XCTAssertTrue(controllerSource.contains("@objc func copy(_ sender: Any?)"))
+        XCTAssertTrue(controllerSource.contains("NotificationCenter.default.post(name: .pasteBuddyCopyPanelSelection, object: self)"))
+        XCTAssertFalse(controllerSource.contains("performKeyEquivalent"))
+    }
+
+    func testPanelCopyGateRejectsStaleRequestsAndExternalPasteboardChanges() throws {
+        let pasteboard = try XCTUnwrap(
+            NSPasteboard(name: NSPasteboard.Name("PasteBuddyPanelCopyGate-\(UUID().uuidString)"))
+        )
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+
+        let first = ClipboardPanelCopyGate.begin(pasteboard: pasteboard)
+        let second = ClipboardPanelCopyGate.begin(pasteboard: pasteboard)
+
+        XCTAssertFalse(ClipboardPanelCopyGate.shouldWrite(first, pasteboard: pasteboard))
+        XCTAssertTrue(ClipboardPanelCopyGate.shouldWrite(second, pasteboard: pasteboard))
+
+        pasteboard.clearContents()
+        pasteboard.setString("newer external copy", forType: .string)
+        XCTAssertFalse(ClipboardPanelCopyGate.shouldWrite(second, pasteboard: pasteboard))
     }
 
     func testSwiftUIShelfCollectionUsesSwiftUIPopover() throws {
