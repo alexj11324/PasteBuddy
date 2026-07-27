@@ -1150,12 +1150,23 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var observedShortcuts: ShortcutConfiguration?
+        store.onShortcutConfigurationChanged = { observedShortcuts = $0 }
 
         store.setShortcutBinding(
-            .pasteSelectedItem,
-            key: "p",
-            modifiers: [.shift, .command, .command]
+            .showHidePanel,
+            key: "g",
+            modifiers: [.option, .command, .command],
+            keyCode: 5
         )
+        XCTAssertEqual(observedShortcuts?.showHidePanel.keyCode, 5)
+        store.setShortcutBinding(
+            .showHidePanel,
+            key: "s",
+            modifiers: [.command, .shift],
+            keyCode: 1
+        )
+        XCTAssertEqual(store.snapshot.shortcuts.showHidePanel.key, "g")
         store.clearShortcutBinding(.pasteSelectedPlainText)
         store.setQuickPasteModifiers([.control, .command])
         store.setQuickPasteModifiers([.shift], plainText: true)
@@ -1163,9 +1174,10 @@ final class PasteBuddyStoreTests: XCTestCase {
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
 
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.key, "p")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.shift, .command])
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "⇧⌘P")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.key, "g")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.modifiers, [.option, .command])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.keyCode, 5)
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "⌥⌘G")
         XCTAssertFalse(reloaded.snapshot.shortcuts.pasteSelectedPlainText.isEnabled)
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedPlainText.displayName, "Not set")
         XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.control, .command])

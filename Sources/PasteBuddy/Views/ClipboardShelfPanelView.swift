@@ -635,7 +635,11 @@ struct ClipboardShelfPanelView: View {
             guard case .clipboard(let item) = displayItem else { return nil }
             return PinboardItemDragPayload(
                 ids: [item.id],
-                plainText: PasteboardWriter.plainText(for: item)
+                plainText: PasteboardWriter.plainText(for: item),
+                exportsImage: item.payload.hasImageAsset,
+                imageDataProvider: {
+                    await store.imageData(for: item)
+                }
             )
         } onSelect: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }

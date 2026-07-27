@@ -71,6 +71,7 @@ public final class PasteBuddyStore {
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
+    @ObservationIgnored public var onShortcutConfigurationChanged: (@MainActor (ShortcutConfiguration) -> Void)?
     @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
@@ -1787,12 +1788,13 @@ public final class PasteBuddyStore {
     public func setShortcutBinding(
         _ action: ShortcutAction,
         key: String?,
-        modifiers: [ShortcutModifier]
+        modifiers: [ShortcutModifier],
+        keyCode: UInt16? = nil
     ) {
-        snapshot.shortcuts.setBinding(
-            ShortcutBinding(key: key, modifiers: modifiers),
-            for: action
-        )
+        let binding = ShortcutBinding(key: key, modifiers: modifiers, keyCode: keyCode)
+        guard action != .showHidePanel || binding.isValidShowHidePanelShortcut else { return }
+        snapshot.shortcuts.setBinding(binding, for: action)
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 
@@ -1801,6 +1803,7 @@ public final class PasteBuddyStore {
             ShortcutBinding(key: nil, modifiers: snapshot.shortcuts.binding(for: action).modifiers),
             for: action
         )
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 
@@ -1815,6 +1818,7 @@ public final class PasteBuddyStore {
 
     public func resetShortcutConfiguration() {
         snapshot.shortcuts = ShortcutConfiguration()
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 

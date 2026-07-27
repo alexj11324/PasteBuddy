@@ -2893,8 +2893,9 @@ public enum ShortcutAction: String, CaseIterable, Codable, Identifiable, Sendabl
 public struct ShortcutBinding: Codable, Equatable, Sendable {
     public var key: String?
     public var modifiers: [ShortcutModifier]
+    public var keyCode: UInt16?
 
-    public init(key: String?, modifiers: [ShortcutModifier]) {
+    public init(key: String?, modifiers: [ShortcutModifier], keyCode: UInt16? = nil) {
         let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let trimmed, !trimmed.isEmpty {
             self.key = String(trimmed.prefix(1)).lowercased()
@@ -2902,10 +2903,18 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
             self.key = nil
         }
         self.modifiers = Self.normalizedModifiers(modifiers)
+        self.keyCode = keyCode
     }
 
     public var isEnabled: Bool {
         key?.isEmpty == false
+    }
+
+    public var isValidShowHidePanelShortcut: Bool {
+        guard isEnabled else { return true }
+        let normalizedModifiers = Self.normalizedModifiers(modifiers)
+        guard !normalizedModifiers.isEmpty else { return false }
+        return normalizedModifiers != [.shift, .command] || (key != "s" && key != "p")
     }
 
     public var displayName: String {

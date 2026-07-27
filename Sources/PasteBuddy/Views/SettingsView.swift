@@ -2164,7 +2164,8 @@ private struct ShortcutBindingEditorRow: View {
                 store.setShortcutBinding(
                     action,
                     key: shortcut.key,
-                    modifiers: shortcut.modifiers
+                    modifiers: shortcut.modifiers,
+                    keyCode: shortcut.keyCode
                 )
             }
         }
@@ -2214,6 +2215,7 @@ private struct ShortcutModifierEditorRow: View {
 private struct RecordedShortcut {
     let key: String
     let modifiers: [ShortcutModifier]
+    let keyCode: UInt16
 
     init?(event: NSEvent) {
         guard let key = event.charactersIgnoringModifiers?.first else {
@@ -2221,6 +2223,7 @@ private struct RecordedShortcut {
         }
         self.key = String(key).lowercased()
         modifiers = event.shortcutModifiers
+        keyCode = event.keyCode
     }
 }
 
