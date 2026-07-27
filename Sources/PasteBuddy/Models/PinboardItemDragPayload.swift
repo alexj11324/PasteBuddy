@@ -34,8 +34,7 @@ struct PinboardItemDragPayload: Codable, Transferable {
             completion(payload, nil)
             return nil
         }
-        if item.contentType != .image,
-           !provider.registeredTypeIdentifiers.contains(UTType.utf8PlainText.identifier) {
+        if !provider.registeredTypeIdentifiers.contains(UTType.utf8PlainText.identifier) {
             let text = Data(PasteboardWriter.plainText(for: item).utf8)
             provider.registerDataRepresentation(
                 forTypeIdentifier: UTType.utf8PlainText.identifier,

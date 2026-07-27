@@ -431,8 +431,6 @@ struct PasteBuddyApp: App {
                 await irohSync.sendIfConnected(item)
             }
         }
-        await irohSync.start()
-
         if monitor == nil {
             let createdMonitor = ClipboardMonitor(
                 store: store,
@@ -468,6 +466,7 @@ struct PasteBuddyApp: App {
 
         if panelHotKeyController == nil, shelfPanelController != nil {
             panelHotKeyController = PasteBuddyPanelHotKeyController(
+                sidePanelShortcut: store.snapshot.shortcuts.showHidePanel,
                 onSidePanel: {
                     Task { @MainActor in
                         await showClipboardPanel(.sidePanel)
@@ -482,6 +481,16 @@ struct PasteBuddyApp: App {
                     ScreenPinController.shared.pinClipboard()
                 }
             )
+        }
+        if let panelHotKeyController {
+            store.onShortcutConfigurationChanged = { [weak panelHotKeyController] shortcuts in
+                panelHotKeyController?.updateSidePanelShortcut(shortcuts.showHidePanel)
+            }
+        }
+        if irohSync.connectionState != .binding {
+            Task { @MainActor in
+                await irohSync.start()
+            }
         }
     }
 
@@ -519,24 +528,6 @@ struct PasteBuddyApp: App {
             "targetSelected",
             detail: "bundle=\(targetBundleIdentifier) name=\(target.localizedName)"
         )
-        let options = notificationDrivenDirectPasteOptions()
-        let requestedActivation = tracker.activateLastExternalApplication()
-        PasteBuddyDiagnostics.record(
-            .directPaste,
-            "activateTargetRequested",
-            detail: "bundle=\(targetBundleIdentifier) requested=\(requestedActivation)"
-        )
-        guard await tracker.waitForActivation(
-            of: targetBundleIdentifier,
-            timeout: options.activationWaitTimeout
-        ) else {
-            PasteBuddyDiagnostics.record(.directPaste, "targetActivationTimedOut", detail: "bundle=\(targetBundleIdentifier)")
-            return DirectPasteResult(
-                outcome: .failedNoTargetApplication,
-                itemCount: 1,
-                format: format
-            )
-        }
         let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             item,
             format: format,
@@ -544,7 +535,11 @@ struct PasteBuddyApp: App {
             activeApplicationBundleIdentifier: {
                 tracker.frontmostApplicationBundleIdentifier()
             },
-            options: options
+            options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions,
+            prepareForPaste: {
+                PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
+                tracker.activateLastExternalApplication()
+            }
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
         return result
@@ -588,24 +583,6 @@ struct PasteBuddyApp: App {
             "targetSelected",
             detail: "bundle=\(targetBundleIdentifier) name=\(target.localizedName)"
         )
-        let options = notificationDrivenDirectPasteOptions()
-        let requestedActivation = tracker.activateLastExternalApplication()
-        PasteBuddyDiagnostics.record(
-            .directPaste,
-            "activateTargetRequested",
-            detail: "bundle=\(targetBundleIdentifier) requested=\(requestedActivation)"
-        )
-        guard await tracker.waitForActivation(
-            of: targetBundleIdentifier,
-            timeout: options.activationWaitTimeout
-        ) else {
-            PasteBuddyDiagnostics.record(.directPaste, "targetActivationTimedOut", detail: "bundle=\(targetBundleIdentifier)")
-            return DirectPasteResult(
-                outcome: .failedNoTargetApplication,
-                itemCount: items.count,
-                format: format
-            )
-        }
         let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             items,
             format: format,
@@ -613,19 +590,14 @@ struct PasteBuddyApp: App {
             activeApplicationBundleIdentifier: {
                 tracker.frontmostApplicationBundleIdentifier()
             },
-            options: options
+            options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions,
+            prepareForPaste: {
+                PasteBuddyDiagnostics.record(.directPaste, "activateTargetRequested", detail: "bundle=\(targetBundleIdentifier)")
+                tracker.activateLastExternalApplication()
+            }
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
         return result
-    }
-
-    private static func notificationDrivenDirectPasteOptions() -> PasteboardWriter.DirectPasteOptions {
-        let configured = PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions
-        return PasteboardWriter.DirectPasteOptions(
-            activationWaitTimeout: configured.activationWaitTimeout,
-            pasteDispatchDelay: configured.pasteDispatchDelay,
-            fallbackBehavior: .failWithoutCopying
-        )
     }
 
     private static func printRuntimeDiagnosticsIfNeeded() {
@@ -677,12 +649,18 @@ enum PasteBuddyDevelopmentCommand: Equatable {
 
 @MainActor
 final class PasteBuddyRuntimeLoadGate {
-    private var didLoadStore = false
+    private var loadTask: Task<Void, Never>?
 
-    func loadIfNeeded(_ loadAsync: () async -> Void) async {
-        guard !didLoadStore else { return }
-        didLoadStore = true
-        await loadAsync()
+    func loadIfNeeded(_ loadAsync: @escaping @MainActor () async -> Void) async {
+        if let loadTask {
+            await loadTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            await loadAsync()
+        }
+        loadTask = task
+        await task.value
     }
 }
 

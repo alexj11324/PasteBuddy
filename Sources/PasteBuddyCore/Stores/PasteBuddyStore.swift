@@ -71,6 +71,7 @@ public final class PasteBuddyStore {
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
+    @ObservationIgnored public var onShortcutConfigurationChanged: (@MainActor (ShortcutConfiguration) -> Void)?
     @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
@@ -189,6 +190,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = diskStore.lastLoadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
                 diskStore.storageMode = loadedStorageMode
@@ -205,6 +207,9 @@ public final class PasteBuddyStore {
             syncClipboardRepositoryFromSnapshot()
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            if repairedShortcutConfiguration {
+                save()
+            }
         } catch {
             historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
@@ -240,6 +245,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = result.loadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
                 diskStore?.storageMode = loadedStorageMode
@@ -267,6 +273,9 @@ public final class PasteBuddyStore {
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            if repairedShortcutConfiguration {
+                save()
+            }
         } catch {
             isRepositorySyncInFlight = false
             if repositorySyncActor != nil {
@@ -283,6 +292,18 @@ public final class PasteBuddyStore {
             return
         }
         scheduleSave(delayNanoseconds: saveDebounceNanoseconds)
+    }
+
+    @discardableResult
+    private func repairLoadedShortcutConfigurationIfNeeded() -> Bool {
+        let binding = snapshot.shortcuts.showHidePanel
+        guard binding.isEnabled,
+              (!binding.isValidShowHidePanelShortcut
+                  || binding.effectivePhysicalKeyCode == nil) else {
+            return false
+        }
+        snapshot.shortcuts.showHidePanel = ShortcutConfiguration().showHidePanel
+        return true
     }
 
     private func saveAndFlush() {
@@ -1784,16 +1805,29 @@ public final class PasteBuddyStore {
         save()
     }
 
+    @discardableResult
     public func setShortcutBinding(
         _ action: ShortcutAction,
         key: String?,
-        modifiers: [ShortcutModifier]
-    ) {
-        snapshot.shortcuts.setBinding(
-            ShortcutBinding(key: key, modifiers: modifiers),
-            for: action
-        )
+        modifiers: [ShortcutModifier],
+        keyCode: UInt16? = nil
+    ) -> Bool {
+        let binding = ShortcutBinding(key: key, modifiers: modifiers, keyCode: keyCode)
+        guard binding.isEnabled,
+              binding.isValidUserShortcut,
+              !binding.conflictsWithFixedProductShortcut,
+              action != .showHidePanel || binding.isValidShowHidePanelShortcut,
+              !ShortcutAction.allCases.contains(where: {
+                  $0 != action
+                      && action.sharesShortcutScope(with: $0)
+                      && binding.conflicts(with: snapshot.shortcuts.binding(for: $0))
+              }) else {
+            return false
+        }
+        snapshot.shortcuts.setBinding(binding, for: action)
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
+        return true
     }
 
     public func clearShortcutBinding(_ action: ShortcutAction) {
@@ -1801,6 +1835,7 @@ public final class PasteBuddyStore {
             ShortcutBinding(key: nil, modifiers: snapshot.shortcuts.binding(for: action).modifiers),
             for: action
         )
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 
@@ -1815,6 +1850,7 @@ public final class PasteBuddyStore {
 
     public func resetShortcutConfiguration() {
         snapshot.shortcuts = ShortcutConfiguration()
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 

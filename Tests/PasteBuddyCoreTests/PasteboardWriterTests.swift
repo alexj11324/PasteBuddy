@@ -599,6 +599,76 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "first\nhttps://example.com")
     }
 
+    func testDirectPasteSharedContractDeliversEveryCardTypeAfterTargetActivation() throws {
+        let image = Self.testImage()
+        let fileURL = URL(fileURLWithPath: "/tmp/PasteBuddy Direct Paste.txt")
+        let items = [
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Text",
+                payload: ClipboardPayload(text: "direct text")
+            ),
+            ClipboardItem(
+                sourceAppName: "Safari",
+                deviceName: "Test Mac",
+                contentType: .url,
+                title: "Link",
+                payload: ClipboardPayload(urlString: "https://example.com/direct")
+            ),
+            ClipboardItem(
+                sourceAppName: "Preview",
+                deviceName: "Test Mac",
+                contentType: .image,
+                title: "Image",
+                payload: ClipboardPayload(imageData: try XCTUnwrap(image.tiffRepresentation))
+            ),
+            ClipboardItem(
+                sourceAppName: "Finder",
+                deviceName: "Test Mac",
+                contentType: .file,
+                title: "File",
+                payload: ClipboardPayload(fileURLString: fileURL.absoluteString)
+            ),
+        ]
+
+        for item in items {
+            let pasteboard = try XCTUnwrap(
+                NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectType-\(UUID().uuidString)"))
+            )
+            defer { pasteboard.releaseGlobally() }
+            var activeBundleIdentifier = "com.example.Other"
+            var sentPasteEvent = false
+
+            let result = PasteboardWriter.pasteToFrontmostApp(
+                item,
+                to: pasteboard,
+                isAccessibilityTrusted: true,
+                targetBundleIdentifier: "com.example.Target",
+                activeApplicationBundleIdentifier: { activeBundleIdentifier },
+                prepareForPaste: { activeBundleIdentifier = "com.example.Target" },
+                sendPasteEvent: { sentPasteEvent = true }
+            )
+
+            XCTAssertEqual(result.outcome, .pastedToFrontmostApp, item.contentType.rawValue)
+            XCTAssertTrue(sentPasteEvent, item.contentType.rawValue)
+            switch item.contentType {
+            case .text:
+                XCTAssertEqual(pasteboard.string(forType: .string), "direct text")
+            case .url:
+                XCTAssertEqual(pasteboard.string(forType: .URL), "https://example.com/direct")
+            case .image:
+                XCTAssertNotNil(pasteboard.data(forType: .tiff))
+            case .file:
+                let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL]
+                XCTAssertEqual(urls, [fileURL])
+            case .mixed:
+                XCTFail("Mixed is not part of this representative single-card matrix.")
+            }
+        }
+    }
+
     func testDirectPastePreparesTargetBeforeSendingPasteEvent() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectPrepare-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }

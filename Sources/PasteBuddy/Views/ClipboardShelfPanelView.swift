@@ -1667,6 +1667,19 @@ enum ClipboardImagePreviewRequest {
     }
 }
 
+@MainActor
+enum ClipboardImagePreviewLayout {
+    static func aspectFitFrame(for imageSize: CGSize?, in bounds: CGRect) -> CGRect {
+        let fittedSize = ClipboardImageCache.fittedDisplaySize(for: imageSize, within: bounds.size)
+        return CGRect(
+            x: bounds.midX - fittedSize.width / 2,
+            y: bounds.midY - fittedSize.height / 2,
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
+    }
+}
+
 private enum ClipboardImagePreviewLiveTextState: Equatable {
     case idle
     case loading
@@ -1782,6 +1795,7 @@ private struct ShelfLiveTextImagePreview: NSViewRepresentable {
 
     func updateNSView(_ nsView: ShelfLiveTextImagePreviewContainer, context: Context) {
         nsView.imageView.image = image
+        nsView.needsLayout = true
         context.coordinator.imageView = nsView.imageView
         context.coordinator.overlayView = nsView.overlayView
         context.coordinator.activate(
@@ -1893,26 +1907,22 @@ private final class ShelfLiveTextImagePreviewContainer: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        overlayView.translatesAutoresizingMaskIntoConstraints = false
         overlayView.trackingImageView = imageView
         addSubview(imageView)
         imageView.addSubview(overlayView)
-
-        NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            imageView.topAnchor.constraint(equalTo: topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            overlayView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
-            overlayView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
-            overlayView.topAnchor.constraint(equalTo: imageView.topAnchor),
-            overlayView.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
-        ])
     }
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override func layout() {
+        super.layout()
+        imageView.frame = ClipboardImagePreviewLayout.aspectFitFrame(
+            for: imageView.image?.size,
+            in: bounds
+        )
+        overlayView.frame = imageView.bounds
     }
 }
 

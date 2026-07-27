@@ -17880,6 +17880,22 @@
         }
       }
     },
+    "message.shortcut_binding_rejected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a modified shortcut that is not reserved or already assigned."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请选择带修饰键、且未被保留或占用的快捷键。"
+          }
+        }
+      }
+    },
     "message.press_space_to_preview_press_return_to": {
       "localizations": {
         "en": {

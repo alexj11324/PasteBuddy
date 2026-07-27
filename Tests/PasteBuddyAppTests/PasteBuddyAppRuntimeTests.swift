@@ -182,6 +182,35 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(loadAsyncCallCount, 1)
     }
 
+    func testRuntimeLoadGateCoalescesConcurrentCallersUntilLoadCompletes() async {
+        let gate = PasteBuddyRuntimeLoadGate()
+        var loadAsyncCallCount = 0
+        var releaseLoad: CheckedContinuation<Void, Never>?
+        var secondCallerReturned = false
+
+        let first = Task { @MainActor in
+            await gate.loadIfNeeded {
+                loadAsyncCallCount += 1
+                await withCheckedContinuation { releaseLoad = $0 }
+            }
+        }
+        await Task.yield()
+        let second = Task { @MainActor in
+            await gate.loadIfNeeded {
+                loadAsyncCallCount += 1
+            }
+            secondCallerReturned = true
+        }
+        await Task.yield()
+
+        XCTAssertEqual(loadAsyncCallCount, 1)
+        XCTAssertFalse(secondCallerReturned)
+        releaseLoad?.resume()
+        await first.value
+        await second.value
+        XCTAssertTrue(secondCallerReturned)
+    }
+
     func testStatusItemIsInstalledBeforeHistoryLoadCanSuspendRuntimeStartup() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let runtimeStart = try XCTUnwrap(source.range(of: "private func startRuntimeIfNeeded() async"))
@@ -225,6 +254,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
 
         XCTAssertEqual(events, ["dismiss", "focus-restored", "paste"])
+    }
+
+    func testDirectPasteUsesWriterOwnedFocusLifecycle() throws {
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+
+        XCTAssertTrue(appSource.contains("targetBundleIdentifier: targetBundleIdentifier"))
+        XCTAssertTrue(appSource.contains("activeApplicationBundleIdentifier: {\n                tracker.frontmostApplicationBundleIdentifier()"))
+        XCTAssertTrue(appSource.contains("prepareForPaste: {\n                PasteBuddyDiagnostics.record(.directPaste, \"activateTargetRequested\""))
+        XCTAssertFalse(appSource.contains("guard await tracker.waitForActivation("))
     }
 
     func testPinnedDirectPasteCanSkipImmediateDismissal() async {
@@ -769,7 +807,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(dragSource.contains("ClipboardItemDragProvider"))
     }
 
-    func testImageCardDragProviderPublishesNativeImageWithoutOCRTextFallback() async throws {
+    func testImageCardDragProviderPublishesNativeImageBeforePlainTextFallback() async throws {
         let image = makeTestImage(width: 2, height: 2) { _, _ in
             (red: 0, green: 122, blue: 255, alpha: 255)
         }
@@ -787,9 +825,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let internalIndex = try XCTUnwrap(
             identifiers.firstIndex(of: UTType.pasteBuddyPinboardItemIDs.identifier)
         )
+        let textIndex = try XCTUnwrap(
+            identifiers.firstIndex(of: UTType.utf8PlainText.identifier)
+        )
         XCTAssertLessThan(imageIndex, internalIndex)
+        XCTAssertLessThan(internalIndex, textIndex)
         XCTAssertFalse(identifiers.contains(UTType.plainText.identifier))
-        XCTAssertFalse(identifiers.contains(UTType.utf8PlainText.identifier))
+        let fallbackData = try await loadData(
+            from: provider,
+            typeIdentifier: UTType.utf8PlainText.identifier
+        )
+        XCTAssertEqual(String(decoding: fallbackData, as: UTF8.self), "Copied image")
 
         let payloadData = try await loadData(
             from: provider,
@@ -1005,6 +1051,35 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
         XCTAssertEqual(landscape.width, 72, accuracy: 0.01)
         XCTAssertLessThan(landscape.height, 38)
+    }
+
+    func testImagePreviewAspectFitsWideTallPortraitAndLandscapeOnResize() {
+        let bounds = CGRect(x: 0, y: 0, width: 612, height: 420)
+        for imageSize in [
+            CGSize(width: 4_000, height: 500),
+            CGSize(width: 500, height: 4_000),
+            CGSize(width: 1_080, height: 1_920),
+            CGSize(width: 1_920, height: 1_080),
+        ] {
+            let frame = ClipboardImagePreviewLayout.aspectFitFrame(for: imageSize, in: bounds)
+            XCTAssertTrue(bounds.insetBy(dx: -0.01, dy: -0.01).contains(frame))
+            XCTAssertEqual(frame.width / frame.height, imageSize.width / imageSize.height, accuracy: 0.001)
+            XCTAssertTrue(
+                abs(frame.width - bounds.width) < 0.01 || abs(frame.height - bounds.height) < 0.01
+            )
+        }
+
+        let resizedBounds = CGRect(x: 0, y: 0, width: 320, height: 180)
+        let resized = ClipboardImagePreviewLayout.aspectFitFrame(
+            for: CGSize(width: 1_080, height: 1_920),
+            in: resizedBounds
+        )
+        XCTAssertTrue(resizedBounds.insetBy(dx: -0.01, dy: -0.01).contains(resized))
+        XCTAssertEqual(
+            resized.width / resized.height,
+            CGFloat(1_080) / CGFloat(1_920),
+            accuracy: 0.001
+        )
     }
 
     func testImagePreviewHydratesRendersDismissesAndReopensPersistedAsset() async throws {
@@ -1700,6 +1775,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("destructiveConfirmation = .resetShortcuts"))
         XCTAssertTrue(source.contains("state.recording_shortcut"))
         XCTAssertTrue(source.contains("message.press_key_combination_to_record"))
+        XCTAssertTrue(source.contains("event.keyCode == 53"))
+        XCTAssertTrue(source.contains("Image(systemName: \"xmark.circle.fill\")"))
+        XCTAssertTrue(source.contains("message.shortcut_binding_rejected"))
         XCTAssertFalse(source.contains("ShortcutModifierToggles"))
         XCTAssertFalse(source.contains("Toggle(modifier.displayName"))
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
@@ -1741,8 +1819,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let source = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
 
         XCTAssertTrue(source.contains("forName: .pasteBuddyShortcutRecordingDidChange"))
-        XCTAssertTrue(source.contains("registration?.setEnabled(!isRecording)"))
-        XCTAssertTrue(source.contains("eventTap?.setEnabled(!isRecording)"))
+        XCTAssertTrue(source.contains("setHotKeySourcesEnabled(!isRecording)"))
+        XCTAssertTrue(source.contains("registration?.setEnabled(isEnabled)"))
+        XCTAssertTrue(source.contains("eventTap?.setEnabled(isEnabled)"))
         XCTAssertTrue(source.contains("ignoredDuringShortcutRecording"))
         XCTAssertTrue(source.contains("UnregisterEventHotKey(hotKeyRef)"))
         XCTAssertTrue(source.contains("CGEvent.tapEnable(tap: eventTap, enable: isEnabled)"))
@@ -1814,6 +1893,50 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             ),
             .shelf
         )
+        for conflictingBinding in [
+            ShortcutBinding(
+                key: nil,
+                modifiers: [.command, .shift],
+                keyCode: UInt16(kVK_ANSI_S)
+            ),
+            ShortcutBinding(
+                key: "g",
+                modifiers: [.command, .shift],
+                keyCode: UInt16(kVK_ANSI_S)
+            ),
+        ] {
+            XCTAssertEqual(
+                PasteBuddyPanelHotKeyMatcher.action(
+                    keyCode: Int64(kVK_ANSI_S),
+                    flags: [.maskCommand, .maskShift],
+                    sidePanelShortcut: conflictingBinding
+                ),
+                .shelf
+            )
+        }
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_S),
+                flags: [.maskCommand, .maskShift],
+                sidePanelShortcut: ShortcutBinding(
+                    key: "s",
+                    modifiers: [.command, .shift],
+                    keyCode: UInt16(kVK_ANSI_S)
+                )
+            ),
+            .shelf
+        )
+        XCTAssertNil(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_G),
+                flags: [],
+                sidePanelShortcut: ShortcutBinding(
+                    key: "g",
+                    modifiers: [],
+                    keyCode: UInt16(kVK_ANSI_G)
+                )
+            )
+        )
         XCTAssertEqual(
             PasteBuddyPanelHotKeyMatcher.action(
                 keyCode: Int64(kVK_ANSI_2),
@@ -1859,6 +1982,64 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 flags: [.maskCommand, .maskShift, .maskControl]
             )
         )
+    }
+
+    func testConfiguredPanelHotKeyIsDispatchableAtLaunchAndAfterSettingsChange() {
+        let launchBinding = ShortcutConfiguration().showHidePanel
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_V),
+                flags: [.maskCommand, .maskShift],
+                sidePanelShortcut: launchBinding
+            ),
+            .sidePanel
+        )
+
+        let changedBinding = ShortcutBinding(
+            key: "g",
+            modifiers: [.command, .option],
+            keyCode: UInt16(kVK_ANSI_G)
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_G),
+                flags: [.maskCommand, .maskAlternate],
+                sidePanelShortcut: changedBinding
+            ),
+            .sidePanel
+        )
+        XCTAssertNil(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_V),
+                flags: [.maskCommand, .maskShift],
+                sidePanelShortcut: changedBinding
+            )
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_S),
+                flags: [.maskCommand, .maskShift],
+                sidePanelShortcut: changedBinding
+            ),
+            .shelf
+        )
+    }
+
+    func testRuntimeInstallsConfiguredHotKeysBeforeStartingNetworkSync() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let syncSource = try sourceFileContents("Sources/PasteBuddyCore/Services/IrohClipboardSyncService.swift")
+        let runtimeStart = try XCTUnwrap(source.range(of: "private func startRuntimeIfNeeded() async"))
+        let runtimeSource = source[runtimeStart.lowerBound...]
+        let hotKeyInstallation = try XCTUnwrap(runtimeSource.range(of: "panelHotKeyController = PasteBuddyPanelHotKeyController("))
+        let networkStart = try XCTUnwrap(
+            runtimeSource.range(of: "Task { @MainActor in\n                await irohSync.start()")
+        )
+
+        XCTAssertLessThan(hotKeyInstallation.lowerBound, networkStart.lowerBound)
+        XCTAssertTrue(runtimeSource.contains("sidePanelShortcut: store.snapshot.shortcuts.showHidePanel"))
+        XCTAssertTrue(runtimeSource.contains("store.onShortcutConfigurationChanged"))
+        XCTAssertTrue(runtimeSource.contains("irohSync.connectionState != .binding"))
+        XCTAssertTrue(syncSource.contains("guard endpoint == nil, connectionState != .binding else { return }"))
     }
 
     func testImagePreviewRejectsStaleAsyncResultsAfterDismissOrItemChange() throws {
@@ -2352,7 +2533,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             ).count - 1,
             2
         )
-        XCTAssertTrue(source.contains("pasteDispatchDelay: configured.pasteDispatchDelay"))
+        XCTAssertEqual(
+            source.components(
+                separatedBy: "options: PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions"
+            ).count - 1,
+            2
+        )
         XCTAssertFalse(source.contains("pasteDispatchDelay: 0"))
         for panelSource in [shelfSource, sideSource] {
             XCTAssertGreaterThanOrEqual(

@@ -2897,6 +2897,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Identifiable, Sendabl
 
     public var id: String { rawValue }
 
+    public func sharesShortcutScope(with other: ShortcutAction) -> Bool {
+        (self == .showHidePanel) == (other == .showHidePanel)
+    }
+
     public var displayName: String {
         switch self {
         case .showHidePanel: "Show/Hide Panel"
@@ -2911,8 +2915,9 @@ public enum ShortcutAction: String, CaseIterable, Codable, Identifiable, Sendabl
 public struct ShortcutBinding: Codable, Equatable, Sendable {
     public var key: String?
     public var modifiers: [ShortcutModifier]
+    public var keyCode: UInt16?
 
-    public init(key: String?, modifiers: [ShortcutModifier]) {
+    public init(key: String?, modifiers: [ShortcutModifier], keyCode: UInt16? = nil) {
         let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let trimmed, !trimmed.isEmpty {
             self.key = String(trimmed.prefix(1)).lowercased()
@@ -2920,10 +2925,49 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
             self.key = nil
         }
         self.modifiers = Self.normalizedModifiers(modifiers)
+        self.keyCode = keyCode
     }
 
     public var isEnabled: Bool {
         key?.isEmpty == false
+    }
+
+    public var isValidUserShortcut: Bool {
+        guard isEnabled else { return true }
+        let normalizedModifiers = Self.normalizedModifiers(modifiers)
+        guard !normalizedModifiers.isEmpty,
+              normalizedModifiers.contains(.command) || normalizedModifiers.contains(.control) else {
+            return false
+        }
+        return !normalizedModifiers.contains(.command)
+            || ![UInt16(12), UInt16(13)].contains(effectivePhysicalKeyCode)
+    }
+
+    public var isValidShowHidePanelShortcut: Bool {
+        guard isValidUserShortcut else { return false }
+        guard isEnabled else { return true }
+        guard Self.normalizedModifiers(modifiers).count >= 2 else { return false }
+        return !conflictsWithFixedProductShortcut
+    }
+
+    public var conflictsWithFixedProductShortcut: Bool {
+        Self.normalizedModifiers(modifiers) == [.shift, .command]
+            && [UInt16(1), UInt16(35)].contains(effectivePhysicalKeyCode)
+    }
+
+    public func conflicts(with other: ShortcutBinding) -> Bool {
+        guard isEnabled, other.isEnabled,
+              Self.normalizedModifiers(modifiers) == Self.normalizedModifiers(other.modifiers) else {
+            return false
+        }
+        if let effectivePhysicalKeyCode, let otherKeyCode = other.effectivePhysicalKeyCode {
+            return effectivePhysicalKeyCode == otherKeyCode
+        }
+        return key == other.key
+    }
+
+    public var effectivePhysicalKeyCode: UInt16? {
+        keyCode ?? key.flatMap { Self.legacyANSIKeyCodes[$0] }
     }
 
     public var displayName: String {
@@ -2934,6 +2978,14 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
     public static func normalizedModifiers(_ modifiers: [ShortcutModifier]) -> [ShortcutModifier] {
         Array(Set(modifiers)).sorted { $0.sortOrder < $1.sortOrder }
     }
+
+    private static let legacyANSIKeyCodes: [String: UInt16] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7,
+        "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15,
+        "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22,
+        "5": 23, "9": 25, "7": 26, "8": 28, "0": 29, "o": 31, "u": 32,
+        "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+    ]
 }
 
 public struct ShortcutConfiguration: Codable, Equatable, Sendable {

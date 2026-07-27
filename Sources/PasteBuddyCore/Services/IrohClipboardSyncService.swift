@@ -135,7 +135,7 @@ public final class IrohClipboardSyncService {
     }
 
     public func start() async {
-        guard endpoint == nil else { return }
+        guard endpoint == nil, connectionState != .binding else { return }
         connectionState = .binding
         do {
             let identity = try identityStore.loadOrCreate()
