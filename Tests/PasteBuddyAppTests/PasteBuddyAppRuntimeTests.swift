@@ -834,6 +834,116 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
+    func testSourceAppSuggestionPanelExposesRowsAndRoutesPointerAccessibilityAndKeyboardSelection() throws {
+        var selectedApps: [String] = []
+        let view = NativeSourceAppSuggestionView(
+            frame: CGRect(
+                x: 0,
+                y: 0,
+                width: 220,
+                height: SourceAppSuggestionMetrics.panelHeight(for: 3)
+            )
+        )
+        view.configure(appNames: ["Paste", "PasteBuddy", "Preview"], query: "Paste") {
+            selectedApps.append($0)
+        }
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(view.accessibilityRole(), .list)
+        XCTAssertEqual(view.accessibilityIdentifier(), "source-app-suggestions")
+        let rows = try XCTUnwrap(view.accessibilityChildren() as? [NativeSourceAppSuggestionRow])
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.map { $0.accessibilityRole() }, [.row, .row, .row])
+        XCTAssertEqual(rows.map { $0.accessibilityLabel() }, ["Paste", "PasteBuddy", "Preview"])
+        XCTAssertEqual(
+            rows.map { $0.accessibilityIdentifier() },
+            ["source-app-suggestion-Paste", "source-app-suggestion-PasteBuddy", "source-app-suggestion-Preview"]
+        )
+
+        for (index, row) in rows.enumerated() {
+            XCTAssertEqual(row.frame.width, 220)
+            let rowCenter = row.convert(
+                CGPoint(x: row.bounds.midX, y: row.bounds.midY),
+                to: view
+            )
+            XCTAssertTrue(row === view.hitTest(rowCenter))
+            XCTAssertTrue(row.accessibilityPerformPress())
+            XCTAssertEqual(selectedApps.last, ["Paste", "PasteBuddy", "Preview"][index])
+        }
+        XCTAssertTrue(view === view.hitTest(CGPoint(x: 110, y: 1)))
+        XCTAssertTrue(view === view.hitTest(CGPoint(x: 110, y: view.bounds.maxY - 1)))
+        XCTAssertNil(view.hitTest(CGPoint(x: -1, y: 1)))
+
+        view.moveSelection(by: 1)
+        view.activateSelectedSuggestion()
+        XCTAssertEqual(selectedApps.last, "PasteBuddy")
+        view.moveSelection(by: 10)
+        view.activateSelectedSuggestion()
+        XCTAssertEqual(selectedApps.last, "Preview")
+
+        XCTAssertEqual(
+            SourceAppSuggestionKeyCommand.resolve(specialKey: .upArrow, keyCode: 0, modifierFlags: []),
+            .move(offset: -1)
+        )
+        XCTAssertEqual(
+            SourceAppSuggestionKeyCommand.resolve(specialKey: .downArrow, keyCode: 0, modifierFlags: []),
+            .move(offset: 1)
+        )
+        XCTAssertEqual(
+            SourceAppSuggestionKeyCommand.resolve(specialKey: .carriageReturn, keyCode: 0, modifierFlags: []),
+            .select
+        )
+        XCTAssertEqual(
+            SourceAppSuggestionKeyCommand.resolve(specialKey: nil, keyCode: 53, modifierFlags: []),
+            .dismiss
+        )
+        XCTAssertNil(
+            SourceAppSuggestionKeyCommand.resolve(specialKey: .downArrow, keyCode: 0, modifierFlags: .command)
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        let anchor = NSView(frame: NSRect(x: 20, y: 160, width: 220, height: 38))
+        window.contentView = anchor
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        var dismissed = false
+        let coordinator = SourceAppSuggestionPanelPresenter.Coordinator()
+        coordinator.update(
+            anchorView: anchor,
+            isPresented: true,
+            appNames: ["Paste", "PasteBuddy", "Preview"],
+            query: "Paste",
+            width: 220,
+            onSelect: { selectedApps.append($0) },
+            onDismiss: { dismissed = true }
+        )
+        XCTAssertTrue(coordinator.isKeyboardMonitoring)
+        coordinator.handleKeyboardCommand(.move(offset: 1))
+        coordinator.handleKeyboardCommand(.select)
+        XCTAssertEqual(selectedApps.last, "PasteBuddy")
+        coordinator.handleKeyboardCommand(.dismiss)
+        XCTAssertTrue(dismissed)
+        XCTAssertFalse(coordinator.isKeyboardMonitoring)
+        coordinator.update(
+            anchorView: anchor,
+            isPresented: true,
+            appNames: ["Paste", "PasteBuddy", "Preview"],
+            query: "Paste",
+            width: 220,
+            onSelect: { selectedApps.append($0) },
+            onDismiss: { dismissed = true }
+        )
+        XCTAssertTrue(coordinator.isKeyboardMonitoring)
+        coordinator.closeImmediately()
+        XCTAssertFalse(coordinator.isKeyboardMonitoring)
+    }
+
     func testShelfExpandedPreviewKeepsKeyboardSelectionAndOmitsChrome() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let previewStart = try XCTUnwrap(source.range(of: "struct ShelfExpandedPreview"))
@@ -1127,9 +1237,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("onTextInput(keyPress.characters)"))
         XCTAssertFalse(shelfSource.contains("ShelfPreviewKeyboardHandler(onDismiss: onDismiss, onMove: onMove, onTextInput: onTextInput)"))
         XCTAssertFalse(shelfSource.contains("ClipboardPanelSearchInput.accepts(event.modifierFlags)"))
-        XCTAssertFalse(shelfSource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
-        XCTAssertFalse(shelfSource.contains("event.window === self.window"))
-        XCTAssertFalse(shelfSource.contains("NSEvent.removeMonitor(keyMonitor)"))
+        XCTAssertEqual(
+            shelfSource.components(separatedBy: "NSEvent.addLocalMonitorForEvents(matching: .keyDown)").count - 1,
+            1
+        )
+        XCTAssertTrue(shelfSource.contains("event.window === self.parentWindow"))
+        XCTAssertTrue(shelfSource.contains("NSEvent.removeMonitor(keyDownMonitor)"))
         XCTAssertTrue(controllerSource.contains("reloadPanelContent(panel)"))
         XCTAssertTrue(controllerSource.contains("hostingView.rootView = panelContentView()"))
         XCTAssertTrue(controllerSource.contains("panelPresentationID = UUID()"))

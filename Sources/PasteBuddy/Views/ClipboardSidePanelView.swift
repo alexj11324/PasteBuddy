@@ -204,6 +204,9 @@ struct ClipboardSidePanelView: View {
                 onSelect: { appName in
                     store.applySourceAppSuggestion(appName)
                     refreshSideItems()
+                },
+                onDismiss: {
+                    setSearchFocused(false)
                 }
             )
         }

@@ -410,6 +410,9 @@ struct ClipboardShelfPanelView: View {
                 onSelect: { appName in
                     store.applySourceAppSuggestion(appName)
                     refreshShelfItems()
+                },
+                onDismiss: {
+                    setSearchFocused(false)
                 }
             )
         }
@@ -2327,6 +2330,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
     let query: String
     let width: CGFloat
     let onSelect: (String) -> Void
+    let onDismiss: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -2347,7 +2351,8 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
                 appNames: appNames,
                 query: query,
                 width: width,
-                onSelect: onSelect
+                onSelect: onSelect,
+                onDismiss: onDismiss
             )
         }
     }
@@ -2362,8 +2367,14 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
         private var contentView: NativeSourceAppSuggestionView?
         private weak var parentWindow: NSWindow?
         private var parentWindowObservers: [NSObjectProtocol] = []
+        private var keyDownMonitor: Any?
         private var isClosingPanel = false
         private var panelAnimationGeneration = 0
+        private var onDismiss: (() -> Void)?
+
+        var isKeyboardMonitoring: Bool {
+            keyDownMonitor != nil
+        }
 
         func update(
             anchorView: NSView,
@@ -2371,7 +2382,8 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
             appNames: [String],
             query: String,
             width: CGFloat,
-            onSelect: @escaping (String) -> Void
+            onSelect: @escaping (String) -> Void,
+            onDismiss: @escaping () -> Void
         ) {
             guard isPresented, !appNames.isEmpty, let window = anchorView.window, window.isVisible else {
                 close(animated: true)
@@ -2383,6 +2395,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
             let wasVisible = panel.isVisible
             isClosingPanel = false
             panelAnimationGeneration += 1
+            self.onDismiss = onDismiss
             if let contentView {
                 contentView.configure(appNames: appNames, query: query, onSelect: onSelect)
             } else {
@@ -2416,6 +2429,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
             if wasVisible {
                 contentView?.resetPresentation()
             }
+            startKeyboardMonitoring()
         }
 
         private func suggestionPanel(parentWindow window: NSWindow) -> SourceAppSuggestionPanel {
@@ -2462,6 +2476,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
         }
 
         private func close(animated: Bool) {
+            stopKeyboardMonitoring()
             guard let panel, panel.isVisible else { return }
             guard animated, !shouldReduceMotion, !isClosingPanel, let contentView else {
                 isClosingPanel = false
@@ -2484,6 +2499,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
 
         func closeImmediately() {
             stopParentWindowMonitoring()
+            stopKeyboardMonitoring()
             isClosingPanel = false
             panelAnimationGeneration += 1
             if let panel {
@@ -2542,6 +2558,43 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         }
 
+        private func startKeyboardMonitoring() {
+            guard keyDownMonitor == nil else { return }
+            keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      self.panel?.isVisible == true,
+                      event.window === self.parentWindow,
+                      let command = SourceAppSuggestionKeyCommand.resolve(
+                          specialKey: event.specialKey,
+                          keyCode: event.keyCode,
+                          modifierFlags: event.modifierFlags
+                      ) else {
+                    return event
+                }
+                self.handleKeyboardCommand(command)
+                return nil
+            }
+        }
+
+        func handleKeyboardCommand(_ command: SourceAppSuggestionKeyCommand) {
+            switch command {
+            case let .move(offset):
+                contentView?.moveSelection(by: offset)
+            case .select:
+                contentView?.activateSelectedSuggestion()
+            case .dismiss:
+                onDismiss?()
+                close(animated: false)
+            }
+        }
+
+        private func stopKeyboardMonitoring() {
+            if let keyDownMonitor {
+                NSEvent.removeMonitor(keyDownMonitor)
+                self.keyDownMonitor = nil
+            }
+        }
+
         private func stopParentWindowMonitoring() {
             parentWindowObservers.forEach(NotificationCenter.default.removeObserver)
             parentWindowObservers = []
@@ -2554,7 +2607,7 @@ private final class SourceAppSuggestionPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private enum SourceAppSuggestionMetrics {
+enum SourceAppSuggestionMetrics {
     static let rowHeight: CGFloat = 32
     static let iconSize: CGFloat = 18
     static let titleFontSize: CGFloat = 14
@@ -2570,8 +2623,40 @@ private enum SourceAppSuggestionMetrics {
     }
 }
 
-private final class NativeSourceAppSuggestionView: NSVisualEffectView {
+enum SourceAppSuggestionKeyCommand: Equatable {
+    case move(offset: Int)
+    case select
+    case dismiss
+
+    static func resolve(
+        specialKey: NSEvent.SpecialKey?,
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> SourceAppSuggestionKeyCommand? {
+        let modifiers = modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        guard modifiers.isEmpty else { return nil }
+        if keyCode == 53 {
+            return .dismiss
+        }
+        return switch specialKey {
+        case .upArrow:
+            .move(offset: -1)
+        case .downArrow:
+            .move(offset: 1)
+        case .enter, .carriageReturn:
+            .select
+        default:
+            nil
+        }
+    }
+}
+
+final class NativeSourceAppSuggestionView: NSVisualEffectView {
     private let stackView = NSStackView()
+    private var rows: [NativeSourceAppSuggestionRow] = []
+    private var selectedIndex = 0
     private var onSelect: ((String) -> Void)?
 
     override init(frame frameRect: NSRect) {
@@ -2586,6 +2671,13 @@ private final class NativeSourceAppSuggestionView: NSVisualEffectView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        return rows.first { row in
+            row.bounds.contains(row.convert(point, from: self))
+        } ?? self
     }
 
     func prepareForPresentation(reduceMotion: Bool) {
@@ -2636,18 +2728,22 @@ private final class NativeSourceAppSuggestionView: NSVisualEffectView {
 
     func configure(appNames: [String], query: String, onSelect: @escaping (String) -> Void) {
         self.onSelect = onSelect
+        selectedIndex = 0
         stackView.arrangedSubviews.forEach { view in
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
 
-        for appName in appNames {
+        rows = appNames.map { appName in
             let row = NativeSourceAppSuggestionRow(appName: appName, query: query)
             row.target = self
             row.action = #selector(selectSuggestion(_:))
             row.heightAnchor.constraint(equalToConstant: SourceAppSuggestionMetrics.rowHeight).isActive = true
             stackView.addArrangedSubview(row)
+            return row
         }
+        updateSelection()
+        setAccessibilityChildren(rows)
     }
 
     private func configureView() {
@@ -2662,7 +2758,7 @@ private final class NativeSourceAppSuggestionView: NSVisualEffectView {
         layer?.borderWidth = 1
 
         stackView.orientation = .vertical
-        stackView.alignment = .leading
+        stackView.alignment = .width
         stackView.distribution = .fill
         stackView.spacing = 0
         stackView.edgeInsets = NSEdgeInsets(
@@ -2681,19 +2777,45 @@ private final class NativeSourceAppSuggestionView: NSVisualEffectView {
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
+        setAccessibilityElement(true)
+        setAccessibilityRole(.list)
         setAccessibilityLabel(NSLocalizedString("label.app_suggestions", comment: ""))
+        setAccessibilityIdentifier("source-app-suggestions")
     }
 
     @objc private func selectSuggestion(_ sender: NativeSourceAppSuggestionRow) {
         onSelect?(sender.appName)
     }
+
+    func moveSelection(by offset: Int) {
+        guard !rows.isEmpty else { return }
+        selectedIndex = min(max(selectedIndex + offset, 0), rows.count - 1)
+        updateSelection()
+    }
+
+    func activateSelectedSuggestion() {
+        guard rows.indices.contains(selectedIndex) else { return }
+        rows[selectedIndex].performSelection()
+    }
+
+    private func updateSelection() {
+        for (index, row) in rows.enumerated() {
+            row.isKeyboardSelected = index == selectedIndex
+        }
+    }
 }
 
-private final class NativeSourceAppSuggestionRow: NSControl {
+final class NativeSourceAppSuggestionRow: NSControl {
     let appName: String
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private var trackingArea: NSTrackingArea?
+    var isKeyboardSelected = false {
+        didSet {
+            setAccessibilitySelected(isKeyboardSelected)
+            needsDisplay = true
+        }
+    }
     private var isHoverHighlighted = false {
         didSet {
             needsDisplay = true
@@ -2742,12 +2864,21 @@ private final class NativeSourceAppSuggestionRow: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
-        sendAction(action, to: target)
+        performSelection()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        performSelection()
+        return true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard isHoverHighlighted else { return }
+        guard isHoverHighlighted || isKeyboardSelected else { return }
         NSColor.selectedContentBackgroundColor.withAlphaComponent(0.14).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 7, dy: 3), xRadius: 8, yRadius: 8).fill()
     }
@@ -2781,7 +2912,15 @@ private final class NativeSourceAppSuggestionRow: NSControl {
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
 
+        setAccessibilityElement(true)
+        setAccessibilityRole(.row)
         setAccessibilityLabel(appName)
+        setAccessibilityIdentifier("source-app-suggestion-\(appName)")
+        setAccessibilityHelp(NSLocalizedString("label.source_app_filter", comment: ""))
+    }
+
+    func performSelection() {
+        sendAction(action, to: target)
     }
 
     private func title(for appName: String, query: String) -> NSAttributedString {
