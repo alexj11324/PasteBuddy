@@ -103,12 +103,72 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.sourceAppSuggestions(matching: "@pasteb"), ["PasteBuddy"])
         XCTAssertEqual(store.sourceAppSuggestions(matching: "browser"), ["Brave Browser"])
 
-        store.searchQuery = "pa"
+        store.searchQuery = "pasteb"
         store.applySourceAppSuggestion("PasteBuddy")
 
         XCTAssertEqual(store.sourceAppFilter, "PasteBuddy")
         XCTAssertEqual(store.searchQuery, "")
         XCTAssertEqual(store.filteredItems.map(\.id), [pasteBuddy.id])
+    }
+
+    func testSourceAppFilterReplacementAndClearingPreserveOtherQueryState() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let paste = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Paste",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Invoice from Paste",
+            payload: ClipboardPayload(text: "invoice paste")
+        ))
+        let notes = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Invoice from Notes",
+            payload: ClipboardPayload(text: "invoice notes")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Unrelated image",
+            payload: ClipboardPayload(text: "unrelated")
+        ))
+        store.contentTypeFilter = .text
+
+        let cases: [(query: String, app: String, expectedID: UUID)] = [
+            ("invoice @pa", "Paste", paste.id),
+            ("invoice @no", "Notes", notes.id)
+        ]
+        var previousRevision = store.queryRevision
+        for testCase in cases {
+            store.searchQuery = testCase.query
+            XCTAssertEqual(store.sourceAppSuggestions(matching: testCase.query).first, testCase.app)
+            store.applySourceAppSuggestion(testCase.app)
+            XCTAssertEqual(store.sourceAppFilter, testCase.app)
+            XCTAssertEqual(store.searchQuery, "invoice")
+            XCTAssertEqual(store.contentTypeFilter, .text)
+            XCTAssertEqual(store.filteredItems.map(\.id), [testCase.expectedID])
+            XCTAssertGreaterThan(store.queryRevision, previousRevision)
+            previousRevision = store.queryRevision
+        }
+
+        store.searchQuery = "invoice @missing"
+        store.setSourceAppFilter("Notes")
+        XCTAssertEqual(store.sourceAppFilter, "Notes")
+        XCTAssertEqual(store.searchQuery, "invoice")
+        XCTAssertEqual(store.filteredItems.map(\.id), [notes.id])
+
+        store.searchQuery = "invoice @pa"
+        store.setSourceAppFilter(nil)
+        XCTAssertNil(store.sourceAppFilter)
+        XCTAssertEqual(store.searchQuery, "invoice")
+        XCTAssertEqual(store.contentTypeFilter, .text)
+        XCTAssertEqual(Set(store.filteredItems.map(\.id)), Set([paste.id, notes.id]))
+        XCTAssertGreaterThan(store.queryRevision, previousRevision)
     }
 
     func testRepositoryBackedSearchAtAppMentionUsesResolvedSourceApp() throws {
@@ -1688,10 +1748,14 @@ final class PasteBuddyStoreTests: XCTestCase {
         store.snapshot.pinboards = [pinboard]
         store.selectedScope = .history
 
-        store.setSelectedItemIDs([older.id, newer.id], in: .pinboard(pinboard.id))
+        store.setSelectedItemIDs(
+            [older.id, newer.id],
+            primaryID: newer.id,
+            in: .pinboard(pinboard.id)
+        )
 
         XCTAssertEqual(store.selectedScope, .history)
-        XCTAssertEqual(store.selectedItemID, older.id)
+        XCTAssertEqual(store.selectedItemID, newer.id)
         XCTAssertEqual(store.selectedItemIDs, [older.id, newer.id])
     }
 

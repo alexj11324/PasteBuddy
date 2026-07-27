@@ -5,7 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VisionKit
 
-private enum ClipboardShelfMetrics {
+enum ClipboardShelfMetrics {
     static let cardWidth: CGFloat = 240
     static let cardHeight: CGFloat = 240
     static let cardHeaderHeight: CGFloat = 58
@@ -19,6 +19,52 @@ private enum ClipboardShelfMetrics {
     static let sourceAppSuggestionWidth: CGFloat = 168
     static let shelfVerticalPadding: CGFloat = 6
     static let shelfHeight: CGFloat = cardHeight + shelfVerticalPadding * 2
+    static let outerVerticalInset: CGFloat = 12
+    static let primaryToolbarHeight: CGFloat = 38
+    static let activeFilterHeight: CGFloat = 30
+    static let toolbarSectionSpacing: CGFloat = 10
+    static let shelfTopSpacing: CGFloat = 10
+    static let footerTopSpacing: CGFloat = 6
+    static let footerHeight: CGFloat = 20
+
+    static func requiredPanelHeight(showsActiveFilters: Bool) -> CGFloat {
+        outerVerticalInset * 2
+            + primaryToolbarHeight
+            + (showsActiveFilters ? toolbarSectionSpacing + activeFilterHeight : 0)
+            + shelfTopSpacing
+            + shelfHeight
+            + footerTopSpacing
+            + footerHeight
+    }
+
+    static func verticalRegions(
+        in bounds: CGRect,
+        showsActiveFilters: Bool
+    ) -> (header: CGRect, shelf: CGRect, footer: CGRect)? {
+        let requiredHeight = requiredPanelHeight(showsActiveFilters: showsActiveFilters)
+        guard bounds.width >= 0, bounds.height >= requiredHeight else { return nil }
+        let headerHeight = primaryToolbarHeight
+            + (showsActiveFilters ? toolbarSectionSpacing + activeFilterHeight : 0)
+        let header = CGRect(
+            x: bounds.minX,
+            y: bounds.maxY - outerVerticalInset - headerHeight,
+            width: bounds.width,
+            height: headerHeight
+        )
+        let shelf = CGRect(
+            x: bounds.minX,
+            y: header.minY - shelfTopSpacing - shelfHeight,
+            width: bounds.width,
+            height: shelfHeight
+        )
+        let footer = CGRect(
+            x: bounds.minX,
+            y: shelf.minY - footerTopSpacing - footerHeight,
+            width: bounds.width,
+            height: footerHeight
+        )
+        return (header, shelf, footer)
+    }
 }
 
 enum ClipboardShelfGlass {
@@ -86,6 +132,7 @@ struct ClipboardShelfPanelView: View {
     let directPasteItem: @MainActor (ClipboardItem, PasteFormat) async -> DirectPasteResult
     let directPasteItems: @MainActor ([ClipboardItem], PasteFormat) async -> DirectPasteResult
     let reloadClipboardHistory: @MainActor () async -> Void
+    let onLayoutChange: () -> Void
     let onDismiss: () -> Void
     let onDismissImmediately: () -> Void
 
@@ -102,21 +149,22 @@ struct ClipboardShelfPanelView: View {
     @State private var pinnedState: Bool?
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             toolbar
                 .zIndex(1)
             shelf
                 .zIndex(0)
+                .padding(.top, 10)
+            shelfFooter
+                .padding(.top, 6)
         }
-        .padding(.top, 12)
+        .padding(.vertical, ClipboardShelfMetrics.outerVerticalInset)
         .padding(.horizontal, 16)
-        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
         .onAppear {
-            store.searchQuery = ""
-            store.clearFilters()
             shelfScope = store.selectedScope
             refreshShelfItems()
             isSearchRailPresented = true
@@ -131,6 +179,12 @@ struct ClipboardShelfPanelView: View {
         }
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
+        }
+        .onChange(of: visibleActiveFilterSummaries.count) {
+            Task { @MainActor in
+                await Task.yield()
+                onLayoutChange()
+            }
         }
         .onChange(of: store.searchQuery) {
             dismissPreparedPreview()
@@ -174,6 +228,15 @@ struct ClipboardShelfPanelView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
+    }
+
+    private var shelfFooter: some View {
+        Text(localized("format.items", paging.totalCount))
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: ClipboardShelfMetrics.footerHeight)
+            .accessibilityIdentifier("clipboard-shelf-result-count")
     }
 
     private var toolbar: some View {
@@ -222,7 +285,7 @@ struct ClipboardShelfPanelView: View {
                 .help(localized("action.add_item_or_pinboard"))
 
                 Menu {
-                    filtersMenu
+                    ClipboardPanelFiltersMenu(store: store)
                     Divider()
                     Button {
                         reloadHistory()
@@ -253,6 +316,7 @@ struct ClipboardShelfPanelView: View {
                 .labelStyle(.iconOnly)
                 .help(localized("label.more_actions"))
             }
+            .frame(height: ClipboardShelfMetrics.primaryToolbarHeight)
             .controlSize(.large)
             .animation(pasteSearchAnimation, value: isSearchRailPresented)
             .animation(pasteSearchAnimation, value: isSearchFocused)
@@ -261,6 +325,7 @@ struct ClipboardShelfPanelView: View {
 
             if !visibleActiveFilterSummaries.isEmpty {
                 activeFilterStrip
+                    .frame(height: ClipboardShelfMetrics.activeFilterHeight)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -270,8 +335,8 @@ struct ClipboardShelfPanelView: View {
     private var searchControl: some View {
         HStack(spacing: 8) {
             if let sourceAppFilter = store.sourceAppFilter {
-                ShelfSourceAppToken(appName: sourceAppFilter) {
-                    store.sourceAppFilter = nil
+                ClipboardSourceAppFilterToken(appName: sourceAppFilter) {
+                    store.clearSourceAppFilter()
                     refreshShelfItems()
                     setSearchFocused(true)
                 }
@@ -377,7 +442,6 @@ struct ClipboardShelfPanelView: View {
 
     private var shouldShowSourceAppSuggestions: Bool {
         isSearchFocused
-            && store.sourceAppFilter == nil
             && !store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !sourceAppSuggestions.isEmpty
     }
@@ -544,43 +608,6 @@ struct ClipboardShelfPanelView: View {
         .scrollIndicators(.never, axes: .horizontal)
     }
 
-    @ViewBuilder
-    private var filtersMenu: some View {
-        Menu("label.filters") {
-            Picker("label.type", selection: $store.contentTypeFilter) {
-                Text("label.any_type").tag(nil as ClipboardContentType?)
-                ForEach(ClipboardContentType.allCases) { type in
-                    Text(localized(type.displayName)).tag(Optional(type))
-                }
-            }
-
-            Picker("label.app", selection: $store.sourceAppFilter) {
-                Text("label.any_app").tag(nil as String?)
-                ForEach(store.availableSourceApps, id: \.self) { appName in
-                    Text(appName).tag(Optional(appName))
-                }
-            }
-
-            Picker("label.device", selection: $store.deviceFilter) {
-                Text("label.any_device").tag(nil as String?)
-                ForEach(store.availableDevices, id: \.self) { deviceName in
-                    Text(deviceName).tag(Optional(deviceName))
-                }
-            }
-
-            Picker("label.date", selection: $store.dateFilter) {
-                ForEach(ClipboardDateFilter.allCases) { filter in
-                    Text(localized(filter.displayName)).tag(filter)
-                }
-            }
-
-            Button("action.clear_filters") {
-                store.clearFilters()
-            }
-            .disabled(!store.hasActiveFilters)
-        }
-    }
-
     private var shelf: some View {
         let pinboards = store.userPinboards
         let defaultPasteFormat = store.defaultPasteFormat
@@ -613,7 +640,7 @@ struct ClipboardShelfPanelView: View {
             .frame(
                 width: ClipboardShelfMetrics.cardWidth,
                 height: ClipboardShelfMetrics.shelfHeight,
-                alignment: .bottom
+                alignment: .center
             )
         } previewContent: { displayItem in
             guard case .clipboard(let item) = displayItem,
@@ -658,13 +685,10 @@ struct ClipboardShelfPanelView: View {
     ) -> some View {
             switch displayItem {
             case .launchAtLoginPrompt:
-                VStack {
-                    Spacer(minLength: 0)
-                    LaunchAtLoginShelfCard(store: store) {
-                        isShowingLaunchAtLoginPrompt = false
-                    }
+                LaunchAtLoginShelfCard(store: store) {
+                    isShowingLaunchAtLoginPrompt = false
                 }
-                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .center)
             case .loading:
                 ProgressView()
                     .controlSize(.large)
@@ -672,15 +696,12 @@ struct ClipboardShelfPanelView: View {
                     .accessibilityLabel(localized("label.clipboard"))
                     .accessibilityValue(localized("state.connecting"))
             case .empty(let title, let detail, let systemImageName):
-                VStack {
-                    Spacer(minLength: 0)
-                    EmptyShelfCard(
-                        title: title,
-                        detail: detail,
-                        systemImageName: systemImageName
-                    )
-                }
-                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .bottom)
+                EmptyShelfCard(
+                    title: title,
+                    detail: detail,
+                    systemImageName: systemImageName
+                )
+                .frame(width: ClipboardShelfMetrics.cardWidth, height: ClipboardShelfMetrics.shelfHeight, alignment: .center)
             case .clipboard(let item):
                 ClipboardShelfCard(
                     item: item,
@@ -774,6 +795,7 @@ struct ClipboardShelfPanelView: View {
         guard shelfScope != scope else { return }
         dismissPreparedPreview()
         shelfScope = scope
+        store.selectedScope = scope
     }
 
     private func isSmartCategorySelected(_ category: SmartPinboardCategory) -> Bool {
@@ -844,6 +866,7 @@ struct ClipboardShelfPanelView: View {
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.select(item.id)
         }
+        store.selectSingleItem(item.id)
         setSearchFocused(false)
     }
 
@@ -929,6 +952,7 @@ struct ClipboardShelfPanelView: View {
         PasteBuddyMotion.performInstantSelection {
             shelfInteraction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
+        store.selectSingleItem(id)
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
@@ -990,6 +1014,11 @@ struct ClipboardShelfPanelView: View {
         guard !isSearchFocused, shelfInteraction.previewedID == nil else { return }
         if request.command.extendsSelection {
             shelfInteraction.extendSelection(by: request.command.offset)
+            store.setSelectedItemIDs(
+                shelfInteraction.selectedIDs,
+                primaryID: shelfInteraction.primarySelectedID,
+                in: shelfScope
+            )
         } else {
             selectOffset(request.command.offset)
         }
@@ -1044,6 +1073,12 @@ struct ClipboardShelfPanelView: View {
 
     private func handleExitCommand() {
         if isSearchFocused {
+            if store.sourceAppFilter != nil {
+                store.clearSourceAppFilter()
+                refreshShelfItems()
+                setSearchFocused(true)
+                return
+            }
             if !store.searchQuery.isEmpty {
                 store.searchQuery = ""
                 refreshShelfItems()
@@ -2229,16 +2264,19 @@ struct ClipboardImageThumbnailView: View {
     }
 }
 
-private struct ShelfSourceAppToken: View {
+struct ClipboardSourceAppFilterToken: View {
     let appName: String
     let onClear: () -> Void
 
     var body: some View {
         HStack(spacing: 5) {
             SourceApplicationIconImage(appName: appName, size: 18)
+                .accessibilityHidden(true)
             Text(appName)
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
+                .accessibilityLabel(NSLocalizedString("label.source_app_filter", comment: ""))
+                .accessibilityValue(appName)
             Button(action: onClear) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.caption.weight(.semibold))
@@ -2246,13 +2284,15 @@ private struct ShelfSourceAppToken: View {
             }
             .buttonStyle(.plain)
             .help(NSLocalizedString("action.clear_app_filter", comment: ""))
+            .accessibilityLabel(NSLocalizedString("action.clear_app_filter", comment: ""))
+            .accessibilityValue(appName)
+            .accessibilityHint(NSLocalizedString("message.clear_source_app_filter_help", comment: ""))
         }
         .padding(.leading, 4)
         .padding(.trailing, 6)
         .padding(.vertical, 3)
         .background(.quaternary, in: Capsule())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(appName)
+        .accessibilityElement(children: .contain)
     }
 }
 

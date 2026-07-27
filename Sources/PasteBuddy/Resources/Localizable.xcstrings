@@ -17096,6 +17096,22 @@
         }
       }
     },
+    "message.clear_source_app_filter_help": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removes the selected source app while keeping the other search and filter choices."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除所选来源应用，并保留其他搜索与过滤条件。"
+          }
+        }
+      }
+    },
     "message.cleared_shortcuts_remain_available_from_menus_but": {
       "localizations": {
         "en": {

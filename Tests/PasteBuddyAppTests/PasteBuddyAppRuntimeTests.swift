@@ -629,7 +629,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(frame.minY, 235)
     }
 
-    func testShelfPlacementFramesAttachToFullScreenTopOrBottomEdges() {
+    func testShelfPlacementFramesStayInsideVisibleFrameAtTopOrBottom() {
         let screenFrame = CGRect(x: -100, y: 50, width: 1512, height: 982)
         let visibleFrame = CGRect(x: -100, y: 111, width: 1512, height: 888)
         let shelfHeight: CGFloat = 330
@@ -650,8 +650,153 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 visibleFrame: visibleFrame,
                 height: shelfHeight
             ),
-            CGRect(x: -100, y: 50, width: 1512, height: 330)
+            CGRect(x: -100, y: 111, width: 1512, height: 330)
         )
+    }
+
+    func testShelfLayoutPolicyContainsEveryRegionAndCardAcrossDisplays() {
+        let shelfSource = try? sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let controllerSource = try? sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        XCTAssertTrue(shelfSource?.contains(".onChange(of: visibleActiveFilterSummaries.count)") == true)
+        XCTAssertTrue(shelfSource?.contains("onLayoutChange()") == true)
+        XCTAssertTrue(controllerSource?.contains("self.positionVisiblePanel(panel)") == true)
+
+        let displays: [(frame: CGRect, visible: CGRect)] = [
+            (
+                CGRect(x: 0, y: 0, width: 1440, height: 900),
+                CGRect(x: 0, y: 25, width: 1440, height: 850)
+            ),
+            (
+                CGRect(x: -1920, y: -120, width: 1920, height: 1080),
+                CGRect(x: -1920, y: -80, width: 1920, height: 1010)
+            ),
+            (
+                CGRect(x: 1440, y: 0, width: 2560, height: 1440),
+                CGRect(x: 1440, y: 24, width: 2560, height: 1370)
+            )
+        ]
+        let backingScales: [CGFloat] = [1, 2, 3]
+        let contentTypes = ClipboardContentType.allCases
+        let requiredHeight = ClipboardShelfMetrics.requiredPanelHeight(showsActiveFilters: true)
+
+        for display in displays {
+            for placement in [ClipboardShelfPlacement.top, .bottom] {
+                let panel = ClipboardShelfPanelController.attachedFrame(
+                    for: placement,
+                    screenFrame: display.frame,
+                    visibleFrame: display.visible,
+                    height: requiredHeight
+                )
+                XCTAssertTrue(display.visible.contains(panel))
+
+                let localBounds = CGRect(origin: .zero, size: panel.size)
+                let regions = ClipboardShelfMetrics.verticalRegions(
+                    in: localBounds,
+                    showsActiveFilters: true
+                )
+                XCTAssertNotNil(regions)
+                guard let regions else { continue }
+
+                XCTAssertTrue(localBounds.contains(regions.header))
+                XCTAssertTrue(localBounds.contains(regions.shelf))
+                XCTAssertTrue(localBounds.contains(regions.footer))
+                XCTAssertLessThanOrEqual(regions.shelf.maxY, regions.header.minY)
+                XCTAssertLessThanOrEqual(regions.footer.maxY, regions.shelf.minY)
+                XCTAssertEqual(regions.shelf.height, ClipboardShelfMetrics.shelfHeight)
+
+                for scale in backingScales {
+                    for _ in contentTypes {
+                        let card = CGRect(
+                            x: 0,
+                            y: regions.shelf.midY - ClipboardShelfMetrics.cardHeight / 2,
+                            width: ClipboardShelfMetrics.cardWidth,
+                            height: ClipboardShelfMetrics.cardHeight
+                        )
+                        XCTAssertTrue(regions.shelf.contains(card))
+                        XCTAssertEqual(
+                            (card.minY - regions.shelf.minY) * scale,
+                            (regions.shelf.maxY - card.maxY) * scale,
+                            accuracy: 0.001
+                        )
+                    }
+                }
+
+                for imageSize in [
+                    CGSize(width: 1600, height: 900),
+                    CGSize(width: 900, height: 1600),
+                    CGSize(width: 1200, height: 1200)
+                ] {
+                    let fitted = ClipboardImagePreviewLayout.aspectFitFrame(
+                        for: imageSize,
+                        in: CGRect(
+                            x: 0,
+                            y: 0,
+                            width: ClipboardShelfMetrics.cardWidth,
+                            height: ClipboardShelfMetrics.cardPreviewHeight
+                        )
+                    )
+                    XCTAssertTrue(
+                        CGRect(
+                            x: 0,
+                            y: 0,
+                            width: ClipboardShelfMetrics.cardWidth,
+                            height: ClipboardShelfMetrics.cardPreviewHeight
+                        ).contains(fitted)
+                    )
+                    XCTAssertEqual(fitted.width / fitted.height, imageSize.width / imageSize.height, accuracy: 0.001)
+                }
+            }
+        }
+    }
+
+    func testShelfAndSidePanelShareSourceFilterStateAndTokenSemantics() throws {
+        let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let sources = [shelf, side]
+        let sharedRequirements = [
+            "ClipboardSourceAppFilterToken(appName: sourceAppFilter)",
+            "store.applySourceAppSuggestion(appName)",
+            "store.clearSourceAppFilter()",
+            "ClipboardPanelFiltersMenu(store: store)",
+            "store.selectedScope = scope",
+            "store.selectSingleItem(item.id)",
+            "ClipboardPanelHistoryAvailability.visibleItems(",
+            "PinboardItemDragPayload.itemProvider(",
+            "ShelfExpandedPreview("
+        ]
+
+        for source in sources {
+            for requirement in sharedRequirements {
+                XCTAssertTrue(source.contains(requirement), "Missing shared panel semantic: \(requirement)")
+            }
+            XCTAssertFalse(source.contains("store.searchQuery = \"\"\\n            store.clearFilters()"))
+        }
+        XCTAssertEqual(
+            sources.filter { $0.contains("struct ClipboardSourceAppFilterToken: View") }.count,
+            1
+        )
+
+        let parityMatrix: [(semantic: String, shelf: [String], side: [String])] = [
+            ("search", ["$store.searchQuery", "action.clear_search"], ["$store.searchQuery", "action.clear_search"]),
+            ("scope/category", ["SmartPinboardCategory.allCases", "store.userPinboards", ".pasteStack"], ["SmartPinboardCategory.allCases", "store.userPinboards", ".pasteStack"]),
+            ("selection/keyboard", ["selectOffset(request.command.offset)", "handleShelfKeyPress"], ["selectOffset(request.command.offset)", "handleKeyPress"]),
+            ("metadata", ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"], ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"]),
+            ("context actions", ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"], ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"]),
+            ("paste/drag", ["onDoubleClick:", "directPasteItem", "PinboardItemDragPayload.itemProvider"], ["onDoubleClick:", "directPasteItem", "PinboardItemDragPayload.itemProvider"]),
+            ("preview", ["ShelfExpandedPreview(", "ClipboardPreparedPreview.prepare("], ["ShelfExpandedPreview(", "ClipboardPreparedPreview.prepare("]),
+            ("paging/count", ["loadNextShelfPage()", "paging.totalCount"], ["loadNextSidePage()", "paging.totalCount"]),
+            ("loading/error", ["isHistoryQueryTransitioning", "historyQueryErrorMessage"], ["isHistoryQueryTransitioning", "historyQueryErrorMessage"]),
+            ("pin/dismiss", ["setPinned(!effectivePinned)", "onDismissImmediately"], ["setPinned(!effectivePinned)", "onDismissImmediately"]),
+            ("accessibility", [".accessibilityLabel(", "NSLocalizedString"], [".accessibilityLabel(", "NSLocalizedString"])
+        ]
+        for row in parityMatrix {
+            for token in row.shelf {
+                XCTAssertTrue(shelf.contains(token), "Shelf parity missing \(row.semantic): \(token)")
+            }
+            for token in row.side {
+                XCTAssertTrue(side.contains(token), "Side parity missing \(row.semantic): \(token)")
+            }
+        }
     }
 
     func testShelfExpandedPreviewKeepsKeyboardSelectionAndOmitsChrome() throws {
@@ -896,8 +1041,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
 
         for source in [shelfSource, sideSource] {
-            XCTAssertTrue(source.contains("store.searchQuery = \"\""))
-            XCTAssertTrue(source.contains("store.clearFilters()"))
+            XCTAssertFalse(source.contains("store.searchQuery = \"\"\\n            store.clearFilters()"))
             XCTAssertTrue(source.contains("await Task.yield()"))
             XCTAssertTrue(source.contains("setSearchFocused(false)"))
             XCTAssertTrue(source.contains(".focusEffectDisabled()"))
@@ -915,11 +1059,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertFalse(source.contains("previewFirstRenderedItem"))
             XCTAssertFalse(source.contains("previewsFirstItemWhenIdle"))
         }
+        XCTAssertTrue(controllerSource.contains("private func resetPanelPresentationState()"))
+        XCTAssertTrue(controllerSource.contains("store.searchQuery = \"\""))
+        XCTAssertTrue(controllerSource.contains("store.clearFilters()"))
         XCTAssertTrue(controllerSource.contains("ClipboardPanelArrowKeyCommand.resolve("))
         XCTAssertTrue(controllerSource.contains("NotificationCenter.default.post(name: .pasteBuddyPanelArrowKey"))
 
-        XCTAssertFalse(shelfSource.contains("store.setSelectedItemIDs(ids, in: shelfScope)"))
-        XCTAssertFalse(sideSource.contains("store.setSelectedItemIDs(ids, in: sideScope)"))
+        XCTAssertTrue(shelfSource.contains("store.setSelectedItemIDs("))
+        XCTAssertTrue(sideSource.contains("store.setSelectedItemIDs("))
+        XCTAssertTrue(shelfSource.contains("primaryID: shelfInteraction.primarySelectedID"))
+        XCTAssertTrue(sideSource.contains("primaryID: interaction.primarySelectedID"))
         XCTAssertFalse(shelfSource.contains("scheduleStoreSelectionSync"))
         XCTAssertFalse(sideSource.contains("scheduleStoreSelectionSync"))
         XCTAssertFalse(shelfSource.contains("selectionSyncTask"))

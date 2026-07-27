@@ -377,6 +377,10 @@ final class ClipboardShelfPanelController {
                     directPasteItems: directPasteItems,
                     reloadClipboardHistory: { [store] in
                         await store.loadAsync()
+                    },
+                    onLayoutChange: { [weak self] in
+                        guard let self, let panel = self.panel, panel.isVisible else { return }
+                        self.positionVisiblePanel(panel)
                     }
                 ) { [weak self] in
                     self?.hide()
@@ -453,7 +457,7 @@ final class ClipboardShelfPanelController {
         let screenFrame = screen.frame
         switch displayMode {
         case .shelf:
-            let height = panelHeight(for: panel, in: screenFrame)
+            let height = panelHeight(for: panel, in: screen.visibleFrame)
             return Self.attachedFrame(
                 for: placement,
                 screenFrame: screenFrame,
@@ -461,7 +465,7 @@ final class ClipboardShelfPanelController {
                 height: height
             )
         case .sidePanel:
-            let preferredSize = preferredContentSize(for: .sidePanel, screenFrame: screenFrame)
+            let preferredSize = preferredContentSize(for: .sidePanel, screenFrame: screen.visibleFrame)
             panel.contentView?.setFrameSize(preferredSize)
             panel.contentView?.layoutSubtreeIfNeeded()
             return Self.rightAnchoredSidePanelFrame(
@@ -478,25 +482,30 @@ final class ClipboardShelfPanelController {
         visibleFrame: CGRect,
         height: CGFloat
     ) -> CGRect {
-        let resolvedHeight = min(max(height, 0), screenFrame.height)
+        let usableFrame = visibleFrame.intersection(screenFrame)
+        let resolvedFrame = usableFrame.isNull || usableFrame.isEmpty ? screenFrame : usableFrame
+        let resolvedHeight = min(max(height, 0), resolvedFrame.height)
         let y = switch placement {
         case .top:
-            max(screenFrame.minY, min(visibleFrame.maxY, screenFrame.maxY) - resolvedHeight)
+            resolvedFrame.maxY - resolvedHeight
         case .bottom:
-            screenFrame.minY
+            resolvedFrame.minY
         }
         return CGRect(
-            x: screenFrame.minX,
+            x: resolvedFrame.minX,
             y: y,
-            width: screenFrame.width,
+            width: resolvedFrame.width,
             height: resolvedHeight
         )
     }
 
-    private func panelHeight(for panel: NSPanel, in screenFrame: NSRect) -> CGFloat {
-        let minimumHeight = min(236, screenFrame.height)
-        let maximumHeight = max(minimumHeight, min(screenFrame.height * 0.36, 360))
-        panel.contentView?.setFrameSize(NSSize(width: screenFrame.width, height: maximumHeight))
+    private func panelHeight(for panel: NSPanel, in visibleFrame: NSRect) -> CGFloat {
+        let minimumHeight = min(
+            ClipboardShelfMetrics.requiredPanelHeight(showsActiveFilters: false),
+            visibleFrame.height
+        )
+        let maximumHeight = max(minimumHeight, min(visibleFrame.height, 440))
+        panel.contentView?.setFrameSize(NSSize(width: visibleFrame.width, height: maximumHeight))
         panel.contentView?.layoutSubtreeIfNeeded()
 
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
@@ -521,12 +530,14 @@ final class ClipboardShelfPanelController {
         visibleFrame: CGRect,
         preferredSize: CGSize
     ) -> CGRect {
-        let width = min(max(preferredSize.width, 320), max(320, screenFrame.width - sidePanelHorizontalInset * 2))
-        let height = min(max(preferredSize.height, 480), max(480, screenFrame.height - sidePanelTopInset * 2))
-        let rightEdge = min(screenFrame.maxX, visibleFrame.maxX)
-        let topEdge = min(screenFrame.maxY, visibleFrame.maxY) - sidePanelTopInset
-        let x = max(screenFrame.minX + sidePanelHorizontalInset, rightEdge - width - sidePanelHorizontalInset)
-        let y = max(screenFrame.minY + sidePanelTopInset, topEdge - height)
+        let usableFrame = visibleFrame.intersection(screenFrame)
+        let resolvedFrame = usableFrame.isNull || usableFrame.isEmpty ? screenFrame : usableFrame
+        let availableWidth = max(0, resolvedFrame.width - sidePanelHorizontalInset * 2)
+        let availableHeight = max(0, resolvedFrame.height - sidePanelTopInset * 2)
+        let width = min(max(preferredSize.width, 320), availableWidth)
+        let height = min(max(preferredSize.height, 480), availableHeight)
+        let x = resolvedFrame.maxX - sidePanelHorizontalInset - width
+        let y = resolvedFrame.maxY - sidePanelTopInset - height
         return CGRect(x: x, y: y, width: width, height: height)
     }
 

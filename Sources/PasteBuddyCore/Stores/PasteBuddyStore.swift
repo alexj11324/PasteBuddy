@@ -685,12 +685,18 @@ public final class PasteBuddyStore {
         return PasteOrderPreview(items: items)
     }
 
-    public func setSelectedItemIDs(_ ids: Set<UUID>, in scope: PasteScope? = nil) {
+    public func setSelectedItemIDs(
+        _ ids: Set<UUID>,
+        primaryID: UUID? = nil,
+        in scope: PasteScope? = nil
+    ) {
         let items = scope.map { filteredItems(for: $0) } ?? mainListItemsSnapshot
-        let primaryID = items.first(where: { ids.contains($0.id) })?.id
-        guard selectedItemIDs != ids || selectedItemID != primaryID else { return }
+        let resolvedPrimaryID = primaryID.flatMap { candidate in
+            items.contains(where: { $0.id == candidate }) && ids.contains(candidate) ? candidate : nil
+        } ?? items.first(where: { ids.contains($0.id) })?.id
+        guard selectedItemIDs != ids || selectedItemID != resolvedPrimaryID else { return }
         selectedItemIDs = ids
-        selectedItemID = primaryID
+        selectedItemID = resolvedPrimaryID
     }
 
     public func selectSingleItem(_ id: UUID?) {
@@ -954,7 +960,7 @@ public final class PasteBuddyStore {
         case .contentType:
             contentTypeFilter = nil
         case .sourceApp:
-            sourceAppFilter = nil
+            clearSourceAppFilter()
         case .device:
             deviceFilter = nil
         case .date:
@@ -967,7 +973,7 @@ public final class PasteBuddyStore {
         case .contentType:
             contentTypeFilter = ClipboardContentType(rawValue: suggestion.value)
         case .sourceApp:
-            sourceAppFilter = suggestion.value
+            setSourceAppFilter(suggestion.value)
         case .device:
             deviceFilter = suggestion.value
         case .date:
@@ -1023,8 +1029,21 @@ public final class PasteBuddyStore {
     }
 
     public func applySourceAppSuggestion(_ appName: String) {
+        let queryParts = PasteBuddySearchQueryParts.parse(searchQuery)
+        searchQuery = queryParts.sourceAppMention == nil ? "" : queryParts.textQuery
+        setSourceAppFilter(appName)
+    }
+
+    public func clearSourceAppFilter() {
+        setSourceAppFilter(nil)
+    }
+
+    public func setSourceAppFilter(_ appName: String?) {
+        let queryParts = PasteBuddySearchQueryParts.parse(searchQuery)
+        if queryParts.sourceAppMention != nil {
+            searchQuery = queryParts.textQuery
+        }
         sourceAppFilter = appName
-        searchQuery = ""
         selectSingleItem(filteredItems.first?.id)
     }
 
@@ -3097,6 +3116,10 @@ public final class PasteBuddyStore {
     }
 
     private static func normalizedAppSuggestionQuery(_ query: String) -> String {
+        let parts = PasteBuddySearchQueryParts.parse(query)
+        if let mention = parts.sourceAppMention {
+            return normalizedAppMention(mention)
+        }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("@") else {
             return normalizedAppMention(trimmed)
