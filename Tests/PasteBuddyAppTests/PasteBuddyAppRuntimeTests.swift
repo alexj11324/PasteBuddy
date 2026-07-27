@@ -924,7 +924,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(plansSource.contains("option.unlockSummary"))
     }
 
-    func testPanelHotKeyMatcherSeparatesShowHideAndShelfModeActions() {
+    func testPanelHotKeyMatcherSeparatesSidePanelAndShelfActions() {
         XCTAssertTrue(
             PasteBuddyPanelHotKeyMatcher.matches(
                 keyCode: Int64(kVK_ANSI_V),
@@ -936,19 +936,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 keyCode: Int64(kVK_ANSI_V),
                 flags: [.maskCommand, .maskShift]
             ),
-            .showHide
+            .sidePanel
         )
         XCTAssertEqual(
             PasteBuddyPanelHotKeyMatcher.action(
-                keyCode: Int64(kVK_ANSI_B),
+                keyCode: Int64(kVK_ANSI_S),
                 flags: [.maskCommand, .maskShift]
             ),
-            .shelfMode
+            .shelf
         )
 
         XCTAssertFalse(
             PasteBuddyPanelHotKeyMatcher.matches(
-                keyCode: Int64(kVK_ANSI_B),
+                keyCode: Int64(kVK_ANSI_S),
                 flags: [.maskCommand, .maskShift]
             )
         )
@@ -961,7 +961,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertNil(
             PasteBuddyPanelHotKeyMatcher.action(
                 keyCode: Int64(kVK_ANSI_B),
-                flags: [.maskCommand]
+                flags: [.maskCommand, .maskShift]
             )
         )
         XCTAssertFalse(
@@ -1254,8 +1254,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(gate.shouldTrigger(source: .eventTap, now: now))
         XCTAssertFalse(gate.shouldTrigger(source: .carbon, now: now.addingTimeInterval(0.10)))
         XCTAssertTrue(gate.shouldTrigger(source: .carbon, now: now.addingTimeInterval(0.30)))
-        XCTAssertTrue(gate.shouldTrigger(action: .shelfMode, source: .eventTap, now: now.addingTimeInterval(0.35)))
-        XCTAssertFalse(gate.shouldTrigger(action: .shelfMode, source: .carbon, now: now.addingTimeInterval(0.45)))
+        XCTAssertTrue(gate.shouldTrigger(action: .shelf, source: .eventTap, now: now.addingTimeInterval(0.35)))
+        XCTAssertFalse(gate.shouldTrigger(action: .shelf, source: .carbon, now: now.addingTimeInterval(0.45)))
 
         XCTAssertEqual(
             events.map { "\($0.category.rawValue).\($0.name):\($0.detail ?? "")" },
