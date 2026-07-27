@@ -631,11 +631,11 @@ struct ClipboardShelfPanelView: View {
                     onTextInput: beginSearch
                 )
             )
-        } dragPayload: { displayItem in
+        } dragItemProvider: { displayItem in
             guard case .clipboard(let item) = displayItem else { return nil }
-            return PinboardItemDragPayload(
-                ids: [item.id],
-                plainText: PasteboardWriter.plainText(for: item)
+            return PinboardItemDragPayload.itemProvider(
+                for: item,
+                hydrate: store.hydratedItem
             )
         } onSelect: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
@@ -870,15 +870,19 @@ struct ClipboardShelfPanelView: View {
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
         let shouldDismissBeforePaste = !effectivePinned
+        let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
-            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
                 dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItem = await store.hydratedItem(for: item)
+                guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }
                 return await directPasteItem(hydratedItem, format)
             }
-            store.recordDirectPasteResult(result)
+            if let result {
+                store.recordDirectPasteResult(result)
+            }
         }
     }
 

@@ -722,12 +722,150 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "wait for active target")
     }
 
-    func testDirectPasteDefaultsWaitForActivationWithoutPasteDelay() {
+    func testDirectPasteDefaultsWaitForActivationAndTargetFocusSettlement() {
         let options = PasteboardWriter.DirectPasteOptions.default
 
         XCTAssertGreaterThanOrEqual(options.activationWaitTimeout, 0.35)
-        XCTAssertEqual(options.pasteDispatchDelay, 0)
+        XCTAssertGreaterThanOrEqual(options.pasteDispatchDelay, 0.05)
         XCTAssertEqual(PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0.05).pasteDispatchDelay, 0.05)
+    }
+
+    func testDirectPasteSuppressesEventIfTargetDriftsDuringFocusSettlement() throws {
+        let pasteboard = try XCTUnwrap(
+            NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectTargetDrift-\(UUID().uuidString)"))
+        )
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("existing clipboard", forType: .string)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Target drift",
+            payload: ClipboardPayload(text: "must not paste elsewhere")
+        )
+        let targetBundleIdentifier = "com.example.Target"
+        var activeProbeCount = 0
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                activeProbeCount += 1
+                return activeProbeCount == 1 ? targetBundleIdentifier : "com.example.Other"
+            },
+            options: PasteboardWriter.DirectPasteOptions(
+                pasteDispatchDelay: 0.01,
+                fallbackBehavior: .failWithoutCopying
+            ),
+            sendPasteEvent: {
+                XCTFail("Command-V must not be sent after focus moves to another app.")
+            }
+        )
+
+        XCTAssertEqual(result.outcome, .failedNoTargetApplication)
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing clipboard")
+    }
+
+    func testDirectPasteWritesRepresentativePayloadBeforeSendingPasteEvent() throws {
+        let imageData = try XCTUnwrap(Self.testImage().tiffRepresentation)
+        let fileURL = URL(fileURLWithPath: "/private/tmp/PasteBuddy-direct-paste-file.txt")
+        let cases: [(ClipboardItem, NSPasteboard.PasteboardType)] = [
+            (
+                ClipboardItem(
+                    sourceAppName: "Notes",
+                    deviceName: "Test Mac",
+                    contentType: .text,
+                    title: "Text",
+                    payload: ClipboardPayload(text: "direct paste text")
+                ),
+                .string
+            ),
+            (
+                ClipboardItem(
+                    sourceAppName: "Safari",
+                    deviceName: "Test Mac",
+                    contentType: .url,
+                    title: "Link",
+                    payload: ClipboardPayload(urlString: "https://example.com/direct-paste")
+                ),
+                .URL
+            ),
+            (
+                ClipboardItem(
+                    sourceAppName: "Preview",
+                    deviceName: "Test Mac",
+                    contentType: .image,
+                    title: "Image",
+                    payload: ClipboardPayload(imageData: imageData)
+                ),
+                .tiff
+            ),
+            (
+                ClipboardItem(
+                    sourceAppName: "Finder",
+                    deviceName: "Test Mac",
+                    contentType: .file,
+                    title: "File",
+                    payload: ClipboardPayload(fileURLStrings: [fileURL.absoluteString])
+                ),
+                .fileURL
+            ),
+        ]
+
+        for (item, expectedType) in cases {
+            let pasteboard = try XCTUnwrap(
+                NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectPayload-\(UUID().uuidString)"))
+            )
+            defer { pasteboard.releaseGlobally() }
+            var sentPasteEvent = false
+
+            let result = PasteboardWriter.pasteToFrontmostApp(
+                item,
+                to: pasteboard,
+                isAccessibilityTrusted: true,
+                options: PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0),
+                sendPasteEvent: {
+                    XCTAssertNotNil(
+                        pasteboard.availableType(from: [expectedType]),
+                        "\(item.contentType.rawValue) payload must exist before Command-V"
+                    )
+                    sentPasteEvent = true
+                }
+            )
+
+            XCTAssertEqual(result.outcome, .pastedToFrontmostApp)
+            XCTAssertTrue(sentPasteEvent)
+        }
+    }
+
+    func testDirectPasteDoesNotSendPasteEventWhenPayloadWriteFails() throws {
+        let pasteboard = try XCTUnwrap(
+            NSPasteboard(name: NSPasteboard.Name("PasteBuddyDirectMissingPayload-\(UUID().uuidString)"))
+        )
+        defer { pasteboard.releaseGlobally() }
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Missing image",
+            payload: ClipboardPayload(imageAssetID: "missing-image")
+        )
+
+        let result = PasteboardWriter.pasteToFrontmostApp(
+            item,
+            to: pasteboard,
+            isAccessibilityTrusted: true,
+            options: PasteboardWriter.DirectPasteOptions(pasteDispatchDelay: 0),
+            sendPasteEvent: {
+                XCTFail("Command-V must not be sent when the pasteboard payload is unavailable.")
+            }
+        )
+
+        XCTAssertEqual(result.outcome, .failedPasteboardWrite)
+        XCTAssertTrue(result.statusMessage.contains("clipboard payload"))
     }
 
     func testAsyncDirectPasteWaitsForTargetActivationWithoutBlockingMainActor() async throws {

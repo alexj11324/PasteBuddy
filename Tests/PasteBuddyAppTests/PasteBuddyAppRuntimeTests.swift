@@ -2,6 +2,7 @@ import AppKit
 import Carbon
 import PasteBuddyCore
 import SwiftUI
+import UniformTypeIdentifiers
 import XCTest
 @testable import PasteBuddy
 
@@ -691,9 +692,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("shelfInteraction.dismissPreview(for: id)"))
         XCTAssertTrue(shelfSource.contains("previewContent: { displayItem in"))
         XCTAssertTrue(shelfSource.contains("ClipboardPreparedPreview.prepare(\n                item: item,\n                hydrateItem: store.hydratedItem"))
-        XCTAssertTrue(shelfSource.contains("dragPayload: { displayItem in"))
-        XCTAssertTrue(shelfSource.contains("plainText: PasteboardWriter.plainText(for: item)"))
-        XCTAssertFalse(shelfSource.contains("dragItemProvider: { displayItem in"))
+        XCTAssertTrue(shelfSource.contains("dragItemProvider: { displayItem in"))
+        XCTAssertTrue(shelfSource.contains("PinboardItemDragPayload.itemProvider("))
+        XCTAssertFalse(shelfSource.contains("dragPayload: { displayItem in"))
         XCTAssertFalse(shelfSource.contains("ShelfCollectionRepresentable"))
         XCTAssertFalse(shelfSource.contains("previewPreferredEdge: .maxY"))
         XCTAssertFalse(shelfSource.contains(".popover(isPresented: isShelfPreviewPresented"))
@@ -712,9 +713,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(sideSource.contains("maxWidth: ClipboardSidePanelMetrics.previewMaxWidth"))
         XCTAssertTrue(sideSource.contains("previewContent: { item in"))
         XCTAssertTrue(sideSource.contains("ClipboardPreparedPreview.prepare(\n                item: item,\n                hydrateItem: store.hydratedItem"))
-        XCTAssertTrue(sideSource.contains("dragPayload: { item in"))
-        XCTAssertTrue(sideSource.contains("plainText: PasteboardWriter.plainText(for: item)"))
-        XCTAssertFalse(sideSource.contains("dragItemProvider: { item in"))
+        XCTAssertTrue(sideSource.contains("dragItemProvider: { item in"))
+        XCTAssertTrue(sideSource.contains("PinboardItemDragPayload.itemProvider("))
+        XCTAssertFalse(sideSource.contains("dragPayload: { item in"))
         XCTAssertFalse(sideSource.contains("private var previewedSideItem: ClipboardItem?"))
         XCTAssertFalse(sideSource.contains("private func sidePreview(_ item: ClipboardItem) -> some View"))
         XCTAssertFalse(sideSource.contains("if let item = previewedSideItem"))
@@ -737,9 +738,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("onPreviewDismiss(id)"))
         XCTAssertTrue(collectionSource.contains("proxy.scrollTo(primarySelectedID)"))
         XCTAssertFalse(collectionSource.contains("anchor: .center"))
-        XCTAssertFalse(collectionSource.contains("var dragItemProvider: ((Item) -> NSItemProvider?)?"))
-        XCTAssertFalse(collectionSource.contains(".onDrag { provider }"))
-        XCTAssertTrue(collectionSource.contains(".draggable(payload)"))
+        XCTAssertTrue(collectionSource.contains("var dragItemProvider: ((Item) -> NSItemProvider?)?"))
+        XCTAssertTrue(collectionSource.contains(".onDrag { provider }"))
+        XCTAssertFalse(collectionSource.contains(".draggable(payload)"))
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
         XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
         XCTAssertFalse(collectionSource.contains(".onTapGesture {"))
@@ -761,11 +762,75 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(sideRowSource.contains("@Binding var isPreviewPresented"))
         XCTAssertTrue(dragSource.contains("struct PinboardItemDragPayload: Codable, Transferable"))
         XCTAssertTrue(dragSource.contains("import CoreTransferable"))
-        XCTAssertTrue(dragSource.contains("let plainText: String"))
         XCTAssertTrue(dragSource.contains("CodableRepresentation(contentType: .pasteBuddyPinboardItemIDs)"))
-        XCTAssertTrue(dragSource.contains("ProxyRepresentation(exporting: \\.plainText)"))
-        XCTAssertFalse(dragSource.contains("NSItemProvider"))
+        XCTAssertTrue(dragSource.contains("PasteboardWriter.itemProviders(for: [item], hydrate: hydrate)"))
+        XCTAssertTrue(dragSource.contains("provider.registerDataRepresentation("))
+        XCTAssertFalse(dragSource.contains("ProxyRepresentation"))
         XCTAssertFalse(dragSource.contains("ClipboardItemDragProvider"))
+    }
+
+    func testImageCardDragProviderPublishesNativeImageWithoutOCRTextFallback() async throws {
+        let image = makeTestImage(width: 2, height: 2) { _, _ in
+            (red: 0, green: 122, blue: 255, alpha: 255)
+        }
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Copied image",
+            payload: ClipboardPayload(imageData: try XCTUnwrap(image.tiffRepresentation))
+        )
+        let provider = try XCTUnwrap(PinboardItemDragPayload.itemProvider(for: item) { $0 })
+        let identifiers = provider.registeredTypeIdentifiers
+
+        let imageIndex = try XCTUnwrap(identifiers.firstIndex(of: UTType.tiff.identifier))
+        let internalIndex = try XCTUnwrap(
+            identifiers.firstIndex(of: UTType.pasteBuddyPinboardItemIDs.identifier)
+        )
+        XCTAssertLessThan(imageIndex, internalIndex)
+        XCTAssertFalse(identifiers.contains(UTType.plainText.identifier))
+        XCTAssertFalse(identifiers.contains(UTType.utf8PlainText.identifier))
+
+        let payloadData = try await loadData(
+            from: provider,
+            typeIdentifier: UTType.pasteBuddyPinboardItemIDs.identifier
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(PinboardItemDragPayload.self, from: payloadData).ids,
+            [item.id]
+        )
+        let textItem = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Copied text",
+            payload: ClipboardPayload(text: "plain drag payload")
+        )
+        let textProvider = try XCTUnwrap(PinboardItemDragPayload.itemProvider(for: textItem) { $0 })
+        XCTAssertTrue(textProvider.canLoadObject(ofClass: NSString.self))
+    }
+
+    func testMultiFileCardDragPreservesAllPathsThroughExistingTextRepresentation() async throws {
+        let firstURL = URL(fileURLWithPath: "/private/tmp/first-drag-file.txt")
+        let secondURL = URL(fileURLWithPath: "/private/tmp/second-drag-file.txt")
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Two files",
+            payload: ClipboardPayload(
+                fileURLStrings: [firstURL.absoluteString, secondURL.absoluteString]
+            )
+        )
+        let provider = try XCTUnwrap(PinboardItemDragPayload.itemProvider(for: item) { $0 })
+        let textData = try await loadData(
+            from: provider,
+            typeIdentifier: UTType.utf8PlainText.identifier
+        )
+        let text = String(decoding: textData, as: UTF8.self)
+
+        XCTAssertTrue(text.contains(firstURL.path))
+        XCTAssertTrue(text.contains(secondURL.path))
     }
 
     func testSidePanelPreviewFollowsSelectionWithoutDeferredHandoff() throws {
@@ -2066,7 +2131,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
-        let draggable = try XCTUnwrap(itemSource.range(of: "itemView.draggable(payload)"))
+        let dragProvider = try XCTUnwrap(itemSource.range(of: "itemView.onDrag { provider }"))
         let doubleTap = try XCTUnwrap(itemSource.range(of: ".onTapGesture(count: 2)"))
         let doubleClick = try XCTUnwrap(itemSource.range(of: "onDoubleClick(itemID)"))
         let simultaneousTap = try XCTUnwrap(itemSource.range(of: ".simultaneousGesture("))
@@ -2074,7 +2139,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let select = try XCTUnwrap(itemSource.range(of: "onSelect(itemID)"))
         let popover = try XCTUnwrap(itemSource.range(of: ".popover("))
 
-        XCTAssertLessThan(draggable.lowerBound, doubleTap.lowerBound)
+        XCTAssertLessThan(dragProvider.lowerBound, doubleTap.lowerBound)
         XCTAssertLessThan(doubleTap.lowerBound, doubleClick.lowerBound)
         XCTAssertLessThan(doubleClick.lowerBound, simultaneousTap.lowerBound)
         XCTAssertLessThan(simultaneousTap.lowerBound, suppressScroll.lowerBound)
@@ -2272,6 +2337,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testPanelDirectPasteRechecksTargetAndKeepsConfiguredFocusSettlementDelay() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertEqual(
+            source.components(separatedBy: "targetBundleIdentifier: targetBundleIdentifier").count - 1,
+            2
+        )
+        XCTAssertEqual(
+            source.components(
+                separatedBy: "tracker.frontmostApplicationBundleIdentifier()"
+            ).count - 1,
+            2
+        )
+        XCTAssertTrue(source.contains("pasteDispatchDelay: configured.pasteDispatchDelay"))
+        XCTAssertFalse(source.contains("pasteDispatchDelay: 0"))
+        for panelSource in [shelfSource, sideSource] {
+            XCTAssertGreaterThanOrEqual(
+                panelSource.components(separatedBy: "ClipboardPanelPasteGate.begin()").count - 1,
+                2
+            )
+            XCTAssertGreaterThanOrEqual(
+                panelSource.components(
+                    separatedBy: "ClipboardPanelPasteGate.shouldPaste(request)"
+                ).count - 1,
+                2
+            )
+        }
+    }
+
     func testAppIconThemeColorUsesLargestChromaticRegion() {
         let width = 40
         let height = 40
@@ -2340,6 +2436,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             intent: .defaultIntent
         )!
         return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    private func loadData(from provider: NSItemProvider, typeIdentifier: String) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let data {
+                    continuation.resume(returning: data)
+                } else {
+                    continuation.resume(throwing: CocoaError(.fileReadUnknown))
+                }
+            }
+        }
     }
 
     private func containsRenderedImage(in view: NSView) -> Bool {

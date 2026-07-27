@@ -82,7 +82,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
     var isSelectable: (Item) -> Bool
     var content: (Item, Bool) -> Content
     var previewContent: (Item) -> PreviewContent
-    var dragPayload: ((Item) -> PinboardItemDragPayload?)?
+    var dragItemProvider: ((Item) -> NSItemProvider?)?
     var onSelect: (UUID) -> Void
     var onDoubleClick: (UUID) -> Void
     var onLastItemAppear: () -> Void
@@ -104,7 +104,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         isSelectable: @escaping (Item) -> Bool = { _ in true },
         @ViewBuilder content: @escaping (Item, Bool) -> Content,
         @ViewBuilder previewContent: @escaping (Item) -> PreviewContent,
-        dragPayload: ((Item) -> PinboardItemDragPayload?)? = nil,
+        dragItemProvider: ((Item) -> NSItemProvider?)? = nil,
         onSelect: @escaping (UUID) -> Void,
         onDoubleClick: @escaping (UUID) -> Void,
         onLastItemAppear: @escaping () -> Void = {}
@@ -121,7 +121,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         self.isSelectable = isSelectable
         self.content = content
         self.previewContent = previewContent
-        self.dragPayload = dragPayload
+        self.dragItemProvider = dragItemProvider
         self.onSelect = onSelect
         self.onDoubleClick = onDoubleClick
         self.onLastItemAppear = onLastItemAppear
@@ -185,8 +185,8 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             .id(itemID)
 
         ZStack {
-            if let payload = dragPayload?(item) {
-                itemView.draggable(payload)
+            if let provider = dragItemProvider?(item) {
+                itemView.onDrag { provider }
             } else {
                 itemView
             }

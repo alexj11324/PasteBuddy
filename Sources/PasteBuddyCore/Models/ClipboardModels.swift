@@ -2750,6 +2750,7 @@ public enum DirectPasteOutcome: String, Codable, Sendable {
     case pastedToFrontmostApp
     case failedAccessibilityPermissionRequired
     case failedNoTargetApplication
+    case failedPasteboardWrite
     case copiedOnlyAccessibilityRequired
     case copiedOnlyNoTargetApplication
     case emptySelection
@@ -2759,6 +2760,11 @@ public enum DirectPasteOutcome: String, Codable, Sendable {
         case .pastedToFrontmostApp: "Paste sent to active app"
         case .failedAccessibilityPermissionRequired: "Paste failed - Accessibility access required"
         case .failedNoTargetApplication: "Paste failed - no target app available"
+        case .failedPasteboardWrite:
+            PasteBuddyLocalization.string(
+                "message.direct_paste_clipboard_payload_unavailable_title",
+                defaultValue: "Paste failed - clipboard payload unavailable"
+            )
         case .copiedOnlyAccessibilityRequired: "Copied only - Accessibility access required"
         case .copiedOnlyNoTargetApplication: "Copied only - no target app available"
         case .emptySelection: "No PasteBuddy items selected"
@@ -2814,7 +2820,8 @@ public struct DirectPasteResult: Codable, Equatable, Sendable {
                 detail: "macOS requires Accessibility access before PasteBuddy can send Command-V into the active app. PasteBuddy did not modify the clipboard.",
                 actionTitle: "Request Accessibility Access"
             )
-        case .pastedToFrontmostApp, .failedNoTargetApplication, .copiedOnlyNoTargetApplication, .emptySelection:
+        case .pastedToFrontmostApp, .failedNoTargetApplication, .failedPasteboardWrite,
+             .copiedOnlyNoTargetApplication, .emptySelection:
             nil
         }
     }
@@ -2831,6 +2838,17 @@ public struct DirectPasteResult: Codable, Equatable, Sendable {
             itemCount == 1
                 ? "Paste was not sent. Focus a target app before using direct paste."
                 : "Paste was not sent for \(itemCount) items. Focus a target app before using direct paste."
+        case .failedPasteboardWrite:
+            itemCount == 1
+                ? PasteBuddyLocalization.string(
+                    "message.direct_paste_clipboard_payload_unavailable",
+                    defaultValue: "Paste was not sent because the clipboard payload was unavailable."
+                )
+                : PasteBuddyLocalization.format(
+                    "format.direct_paste_clipboard_payloads_unavailable",
+                    defaultValue: "Paste was not sent for %d items because the clipboard payload was unavailable.",
+                    itemCount
+                )
         case .copiedOnlyAccessibilityRequired:
             itemCount == 1
                 ? "Copied 1 item. Grant Accessibility access to paste automatically."

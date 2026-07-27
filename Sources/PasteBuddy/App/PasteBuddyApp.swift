@@ -540,6 +540,10 @@ struct PasteBuddyApp: App {
         let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             item,
             format: format,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                tracker.frontmostApplicationBundleIdentifier()
+            },
             options: options
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
@@ -605,6 +609,10 @@ struct PasteBuddyApp: App {
         let result = await PasteboardWriter.pasteToFrontmostAppAsync(
             items,
             format: format,
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: {
+                tracker.frontmostApplicationBundleIdentifier()
+            },
             options: options
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
@@ -615,7 +623,7 @@ struct PasteBuddyApp: App {
         let configured = PasteboardWriter.userConfiguredPasteOnlyDirectPasteOptions
         return PasteboardWriter.DirectPasteOptions(
             activationWaitTimeout: configured.activationWaitTimeout,
-            pasteDispatchDelay: 0,
+            pasteDispatchDelay: configured.pasteDispatchDelay,
             fallbackBehavior: .failWithoutCopying
         )
     }
