@@ -95,12 +95,6 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
             snapshot.security.storageMode = storageMode
             return snapshot
         }
-        let data: Data
-        do {
-            data = try Data(contentsOf: fileURL)
-        } catch {
-            throw SnapshotStoreError.unreadableStore(error)
-        }
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             if attributes[.protectionKey] as? FileProtectionType == .complete {
@@ -111,6 +105,12 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
             }
         } catch {
             NSLog("PasteBuddy loaded its store but could not update file protection: %@", error.localizedDescription)
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw SnapshotStoreError.unreadableStore(error)
         }
 
         let envelope: EncryptedEnvelope
@@ -147,6 +147,10 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
     public func save(_ snapshot: PasteBuddySnapshot) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directory.path
+        )
         let data: Data
         if storageMode == .encrypted {
             var encryptedSnapshot = snapshot
@@ -160,10 +164,15 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
         }
         do {
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            try handle.close()
         } catch {
-            // Some macOS locations reject file-protection writes. Encrypted mode remains AES-GCM protected.
             try data.write(to: fileURL, options: [.atomic])
         }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: fileURL.path
+        )
         lastLoadedStorageMode = storageMode
     }
 

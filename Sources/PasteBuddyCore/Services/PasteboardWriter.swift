@@ -16,7 +16,7 @@ public enum PasteboardWriter {
 
     public struct DirectPasteOptions: Equatable, Sendable {
         public static let activationWaitTimeoutDefault: TimeInterval = 0.45
-        public static let pasteDispatchDelayDefault: TimeInterval = 0
+        public static let pasteDispatchDelayDefault: TimeInterval = 0.05
         public static let pasteDispatchDelayUserDefaultsKey = "PasteBuddyDirectPasteDelaySeconds"
 
         public var activationWaitTimeout: TimeInterval
@@ -192,8 +192,22 @@ public enum PasteboardWriter {
                 options: options
             )
         }
-        copy(item, format: format, to: pasteboard)
         waitBeforePasteEvent(options.pasteDispatchDelay)
+        guard targetApplicationIsActiveIfNeeded(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier
+        ) else {
+            return copyFallbackResult(
+                item,
+                format: format,
+                to: pasteboard,
+                outcome: .copiedOnlyNoTargetApplication,
+                options: options
+            )
+        }
+        guard copy(item, format: format, to: pasteboard) else {
+            return DirectPasteResult(outcome: .failedPasteboardWrite, itemCount: 1, format: format)
+        }
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -237,8 +251,22 @@ public enum PasteboardWriter {
                 options: options
             )
         }
-        copy(item, format: format, to: pasteboard)
         await waitBeforePasteEventAsync(options.pasteDispatchDelay)
+        guard targetApplicationIsActiveIfNeeded(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier
+        ) else {
+            return copyFallbackResult(
+                item,
+                format: format,
+                to: pasteboard,
+                outcome: .copiedOnlyNoTargetApplication,
+                options: options
+            )
+        }
+        guard copy(item, format: format, to: pasteboard) else {
+            return DirectPasteResult(outcome: .failedPasteboardWrite, itemCount: 1, format: format)
+        }
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -298,8 +326,22 @@ public enum PasteboardWriter {
                 options: options
             )
         }
-        copy(items, format: format, to: pasteboard)
         waitBeforePasteEvent(options.pasteDispatchDelay)
+        guard targetApplicationIsActiveIfNeeded(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier
+        ) else {
+            return copyFallbackResult(
+                items,
+                format: format,
+                to: pasteboard,
+                outcome: .copiedOnlyNoTargetApplication,
+                options: options
+            )
+        }
+        guard copy(items, format: format, to: pasteboard) else {
+            return DirectPasteResult(outcome: .failedPasteboardWrite, itemCount: items.count, format: format)
+        }
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -359,8 +401,22 @@ public enum PasteboardWriter {
                 options: options
             )
         }
-        copy(items, format: format, to: pasteboard)
         await waitBeforePasteEventAsync(options.pasteDispatchDelay)
+        guard targetApplicationIsActiveIfNeeded(
+            targetBundleIdentifier: targetBundleIdentifier,
+            activeApplicationBundleIdentifier: activeApplicationBundleIdentifier
+        ) else {
+            return copyFallbackResult(
+                items,
+                format: format,
+                to: pasteboard,
+                outcome: .copiedOnlyNoTargetApplication,
+                options: options
+            )
+        }
+        guard copy(items, format: format, to: pasteboard) else {
+            return DirectPasteResult(outcome: .failedPasteboardWrite, itemCount: items.count, format: format)
+        }
         if let sendPasteEvent {
             sendPasteEvent()
         } else {
@@ -554,7 +610,8 @@ public enum PasteboardWriter {
             return .failedAccessibilityPermissionRequired
         case .copiedOnlyNoTargetApplication:
             return .failedNoTargetApplication
-        case .pastedToFrontmostApp, .failedAccessibilityPermissionRequired, .failedNoTargetApplication, .emptySelection:
+        case .pastedToFrontmostApp, .failedAccessibilityPermissionRequired, .failedNoTargetApplication,
+             .failedPasteboardWrite, .emptySelection:
             return copyOutcome
         }
     }
@@ -619,6 +676,17 @@ public enum PasteboardWriter {
         repeat {
             await sleepAsync(until: min(deadline, Date().addingTimeInterval(0.005)))
         } while Date() < deadline
+    }
+
+    private static func targetApplicationIsActiveIfNeeded(
+        targetBundleIdentifier: String?,
+        activeApplicationBundleIdentifier: (() -> String?)?
+    ) -> Bool {
+        guard let targetBundleIdentifier = normalizedBundleIdentifier(targetBundleIdentifier),
+              let activeApplicationBundleIdentifier else {
+            return true
+        }
+        return normalizedBundleIdentifier(activeApplicationBundleIdentifier()) == targetBundleIdentifier
     }
 
     private static func sleepBriefly(until deadline: Date) {

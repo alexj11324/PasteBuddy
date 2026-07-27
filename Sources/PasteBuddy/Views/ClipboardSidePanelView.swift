@@ -53,8 +53,6 @@ struct ClipboardSidePanelView: View {
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
         .onAppear {
-            store.searchQuery = ""
-            store.clearFilters()
             sideScope = store.selectedScope
             refreshSideItems()
             Task { @MainActor in
@@ -129,6 +127,11 @@ struct ClipboardSidePanelView: View {
                 searchControl
                     .layoutPriority(1)
 
+                ClipboardPanelFiltersMenu(store: store)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .frame(width: 30, height: 30)
+
                 Button {
                     store.clearRequestedSettingsDestination()
                     onDismissImmediately()
@@ -149,6 +152,14 @@ struct ClipboardSidePanelView: View {
 
     private var searchControl: some View {
         HStack(spacing: 7) {
+            if let sourceAppFilter = store.sourceAppFilter {
+                ClipboardSourceAppFilterToken(appName: sourceAppFilter) {
+                    store.clearSourceAppFilter()
+                    refreshSideItems()
+                    setSearchFocused(true)
+                }
+            }
+
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(isSearchFocused ? .primary : .secondary)
@@ -193,6 +204,9 @@ struct ClipboardSidePanelView: View {
                 onSelect: { appName in
                     store.applySourceAppSuggestion(appName)
                     refreshSideItems()
+                },
+                onDismiss: {
+                    setSearchFocused(false)
                 }
             )
         }
@@ -302,8 +316,12 @@ struct ClipboardSidePanelView: View {
                         ClipboardSidePanelListRow(
                             item: item,
                             imageDataProvider: store.imageData,
+                            linkMetadataProvider: { item in
+                                await store.enrichLinkPreviewMetadataIfNeeded(for: item)
+                            },
                             isSelected: isSelected,
                             timestampReference: timestampReference,
+                            defaultPasteFormat: store.defaultPasteFormat,
                             onPaste: { format in
                                 pasteItem(item, format: format)
                             },
@@ -344,10 +362,10 @@ struct ClipboardSidePanelView: View {
                             )
                         )
                     },
-                    dragPayload: { item in
-                        PinboardItemDragPayload(
-                            ids: [item.id],
-                            plainText: PasteboardWriter.plainText(for: item)
+                    dragItemProvider: { item in
+                        PinboardItemDragPayload.itemProvider(
+                            for: item,
+                            hydrate: store.hydratedItem
                         )
                     },
                     onSelect: { id in
@@ -435,7 +453,6 @@ struct ClipboardSidePanelView: View {
 
     private var shouldShowSourceAppSuggestions: Bool {
         isSearchFocused
-            && store.sourceAppFilter == nil
             && hasSearchText
             && !sourceAppSuggestions.isEmpty
     }
@@ -505,9 +522,7 @@ struct ClipboardSidePanelView: View {
         if sideScope != scope {
             dismissPreparedPreview()
             sideScope = scope
-        }
-        if store.hasActiveFilters {
-            store.clearFilters()
+            store.selectedScope = scope
         }
     }
 
@@ -525,6 +540,7 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
         }
+        store.selectSingleItem(item.id)
         setSearchFocused(false)
     }
 
@@ -532,6 +548,7 @@ struct ClipboardSidePanelView: View {
         PasteBuddyMotion.performInstantSelection {
             interaction.selectSingle(id, keepsPreviewOpen: keepsPreviewOpen)
         }
+        store.selectSingleItem(id)
     }
 
     private func setSearchFocused(_ isFocused: Bool) {
@@ -611,6 +628,11 @@ struct ClipboardSidePanelView: View {
         guard !isSearchFocused, interaction.previewedID == nil else { return }
         if request.command.extendsSelection {
             interaction.extendSelection(by: request.command.offset)
+            store.setSelectedItemIDs(
+                interaction.selectedIDs,
+                primaryID: interaction.primarySelectedID,
+                in: sideScope
+            )
         } else {
             selectOffset(request.command.offset)
         }
@@ -686,15 +708,19 @@ struct ClipboardSidePanelView: View {
     private func pasteItem(_ item: ClipboardItem, format: PasteFormat) {
         selectSingleItem(item.id)
         let shouldDismissBeforePaste = !effectivePinned
+        let request = ClipboardPanelPasteGate.begin()
         Task { @MainActor in
-            let result = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
+            let result: DirectPasteResult? = await ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal(
                 dismissBeforePaste: shouldDismissBeforePaste,
                 dismiss: onDismissImmediately
             ) {
                 let hydratedItem = await store.hydratedItem(for: item)
+                guard ClipboardPanelPasteGate.shouldPaste(request) else { return nil }
                 return await directPasteItem(hydratedItem, format)
             }
-            store.recordDirectPasteResult(result)
+            if let result {
+                store.recordDirectPasteResult(result)
+            }
         }
     }
 
@@ -724,6 +750,12 @@ struct ClipboardSidePanelView: View {
 
     private func handleExitCommand() {
         if isSearchFocused {
+            if store.sourceAppFilter != nil {
+                store.clearSourceAppFilter()
+                refreshSideItems()
+                setSearchFocused(true)
+                return
+            }
             if !store.searchQuery.isEmpty {
                 store.searchQuery = ""
                 refreshSideItems()
@@ -787,8 +819,10 @@ private struct ClipboardSidePanelFilterChip: View {
 private struct ClipboardSidePanelListRow: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
     let timestampReference: Date
+    let defaultPasteFormat: PasteFormat
     let onPaste: (PasteFormat) -> Void
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
@@ -809,7 +843,11 @@ private struct ClipboardSidePanelListRow: View {
             SourceApplicationIconBadge(item: item, size: ClipboardSidePanelMetrics.thumbnailSize)
                 .frame(width: ClipboardSidePanelMetrics.thumbnailSize, height: ClipboardSidePanelMetrics.thumbnailSize)
 
-            ClipboardSidePanelContentPreview(item: item, imageDataProvider: imageDataProvider)
+            ClipboardSidePanelContentPreview(
+                item: item,
+                imageDataProvider: imageDataProvider,
+                linkMetadataProvider: linkMetadataProvider
+            )
 
             Spacer(minLength: 8)
 
@@ -837,7 +875,7 @@ private struct ClipboardSidePanelListRow: View {
         }
         .contextMenu {
             Button("action.paste") {
-                onPaste(.original)
+                onPaste(defaultPasteFormat)
             }
             Button("action.paste_as_plain_text") {
                 onPaste(.plainText)
@@ -870,8 +908,11 @@ private struct ClipboardSidePanelListRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("clipboard-side-panel-row-\(item.id.uuidString)")
-        .accessibilityLabel("\(item.title), \(timestamp.accessibilityText)")
+        .accessibilityLabel(
+            "\(item.title), \(NSLocalizedString(item.presentationContentType.displayName, comment: "")), \(timestamp.accessibilityText)"
+        )
         .accessibilityValue(NSLocalizedString(isSelected ? "state.selected" : "label.not_selected", comment: ""))
+        .accessibilityHint(NSLocalizedString("message.press_space_to_preview_press_return_to", comment: ""))
     }
 
 }
@@ -879,21 +920,33 @@ private struct ClipboardSidePanelListRow: View {
 private struct ClipboardSidePanelContentPreview: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
 
     var body: some View {
         if item.presentationContentType == .image, item.payload.hasImageAsset {
             ClipboardSidePanelImagePreview(item: item, imageDataProvider: imageDataProvider)
         } else {
-            Text(primaryText)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                if item.presentationContentType == .url, item.visualPreview.prefersImageThumbnail {
+                    ClipboardSidePanelImagePreview(item: item, imageDataProvider: imageDataProvider)
+                }
+                Text(primaryText)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .task(id: item.id) {
+                guard item.presentationContentType == .url,
+                      !item.visualPreview.prefersImageThumbnail else { return }
+                await linkMetadataProvider(item)
+            }
         }
     }
 
     private var primaryText: String {
-        nonEmpty(item.visualPreview.body)
+        (item.presentationContentType == .url ? nonEmpty(item.visualPreview.headline) : nil)
+            ?? nonEmpty(item.visualPreview.body)
             ?? nonEmpty(item.summary)
             ?? NSLocalizedString(item.presentationContentType.displayName, comment: "")
     }

@@ -2150,22 +2150,32 @@ private extension MCPToolName {
 private struct ShortcutBindingEditorRow: View {
     @Bindable var store: PasteBuddyStore
     let action: ShortcutAction
+    @State private var validationMessage: String?
 
     var body: some View {
-        LabeledContent(localized(action.settingsTitleKey)) {
-            ShortcutCaptureButton(
-                displayName: currentBinding.isEnabled
-                    ? currentBinding.displayName
-                    : localized("label.not_set"),
-                onClear: currentBinding.isEnabled ? {
-                    store.clearShortcutBinding(action)
-                } : nil
-            ) { shortcut in
-                store.setShortcutBinding(
-                    action,
-                    key: shortcut.key,
-                    modifiers: shortcut.modifiers
-                )
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent(localized(action.settingsTitleKey)) {
+                ShortcutCaptureButton(
+                    displayName: currentBinding.isEnabled
+                        ? currentBinding.displayName
+                        : localized("label.not_set"),
+                    onClear: currentBinding.isEnabled ? {
+                        validationMessage = nil
+                        store.clearShortcutBinding(action)
+                    } : nil
+                ) { shortcut in
+                    validationMessage = store.setShortcutBinding(
+                        action,
+                        key: shortcut.key,
+                        modifiers: shortcut.modifiers,
+                        keyCode: shortcut.keyCode
+                    ) ? nil : localized("message.shortcut_binding_rejected")
+                }
+            }
+            if let validationMessage {
+                Text(validationMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }
@@ -2214,6 +2224,7 @@ private struct ShortcutModifierEditorRow: View {
 private struct RecordedShortcut {
     let key: String
     let modifiers: [ShortcutModifier]
+    let keyCode: UInt16
 
     init?(event: NSEvent) {
         guard let key = event.charactersIgnoringModifiers?.first else {
@@ -2221,6 +2232,7 @@ private struct RecordedShortcut {
         }
         self.key = String(key).lowercased()
         modifiers = event.shortcutModifiers
+        keyCode = event.keyCode
     }
 }
 
@@ -2231,26 +2243,20 @@ private struct ShortcutCaptureButton: View {
     @StateObject private var recorder = ShortcutRecorderState()
 
     var body: some View {
-        Group {
+        HStack(spacing: 4) {
+            Button {
+                recorder.start(onCapture: onCapture)
+            } label: {
+                shortcutLabel
+            }
+            .buttonStyle(.plain)
             if let onClear {
-                Menu {
-                    Button("action.record_shortcut") {
-                        recorder.start(onCapture: onCapture)
-                    }
-                    Button("action.clear_shortcut", role: .destructive) {
-                        onClear()
-                    }
-                } label: {
-                    shortcutLabel
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
                 }
-                .menuStyle(.borderlessButton)
-            } else {
-                Button {
-                    recorder.start(onCapture: onCapture)
-                } label: {
-                    shortcutLabel
-                }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(Text("action.clear_shortcut"))
             }
         }
         .onDisappear { recorder.stop() }

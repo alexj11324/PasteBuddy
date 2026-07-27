@@ -123,26 +123,56 @@ final class EncryptionServiceTests: XCTestCase {
 
         let raw = try Data(contentsOf: fileURL)
         let rawString = String(decoding: raw, as: UTF8.self)
+        XCTAssertEqual(
+            (try FileManager.default.attributesOfItem(atPath: fileURL.path)[.posixPermissions] as? NSNumber)?.intValue,
+            0o600
+        )
+        XCTAssertEqual(
+            (try FileManager.default.attributesOfItem(
+                atPath: fileURL.deletingLastPathComponent().path
+            )[.posixPermissions] as? NSNumber)?.intValue,
+            0o700
+        )
+        let loaded = try store.load()
+
+        XCTAssertTrue(rawString.contains("Standard Storage Item"))
+        XCTAssertTrue(rawString.contains("standard local storage is explicit"))
+        XCTAssertEqual(loaded.security.storageMode, .standard)
+        XCTAssertEqual(store.lastLoadedStorageMode, .standard)
+        XCTAssertEqual(loaded.items.first?.payload.text, "standard local storage is explicit")
+    }
+
+    func testSnapshotStoreDowngradesCompleteFileProtectionWhenRuntimeSupportsTransition() throws {
+        let probeURL = try makeTemporaryStoreFile(filename: "protection-probe")
+        try Data([0]).write(to: probeURL, options: .atomic)
+        do {
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: probeURL.path
+            )
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: probeURL.path
+            )
+            _ = try Data(contentsOf: probeURL)
+        } catch {
+            throw XCTSkip("This test host cannot reopen a file after the macOS Data Protection transition.")
+        }
+
+        let fileURL = try makeTemporaryStoreFile(filename: "clipboard.pbstore")
+        let store = EncryptedSnapshotStore(fileURL: fileURL, storageMode: .standard)
+        try store.save(PasteBuddySnapshot())
         try FileManager.default.setAttributes(
             [.protectionKey: FileProtectionType.complete],
             ofItemAtPath: fileURL.path
         )
+
+        _ = try store.load()
+
         XCTAssertEqual(
             try FileManager.default.attributesOfItem(atPath: fileURL.path)[.protectionKey] as? FileProtectionType,
-            .complete
-        )
-        let loaded = try store.load()
-        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-
-        XCTAssertTrue(rawString.contains("Standard Storage Item"))
-        XCTAssertTrue(rawString.contains("standard local storage is explicit"))
-        XCTAssertEqual(
-            attributes[.protectionKey] as? FileProtectionType,
             .completeUntilFirstUserAuthentication
         )
-        XCTAssertEqual(loaded.security.storageMode, .standard)
-        XCTAssertEqual(store.lastLoadedStorageMode, .standard)
-        XCTAssertEqual(loaded.items.first?.payload.text, "standard local storage is explicit")
     }
 
     func testDefaultStandardStoreDoesNotAutoOpenLegacyEncryptedFile() throws {

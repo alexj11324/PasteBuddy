@@ -68,9 +68,11 @@ public final class PasteBuddyStore {
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
     @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
+    @ObservationIgnored private var completedLinkPreviewMetadataRequests: Set<UUID> = []
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
+    @ObservationIgnored public var onShortcutConfigurationChanged: (@MainActor (ShortcutConfiguration) -> Void)?
     @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
@@ -189,6 +191,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = diskStore.lastLoadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
                 diskStore.storageMode = loadedStorageMode
@@ -205,6 +208,9 @@ public final class PasteBuddyStore {
             syncClipboardRepositoryFromSnapshot()
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            if repairedShortcutConfiguration {
+                save()
+            }
         } catch {
             historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
@@ -240,6 +246,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = result.loadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
                 diskStore?.storageMode = loadedStorageMode
@@ -267,6 +274,9 @@ public final class PasteBuddyStore {
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            if repairedShortcutConfiguration {
+                save()
+            }
         } catch {
             isRepositorySyncInFlight = false
             if repositorySyncActor != nil {
@@ -283,6 +293,18 @@ public final class PasteBuddyStore {
             return
         }
         scheduleSave(delayNanoseconds: saveDebounceNanoseconds)
+    }
+
+    @discardableResult
+    private func repairLoadedShortcutConfigurationIfNeeded() -> Bool {
+        let binding = snapshot.shortcuts.showHidePanel
+        guard binding.isEnabled,
+              (!binding.isValidShowHidePanelShortcut
+                  || binding.effectivePhysicalKeyCode == nil) else {
+            return false
+        }
+        snapshot.shortcuts.showHidePanel = ShortcutConfiguration().showHidePanel
+        return true
     }
 
     private func saveAndFlush() {
@@ -664,12 +686,18 @@ public final class PasteBuddyStore {
         return PasteOrderPreview(items: items)
     }
 
-    public func setSelectedItemIDs(_ ids: Set<UUID>, in scope: PasteScope? = nil) {
+    public func setSelectedItemIDs(
+        _ ids: Set<UUID>,
+        primaryID: UUID? = nil,
+        in scope: PasteScope? = nil
+    ) {
         let items = scope.map { filteredItems(for: $0) } ?? mainListItemsSnapshot
-        let primaryID = items.first(where: { ids.contains($0.id) })?.id
-        guard selectedItemIDs != ids || selectedItemID != primaryID else { return }
+        let resolvedPrimaryID = primaryID.flatMap { candidate in
+            items.contains(where: { $0.id == candidate }) && ids.contains(candidate) ? candidate : nil
+        } ?? items.first(where: { ids.contains($0.id) })?.id
+        guard selectedItemIDs != ids || selectedItemID != resolvedPrimaryID else { return }
         selectedItemIDs = ids
-        selectedItemID = primaryID
+        selectedItemID = resolvedPrimaryID
     }
 
     public func selectSingleItem(_ id: UUID?) {
@@ -933,7 +961,7 @@ public final class PasteBuddyStore {
         case .contentType:
             contentTypeFilter = nil
         case .sourceApp:
-            sourceAppFilter = nil
+            clearSourceAppFilter()
         case .device:
             deviceFilter = nil
         case .date:
@@ -946,7 +974,7 @@ public final class PasteBuddyStore {
         case .contentType:
             contentTypeFilter = ClipboardContentType(rawValue: suggestion.value)
         case .sourceApp:
-            sourceAppFilter = suggestion.value
+            setSourceAppFilter(suggestion.value)
         case .device:
             deviceFilter = suggestion.value
         case .date:
@@ -1002,8 +1030,21 @@ public final class PasteBuddyStore {
     }
 
     public func applySourceAppSuggestion(_ appName: String) {
+        let queryParts = PasteBuddySearchQueryParts.parse(searchQuery)
+        searchQuery = queryParts.sourceAppMention == nil ? "" : queryParts.textQuery
+        setSourceAppFilter(appName)
+    }
+
+    public func clearSourceAppFilter() {
+        setSourceAppFilter(nil)
+    }
+
+    public func setSourceAppFilter(_ appName: String?) {
+        let queryParts = PasteBuddySearchQueryParts.parse(searchQuery)
+        if queryParts.sourceAppMention != nil {
+            searchQuery = queryParts.textQuery
+        }
         sourceAppFilter = appName
-        searchQuery = ""
         selectSingleItem(filteredItems.first?.id)
     }
 
@@ -1103,12 +1144,16 @@ public final class PasteBuddyStore {
               item.presentationContentType == .url,
               !item.payload.hasImageAsset,
               let urlString = item.payload.presentationURLString,
+              !completedLinkPreviewMetadataRequests.contains(item.id),
               !linkPreviewMetadataRequests.contains(item.id) else {
             return
         }
 
         linkPreviewMetadataRequests.insert(item.id)
-        defer { linkPreviewMetadataRequests.remove(item.id) }
+        defer {
+            linkPreviewMetadataRequests.remove(item.id)
+            completedLinkPreviewMetadataRequests.insert(item.id)
+        }
 
         guard let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString),
               metadata.title != nil || metadata.imageData != nil,
@@ -1117,15 +1162,19 @@ public final class PasteBuddyStore {
             return
         }
 
-        if let title = metadata.title {
+        var didChange = false
+        if let title = metadata.title, snapshot.items[index].title != title {
             snapshot.items[index].title = title
+            didChange = true
         }
         var didAdoptImage = false
         if let imageData = metadata.imageData {
             snapshot.items[index].payload.imageData = imageData
             snapshot.items[index].payload.imageByteCount = imageData.count
             didAdoptImage = true
+            didChange = true
         }
+        guard didChange else { return }
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
         syncPasteStackItem(snapshot.items[index])
@@ -1784,16 +1833,29 @@ public final class PasteBuddyStore {
         save()
     }
 
+    @discardableResult
     public func setShortcutBinding(
         _ action: ShortcutAction,
         key: String?,
-        modifiers: [ShortcutModifier]
-    ) {
-        snapshot.shortcuts.setBinding(
-            ShortcutBinding(key: key, modifiers: modifiers),
-            for: action
-        )
+        modifiers: [ShortcutModifier],
+        keyCode: UInt16? = nil
+    ) -> Bool {
+        let binding = ShortcutBinding(key: key, modifiers: modifiers, keyCode: keyCode)
+        guard binding.isEnabled,
+              binding.isValidUserShortcut,
+              !binding.conflictsWithFixedProductShortcut,
+              action != .showHidePanel || binding.isValidShowHidePanelShortcut,
+              !ShortcutAction.allCases.contains(where: {
+                  $0 != action
+                      && action.sharesShortcutScope(with: $0)
+                      && binding.conflicts(with: snapshot.shortcuts.binding(for: $0))
+              }) else {
+            return false
+        }
+        snapshot.shortcuts.setBinding(binding, for: action)
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
+        return true
     }
 
     public func clearShortcutBinding(_ action: ShortcutAction) {
@@ -1801,6 +1863,7 @@ public final class PasteBuddyStore {
             ShortcutBinding(key: nil, modifiers: snapshot.shortcuts.binding(for: action).modifiers),
             for: action
         )
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 
@@ -1815,6 +1878,7 @@ public final class PasteBuddyStore {
 
     public func resetShortcutConfiguration() {
         snapshot.shortcuts = ShortcutConfiguration()
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 
@@ -3061,6 +3125,10 @@ public final class PasteBuddyStore {
     }
 
     private static func normalizedAppSuggestionQuery(_ query: String) -> String {
+        let parts = PasteBuddySearchQueryParts.parse(query)
+        if let mention = parts.sourceAppMention {
+            return normalizedAppMention(mention)
+        }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("@") else {
             return normalizedAppMention(trimmed)

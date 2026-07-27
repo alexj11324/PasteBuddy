@@ -246,7 +246,7 @@ final class ClipboardShelfPanelController {
         isAnimatingPanelOut = false
         panelAnimationGeneration += 1
         panel.animationBehavior = .none
-        panel.setFrame(finalFrame, display: false)
+        Self.applyPanelFrame(finalFrame, to: panel, display: false)
         preparePanelContentForPresentation(panel)
         startScreenParameterMonitoring(for: panel)
         panel.orderFrontRegardless()
@@ -377,6 +377,10 @@ final class ClipboardShelfPanelController {
                     directPasteItems: directPasteItems,
                     reloadClipboardHistory: { [store] in
                         await store.loadAsync()
+                    },
+                    onLayoutChange: { [weak self] in
+                        guard let self, let panel = self.panel, panel.isVisible else { return }
+                        self.positionVisiblePanel(panel)
                     }
                 ) { [weak self] in
                     self?.hide()
@@ -453,7 +457,7 @@ final class ClipboardShelfPanelController {
         let screenFrame = screen.frame
         switch displayMode {
         case .shelf:
-            let height = panelHeight(for: panel, in: screenFrame)
+            let height = panelHeight(for: panel, in: screen.visibleFrame)
             return Self.attachedFrame(
                 for: placement,
                 screenFrame: screenFrame,
@@ -461,7 +465,7 @@ final class ClipboardShelfPanelController {
                 height: height
             )
         case .sidePanel:
-            let preferredSize = preferredContentSize(for: .sidePanel, screenFrame: screenFrame)
+            let preferredSize = preferredContentSize(for: .sidePanel, screenFrame: screen.visibleFrame)
             panel.contentView?.setFrameSize(preferredSize)
             panel.contentView?.layoutSubtreeIfNeeded()
             return Self.rightAnchoredSidePanelFrame(
@@ -478,25 +482,30 @@ final class ClipboardShelfPanelController {
         visibleFrame: CGRect,
         height: CGFloat
     ) -> CGRect {
-        let resolvedHeight = min(max(height, 0), screenFrame.height)
+        let usableFrame = visibleFrame.intersection(screenFrame)
+        let resolvedFrame = usableFrame.isNull || usableFrame.isEmpty ? screenFrame : usableFrame
+        let resolvedHeight = min(max(height, 0), resolvedFrame.height)
         let y = switch placement {
         case .top:
-            max(screenFrame.minY, min(visibleFrame.maxY, screenFrame.maxY) - resolvedHeight)
+            resolvedFrame.maxY - resolvedHeight
         case .bottom:
-            screenFrame.minY
+            resolvedFrame.minY
         }
         return CGRect(
-            x: screenFrame.minX,
+            x: resolvedFrame.minX,
             y: y,
-            width: screenFrame.width,
+            width: resolvedFrame.width,
             height: resolvedHeight
         )
     }
 
-    private func panelHeight(for panel: NSPanel, in screenFrame: NSRect) -> CGFloat {
-        let minimumHeight = min(236, screenFrame.height)
-        let maximumHeight = max(minimumHeight, min(screenFrame.height * 0.36, 360))
-        panel.contentView?.setFrameSize(NSSize(width: screenFrame.width, height: maximumHeight))
+    private func panelHeight(for panel: NSPanel, in visibleFrame: NSRect) -> CGFloat {
+        let minimumHeight = min(
+            ClipboardShelfMetrics.requiredPanelHeight(showsActiveFilters: false),
+            visibleFrame.height
+        )
+        let maximumHeight = max(minimumHeight, min(visibleFrame.height, 440))
+        panel.contentView?.setFrameSize(NSSize(width: visibleFrame.width, height: maximumHeight))
         panel.contentView?.layoutSubtreeIfNeeded()
 
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
@@ -521,18 +530,26 @@ final class ClipboardShelfPanelController {
         visibleFrame: CGRect,
         preferredSize: CGSize
     ) -> CGRect {
-        let width = min(max(preferredSize.width, 320), max(320, screenFrame.width - sidePanelHorizontalInset * 2))
-        let height = min(max(preferredSize.height, 480), max(480, screenFrame.height - sidePanelTopInset * 2))
-        let rightEdge = min(screenFrame.maxX, visibleFrame.maxX)
-        let topEdge = min(screenFrame.maxY, visibleFrame.maxY) - sidePanelTopInset
-        let x = max(screenFrame.minX + sidePanelHorizontalInset, rightEdge - width - sidePanelHorizontalInset)
-        let y = max(screenFrame.minY + sidePanelTopInset, topEdge - height)
+        let usableFrame = visibleFrame.intersection(screenFrame)
+        let resolvedFrame = usableFrame.isNull || usableFrame.isEmpty ? screenFrame : usableFrame
+        let availableWidth = max(0, resolvedFrame.width - sidePanelHorizontalInset * 2)
+        let availableHeight = max(0, resolvedFrame.height - sidePanelTopInset * 2)
+        let width = min(max(preferredSize.width, 320), availableWidth)
+        let height = min(max(preferredSize.height, 480), availableHeight)
+        let x = resolvedFrame.maxX - sidePanelHorizontalInset - width
+        let y = resolvedFrame.maxY - sidePanelTopInset - height
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
     private func positionVisiblePanel(_ panel: NSPanel) {
         let finalFrame = attachedFrame(for: panel)
-        panel.setFrame(finalFrame, display: panel.isVisible)
+        Self.applyPanelFrame(finalFrame, to: panel, display: panel.isVisible)
+    }
+
+    static func applyPanelFrame(_ frame: NSRect, to panel: NSPanel, display: Bool) {
+        panel.setFrame(frame, display: display)
+        panel.contentView?.setFrameSize(frame.size)
+        panel.contentView?.layoutSubtreeIfNeeded()
     }
 
     private func startDismissalMonitoring(for panel: NSPanel) {
@@ -848,6 +865,7 @@ private extension NSRect {
 
 @MainActor
 final class PasteBuddyPanelHotKeyController {
+    private var sidePanelShortcut: ShortcutBinding
     private let onSidePanel: @MainActor () -> Void
     private let onShelf: @MainActor () -> Void
     private let onPinClipboard: @MainActor () -> Void
@@ -858,18 +876,19 @@ final class PasteBuddyPanelHotKeyController {
     private var isShortcutRecordingActive = false
 
     init(
+        sidePanelShortcut: ShortcutBinding = ShortcutConfiguration().showHidePanel,
         onSidePanel: @escaping @MainActor () -> Void,
         onShelf: @escaping @MainActor () -> Void,
         onPinClipboard: @escaping @MainActor () -> Void
     ) {
+        self.sidePanelShortcut = Self.validatedSidePanelShortcut(sidePanelShortcut)
         self.onSidePanel = onSidePanel
         self.onShelf = onShelf
         self.onPinClipboard = onPinClipboard
         let handler: @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void = { [weak self] action, source in
             self?.trigger(action: action, source: source)
         }
-        eventTap = PasteBuddyPanelHotKeyEventTap(onAction: { action in handler(action, .eventTap) })
-        registration = PasteBuddyCarbonHotKeyRegistration(onAction: { action in handler(action, .carbon) })
+        installHotKeySources(handler: handler)
         shortcutRecordingObserver = NotificationCenter.default.addObserver(
             forName: .pasteBuddyShortcutRecordingDidChange,
             object: nil,
@@ -880,6 +899,22 @@ final class PasteBuddyPanelHotKeyController {
                 self?.setShortcutRecordingActive(isRecording)
             }
         }
+    }
+
+    func updateSidePanelShortcut(_ shortcut: ShortcutBinding) {
+        let validatedShortcut = Self.validatedSidePanelShortcut(shortcut)
+        guard sidePanelShortcut != validatedShortcut else { return }
+        sidePanelShortcut = validatedShortcut
+        registration = nil
+        eventTap = nil
+        let handler: @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void = { [weak self] action, source in
+            self?.trigger(action: action, source: source)
+        }
+        installHotKeySources(handler: handler)
+        if isShortcutRecordingActive {
+            setHotKeySourcesEnabled(false)
+        }
+        PasteBuddyDiagnostics.record(.hotKey, "configurationUpdated", detail: "sidePanel=\(validatedShortcut.displayName)")
     }
 
     private func trigger(action: PasteBuddyPanelHotKeyAction, source: PasteBuddyPanelHotKeySource) {
@@ -901,8 +936,40 @@ final class PasteBuddyPanelHotKeyController {
     private func setShortcutRecordingActive(_ isRecording: Bool) {
         guard isShortcutRecordingActive != isRecording else { return }
         isShortcutRecordingActive = isRecording
-        registration?.setEnabled(!isRecording)
-        eventTap?.setEnabled(!isRecording)
+        setHotKeySourcesEnabled(!isRecording)
+    }
+
+    private func installHotKeySources(
+        handler: @escaping @MainActor (PasteBuddyPanelHotKeyAction, PasteBuddyPanelHotKeySource) -> Void
+    ) {
+        eventTap = PasteBuddyPanelHotKeyEventTap(
+            sidePanelShortcut: sidePanelShortcut,
+            onAction: { action in handler(action, .eventTap) }
+        )
+        registration = PasteBuddyCarbonHotKeyRegistration(
+            sidePanelShortcut: sidePanelShortcut,
+            onAction: { action in handler(action, .carbon) }
+        )
+        PasteBuddyDiagnostics.record(.hotKey, "configurationApplied", detail: "sidePanel=\(sidePanelShortcut.displayName)")
+    }
+
+    private func setHotKeySourcesEnabled(_ isEnabled: Bool) {
+        registration?.setEnabled(isEnabled)
+        eventTap?.setEnabled(isEnabled)
+    }
+
+    private static func validatedSidePanelShortcut(_ shortcut: ShortcutBinding) -> ShortcutBinding {
+        let effectiveKeyCode = PasteBuddyPanelHotKeyMatcher.keyCode(for: shortcut)
+        let conflictsWithFixedHotKey =
+            PasteBuddyPanelHotKeyMatcher.carbonModifiers(for: shortcut) == UInt32(cmdKey | shiftKey)
+            && effectiveKeyCode.map {
+                [UInt32(kVK_ANSI_S), UInt32(kVK_ANSI_P)].contains($0)
+            } == true
+        guard shortcut.isValidShowHidePanelShortcut, !conflictsWithFixedHotKey else {
+            PasteBuddyDiagnostics.record(.hotKey, "configurationRejected", detail: "sidePanel=\(shortcut.displayName)")
+            return ShortcutConfiguration().showHidePanel
+        }
+        return shortcut
     }
 }
 
@@ -942,11 +1009,16 @@ struct PasteBuddyPanelHotKeyTriggerGate {
 }
 
 private final class PasteBuddyCarbonHotKeyRegistration {
+    private let sidePanelShortcut: ShortcutBinding
     private let onAction: @MainActor (PasteBuddyPanelHotKeyAction) -> Void
     private var hotKeyRefs: [UInt32: EventHotKeyRef] = [:]
     private var eventHandler: EventHandlerRef?
 
-    init(onAction: @escaping @MainActor (PasteBuddyPanelHotKeyAction) -> Void) {
+    init(
+        sidePanelShortcut: ShortcutBinding,
+        onAction: @escaping @MainActor (PasteBuddyPanelHotKeyAction) -> Void
+    ) {
+        self.sidePanelShortcut = sidePanelShortcut
         self.onAction = onAction
         installEventHandler()
         registerHotKeys()
@@ -1013,17 +1085,29 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 
     private func registerHotKeys() {
         unregisterHotKeys()
-        registerHotKey(id: pasteBuddySidePanelHotKeyID, keyCode: UInt32(kVK_ANSI_V))
+        registerHotKey(
+            id: pasteBuddySidePanelHotKeyID,
+            keyCode: PasteBuddyPanelHotKeyMatcher.keyCode(for: sidePanelShortcut),
+            modifiers: PasteBuddyPanelHotKeyMatcher.carbonModifiers(for: sidePanelShortcut)
+        )
         registerHotKey(id: pasteBuddyShelfHotKeyID, keyCode: UInt32(kVK_ANSI_S))
         registerHotKey(id: pasteBuddyPinClipboardHotKeyID, keyCode: UInt32(kVK_ANSI_P))
     }
 
-    private func registerHotKey(id: UInt32, keyCode: UInt32) {
+    private func registerHotKey(
+        id: UInt32,
+        keyCode: UInt32?,
+        modifiers: UInt32 = UInt32(cmdKey | shiftKey)
+    ) {
+        guard let keyCode else {
+            PasteBuddyDiagnostics.record(.hotKey, "carbonRegistrationSkipped", detail: "id=\(id)")
+            return
+        }
         let hotKeyID = EventHotKeyID(signature: pasteBuddyHotKeySignature, id: id)
         var hotKeyRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
             keyCode,
-            UInt32(cmdKey | shiftKey),
+            modifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,
@@ -1063,11 +1147,16 @@ private final class PasteBuddyCarbonHotKeyRegistration {
 }
 
 final class PasteBuddyPanelHotKeyEventTap {
+    private let sidePanelShortcut: ShortcutBinding
     private let onAction: @MainActor (PasteBuddyPanelHotKeyAction) -> Void
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    init(onAction: @escaping @MainActor (PasteBuddyPanelHotKeyAction) -> Void) {
+    init(
+        sidePanelShortcut: ShortcutBinding,
+        onAction: @escaping @MainActor (PasteBuddyPanelHotKeyAction) -> Void
+    ) {
+        self.sidePanelShortcut = sidePanelShortcut
         self.onAction = onAction
         installEventTap()
     }
@@ -1132,7 +1221,11 @@ final class PasteBuddyPanelHotKeyEventTap {
         }
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        guard let action = PasteBuddyPanelHotKeyMatcher.action(keyCode: keyCode, flags: event.flags) else {
+        guard let action = PasteBuddyPanelHotKeyMatcher.action(
+            keyCode: keyCode,
+            flags: event.flags,
+            sidePanelShortcut: sidePanelShortcut
+        ) else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -1149,24 +1242,61 @@ enum PasteBuddyPanelHotKeyMatcher {
         action(keyCode: keyCode, flags: flags) == .sidePanel
     }
 
-    static func action(keyCode: Int64, flags: CGEventFlags) -> PasteBuddyPanelHotKeyAction? {
-        guard flags.contains(.maskCommand),
-              flags.contains(.maskShift),
-              !flags.contains(.maskAlternate),
-              !flags.contains(.maskControl) else {
-            return nil
+    static func action(
+        keyCode: Int64,
+        flags: CGEventFlags,
+        sidePanelShortcut: ShortcutBinding = ShortcutConfiguration().showHidePanel
+    ) -> PasteBuddyPanelHotKeyAction? {
+        if relevantFlags(flags) == [.maskCommand, .maskShift] {
+            switch keyCode {
+            case Int64(kVK_ANSI_S):
+                return .shelf
+            case Int64(kVK_ANSI_P):
+                return .pinClipboard
+            default:
+                break
+            }
         }
-        switch keyCode {
-        case Int64(kVK_ANSI_V):
+        if sidePanelShortcut.isValidShowHidePanelShortcut,
+           let sidePanelKeyCode = Self.keyCode(for: sidePanelShortcut),
+           keyCode == Int64(sidePanelKeyCode),
+           relevantFlags(flags) == eventFlags(for: sidePanelShortcut) {
             return .sidePanel
-        case Int64(kVK_ANSI_S):
-            return .shelf
-        case Int64(kVK_ANSI_P):
-            return .pinClipboard
-        default:
-            return nil
+        }
+        return nil
+    }
+
+    static func keyCode(for shortcut: ShortcutBinding) -> UInt32? {
+        guard shortcut.isEnabled else { return nil }
+        return shortcut.effectivePhysicalKeyCode.map(UInt32.init)
+    }
+
+    static func carbonModifiers(for shortcut: ShortcutBinding) -> UInt32 {
+        shortcut.modifiers.reduce(into: UInt32(0)) { result, modifier in
+            switch modifier {
+            case .command: result |= UInt32(cmdKey)
+            case .option: result |= UInt32(optionKey)
+            case .shift: result |= UInt32(shiftKey)
+            case .control: result |= UInt32(controlKey)
+            }
         }
     }
+
+    private static func eventFlags(for shortcut: ShortcutBinding) -> CGEventFlags {
+        shortcut.modifiers.reduce(into: CGEventFlags()) { result, modifier in
+            switch modifier {
+            case .command: result.insert(.maskCommand)
+            case .option: result.insert(.maskAlternate)
+            case .shift: result.insert(.maskShift)
+            case .control: result.insert(.maskControl)
+            }
+        }
+    }
+
+    private static func relevantFlags(_ flags: CGEventFlags) -> CGEventFlags {
+        flags.intersection([.maskCommand, .maskAlternate, .maskShift, .maskControl])
+    }
+
 }
 
 private let pasteBuddyHotKeySignature: OSType = 0x50425348

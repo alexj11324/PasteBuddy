@@ -103,12 +103,72 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.sourceAppSuggestions(matching: "@pasteb"), ["PasteBuddy"])
         XCTAssertEqual(store.sourceAppSuggestions(matching: "browser"), ["Brave Browser"])
 
-        store.searchQuery = "pa"
+        store.searchQuery = "pasteb"
         store.applySourceAppSuggestion("PasteBuddy")
 
         XCTAssertEqual(store.sourceAppFilter, "PasteBuddy")
         XCTAssertEqual(store.searchQuery, "")
         XCTAssertEqual(store.filteredItems.map(\.id), [pasteBuddy.id])
+    }
+
+    func testSourceAppFilterReplacementAndClearingPreserveOtherQueryState() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let paste = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Paste",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Invoice from Paste",
+            payload: ClipboardPayload(text: "invoice paste")
+        ))
+        let notes = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Invoice from Notes",
+            payload: ClipboardPayload(text: "invoice notes")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Unrelated image",
+            payload: ClipboardPayload(text: "unrelated")
+        ))
+        store.contentTypeFilter = .text
+
+        let cases: [(query: String, app: String, expectedID: UUID)] = [
+            ("invoice @pa", "Paste", paste.id),
+            ("invoice @no", "Notes", notes.id)
+        ]
+        var previousRevision = store.queryRevision
+        for testCase in cases {
+            store.searchQuery = testCase.query
+            XCTAssertEqual(store.sourceAppSuggestions(matching: testCase.query).first, testCase.app)
+            store.applySourceAppSuggestion(testCase.app)
+            XCTAssertEqual(store.sourceAppFilter, testCase.app)
+            XCTAssertEqual(store.searchQuery, "invoice")
+            XCTAssertEqual(store.contentTypeFilter, .text)
+            XCTAssertEqual(store.filteredItems.map(\.id), [testCase.expectedID])
+            XCTAssertGreaterThan(store.queryRevision, previousRevision)
+            previousRevision = store.queryRevision
+        }
+
+        store.searchQuery = "invoice @missing"
+        store.setSourceAppFilter("Notes")
+        XCTAssertEqual(store.sourceAppFilter, "Notes")
+        XCTAssertEqual(store.searchQuery, "invoice")
+        XCTAssertEqual(store.filteredItems.map(\.id), [notes.id])
+
+        store.searchQuery = "invoice @pa"
+        store.setSourceAppFilter(nil)
+        XCTAssertNil(store.sourceAppFilter)
+        XCTAssertEqual(store.searchQuery, "invoice")
+        XCTAssertEqual(store.contentTypeFilter, .text)
+        XCTAssertEqual(Set(store.filteredItems.map(\.id)), Set([paste.id, notes.id]))
+        XCTAssertGreaterThan(store.queryRevision, previousRevision)
     }
 
     func testRepositoryBackedSearchAtAppMentionUsesResolvedSourceApp() throws {
@@ -1150,12 +1210,78 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var observedShortcuts: ShortcutConfiguration?
+        store.onShortcutConfigurationChanged = { observedShortcuts = $0 }
 
-        store.setShortcutBinding(
+        XCTAssertTrue(store.setShortcutBinding(
+            .showHidePanel,
+            key: "g",
+            modifiers: [.option, .command, .command],
+            keyCode: 5
+        ))
+        XCTAssertEqual(observedShortcuts?.showHidePanel.keyCode, 5)
+        XCTAssertFalse(store.setShortcutBinding(
+            .showHidePanel,
+            key: "s",
+            modifiers: [.command, .shift],
+            keyCode: 1
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
+            .showHidePanel,
+            key: "g",
+            modifiers: [.shift],
+            keyCode: 5
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
+            .showHidePanel,
+            key: "q",
+            modifiers: [.command, .option],
+            keyCode: 12
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
+            .showHidePanel,
+            key: "g",
+            modifiers: [.command, .option],
+            keyCode: 12
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
+            .showHidePanel,
+            key: "g",
+            modifiers: [.command, .shift],
+            keyCode: 1
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
+            .showHidePanel,
+            key: "a",
+            modifiers: [.command],
+            keyCode: 0
+        ))
+        XCTAssertTrue(store.setShortcutBinding(
+            .showHidePanel,
+            key: "v",
+            modifiers: [.command, .shift],
+            keyCode: 9
+        ))
+        XCTAssertEqual(store.snapshot.shortcuts.showHidePanel.key, "v")
+        XCTAssertTrue(store.setShortcutBinding(
+            .showHidePanel,
+            key: "g",
+            modifiers: [.option, .command],
+            keyCode: 5
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
             .pasteSelectedItem,
             key: "p",
-            modifiers: [.shift, .command, .command]
-        )
+            modifiers: [.command, .shift],
+            keyCode: 35
+        ))
+        XCTAssertFalse(store.setShortcutBinding(
+            .pasteSelectedItem,
+            key: " ",
+            modifiers: [.command],
+            keyCode: 49
+        ))
+        XCTAssertEqual(store.snapshot.shortcuts.showHidePanel.key, "g")
         store.clearShortcutBinding(.pasteSelectedPlainText)
         store.setQuickPasteModifiers([.control, .command])
         store.setQuickPasteModifiers([.shift], plainText: true)
@@ -1163,13 +1289,76 @@ final class PasteBuddyStoreTests: XCTestCase {
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
 
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.key, "p")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.modifiers, [.shift, .command])
-        XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedItem.displayName, "⇧⌘P")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.key, "g")
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.modifiers, [.option, .command])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.keyCode, 5)
+        XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "⌥⌘G")
         XCTAssertFalse(reloaded.snapshot.shortcuts.pasteSelectedPlainText.isEnabled)
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedPlainText.displayName, "Not set")
         XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.control, .command])
         XCTAssertEqual(reloaded.snapshot.shortcuts.plainTextQuickPasteModifiers, [.shift])
+    }
+
+    func testSyncLoadRepairsAndPersistsUnsafeLegacyPanelShortcut() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        var snapshot = PasteBuddySnapshot()
+        snapshot.shortcuts.showHidePanel = ShortcutBinding(
+            key: "a",
+            modifiers: [.command],
+            keyCode: 0
+        )
+        try harness.snapshotStore.save(snapshot)
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.load()
+
+        XCTAssertEqual(store.snapshot.shortcuts.showHidePanel, ShortcutConfiguration().showHidePanel)
+        XCTAssertEqual(
+            try harness.snapshotStore.load().shortcuts.showHidePanel,
+            ShortcutConfiguration().showHidePanel
+        )
+    }
+
+    func testAsyncLoadRepairsAndPersistsUnmappableLegacyPanelShortcut() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        var snapshot = PasteBuddySnapshot()
+        snapshot.shortcuts.showHidePanel = ShortcutBinding(
+            key: ".",
+            modifiers: [.command, .option]
+        )
+        try harness.snapshotStore.save(snapshot)
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        await store.loadAsync()
+
+        XCTAssertEqual(store.snapshot.shortcuts.showHidePanel, ShortcutConfiguration().showHidePanel)
+        XCTAssertEqual(
+            try harness.snapshotStore.load().shortcuts.showHidePanel,
+            ShortcutConfiguration().showHidePanel
+        )
+    }
+
+    func testSyncAndAsyncLoadPreserveExplicitlyDisabledPanelShortcut() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        var snapshot = PasteBuddySnapshot()
+        snapshot.shortcuts.showHidePanel = ShortcutBinding(
+            key: nil,
+            modifiers: [.command, .shift],
+            keyCode: 9
+        )
+        try harness.snapshotStore.save(snapshot)
+
+        let syncStore = PasteBuddyStore(diskStore: harness.snapshotStore)
+        syncStore.load()
+        XCTAssertFalse(syncStore.snapshot.shortcuts.showHidePanel.isEnabled)
+
+        let asyncStore = PasteBuddyStore(diskStore: harness.snapshotStore)
+        await asyncStore.loadAsync()
+        XCTAssertFalse(asyncStore.snapshot.shortcuts.showHidePanel.isEnabled)
+        XCTAssertFalse(try harness.snapshotStore.load().shortcuts.showHidePanel.isEnabled)
     }
 
     func testShortcutBindingNormalizesWhitespaceKeyAndModifierOrder() {
@@ -1559,10 +1748,14 @@ final class PasteBuddyStoreTests: XCTestCase {
         store.snapshot.pinboards = [pinboard]
         store.selectedScope = .history
 
-        store.setSelectedItemIDs([older.id, newer.id], in: .pinboard(pinboard.id))
+        store.setSelectedItemIDs(
+            [older.id, newer.id],
+            primaryID: newer.id,
+            in: .pinboard(pinboard.id)
+        )
 
         XCTAssertEqual(store.selectedScope, .history)
-        XCTAssertEqual(store.selectedItemID, older.id)
+        XCTAssertEqual(store.selectedItemID, newer.id)
         XCTAssertEqual(store.selectedItemIDs, [older.id, newer.id])
     }
 
@@ -3626,8 +3819,10 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var fetchCount = 0
         ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
-            ClipboardLinkPreviewMetadata(title: "Only Title", imageData: nil)
+            fetchCount += 1
+            return ClipboardLinkPreviewMetadata(title: "Only Title", imageData: nil)
         }
         defer { ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil }
 
@@ -3649,6 +3844,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         let enriched = try XCTUnwrap(store.snapshot.items.first { $0.id == bare.id })
         XCTAssertEqual(enriched.title, "Only Title")
         XCTAssertEqual(forwardedCount, 0, "Title-only enrichment should stay local until peers can merge it safely")
+
+        let enrichedRevision = store.dataRevision
+        await store.enrichLinkPreviewMetadataIfNeeded(for: enriched)
+        XCTAssertEqual(fetchCount, 1, "A rendered title-only link must not refetch metadata in the same app session")
+        XCTAssertEqual(store.dataRevision, enrichedRevision, "Repeated rendering must not rewrite unchanged metadata")
     }
     #endif
 

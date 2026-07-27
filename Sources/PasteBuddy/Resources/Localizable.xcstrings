@@ -11144,6 +11144,22 @@
         }
       }
     },
+    "format.direct_paste_clipboard_payloads_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste was not sent for %d items because the clipboard payload was unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由于剪贴板内容不可用，未粘贴 %d 个项目。"
+          }
+        }
+      }
+    },
     "format.copied_item": {
       "localizations": {
         "en": {
@@ -17080,6 +17096,22 @@
         }
       }
     },
+    "message.clear_source_app_filter_help": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removes the selected source app while keeping the other search and filter choices."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除所选来源应用，并保留其他搜索与过滤条件。"
+          }
+        }
+      }
+    },
     "message.cleared_shortcuts_remain_available_from_menus_but": {
       "localizations": {
         "en": {
@@ -17252,6 +17284,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "直接粘贴会先复制所选项目，然后仅在已授予 macOS 辅助功能访问权限时发送 Command-V。"
+          }
+        }
+      }
+    },
+    "message.direct_paste_clipboard_payload_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste was not sent because the clipboard payload was unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由于剪贴板内容不可用，未执行粘贴。"
+          }
+        }
+      }
+    },
+    "message.direct_paste_clipboard_payload_unavailable_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste failed - clipboard payload unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴失败——剪贴板内容不可用"
           }
         }
       }
@@ -17828,6 +17892,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "请按下要录制的组合键。"
+          }
+        }
+      }
+    },
+    "message.shortcut_binding_rejected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a modified shortcut that is not reserved or already assigned."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请选择带修饰键、且未被保留或占用的快捷键。"
           }
         }
       }
