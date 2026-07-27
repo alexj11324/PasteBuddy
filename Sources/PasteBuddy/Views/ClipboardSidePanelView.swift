@@ -313,6 +313,9 @@ struct ClipboardSidePanelView: View {
                         ClipboardSidePanelListRow(
                             item: item,
                             imageDataProvider: store.imageData,
+                            linkMetadataProvider: { item in
+                                await store.enrichLinkPreviewMetadataIfNeeded(for: item)
+                            },
                             isSelected: isSelected,
                             timestampReference: timestampReference,
                             defaultPasteFormat: store.defaultPasteFormat,
@@ -813,6 +816,7 @@ private struct ClipboardSidePanelFilterChip: View {
 private struct ClipboardSidePanelListRow: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
     let isSelected: Bool
     let timestampReference: Date
     let defaultPasteFormat: PasteFormat
@@ -836,7 +840,11 @@ private struct ClipboardSidePanelListRow: View {
             SourceApplicationIconBadge(item: item, size: ClipboardSidePanelMetrics.thumbnailSize)
                 .frame(width: ClipboardSidePanelMetrics.thumbnailSize, height: ClipboardSidePanelMetrics.thumbnailSize)
 
-            ClipboardSidePanelContentPreview(item: item, imageDataProvider: imageDataProvider)
+            ClipboardSidePanelContentPreview(
+                item: item,
+                imageDataProvider: imageDataProvider,
+                linkMetadataProvider: linkMetadataProvider
+            )
 
             Spacer(minLength: 8)
 
@@ -909,21 +917,33 @@ private struct ClipboardSidePanelListRow: View {
 private struct ClipboardSidePanelContentPreview: View {
     let item: ClipboardItem
     let imageDataProvider: @MainActor (ClipboardItem) async -> Data?
+    let linkMetadataProvider: @MainActor (ClipboardItem) async -> Void
 
     var body: some View {
         if item.presentationContentType == .image, item.payload.hasImageAsset {
             ClipboardSidePanelImagePreview(item: item, imageDataProvider: imageDataProvider)
         } else {
-            Text(primaryText)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                if item.presentationContentType == .url, item.visualPreview.prefersImageThumbnail {
+                    ClipboardSidePanelImagePreview(item: item, imageDataProvider: imageDataProvider)
+                }
+                Text(primaryText)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .task(id: item.id) {
+                guard item.presentationContentType == .url,
+                      !item.visualPreview.prefersImageThumbnail else { return }
+                await linkMetadataProvider(item)
+            }
         }
     }
 
     private var primaryText: String {
-        nonEmpty(item.visualPreview.body)
+        (item.presentationContentType == .url ? nonEmpty(item.visualPreview.headline) : nil)
+            ?? nonEmpty(item.visualPreview.body)
             ?? nonEmpty(item.summary)
             ?? NSLocalizedString(item.presentationContentType.displayName, comment: "")
     }

@@ -3819,8 +3819,10 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var fetchCount = 0
         ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
-            ClipboardLinkPreviewMetadata(title: "Only Title", imageData: nil)
+            fetchCount += 1
+            return ClipboardLinkPreviewMetadata(title: "Only Title", imageData: nil)
         }
         defer { ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil }
 
@@ -3842,6 +3844,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         let enriched = try XCTUnwrap(store.snapshot.items.first { $0.id == bare.id })
         XCTAssertEqual(enriched.title, "Only Title")
         XCTAssertEqual(forwardedCount, 0, "Title-only enrichment should stay local until peers can merge it safely")
+
+        let enrichedRevision = store.dataRevision
+        await store.enrichLinkPreviewMetadataIfNeeded(for: enriched)
+        XCTAssertEqual(fetchCount, 1, "A rendered title-only link must not refetch metadata in the same app session")
+        XCTAssertEqual(store.dataRevision, enrichedRevision, "Repeated rendering must not rewrite unchanged metadata")
     }
     #endif
 

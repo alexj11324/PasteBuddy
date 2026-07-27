@@ -2205,7 +2205,7 @@ private struct ShelfThumbnailView: View {
             item: item,
             imageDataProvider: imageDataProvider,
             tint: tint,
-            contentMode: .fill,
+            contentMode: .fit,
             placeholderIconSize: 30
         )
         .frame(height: ClipboardShelfMetrics.cardPreviewHeight)

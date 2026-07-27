@@ -68,6 +68,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored private let saveDebounceNanoseconds: UInt64?
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
     @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
+    @ObservationIgnored private var completedLinkPreviewMetadataRequests: Set<UUID> = []
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
@@ -1143,12 +1144,16 @@ public final class PasteBuddyStore {
               item.presentationContentType == .url,
               !item.payload.hasImageAsset,
               let urlString = item.payload.presentationURLString,
+              !completedLinkPreviewMetadataRequests.contains(item.id),
               !linkPreviewMetadataRequests.contains(item.id) else {
             return
         }
 
         linkPreviewMetadataRequests.insert(item.id)
-        defer { linkPreviewMetadataRequests.remove(item.id) }
+        defer {
+            linkPreviewMetadataRequests.remove(item.id)
+            completedLinkPreviewMetadataRequests.insert(item.id)
+        }
 
         guard let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString),
               metadata.title != nil || metadata.imageData != nil,
@@ -1157,15 +1162,19 @@ public final class PasteBuddyStore {
             return
         }
 
-        if let title = metadata.title {
+        var didChange = false
+        if let title = metadata.title, snapshot.items[index].title != title {
             snapshot.items[index].title = title
+            didChange = true
         }
         var didAdoptImage = false
         if let imageData = metadata.imageData {
             snapshot.items[index].payload.imageData = imageData
             snapshot.items[index].payload.imageByteCount = imageData.count
             didAdoptImage = true
+            didChange = true
         }
+        guard didChange else { return }
         snapshot.items[index].updatedAt = Date()
         snapshot.items[index].refreshSearchDocument()
         syncPasteStackItem(snapshot.items[index])

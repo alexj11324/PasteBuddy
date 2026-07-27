@@ -1364,6 +1364,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
+    func testShelfImageCardsFitEntireThumbnailWithoutCropping() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let start = try XCTUnwrap(source.range(of: "private struct ShelfThumbnailView"))
+        let end = try XCTUnwrap(source.range(of: "struct ClipboardImageThumbnailView"))
+        let thumbnailSource = String(source[start.lowerBound..<end.lowerBound])
+
+        XCTAssertTrue(thumbnailSource.contains("contentMode: .fit"))
+        XCTAssertFalse(thumbnailSource.contains("contentMode: .fill"))
+    }
+
     func testShelfLinkCardsUsePersistedMetadataPreviewWithoutViewFetch() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let monitorSource = try sourceFileContents("Sources/PasteBuddyCore/Services/ClipboardMonitor.swift")
@@ -2298,6 +2308,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("prepareAndPresentPreview(for: item)"))
         XCTAssertTrue(source.contains("ShelfExpandedPreview"))
         XCTAssertTrue(source.contains("ClipboardImageThumbnailView"))
+        XCTAssertTrue(source.contains("linkMetadataProvider: { item in"))
+        XCTAssertTrue(source.contains("await store.enrichLinkPreviewMetadataIfNeeded(for: item)"))
+        XCTAssertTrue(source.contains("item.visualPreview.prefersImageThumbnail"))
+        XCTAssertTrue(source.contains("nonEmpty(item.visualPreview.headline)"))
         XCTAssertTrue(source.contains(".focusEffectDisabled()"))
         XCTAssertTrue(source.contains("ClipboardShelfDirectPasteCoordinator.runAfterImmediateDismissal"))
         XCTAssertTrue(source.contains("@Environment(\\.openSettings)"))
