@@ -702,6 +702,149 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         XCTAssertEqual(indexNames, ["idx_items_image_asset", "idx_items_rtf_asset"])
     }
 
+    @MainActor
+    func testLinkMetadataEnrichmentPersistsAuthoritativeShelfImageReference() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        defer {
+            ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil
+            ClipboardLinkMetadataFetcher.resetFetchStateForTesting()
+        }
+
+        let databaseURL = harness.directory.appendingPathComponent("link-preview.sqlite")
+        let repository = ClipboardItemRepository(database: try PasteBuddyDatabase(fileURL: databaseURL))
+        let store = PasteBuddyStore(
+            diskStore: EncryptedSnapshotStore(
+                fileURL: harness.directory.appendingPathComponent("link-preview.pbstore"),
+                storageMode: .standard
+            ),
+            clipboardRepository: repository
+        )
+        let previewImage = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A])
+        ClipboardLinkMetadataFetcher.resetFetchStateForTesting()
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
+            ClipboardLinkPreviewMetadata(
+                title: "volcengine/MineContext",
+                imageData: previewImage
+            )
+        }
+        let captured = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Google Chrome",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "github.com",
+            payload: ClipboardPayload(urlString: "https://github.com/volcengine/MineContext")
+        ))
+
+        await store.enrichLinkPreviewMetadataIfNeeded(for: captured)
+        let didFlush = await store.flushPendingSave()
+        XCTAssertTrue(didFlush)
+
+        let persisted = try XCTUnwrap(
+            repository.fetchPage(ClipboardItemPageRequest(searchQuery: "MineContext")).first
+        )
+        XCTAssertEqual(persisted.title, "volcengine/MineContext")
+        XCTAssertNotNil(persisted.payload.imageAssetID)
+        XCTAssertEqual(try repository.imageData(for: persisted), previewImage)
+        XCTAssertEqual(
+            try sqliteScalarInt(
+                """
+                SELECT COUNT(*)
+                FROM clipboard_items
+                WHERE id = '\(captured.id.uuidString)'
+                  AND image_asset_id = json_extract(payload_json, '$.imageAssetID')
+                """,
+                at: databaseURL
+            ),
+            1,
+            "Shelf hydration and asset garbage collection must share the same authoritative reference"
+        )
+    }
+
+    func testMigrationRepairsPayloadAssetReferenceWrittenWithoutAuthorityColumn() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("link-preview-repair.sqlite")
+        let previewImage = Data([0x89, 0x50, 0x4E, 0x47])
+        let item = ClipboardItem(
+            sourceAppName: "Google Chrome",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "volcengine/MineContext",
+            payload: ClipboardPayload(
+                urlString: "https://github.com/volcengine/MineContext",
+                imageData: previewImage
+            )
+        )
+        do {
+            let repository = ClipboardItemRepository(database: try PasteBuddyDatabase(fileURL: databaseURL))
+            try repository.replaceAll(with: PasteBuddySnapshot(items: [item]))
+        }
+        try executeSQLite(
+            """
+            UPDATE clipboard_items
+            SET image_asset_id = NULL
+            WHERE id = '\(item.id.uuidString)';
+            DELETE FROM grdb_migrations
+            WHERE identifier = 'repair authoritative asset references';
+            """,
+            at: databaseURL
+        )
+
+        let repairedRepository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(fileURL: databaseURL)
+        )
+        let repaired = try XCTUnwrap(
+            repairedRepository.fetchPage(ClipboardItemPageRequest(searchQuery: "MineContext")).first
+        )
+
+        XCTAssertEqual(try repairedRepository.imageData(for: repaired), previewImage)
+        XCTAssertEqual(
+            try sqliteScalarInt(
+                """
+                SELECT COUNT(*)
+                FROM clipboard_items
+                WHERE id = '\(item.id.uuidString)'
+                  AND image_asset_id = json_extract(payload_json, '$.imageAssetID')
+                """,
+                at: databaseURL
+            ),
+            1
+        )
+    }
+
+    func testAssetReferenceRepairMigrationPreservesRevokedTombstone() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let databaseURL = harness.directory.appendingPathComponent("link-preview-revoked.sqlite")
+        _ = try PasteBuddyDatabase(fileURL: databaseURL)
+        try executeSQLite(
+            """
+            INSERT INTO snapshot_metadata (key, value_json)
+            VALUES ('snapshot', 'PBDB-REVOKED:1')
+            ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json;
+            DELETE FROM grdb_migrations
+            WHERE identifier = 'repair authoritative asset references';
+            """,
+            at: databaseURL
+        )
+
+        XCTAssertNoThrow(try PasteBuddyDatabase(fileURL: databaseURL))
+        XCTAssertEqual(
+            try sqliteScalarInt(
+                """
+                SELECT COUNT(*)
+                FROM snapshot_metadata
+                WHERE key = 'snapshot' AND value_json = 'PBDB-REVOKED:1'
+                """,
+                at: databaseURL
+            ),
+            1
+        )
+    }
+
     func testCaptureJournalAppliesOrderedItemAndPinboardMutationsInOneTransaction() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

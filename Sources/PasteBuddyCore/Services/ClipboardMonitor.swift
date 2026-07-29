@@ -638,17 +638,9 @@ public enum ClipboardLinkMetadataFetcher {
     /// Test seam: production always fetches through LinkPresentation.
     @MainActor public static var fetchOverrideForTesting: ((String) async -> ClipboardLinkPreviewMetadata?)?
     @MainActor private static var inFlightRequests: [String: Task<ClipboardLinkPreviewMetadata?, Never>] = [:]
-    @MainActor private static var failedFetchDates: [String: Date] = [:]
-    private static let failedFetchRetryInterval: TimeInterval = 15 * 60
-    private static let failedFetchCapacity = 256
 
     @MainActor
     public static func fetch(for urlString: String) async -> ClipboardLinkPreviewMetadata? {
-        let now = Date()
-        if let failedAt = failedFetchDates[urlString],
-           now.timeIntervalSince(failedAt) < failedFetchRetryInterval {
-            return nil
-        }
         if let request = inFlightRequests[urlString] {
             return await request.value
         }
@@ -659,11 +651,6 @@ public enum ClipboardLinkMetadataFetcher {
         inFlightRequests[urlString] = request
         let metadata = await request.value
         inFlightRequests.removeValue(forKey: urlString)
-        if metadata == nil {
-            recordFailedFetch(for: urlString, at: Date())
-        } else {
-            failedFetchDates.removeValue(forKey: urlString)
-        }
         return metadata
     }
 
@@ -686,22 +673,11 @@ public enum ClipboardLinkMetadataFetcher {
     }
 
     @MainActor
-    private static func recordFailedFetch(for urlString: String, at date: Date) {
-        if failedFetchDates.count >= failedFetchCapacity,
-           failedFetchDates[urlString] == nil,
-           let oldestURL = failedFetchDates.min(by: { $0.value < $1.value })?.key {
-            failedFetchDates.removeValue(forKey: oldestURL)
-        }
-        failedFetchDates[urlString] = date
-    }
-
-    @MainActor
     static func resetFetchStateForTesting() {
         for request in inFlightRequests.values {
             request.cancel()
         }
         inFlightRequests.removeAll()
-        failedFetchDates.removeAll()
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

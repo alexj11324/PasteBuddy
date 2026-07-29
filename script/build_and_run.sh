@@ -209,16 +209,21 @@ resolve_sentry_dsn() {
 
 CODESIGN_IDENTITY="$(resolve_code_sign_identity)"
 
-kill_binary() {
-  local binary="$1"
+running_pids_for_bundle_id() {
+  local pid details
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    details="$(/usr/bin/lsappinfo info -only bundleID -app "$pid" 2>/dev/null || true)"
+    [[ "$details" == *"bundleID=\"$BUNDLE_ID\""* ]] && printf '%s\n' "$pid"
+  done < <(pgrep -x "$EXECUTABLE_NAME" 2>/dev/null || true)
+}
+
+kill_existing_app() {
   local pids=()
   local pid
-  if [[ -x "$binary" ]]; then
-    while IFS= read -r pid; do
-      [[ -z "$pid" ]] && continue
-      pids+=("$pid")
-    done < <(pgrep -f "$binary" 2>/dev/null || true)
-  fi
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && pids+=("$pid")
+  done < <(running_pids_for_bundle_id)
   [[ ${#pids[@]} -gt 0 ]] || return 0
   kill "${pids[@]}" >/dev/null 2>&1 || true
   for _ in {1..50}; do
@@ -234,15 +239,6 @@ kill_binary() {
   done
   kill -9 "${pids[@]}" >/dev/null 2>&1 || true
 }
-
-kill_existing_app() {
-  kill_binary "$APP_BINARY"
-  kill_binary "$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
-  kill_binary "$STAGE_ROOT/PasteBuddy.app/Contents/MacOS/$EXECUTABLE_NAME"
-  kill_binary "$STAGE_ROOT/PasteBuddy Dev.app/Contents/MacOS/$EXECUTABLE_NAME"
-}
-
-kill_existing_app
 
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
@@ -395,7 +391,32 @@ install_app() {
 }
 
 open_app() {
-  /usr/bin/open -n "$INSTALL_BUNDLE"
+  /usr/bin/open "$INSTALL_BUNDLE"
+  wait_for_single_installed_app
+}
+
+wait_for_single_installed_app() {
+  local binary="$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
+  local pids=()
+  local pid command
+  for _ in {1..20}; do
+    pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(running_pids_for_bundle_id)
+    if [[ ${#pids[@]} -eq 1 ]]; then
+      command="$(/bin/ps -p "${pids[0]}" -o command= 2>/dev/null || true)"
+      command="${command#"${command%%[![:space:]]*}"}"
+      [[ "$command" == "$binary" ]] || die "Running $APP_NAME instance is not the stable installed app: $command"
+      printf 'runningInstanceCount=1 pid=%s bundlePath=%s\n' "${pids[0]}" "$INSTALL_BUNDLE"
+      return 0
+    fi
+    if [[ ${#pids[@]} -gt 1 ]]; then
+      die "Expected one running $APP_NAME instance at $INSTALL_BUNDLE; found ${#pids[@]}."
+    fi
+    sleep 0.5
+  done
+  die "$APP_NAME did not appear as one stable installed process after launch."
 }
 
 print_runtime_diagnostics() {
@@ -431,22 +452,10 @@ case "$MODE" in
   --verify|verify)
     install_app
     print_runtime_diagnostics
-    /usr/bin/open -n -W "$INSTALL_BUNDLE" &
+    /usr/bin/open -W "$INSTALL_BUNDLE" &
     OPEN_PID="$!"
-    for _ in {1..20}; do
-      if pgrep -x "$EXECUTABLE_NAME" >/dev/null || pgrep -f "$INSTALL_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME" >/dev/null; then
-        kill "$OPEN_PID" >/dev/null 2>&1 || true
-        exit 0
-      fi
-      if ! kill -0 "$OPEN_PID" >/dev/null 2>&1; then
-        echo "$APP_NAME exited before verify could observe a running process" >&2
-        exit 1
-      fi
-      sleep 0.5
-    done
+    wait_for_single_installed_app
     kill "$OPEN_PID" >/dev/null 2>&1 || true
-    echo "$EXECUTABLE_NAME did not appear in the process table after launch" >&2
-    exit 1
     ;;
   --install|install)
     install_app

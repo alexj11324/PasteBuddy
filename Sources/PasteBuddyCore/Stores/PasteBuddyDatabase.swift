@@ -465,6 +465,26 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
             metadata.repositoryRevision = UUID()
             try ClipboardItemRepository.saveMetadata(metadata, db: db)
         }
+        migrator.registerMigration("repair authoritative asset references") { db in
+            try db.execute(sql: """
+                UPDATE clipboard_items
+                SET image_asset_id = json_extract(payload_json, '$.imageAssetID'),
+                    rtf_asset_id = json_extract(payload_json, '$.rtfAssetID')
+                WHERE image_asset_id IS NOT json_extract(payload_json, '$.imageAssetID')
+                   OR rtf_asset_id IS NOT json_extract(payload_json, '$.rtfAssetID')
+                """)
+
+            let metadataValue = try String.fetchOne(
+                db,
+                sql: "SELECT value_json FROM snapshot_metadata WHERE key = ?",
+                arguments: [ClipboardItemRepository.metadataKey]
+            )
+            guard metadataValue != nil, metadataValue != "PBDB-REVOKED:1" else { return }
+
+            var metadata = try ClipboardItemRepository.fetchMetadata(db: db)
+            metadata.repositoryRevision = UUID()
+            try ClipboardItemRepository.saveMetadata(metadata, db: db)
+        }
         return migrator
     }
 

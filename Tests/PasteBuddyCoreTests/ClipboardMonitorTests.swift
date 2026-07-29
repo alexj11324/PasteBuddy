@@ -181,13 +181,15 @@ final class ClipboardMonitorTests: XCTestCase {
         monitor.stop()
     }
 
-    func testLinkMetadataFailuresBackOffAndConcurrentRequestsShareOneFetch() async {
-        let urlString = "https://metadata-backoff.example/preview"
+    func testLinkMetadataFailuresRetryWhileConcurrentRequestsShareOneFetch() async {
+        let urlString = "https://metadata-retry.example/preview"
         let counter = CaptureCallCounter()
         ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
-            _ = await counter.next()
+            let call = await counter.next()
             try? await Task.sleep(nanoseconds: 50_000_000)
-            return nil
+            return call == 1
+                ? nil
+                : ClipboardLinkPreviewMetadata(title: "Recovered preview")
         }
 
         async let first = ClipboardLinkMetadataFetcher.fetch(for: urlString)
@@ -198,10 +200,11 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertTrue(concurrentResults.allSatisfy { $0 == nil })
         XCTAssertEqual(callsAfterConcurrentFetch, 1, "Concurrent requests for one URL must share one metadata fetch")
 
-        _ = await ClipboardLinkMetadataFetcher.fetch(for: urlString)
-        let callsAfterBackoff = await counter.calls()
+        let retry = await ClipboardLinkMetadataFetcher.fetch(for: urlString)
+        let callsAfterRetry = await counter.calls()
 
-        XCTAssertEqual(callsAfterBackoff, 1, "A failed URL must not refetch on every Shelf appearance")
+        XCTAssertEqual(retry?.title, "Recovered preview")
+        XCTAssertEqual(callsAfterRetry, 2, "A transient failure must not suppress the next preview attempt")
     }
 
     func testCapturedURLItemIsStoredWithoutWaitingForLinkMetadata() async throws {
