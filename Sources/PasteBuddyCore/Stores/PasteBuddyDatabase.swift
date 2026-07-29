@@ -83,7 +83,12 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
             throw SnapshotStoreError.missingApplicationSupportDirectory
         }
         return base
-            .appendingPathComponent("PasteBuddy", isDirectory: true)
+            .appendingPathComponent(
+                EncryptedSnapshotStore.persistenceDirectoryName(
+                    bundleIdentifier: Bundle.main.bundleIdentifier
+                ),
+                isDirectory: true
+            )
             .appendingPathComponent("clipboard.sqlite")
     }
 
@@ -173,19 +178,7 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
                     value_json TEXT NOT NULL
                 )
                 """)
-            try db.execute(sql: """
-                CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_search_fts
-                USING fts5(
-                    item_id UNINDEXED,
-                    title,
-                    labels,
-                    source_app_name,
-                    device_name,
-                    content_type,
-                    searchable_text,
-                    ocr_text
-                )
-                """)
+            try createTrigramSearchIndex(db: db)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_created_at ON clipboard_items(created_at DESC)")
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_type_created ON clipboard_items(content_type, created_at DESC)")
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_items_source_created ON clipboard_items(source_app_name, created_at DESC)")
@@ -204,7 +197,33 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         migrator.registerMigration("allow duplicate item dedupe hashes") { db in
             try removeClipboardItemsDedupeUniqueConstraintIfNeeded(db: db)
         }
+        migrator.registerMigration("use trigram substring search") { db in
+            let schema = try String.fetchOne(
+                db,
+                sql: "SELECT sql FROM sqlite_master WHERE name = 'clipboard_search_fts'"
+            ) ?? ""
+            guard !schema.contains("tokenize='trigram'") else { return }
+
+            try db.execute(sql: "DROP TABLE IF EXISTS clipboard_search_fts")
+            try createTrigramSearchIndex(db: db)
+            try db.execute(sql: """
+                INSERT INTO clipboard_search_fts (item_id, searchable_text)
+                SELECT id, COALESCE(searchable_text, '')
+                FROM clipboard_items
+                """)
+        }
         return migrator
+    }
+
+    private static func createTrigramSearchIndex(db: Database) throws {
+        try db.execute(sql: """
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_search_fts
+            USING fts5(
+                item_id UNINDEXED,
+                searchable_text,
+                tokenize='trigram'
+            )
+            """)
     }
 
     private static let clipboardItemColumnList = """
@@ -585,6 +604,16 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     public func itemCount() throws -> Int {
         try database.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard_items") ?? 0
+        }
+    }
+
+    public func hasStoredSnapshot() throws -> Bool {
+        try database.read { db in
+            try Bool.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM snapshot_metadata WHERE key = ?)",
+                arguments: [Self.metadataKey]
+            ) ?? false
         }
     }
 
@@ -1143,21 +1172,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         try db.execute(sql: "DELETE FROM clipboard_search_fts WHERE item_id = ?", arguments: [item.id.uuidString])
         try db.execute(
             sql: """
-                INSERT INTO clipboard_search_fts (
-                    item_id, title, labels, source_app_name, device_name,
-                    content_type, searchable_text, ocr_text
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO clipboard_search_fts (item_id, searchable_text)
+                VALUES (?, ?)
                 """,
             arguments: [
                 item.id.uuidString,
-                item.title,
-                item.labels.joined(separator: " "),
-                item.sourceAppName,
-                item.deviceName,
-                item.contentType.displayName,
-                item.searchDocument.normalizedText,
-                item.payload.ocrText
+                item.searchDocument.normalizedText
             ]
         )
     }

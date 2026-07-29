@@ -76,7 +76,7 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
         )
     }
 
-    func testRepositorySearchUsesNormalizedTokenPrefixesWithDocumentedSubstringBoundary() throws {
+    func testRepositorySearchUsesNormalizedInteriorSubstrings() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -104,9 +104,9 @@ final class PasteBuddyDatabaseIncrementalTests: XCTestCase {
             try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "vip cli")).map(\.id),
             [item.id]
         )
-        XCTAssertTrue(
-            try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "oadmap")).isEmpty,
-            "Token-prefix search should not match a substring from the middle of a token."
+        XCTAssertEqual(
+            try repository.fetchPage(ClipboardItemPageRequest(searchQuery: "oadmap")).map(\.id),
+            [item.id]
         )
     }
 
