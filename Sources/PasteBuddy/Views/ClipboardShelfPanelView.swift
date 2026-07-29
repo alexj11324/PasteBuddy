@@ -2143,7 +2143,6 @@ private struct ShelfLinkPreviewCardBody: View {
                     .frame(maxWidth: .infinity)
                     .clipped()
                     metadataFooter
-                        .frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight)
                 }
                 .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
                 .frame(maxWidth: .infinity)
@@ -2194,6 +2193,7 @@ private struct ShelfLinkPreviewCardBody: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight, alignment: .leading)
         .background(Color.black.opacity(0.78))
     }
 }

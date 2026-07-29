@@ -1540,7 +1540,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("contentMode: .fit"))
         XCTAssertTrue(shelfSource.contains("static let linkMetadataImageHeight: CGFloat = cardPreviewHeight - linkMetadataFooterHeight"))
         XCTAssertTrue(shelfSource.contains(".frame(height: ClipboardShelfMetrics.linkMetadataImageHeight)"))
-        XCTAssertTrue(shelfSource.contains(".frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight)"))
+        XCTAssertTrue(shelfSource.contains(
+            ".frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight, alignment: .leading)\n        .background(Color.black.opacity(0.78))"
+        ))
+        XCTAssertFalse(shelfSource.contains(
+            "metadataFooter\n                        .frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight)"
+        ))
         XCTAssertTrue(shelfSource.contains("private var metadataFooter: some View"))
         XCTAssertTrue(shelfSource.contains("Text(preview.headline)"))
         XCTAssertTrue(shelfSource.contains("Text(preview.body)"))
