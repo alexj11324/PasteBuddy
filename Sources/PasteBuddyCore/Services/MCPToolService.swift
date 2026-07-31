@@ -47,7 +47,7 @@ public struct MCPClipboardItemPayload: Codable, Equatable, Sendable {
         self.fileURLString = item.payload.fileURLString
         self.plainText = ClipboardPlainTextRenderer.plainText(for: item)
         self.ocrText = item.payload.ocrText
-        self.imageByteCount = item.payload.imageData?.count
+        self.imageByteCount = item.payload.imageData?.count ?? item.payload.imageByteCount
         self.imageDataBase64 = includeImageData ? item.payload.imageData?.base64EncodedString() : nil
     }
 }
@@ -62,7 +62,7 @@ public struct MCPClipboardItemResponse: Codable, Equatable, Sendable {
         self.item = AutomationItemSummary(item: item)
         self.payload = MCPClipboardItemPayload(item: item, includeImageData: includeImageData)
         self.payloadIncluded = true
-        self.imageDataOmitted = item.payload.imageData != nil && !includeImageData
+        self.imageDataOmitted = item.payload.hasImageAsset && !includeImageData
     }
 }
 
@@ -129,14 +129,17 @@ public final class MCPToolService {
         }
     }
 
-    public func retrieveItem(itemID: UUID, includeImageData: Bool = false) throws -> MCPClipboardItemResponse {
+    public func retrieveItem(itemID: UUID, includeImageData: Bool = false) async throws -> MCPClipboardItemResponse {
         do {
             try require(.retrieveItem)
             guard let item = store.snapshot.items.first(where: { $0.id == itemID }) else {
                 throw MCPToolServiceError.noMatchingItem
             }
             try requireMCPVisible(item)
-            let response = MCPClipboardItemResponse(item: item, includeImageData: includeImageData)
+            let responseItem = includeImageData
+                ? try await store.hydratedItemForTransfer(item)
+                : item
+            let response = MCPClipboardItemResponse(item: responseItem, includeImageData: includeImageData)
             recordAccess(
                 tool: .retrieveItem,
                 outcome: .succeeded,

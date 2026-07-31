@@ -733,10 +733,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
-    public func exportSnapshot() throws -> PasteBuddySnapshot {
+    public func exportSnapshot(hydrateAssets: Bool = true) throws -> PasteBuddySnapshot {
         try database.read { db in
             let metadata = try Self.fetchMetadata(db: db)
-            let items = try Self.fetchAllItems(db: db)
+            let items = try Self.fetchAllItems(db: db, hydrateAssets: hydrateAssets)
             let pinboards = try Self.fetchAllPinboards(db: db)
             return metadata.snapshot(items: items, pinboards: pinboards)
         }
@@ -748,6 +748,17 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             try Self.hydrateAssetData(in: &hydratedItem.payload, db: db)
             hydratedItem.refreshSearchDocument()
             return hydratedItem
+        }
+    }
+
+    public func hydrateAssets(for items: [ClipboardItem]) throws -> [ClipboardItem] {
+        try database.read { db in
+            try items.map { item in
+                var hydratedItem = item
+                try Self.hydrateAssetData(in: &hydratedItem.payload, db: db)
+                hydratedItem.refreshSearchDocument()
+                return hydratedItem
+            }
         }
     }
 
@@ -1029,12 +1040,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         abs(lhs - rhs) < 0.000_001
     }
 
-    private static func fetchAllItems(db: Database) throws -> [ClipboardItem] {
+    private static func fetchAllItems(db: Database, hydrateAssets: Bool) throws -> [ClipboardItem] {
         let rows = try Row.fetchAll(
             db,
             sql: "SELECT * FROM clipboard_items ORDER BY snapshot_order ASC"
         )
-        return try items(from: rows, db: db, hydrateAssets: true)
+        return try items(from: rows, db: db, hydrateAssets: hydrateAssets)
     }
 
     private static func fetchItem(id: UUID, db: Database) throws -> ClipboardItem? {

@@ -45,7 +45,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(decoded.enabledTools.contains(.retrieveItem))
     }
 
-    func testMCPToolLevelAccessControls() throws {
+    func testMCPToolLevelAccessControls() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -56,7 +56,7 @@ final class MCPToolServiceTests: XCTestCase {
         let service = MCPToolService(store: store)
 
         XCTAssertNoThrow(try service.searchHistory(query: "anything"))
-        XCTAssertThrowsError(try service.retrieveItem(itemID: UUID())) { error in
+        await XCTAssertThrowsErrorAsync(try await service.retrieveItem(itemID: UUID())) { error in
             XCTAssertEqual(error as? MCPToolServiceError, .toolDisabled(.retrieveItem))
         }
         XCTAssertThrowsError(try service.listPinboards()) { error in
@@ -97,7 +97,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(logJSON.contains("raw clipboard payload"))
     }
 
-    func testMCPRetrieveItemReturnsPayloadAfterAgentConnectionIsAllowed() throws {
+    func testMCPRetrieveItemReturnsPayloadAfterAgentConnectionIsAllowed() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -113,7 +113,7 @@ final class MCPToolServiceTests: XCTestCase {
         ))
         let service = MCPToolService(store: store)
 
-        let response = try service.retrieveItem(itemID: item.id)
+        let response = try await service.retrieveItem(itemID: item.id)
 
         XCTAssertEqual(response.item.id, item.id)
         XCTAssertTrue(response.payloadIncluded)
@@ -127,7 +127,7 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(store.snapshot.mcp.accessLog.first?.imageDataIncluded ?? true)
     }
 
-    func testMCPRetrieveItemOmitsImageBytesUnlessRequested() throws {
+    func testMCPRetrieveItemOmitsImageBytesUnlessRequested() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -144,14 +144,14 @@ final class MCPToolServiceTests: XCTestCase {
         ))
         let service = MCPToolService(store: store)
 
-        let metadataOnly = try service.retrieveItem(itemID: item.id)
+        let metadataOnly = try await service.retrieveItem(itemID: item.id)
 
         XCTAssertEqual(metadataOnly.payload.ocrText, "Visible OCR text")
         XCTAssertEqual(metadataOnly.payload.imageByteCount, imageData.count)
         XCTAssertNil(metadataOnly.payload.imageDataBase64)
         XCTAssertTrue(metadataOnly.imageDataOmitted)
 
-        let withImageData = try service.retrieveItem(itemID: item.id, includeImageData: true)
+        let withImageData = try await service.retrieveItem(itemID: item.id, includeImageData: true)
 
         XCTAssertEqual(withImageData.payload.imageDataBase64, imageData.base64EncodedString())
         XCTAssertFalse(withImageData.imageDataOmitted)
@@ -161,7 +161,55 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertTrue(store.snapshot.mcp.accessLog.first?.imageDataIncluded ?? false)
     }
 
-    func testMCPToolsRespectCurrentPrivacyRulesWhenReadingExistingItems() throws {
+    func testMCPRetrieveItemHydratesImageBytesAfterRepositoryBackedRelaunch() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let imageData = Data(repeating: 0x6D, count: 24_576)
+        let repository = ClipboardItemRepository(
+            database: try PasteBuddyDatabase(
+                fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+            )
+        )
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Screenshots",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Repository Diagram",
+            payload: ClipboardPayload(imageData: imageData, ocrText: "repository image")
+        ))
+        await store.flushPendingSave()
+
+        let reloaded = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        await reloaded.loadAsync()
+        let lightweightItem = try XCTUnwrap(reloaded.snapshot.items.first { $0.id == item.id })
+        XCTAssertNil(lightweightItem.payload.imageData)
+        reloaded.setMCPTool(.retrieveItem, enabled: true)
+
+        let service = MCPToolService(store: reloaded)
+        let metadataOnly = try await service.retrieveItem(itemID: item.id)
+        XCTAssertEqual(metadataOnly.payload.imageByteCount, imageData.count)
+        XCTAssertNil(metadataOnly.payload.imageDataBase64)
+        XCTAssertTrue(metadataOnly.imageDataOmitted)
+
+        let withImageData = try await service.retrieveItem(
+            itemID: item.id,
+            includeImageData: true
+        )
+        XCTAssertEqual(withImageData.payload.imageDataBase64, imageData.base64EncodedString())
+        XCTAssertFalse(withImageData.imageDataOmitted)
+    }
+
+    func testMCPToolsRespectCurrentPrivacyRulesWhenReadingExistingItems() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -199,7 +247,7 @@ final class MCPToolServiceTests: XCTestCase {
         let visibleSearch = try service.searchHistory(query: "notes")
         XCTAssertEqual(visibleSearch.items.map(\.id), [visible.id])
 
-        XCTAssertThrowsError(try service.retrieveItem(itemID: hidden.id)) { error in
+        await XCTAssertThrowsErrorAsync(try await service.retrieveItem(itemID: hidden.id)) { error in
             XCTAssertEqual(error as? MCPToolServiceError, .privacyBlocked("No payroll MCP access"))
         }
         XCTAssertEqual(store.snapshot.mcp.accessLog.first?.tool, .retrieveItem)
@@ -297,5 +345,20 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(reloaded.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(reloaded.snapshot.mcp.enabledTools, [])
         XCTAssertNotNil(reloaded.snapshot.mcp.lastAccessRevokedAt)
+    }
+}
+
+@MainActor
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @MainActor @autoclosure () async throws -> T,
+    _ handler: @MainActor (Error) -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected expression to throw.", file: file, line: line)
+    } catch {
+        handler(error)
     }
 }

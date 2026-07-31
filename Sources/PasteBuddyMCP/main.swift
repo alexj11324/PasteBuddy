@@ -169,7 +169,7 @@ private final class PasteBuddyMCPServer {
                     limit: intValue("limit", in: arguments) ?? 5
                 )
             case .retrieveItem:
-                payload = try service.retrieveItem(
+                payload = try await service.retrieveItem(
                     itemID: try requiredUUID("itemID", in: arguments),
                     includeImageData: boolValue("includeImageData", in: arguments) ?? false
                 )

@@ -178,14 +178,14 @@ public final class PasteBuddyStore {
         do {
             let repositoryHasStoredSnapshot = try clipboardRepository?.hasStoredSnapshot() == true
             var loadedSnapshot = if repositoryHasStoredSnapshot, let clipboardRepository {
-                try clipboardRepository.exportSnapshot()
+                try clipboardRepository.exportSnapshot(hydrateAssets: false)
             } else {
                 try diskStore.load()
             }
             if !repositoryHasStoredSnapshot,
                Self.needsExternalAssetHydration(loadedSnapshot),
                let clipboardRepository {
-                let repositorySnapshot = try clipboardRepository.exportSnapshot()
+                let repositorySnapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
                 if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
                     loadedSnapshot = repositorySnapshot
                 }
@@ -228,7 +228,7 @@ public final class PasteBuddyStore {
             let repositoryHasStoredSnapshot = try await repositorySyncActor?.hasStoredSnapshot() == true
             let result: SnapshotPersistenceLoadResult
             if repositoryHasStoredSnapshot, let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
+                let repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
                 result = SnapshotPersistenceLoadResult(
                     snapshot: repositorySnapshot,
                     loadedStorageMode: repositorySnapshot.security.storageMode
@@ -240,7 +240,7 @@ public final class PasteBuddyStore {
             if !repositoryHasStoredSnapshot,
                Self.needsExternalAssetHydration(loadedSnapshot),
                let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
+                let repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
                 if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
                     loadedSnapshot = repositorySnapshot
                 }
@@ -608,6 +608,15 @@ public final class PasteBuddyStore {
     }
 
     public func hydratedItem(for item: ClipboardItem) async -> ClipboardItem {
+        do {
+            return try await hydratedItemForTransfer(item)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return item
+        }
+    }
+
+    public func hydratedItemForTransfer(_ item: ClipboardItem) async throws -> ClipboardItem {
         let needsImageData = item.payload.imageData == nil && item.payload.imageAssetID != nil
         let needsRTFData = item.payload.rtfData == nil && item.payload.rtfAssetID != nil
         guard needsImageData || needsRTFData else {
@@ -621,14 +630,16 @@ public final class PasteBuddyStore {
             }
         }
         guard let repositorySyncActor else {
-            return item
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
         }
-        do {
-            return try await repositorySyncActor.hydrateAssets(for: item)
-        } catch {
-            lastErrorMessage = error.localizedDescription
-            return item
+        let hydrated = try await repositorySyncActor.hydrateAssets(for: item)
+        if needsImageData && hydrated.payload.imageData == nil {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
         }
+        if needsRTFData && hydrated.payload.rtfData == nil {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+        return hydrated
     }
 
     public func hydratedItems(for items: [ClipboardItem]) async -> [ClipboardItem] {
@@ -656,6 +667,35 @@ public final class PasteBuddyStore {
             lastErrorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    public func portableSnapshot() async throws -> PasteBuddySnapshot {
+        var portable = snapshot
+        let needsHydration = portable.items.contains { item in
+            (item.payload.imageData == nil && item.payload.imageAssetID != nil)
+                || (item.payload.rtfData == nil && item.payload.rtfAssetID != nil)
+        }
+        guard needsHydration else {
+            return portable
+        }
+        guard let repositorySyncActor else {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+        let hydratedItems = try await repositorySyncActor.hydrateAssets(for: portable.items)
+        for (original, hydrated) in zip(portable.items, hydratedItems) {
+            if original.payload.imageData == nil,
+               original.payload.imageAssetID != nil,
+               hydrated.payload.imageData == nil {
+                throw PasteBuddyDatabaseError.repositoryOutOfSync
+            }
+            if original.payload.rtfData == nil,
+               original.payload.rtfAssetID != nil,
+               hydrated.payload.rtfData == nil {
+                throw PasteBuddyDatabaseError.repositoryOutOfSync
+            }
+        }
+        portable.items = hydratedItems
+        return portable
     }
 
     public var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -2059,7 +2099,7 @@ public final class PasteBuddyStore {
         using service: CloudKitSyncService
     ) async -> CloudSyncUploadResult? {
         do {
-            let result = try await service.upload(snapshot)
+            let result = try await service.upload(try await portableSnapshot())
             snapshot.sync.lastSyncAt = result.package.createdAt
             snapshot.sync.lastSyncStatusMessage = "Encrypted CloudKit sync uploaded."
             lastErrorMessage = nil

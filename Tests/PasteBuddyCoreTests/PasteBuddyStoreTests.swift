@@ -4039,6 +4039,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
+        let imageData = Data(repeating: 0x41, count: 16_384)
+
         let stale = ClipboardItem(
             sourceAppName: "Notes",
             deviceName: "Test Mac",
@@ -4049,11 +4051,11 @@ final class PasteBuddyStoreTests: XCTestCase {
         try harness.snapshotStore.save(PasteBuddySnapshot(items: [stale]))
 
         let authoritative = ClipboardItem(
-            sourceAppName: "Safari",
+            sourceAppName: "Preview",
             deviceName: "Test Mac",
-            contentType: .url,
+            contentType: .image,
             title: "Authoritative SQLite",
-            payload: ClipboardPayload(urlString: "https://example.com/authoritative")
+            payload: ClipboardPayload(imageData: imageData, ocrText: "authoritative image")
         )
         let repository = ClipboardItemRepository(
             database: try PasteBuddyDatabase(
@@ -4069,6 +4071,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         await store.loadAsync()
 
         XCTAssertEqual(store.snapshot.items.map(\.id), [authoritative.id])
+        let lightweightItem = try XCTUnwrap(store.snapshot.items.first)
+        XCTAssertNil(lightweightItem.payload.imageData)
+        XCTAssertNotNil(lightweightItem.payload.imageAssetID)
+        XCTAssertEqual(lightweightItem.payload.imageByteCount, imageData.count)
+        let hydratedImageData = await store.imageData(for: lightweightItem)
+        XCTAssertEqual(hydratedImageData, imageData)
         XCTAssertEqual(store.repositorySyncedDataRevision, store.dataRevision)
     }
 
@@ -4711,6 +4719,16 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(exportedItem.payload.imageData, imageData)
         XCTAssertEqual(exportedItem.payload.rtfData, rtfData)
         XCTAssertTrue(exportedItem.matches("hero screenshot"))
+
+        let lightweightExportedItem = try XCTUnwrap(
+            repository.exportSnapshot(hydrateAssets: false).items.first
+        )
+        XCTAssertNil(lightweightExportedItem.payload.imageData)
+        XCTAssertNil(lightweightExportedItem.payload.rtfData)
+        XCTAssertEqual(lightweightExportedItem.payload.imageAssetID, pageItem.payload.imageAssetID)
+        XCTAssertEqual(lightweightExportedItem.payload.rtfAssetID, pageItem.payload.rtfAssetID)
+        XCTAssertEqual(lightweightExportedItem.payload.imageByteCount, imageData.count)
+        XCTAssertEqual(lightweightExportedItem.payload.rtfByteCount, rtfData.count)
     }
 
     func testStoreHydratesRepositoryBackedLightweightAssetsForPreviewAndPaste() async throws {
@@ -4762,7 +4780,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.filteredItemCount(for: .history), historyCount)
     }
 
-    func testRepositoryBackedStoreWritesAssetReferencesToDiskSnapshotAndHydratesOnReload() throws {
+    func testRepositoryBackedStoreWritesAssetReferencesAndLoadsAssetsProgressivelyOnReload() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
@@ -4815,9 +4833,22 @@ final class PasteBuddyStoreTests: XCTestCase {
         reloaded.load()
 
         let reloadedItem = try XCTUnwrap(reloaded.snapshot.items.first)
-        XCTAssertEqual(reloadedItem.payload.imageData, imageData)
-        XCTAssertEqual(reloadedItem.payload.rtfData, rtfData)
+        XCTAssertNil(reloadedItem.payload.imageData)
+        XCTAssertNil(reloadedItem.payload.rtfData)
+        XCTAssertNotNil(reloadedItem.payload.imageAssetID)
+        XCTAssertNotNil(reloadedItem.payload.rtfAssetID)
         XCTAssertTrue(reloadedItem.matches("disk ocr"))
+
+        let hydratedItem = await reloaded.hydratedItem(for: reloadedItem)
+        XCTAssertEqual(hydratedItem.payload.imageData, imageData)
+        XCTAssertEqual(hydratedItem.payload.rtfData, rtfData)
+
+        let portableSnapshot = try await reloaded.portableSnapshot()
+        let portableItem = try XCTUnwrap(portableSnapshot.items.first)
+        XCTAssertEqual(portableItem.payload.imageData, imageData)
+        XCTAssertEqual(portableItem.payload.rtfData, rtfData)
+        XCTAssertNil(reloaded.snapshot.items.first?.payload.imageData)
+        XCTAssertNil(reloaded.snapshot.items.first?.payload.rtfData)
     }
 
     func testGRDBRepositoryMigratesLegacySnapshotInlineAssetsIntoAssetRows() throws {
