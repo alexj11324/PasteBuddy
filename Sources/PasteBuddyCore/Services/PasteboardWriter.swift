@@ -83,7 +83,8 @@ public enum PasteboardWriter {
             }
         case .url:
             if let value = item.payload.urlString, let url = URL(string: value) {
-                succeeded = pasteboard.writeObjects([url as NSURL])
+                succeeded = pasteboard.writeObjects([url as NSURL]) || succeeded
+                succeeded = pasteboard.setString(value, forType: .string) || succeeded
             } else if let value = item.payload.urlString {
                 succeeded = pasteboard.setString(value, forType: .string)
             }
@@ -441,8 +442,16 @@ public enum PasteboardWriter {
         case .text:
             return [textProvider(for: item, hydrate: hydrate)]
         case .url:
-            if let value = item.payload.urlString, let url = URL(string: value) {
-                return [NSItemProvider(object: url as NSURL)]
+            if let value = item.payload.urlString, URL(string: value) != nil {
+                let provider = textProvider(for: item, hydrate: hydrate)
+                provider.registerDataRepresentation(
+                    forTypeIdentifier: UTType.url.identifier,
+                    visibility: .all
+                ) { completion in
+                    completion(Data(value.utf8), nil)
+                    return nil
+                }
+                return [provider]
             }
         case .file:
             let providers = item.payload.allFileURLStrings

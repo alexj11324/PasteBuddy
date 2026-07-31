@@ -273,6 +273,23 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertFalse(PasteboardWriter.copy([], to: pasteboard))
     }
 
+    func testCopyURLWritesURLAndPlainTextRepresentations() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyURLCopy-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let urlString = "https://www.figma.com/design/example"
+        let item = ClipboardItem(
+            sourceAppName: "Google Chrome",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "www.figma.com",
+            payload: ClipboardPayload(urlString: urlString)
+        )
+
+        XCTAssertTrue(PasteboardWriter.copy(item, to: pasteboard))
+        XCTAssertEqual(pasteboard.string(forType: .URL), urlString)
+        XCTAssertEqual(pasteboard.string(forType: .string), urlString)
+    }
+
     func testCopyTextPreservesRichVariantsWhenAvailable() throws {
         let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyRichText-\(UUID().uuidString)")))
         defer { pasteboard.releaseGlobally() }
@@ -411,6 +428,24 @@ final class PasteboardWriterTests: XCTestCase {
             textData.flatMap { String(data: $0, encoding: .utf8) },
             "first\nhttps://example.com"
         )
+    }
+
+    func testNativeCopyCommandProviderForURLIncludesPlainText() async throws {
+        let urlString = "https://www.figma.com/design/example"
+        let item = ClipboardItem(
+            sourceAppName: "Google Chrome",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "www.figma.com",
+            payload: ClipboardPayload(urlString: urlString)
+        )
+
+        let provider = try XCTUnwrap(PasteboardWriter.itemProviders(for: [item]) { $0 }.first)
+
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.url.identifier))
+        XCTAssertTrue(provider.canLoadObject(ofClass: NSString.self))
+        let textData = try await loadData(from: provider, type: .plainText)
+        XCTAssertEqual(textData.flatMap { String(data: $0, encoding: .utf8) }, urlString)
     }
 
     func testNativeCopyCommandProvidersPreserveFileURLOrder() async throws {
