@@ -1182,7 +1182,7 @@ private struct SettingsPrivacyRules: View {
             HStack {
                 Text("label.ignore_clipboard_larger_than")
                 TextField(
-                    "0.0",
+                    "",
                     value: Binding(
                         get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
                         set: { store.setMaximumClipboardSizeMegabytes($0) }
