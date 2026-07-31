@@ -937,6 +937,9 @@ final class PasteboardWriterTests: XCTestCase {
                         pasteboard.availableType(from: [expectedType]),
                         "\(item.contentType.rawValue) payload must exist before Command-V"
                     )
+                    if item.contentType == .url {
+                        XCTAssertEqual(pasteboard.string(forType: .string), item.payload.urlString)
+                    }
                     sentPasteEvent = true
                 }
             )
