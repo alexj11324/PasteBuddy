@@ -619,7 +619,7 @@ public enum PasteboardWriter {
             return .failedAccessibilityPermissionRequired
         case .copiedOnlyNoTargetApplication:
             return .failedNoTargetApplication
-        case .pastedToFrontmostApp, .failedAccessibilityPermissionRequired, .failedNoTargetApplication,
+        case .pastedToFrontmostApp, .copiedToClipboard, .failedAccessibilityPermissionRequired, .failedNoTargetApplication,
              .failedPasteboardWrite, .emptySelection:
             return copyOutcome
         }

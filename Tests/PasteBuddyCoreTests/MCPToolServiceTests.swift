@@ -3,6 +3,35 @@ import XCTest
 
 @MainActor
 final class MCPToolServiceTests: XCTestCase {
+    func testJSONRPCServiceUsesTheInjectedLiveStore() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setMCPServerEnabled(true)
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Live MCP item",
+            payload: ClipboardPayload(text: "live store payload")
+        ))
+        let service = MCPJSONRPCService(store: store)
+        let request = Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pastebuddy.search_history","arguments":{"query":"Live MCP"}}}"#.utf8)
+
+        let handledResponse = await service.handle(request)
+        let responseData = try XCTUnwrap(handledResponse)
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+
+        XCTAssertTrue((content.first?["text"] as? String)?.contains("Live MCP item") == true)
+        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.tool, .searchHistory)
+        XCTAssertEqual(store.snapshot.mcp.accessLog.first?.resultCount, 1)
+    }
+
     func testMCPServerIsDisabledByDefault() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -161,6 +190,40 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertTrue(store.snapshot.mcp.accessLog.first?.imageDataIncluded ?? false)
     }
 
+    func testMCPRetrieveRechecksPrivacyAfterHydration() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Images",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Hydrated image",
+            payload: ClipboardPayload(imageData: Data([0x01]))
+        ))
+        _ = store.addCaptureRule(
+            name: "Block hydrated secret",
+            condition: .containsText,
+            pattern: "hydrated secret",
+            contentTypes: [.image]
+        )
+        let service = MCPToolService(store: store) { item in
+            var hydrated = item
+            hydrated.payload.ocrText = "hydrated secret"
+            hydrated.refreshSearchDocument()
+            return hydrated
+        }
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.retrieveItem(itemID: item.id, includeImageData: true)
+        ) { error in
+            XCTAssertEqual(error as? MCPToolServiceError, .privacyBlocked("Block hydrated secret"))
+        }
+    }
+
     func testMCPRetrieveItemHydratesImageBytesAfterRepositoryBackedRelaunch() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -263,6 +326,35 @@ final class MCPToolServiceTests: XCTestCase {
         }
     }
 
+    func testMCPPrivacyRulesReceiveSourceBundleIdentifier() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Vault",
+            sourceBundleIdentifier: "com.example.vault",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Bundle protected",
+            payload: ClipboardPayload(text: "bundle protected content")
+        ))
+        _ = store.addCaptureRule(
+            name: "Block Vault Bundle",
+            condition: .sourceBundleIdentifier,
+            pattern: "com.example.vault",
+            contentTypes: [.text]
+        )
+        let service = MCPToolService(store: store)
+
+        XCTAssertTrue(try service.searchHistory(query: "Bundle protected").items.isEmpty)
+        await XCTAssertThrowsErrorAsync(try await service.retrieveItem(itemID: item.id)) { error in
+            XCTAssertEqual(error as? MCPToolServiceError, .privacyBlocked("Block Vault Bundle"))
+        }
+    }
+
     func testMCPCreatePinboardAndPinFirstMatch() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -332,12 +424,15 @@ final class MCPToolServiceTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var revokeCallbacks = 0
+        store.onMCPAccessRevoked = { revokeCallbacks += 1 }
         store.setMCPServerEnabled(true)
         store.revokeMCPAccess()
 
         XCTAssertFalse(store.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(store.snapshot.mcp.enabledTools, [])
         XCTAssertNotNil(store.snapshot.mcp.lastAccessRevokedAt)
+        XCTAssertEqual(revokeCallbacks, 1)
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
@@ -345,6 +440,30 @@ final class MCPToolServiceTests: XCTestCase {
         XCTAssertFalse(reloaded.snapshot.mcp.isServerEnabled)
         XCTAssertEqual(reloaded.snapshot.mcp.enabledTools, [])
         XCTAssertNotNil(reloaded.snapshot.mcp.lastAccessRevokedAt)
+    }
+
+    func testRetrieveRechecksPermissionAfterHydration() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.setMCPServerEnabled(true)
+        store.setMCPTool(.retrieveItem, enabled: true)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Hydration race",
+            payload: ClipboardPayload(text: "secret")
+        )
+        _ = store.addCapturedItem(item)
+        let service = MCPToolService(store: store) { item in
+            store.revokeMCPAccess()
+            return item
+        }
+
+        await XCTAssertThrowsErrorAsync(try await service.retrieveItem(itemID: item.id, includeImageData: true)) {
+            XCTAssertEqual($0 as? MCPToolServiceError, .serverDisabled)
+        }
     }
 }
 

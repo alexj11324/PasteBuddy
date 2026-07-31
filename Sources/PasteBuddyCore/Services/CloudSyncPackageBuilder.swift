@@ -145,7 +145,7 @@ public enum CloudSyncImportError: LocalizedError, Equatable {
 public final class CloudSyncPackageBuilder: @unchecked Sendable {
     private let encryptor: any EnvelopeEncrypting
 
-    public init(encryptor: any EnvelopeEncrypting = EncryptionService()) {
+    public init(encryptor: any EnvelopeEncrypting = EncryptionService.cloudSync()) {
         self.encryptor = encryptor
     }
 
@@ -181,7 +181,7 @@ public final class CloudSyncPackageBuilder: @unchecked Sendable {
 public final class CloudSyncPackageImporter: @unchecked Sendable {
     private let decryptor: any EnvelopeDecrypting
 
-    public init(decryptor: any EnvelopeDecrypting = EncryptionService()) {
+    public init(decryptor: any EnvelopeDecrypting = EncryptionService.cloudSync()) {
         self.decryptor = decryptor
     }
 

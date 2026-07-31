@@ -141,6 +141,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "checkmark.circle.fill",
             "exclamationmark.triangle.fill",
             "lock.open.fill",
+            "shield",
             "calendar",
             "calendar.badge.clock",
             "infinity",
@@ -1762,21 +1763,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testMCPSettingsExposeConnectionMenuAndAdvancedControls() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let mcpStart = try XCTUnwrap(source.range(of: "Section(\"label.mcp_ai_tools\")"))
-        let syncStart = try XCTUnwrap(source.range(of: "Section(\"action.sync_sharing\")"))
-        let mcpSource = String(source[mcpStart.lowerBound..<syncStart.lowerBound])
+        let mcpStart = try XCTUnwrap(source.range(of: "private var integrationSettings"))
+        let subscriptionStart = try XCTUnwrap(source.range(of: "private var subscriptionSettings"))
+        let mcpSource = String(source[mcpStart.lowerBound..<subscriptionStart.lowerBound])
 
-        XCTAssertTrue(mcpSource.contains("action.allow_local_agent_connection"))
+        XCTAssertTrue(mcpSource.contains("label.enable_mcp"))
+        XCTAssertTrue(mcpSource.contains("message.mcp_local_connection"))
         XCTAssertTrue(mcpSource.contains("action.connect_ai_tool"))
         XCTAssertTrue(mcpSource.contains("action.agent_privacy_and_access"))
-        XCTAssertTrue(mcpSource.contains("detectedMCPClientCandidates"))
-        XCTAssertTrue(mcpSource.contains("supportedMCPClientCandidates"))
+        XCTAssertTrue(mcpSource.contains("mcpClientCandidates"))
         XCTAssertTrue(source.contains("struct MCPClientDetector"))
-        XCTAssertFalse(source.contains("MCPClientConfigurationTarget.settingsMenuTargets"))
         XCTAssertTrue(mcpSource.contains("label.connected_ai_tools"))
-        XCTAssertFalse(mcpSource.contains("action.generate_server_config"))
-        XCTAssertFalse(mcpSource.contains("action.shut_down_mcp_server"))
-        XCTAssertFalse(mcpSource.contains("mcpServerCommandSummary"))
+        XCTAssertTrue(mcpSource.contains("PasteBuddyMCPHTTPServer.endpoint"))
         XCTAssertTrue(source.contains("struct MCPClientConfigurationSheet"))
         XCTAssertTrue(source.contains("struct MCPClientCommandRunner"))
         XCTAssertTrue(source.contains("runMCPInstallationCommand"))
@@ -1788,10 +1786,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("action.revoke_mcp_access"))
         XCTAssertTrue(source.contains("message.retrieve_item_requires_explicit_mcp_opt_in"))
         let advancedStart = try XCTUnwrap(source.range(of: "private struct MCPAdvancedSettingsSheet"))
-        let excludedAppsStart = try XCTUnwrap(source.range(of: "private struct ExcludedApplicationsSheet"))
-        let advancedSource = String(source[advancedStart.lowerBound..<excludedAppsStart.lowerBound])
+        let toggleLabelStart = try XCTUnwrap(source.range(of: "private struct SettingsToggleLabel"))
+        let advancedSource = String(source[advancedStart.lowerBound..<toggleLabelStart.lowerBound])
         XCTAssertFalse(advancedSource.contains("action.enable_mcp"))
-        XCTAssertFalse(mcpSource.contains("127.0.0.1"))
+        XCTAssertEqual(PasteBuddyMCPHTTPServer.endpoint, "http://127.0.0.1:18789/mcp")
     }
 
     func testSettingsDoesNotExposeLocalHistoryEncryptionToggle() throws {
@@ -1934,108 +1932,48 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testSettingsUsesSidebarSplitViewInsteadOfToolbarTabs() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
-        let generalStart = try XCTUnwrap(source.range(of: "private var generalSettingsForm"))
-        let captureStart = try XCTUnwrap(source.range(of: "private var captureSettingsForm"))
-        let storageStart = try XCTUnwrap(source.range(of: "private var storageSettingsForm"))
-        let generalSource = String(source[generalStart.lowerBound..<captureStart.lowerBound])
-        let captureSource = String(source[captureStart.lowerBound..<storageStart.lowerBound])
+        let generalStart = try XCTUnwrap(source.range(of: "private var generalSettings"))
+        let privacyStart = try XCTUnwrap(source.range(of: "private var privacySettings"))
+        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutSettings"))
+        let generalSource = String(source[generalStart.lowerBound..<privacyStart.lowerBound])
+        let privacySource = String(source[privacyStart.lowerBound..<shortcutsStart.lowerBound])
 
         XCTAssertTrue(source.contains("NavigationSplitView"))
         XCTAssertTrue(source.contains("List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection)"))
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
-        XCTAssertTrue(source.contains(".background(.regularMaterial)"))
-        XCTAssertTrue(source.contains(".background(SettingsSidebarToggleRemover())"))
-        XCTAssertTrue(source.contains("item.itemIdentifier == .toggleSidebar"))
-        XCTAssertTrue(source.contains("#selector(NSSplitViewController.toggleSidebar(_:))"))
-        XCTAssertTrue(source.contains("toolbar.removeItem(at: index)"))
-        XCTAssertTrue(source.contains("NSToolbar.willAddItemNotification"))
-        XCTAssertTrue(source.contains("toolbarWillAddItem"))
-        XCTAssertFalse(source.contains(".toolbar(removing: .sidebarToggle)"))
-        XCTAssertTrue(source.contains("case capture"))
+        XCTAssertTrue(source.contains(".navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 240)"))
+        XCTAssertFalse(source.contains("SettingsSidebarToggleRemover"))
+        XCTAssertFalse(source.contains("toolbar.removeItem(at: index)"))
+        XCTAssertTrue(appSource.contains(".windowToolbarStyle(.unified(showsTitle: false))"))
+        XCTAssertTrue(appSource.contains(".defaultSize(width: 1040, height: 760)"))
+        XCTAssertTrue(source.contains("case privacy"))
         XCTAssertTrue(source.contains("case .privacy:"))
-        XCTAssertTrue(source.contains("self = .capture"))
+        XCTAssertTrue(source.contains("self = .privacy"))
         XCTAssertTrue(source.contains("case .sync:"))
         XCTAssertTrue(source.contains("self = .integrations"))
         XCTAssertTrue(generalSource.contains("label.launch_at_login"))
-        XCTAssertTrue(generalSource.contains("Picker(\"label.panel_style\", selection: $panelDisplayMode)"))
+        XCTAssertTrue(generalSource.contains("label.panel_style"))
         XCTAssertTrue(generalSource.contains("action.paste_as_plain_text_by"))
-        XCTAssertTrue(generalSource.contains("label.direct_paste_permission"))
-        XCTAssertFalse(generalSource.contains("action.clear_settings_focus"))
-        XCTAssertFalse(generalSource.contains("label.menu_bar"))
-        XCTAssertTrue(captureSource.contains("action.save_clipboard_history"))
-        XCTAssertTrue(captureSource.contains("action.save_copied_images"))
-        XCTAssertTrue(captureSource.contains("action.recognize_text_in_copied_images"))
-        XCTAssertTrue(captureSource.contains("DisclosureGroup(\"label.advanced_capture_rules\")"))
-        XCTAssertTrue(captureSource.contains("DisclosureGroup(\"label.temporary_capture_pause\")"))
-        XCTAssertFalse(captureSource.localizedCaseInsensitiveContains("screenshot"))
+        XCTAssertTrue(generalSource.contains("label.keep_history"))
+        XCTAssertTrue(generalSource.contains("label.iroh_clipboard_sync"))
+        XCTAssertTrue(privacySource.contains("label.show_during_screen_sharing"))
+        XCTAssertTrue(privacySource.contains("label.capture_images"))
+        XCTAssertTrue(privacySource.contains("label.storage_security"))
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
-    }
-
-    func testSettingsSidebarToggleRemovalTracksToolbarLifecycle() async {
-        func drainMainQueue() async {
-            await withCheckedContinuation { continuation in
-                DispatchQueue.main.async {
-                    continuation.resume()
-                }
-            }
-        }
-
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        let firstToolbar = NSToolbar(identifier: "settings-first")
-        firstToolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
-        window.toolbar = firstToolbar
-
-        let remover = SettingsSidebarToggleRemovalView()
-        window.contentView = remover
-        await drainMainQueue()
-        XCTAssertFalse(firstToolbar.items.contains { $0.itemIdentifier == .toggleSidebar })
-
-        firstToolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
-        await drainMainQueue()
-        XCTAssertFalse(firstToolbar.items.contains { $0.itemIdentifier == .toggleSidebar })
-
-        let replacementToolbar = NSToolbar(identifier: "settings-replacement")
-        window.toolbar = replacementToolbar
-        window.update()
-        replacementToolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
-        await drainMainQueue()
-        XCTAssertFalse(replacementToolbar.items.contains { $0.itemIdentifier == .toggleSidebar })
-        XCTAssertTrue(remover.observedToolbar === replacementToolbar)
-
-        window.contentView = NSView()
-        XCTAssertNil(remover.observedToolbar)
-    }
-
-    func testSettingsSidebarToggleRemovalRecognizesSwiftUIToggleAction() {
-        let item = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("swiftui-sidebar-toggle"))
-        item.action = #selector(NSSplitViewController.toggleSidebar(_:))
-
-        XCTAssertTrue(SettingsSidebarToggleRemovalView.isSidebarToggleItem(item))
-
-        let xcode27Item = NSToolbarItem(
-            itemIdentifier: NSToolbarItem.Identifier(
-                "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
-            )
-        )
-        XCTAssertTrue(SettingsSidebarToggleRemovalView.isSidebarToggleItem(xcode27Item))
     }
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
 
         XCTAssertTrue(source.contains("InstalledApplicationPickerSheet"))
-        XCTAssertTrue(source.contains("newCaptureRuleCondition.requiresInstalledApplication"))
-        XCTAssertTrue(source.contains("newCaptureRuleCondition.rulePattern(for: application)"))
-        XCTAssertTrue(source.contains("captureRulePatternForSubmit"))
-        XCTAssertTrue(source.contains("showingExcludedApplicationsSheet"))
+        XCTAssertTrue(source.contains("SettingsPrivacyRuleMode"))
+        XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
+        XCTAssertTrue(source.contains("label.ignore_remote_clipboard"))
+        XCTAssertTrue(source.contains("label.flatten_large_excel_clipboard"))
+        XCTAssertTrue(source.contains("setMaximumClipboardSizeMegabytes"))
         XCTAssertTrue(source.contains("store.excludeApplication("))
     }
 
@@ -2070,8 +2008,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testShortcutSettingsRecordKeyCombinationsInsteadOfManualToggles() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let bindingRowStart = try XCTUnwrap(source.range(of: "private struct ShortcutBindingEditorRow"))
-        let modifierRowStart = try XCTUnwrap(source.range(of: "private struct ShortcutModifierEditorRow"))
+        let bindingRowStart = try XCTUnwrap(source.range(of: "private struct SettingsShortcutRow"))
+        let modifierRowStart = try XCTUnwrap(source.range(of: "private struct SettingsModifierShortcutRow"))
         let bindingRowSource = String(source[bindingRowStart.lowerBound..<modifierRowStart.lowerBound])
 
         XCTAssertTrue(source.contains("ShortcutCaptureButton"))
@@ -2080,7 +2018,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("NSEvent.removeMonitor(eventMonitor)"))
         XCTAssertTrue(source.contains("NotificationCenter.default.post(name: .pasteBuddyShortcutRecordingDidChange"))
         XCTAssertTrue(source.contains("store.setShortcutBinding("))
-        XCTAssertTrue(source.contains("store.setQuickPasteModifiers(shortcut.modifiers"))
+        XCTAssertTrue(source.contains("store.setQuickPasteModifiers("))
         XCTAssertTrue(bindingRowSource.contains("onClear: currentBinding.isEnabled"))
         XCTAssertFalse(bindingRowSource.contains("Button(\"action.clear_shortcut\")"))
         XCTAssertTrue(source.contains("action.reset_all_shortcuts"))
@@ -2088,43 +2026,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("state.recording_shortcut"))
         XCTAssertTrue(source.contains("message.press_key_combination_to_record"))
         XCTAssertTrue(source.contains("event.keyCode == 53"))
-        XCTAssertTrue(source.contains("Image(systemName: \"xmark.circle.fill\")"))
+        XCTAssertTrue(source.contains("Image(systemName: \"xmark\")"))
         XCTAssertTrue(source.contains("message.shortcut_binding_rejected"))
+        XCTAssertTrue(source.contains("action: .showNextPinboard"))
+        XCTAssertTrue(source.contains("action: .showPreviousPinboard"))
         XCTAssertFalse(source.contains("ShortcutModifierToggles"))
         XCTAssertFalse(source.contains("Toggle(modifier.displayName"))
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
     }
 
-    func testCaptureRuleRemovalUsesSemanticLabelsAndConfirmation() throws {
+    func testPrivacySettingsUsesNativeSelectionForExcludedApplications() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
 
-        XCTAssertTrue(source.contains("format.enable_capture_rule"))
-        XCTAssertTrue(source.contains("format.remove_capture_rule"))
-        XCTAssertTrue(source.contains("destructiveConfirmation = .removeCaptureRule(rule.id, rule.name)"))
-        XCTAssertFalse(source.contains("Toggle(\n                                \"Enabled\""))
+        XCTAssertTrue(source.contains("List(selection: $selectedRowID)"))
+        XCTAssertTrue(source.contains("store.removeExcludedApplication(name)"))
+        XCTAssertTrue(source.contains("store.removeExcludedBundleIdentifier(bundleIdentifier)"))
+        XCTAssertTrue(source.contains(".disabled(selectedRowID == nil)"))
     }
 
-    func testStorageSettingsKeepsRiskyControlsBehindExplicitDisclosure() throws {
+    func testPrivacySettingsKeepsStorageGrowthVisibleWithoutAnItemCap() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let storageStart = try XCTUnwrap(source.range(of: "private var storageSettingsForm"))
-        let plansStart = try XCTUnwrap(source.range(of: "private var plansSettingsForm"))
-        let storageSource = String(source[storageStart.lowerBound..<plansStart.lowerBound])
+        let privacyStart = try XCTUnwrap(source.range(of: "private var privacySettings"))
+        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutSettings"))
+        let privacySource = String(source[privacyStart.lowerBound..<shortcutsStart.lowerBound])
 
-        XCTAssertTrue(storageSource.contains("label.require_touch_id_for_history"))
-        XCTAssertTrue(storageSource.contains("label.storage_usage"))
-        XCTAssertTrue(storageSource.contains("DisclosureGroup(\"label.history_access\")"))
-        XCTAssertTrue(storageSource.contains("DisclosureGroup(\"label.advanced_storage\")"))
-        XCTAssertTrue(storageSource.contains("requestRetentionDaysChange"))
-        XCTAssertTrue(storageSource.contains("requestMaxStorageBytesChange"))
-        XCTAssertTrue(storageSource.contains("Menu(\"action.clear_history_ellipsis\")"))
-        XCTAssertTrue(storageSource.contains("destructiveConfirmation = .clearUnpinnedHistory"))
-        XCTAssertTrue(storageSource.contains("destructiveConfirmation = .clearAllHistory"))
-        XCTAssertFalse(storageSource.contains("Section(\"action.paste\")"))
-        XCTAssertFalse(storageSource.contains("Paste as plain text by default"))
+        XCTAssertTrue(privacySource.contains("label.require_touch_id_for_history"))
+        XCTAssertTrue(privacySource.contains("label.storage_usage"))
+        XCTAssertTrue(privacySource.contains("storageUsageReport.itemCount"))
+        XCTAssertTrue(privacySource.contains("storageUsageReport.estimatedBytes"))
+        XCTAssertFalse(privacySource.contains("maxHistoryItems"))
         XCTAssertTrue(source.contains("destructiveConfirmation = .reduceRetentionDays(value)"))
-        XCTAssertTrue(source.contains("destructiveConfirmation = .reduceStorageLimit(value)"))
         XCTAssertTrue(source.contains("case .reduceRetentionDays(let days):"))
-        XCTAssertTrue(source.contains("case .reduceStorageLimit(let bytes):"))
     }
 
     func testPanelHotKeyControllerPausesGlobalHotKeysWhileRecordingShortcuts() throws {
@@ -2139,14 +2071,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("CGEvent.tapEnable(tap: eventTap, enable: isEnabled)"))
     }
 
-    func testPlansSettingsDoesNotExposeInternalPurchaseCopy() throws {
+    func testSubscriptionSettingsUsesVerifiedStoreKitInfrastructure() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let plansStart = try XCTUnwrap(source.range(of: "private var plansSettingsForm"))
-        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutsSettingsForm"))
-        let plansSource = String(source[plansStart.lowerBound..<shortcutsStart.lowerBound])
+        let plansStart = try XCTUnwrap(source.range(of: "private var subscriptionSettings"))
+        let bindingsStart = try XCTUnwrap(source.range(of: "private var launchAtLoginBinding"))
+        let plansSource = String(source[plansStart.lowerBound..<bindingsStart.lowerBound])
 
         XCTAssertTrue(plansSource.contains("action.restore_purchases"))
         XCTAssertTrue(plansSource.contains("AppleStoreKitEntitlementProvider()"))
+        XCTAssertTrue(plansSource.contains("fetchProducts()"))
+        XCTAssertFalse(plansSource.contains("displayPrice"))
+        XCTAssertTrue(plansSource.contains("lifetimeProduct == nil"))
         XCTAssertTrue(plansSource.contains("await store.flushPendingSave()"))
         XCTAssertFalse(plansSource.contains("action.start_trial"))
         XCTAssertFalse(plansSource.contains("action.cancel_trial"))
@@ -2167,21 +2102,43 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(plansSource.contains("option.unlockSummary"))
     }
 
-    func testIntegrationSettingsMovesImmediateActionsIntoDisclosures() throws {
+    func testIntegrationSettingsUsesRealMCPConfigurationActions() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let integrationsStart = try XCTUnwrap(source.range(of: "private var integrationsSettingsForm"))
-        let confirmationStart = try XCTUnwrap(source.range(of: "private var isShowingDestructiveConfirmation"))
-        let integrationsSource = String(source[integrationsStart.lowerBound..<confirmationStart.lowerBound])
+        let integrationsStart = try XCTUnwrap(source.range(of: "private var integrationSettings"))
+        let subscriptionStart = try XCTUnwrap(source.range(of: "private var subscriptionSettings"))
+        let integrationsSource = String(source[integrationsStart.lowerBound..<subscriptionStart.lowerBound])
 
-        XCTAssertTrue(integrationsSource.contains("DisclosureGroup(\"label.sync_recovery_and_sharing\")"))
-        XCTAssertTrue(integrationsSource.contains("DisclosureGroup(\"action.add_device_ellipsis\")"))
-        XCTAssertTrue(integrationsSource.contains("destructiveConfirmation = .disableSharedPinboards"))
-        XCTAssertTrue(integrationsSource.contains("destructiveConfirmation = .disableCloudSync"))
-        XCTAssertFalse(integrationsSource.contains("action.send_latest_clipboard_item"))
-        XCTAssertFalse(integrationsSource.contains("Section(\"label.direct_paste\")"))
-        XCTAssertFalse(integrationsSource.contains("label.last_imported_package"))
-        XCTAssertTrue(source.contains("case .disableSharedPinboards:"))
-        XCTAssertTrue(source.contains("case .disableCloudSync:"))
+        XCTAssertTrue(integrationsSource.contains("store.setMCPServerEnabled"))
+        XCTAssertTrue(integrationsSource.contains("mcpClientCandidates"))
+        XCTAssertTrue(integrationsSource.contains("selectedMCPClient = candidate.target"))
+        XCTAssertTrue(integrationsSource.contains("action.connect_ai_tool"))
+    }
+
+    func testMCPStdioExecutableProxiesToTheRunningAppWithoutOpeningAStore() throws {
+        let source = try sourceFileContents("Sources/PasteBuddyMCP/main.swift")
+
+        XCTAssertTrue(source.contains("PASTEBUDDY_MCP_TOKEN") || source.contains("MCPAuthenticationToken.environmentVariable"))
+        XCTAssertTrue(source.contains("http://127.0.0.1:18789/mcp"))
+        XCTAssertTrue(source.contains("URLSession.shared.data(for: request)"))
+        XCTAssertFalse(source.contains("PasteBuddyStore()"))
+        XCTAssertFalse(source.contains("loadAsync()"))
+        XCTAssertFalse(source.contains("flushPendingSave()"))
+    }
+
+    func testStableBundlePackagesMCPAndCloudKitRuntimeCapabilities() throws {
+        let settingsSource = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let buildSource = try sourceFileContents("script/build_and_run.sh")
+        let entitlements = try sourceFileContents("Support/Entitlements/PasteBuddy.entitlements")
+
+        XCTAssertTrue(settingsSource.contains("Contents/MacOS/PasteBuddyMCP"))
+        XCTAssertTrue(buildSource.contains("MCP_BUILD_BINARY"))
+        XCTAssertTrue(buildSource.contains("$APP_MACOS/PasteBuddyMCP"))
+        XCTAssertTrue(buildSource.contains("--entitlements"))
+        XCTAssertTrue(entitlements.contains("iCloud.com.alexjiang.PasteBuddy"))
+        XCTAssertTrue(appSource.contains("CloudKitRemoteRecordTransport"))
+        XCTAssertTrue(appSource.contains("importLatestCloudSyncSnapshot"))
+        XCTAssertTrue(appSource.contains("uploadCloudSyncSnapshot"))
     }
 
     func testPanelHotKeyMatcherSeparatesSidePanelAndShelfActions() {
@@ -2334,6 +2291,76 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 sidePanelShortcut: changedBinding
             ),
             .shelf
+        )
+    }
+
+    func testPinboardCycleHotKeysAndLocalScopeWrapping() {
+        let shortcuts = ShortcutConfiguration()
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_RightArrow),
+                flags: [.maskCommand],
+                nextPinboardShortcut: shortcuts.showNextPinboard,
+                previousPinboardShortcut: shortcuts.showPreviousPinboard
+            ),
+            .nextPinboard
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_LeftArrow),
+                flags: [.maskCommand],
+                nextPinboardShortcut: shortcuts.showNextPinboard,
+                previousPinboardShortcut: shortcuts.showPreviousPinboard
+            ),
+            .previousPinboard
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_1),
+                flags: [.maskCommand, .maskControl]
+            ),
+            .quickPaste(index: 0, format: .original)
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_9),
+                flags: [.maskShift, .maskControl]
+            ),
+            .quickPaste(index: 8, format: .plainText)
+        )
+        XCTAssertEqual(
+            PasteBuddyPanelHotKeyMatcher.action(
+                keyCode: Int64(kVK_ANSI_C),
+                flags: [.maskCommand, .maskShift]
+            ),
+            .pasteStack
+        )
+
+        let first = UUID()
+        let second = UUID()
+        XCTAssertEqual(
+            PinboardCycleSelection.destination(
+                from: .history,
+                pinboardIDs: [first, second],
+                direction: .next
+            ),
+            .pinboard(first)
+        )
+        XCTAssertEqual(
+            PinboardCycleSelection.destination(
+                from: .pinboard(second),
+                pinboardIDs: [first, second],
+                direction: .next
+            ),
+            .pinboard(first)
+        )
+        XCTAssertEqual(
+            PinboardCycleSelection.destination(
+                from: .pinboard(first),
+                pinboardIDs: [first, second],
+                direction: .previous
+            ),
+            .pinboard(second)
         )
     }
 

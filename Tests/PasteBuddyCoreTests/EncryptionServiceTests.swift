@@ -5,6 +5,18 @@ import CloudKit
 #endif
 
 final class EncryptionServiceTests: XCTestCase {
+    func testCloudSyncKeyMaterialUsesSynchronizableKeychainStorage() {
+        let store = KeychainKeyMaterialStore(
+            service: "com.pastebuddy.tests.cloud-sync",
+            account: UUID().uuidString,
+            synchronizesAcrossDevices: true,
+            accessGroup: "TEAM.com.alexjiang.PasteBuddy.shared"
+        )
+
+        XCTAssertTrue(store.synchronizesAcrossDevices)
+        XCTAssertEqual(store.accessGroup, "TEAM.com.alexjiang.PasteBuddy.shared")
+    }
+
     private func makeTemporaryStoreFile(
         filename: String = "clipboard.pbenc"
     ) throws -> URL {
@@ -528,6 +540,8 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(Set(download.snapshot.items.map(\.id)), Set([localItem.id, remoteItem.id]))
         XCTAssertEqual(download.report.addedItems, 1)
         XCTAssertEqual(download.snapshot.sync.lastImportedPackageID, upload.record.packageID)
+        let repeatedDownload = try await syncService.downloadLatest(into: download.snapshot)
+        XCTAssertNil(repeatedDownload)
     }
 
     func testCloudKitSyncServiceRejectsBlockedReadinessBeforeRemoteSave() async throws {

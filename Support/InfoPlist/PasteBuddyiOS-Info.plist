@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>PasteBuddyKeychainAccessGroup</key>
+    <string>72UN4PF4BL.com.alexjiang.PasteBuddy.shared</string>
     <key>CFBundleDisplayName</key>
     <string>PasteBuddy</string>
     <key>CFBundleExecutable</key>

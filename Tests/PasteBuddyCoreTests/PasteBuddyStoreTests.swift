@@ -1189,8 +1189,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
-        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "⌥⌘1-9")
-        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "⌃⌥⌘1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.quickPasteDisplayName, "⌘⌃1-9")
+        XCTAssertEqual(store.snapshot.shortcuts.plainTextQuickPasteDisplayName, "⇧⌃1-9")
 
         store.setQuickPasteShortcutsEnabled(false)
 
@@ -1283,8 +1283,8 @@ final class PasteBuddyStoreTests: XCTestCase {
         ))
         XCTAssertEqual(store.snapshot.shortcuts.showHidePanel.key, "g")
         store.clearShortcutBinding(.pasteSelectedPlainText)
-        store.setQuickPasteModifiers([.control, .command])
-        store.setQuickPasteModifiers([.shift], plainText: true)
+        XCTAssertTrue(store.setQuickPasteModifiers([.option, .command]))
+        XCTAssertTrue(store.setQuickPasteModifiers([.shift, .command], plainText: true))
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
@@ -1295,8 +1295,22 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.shortcuts.showHidePanel.displayName, "⌥⌘G")
         XCTAssertFalse(reloaded.snapshot.shortcuts.pasteSelectedPlainText.isEnabled)
         XCTAssertEqual(reloaded.snapshot.shortcuts.pasteSelectedPlainText.displayName, "Not set")
-        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.control, .command])
-        XCTAssertEqual(reloaded.snapshot.shortcuts.plainTextQuickPasteModifiers, [.shift])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.quickPasteModifiers, [.option, .command])
+        XCTAssertEqual(reloaded.snapshot.shortcuts.plainTextQuickPasteModifiers, [.shift, .command])
+    }
+
+    func testQuickPasteRejectsShiftOnlyAndDigitActionConflicts() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+
+        XCTAssertFalse(store.setQuickPasteModifiers([.shift]))
+        XCTAssertFalse(store.setShortcutBinding(
+            .activatePasteStack,
+            key: "1",
+            modifiers: store.snapshot.shortcuts.quickPasteModifiers,
+            keyCode: 18
+        ))
     }
 
     func testSyncLoadRepairsAndPersistsUnsafeLegacyPanelShortcut() throws {
@@ -3850,6 +3864,33 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1, "A rendered title-only link must not refetch metadata in the same app session")
         XCTAssertEqual(store.dataRevision, enrichedRevision, "Repeated rendering must not rewrite unchanged metadata")
     }
+
+    func testDisablingLinkPreviewsRejectsAnInFlightMetadataResult() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        ClipboardLinkMetadataFetcher.fetchOverrideForTesting = { _ in
+            try? await Task.sleep(for: .milliseconds(40))
+            return ClipboardLinkPreviewMetadata(title: "Late Preview", imageData: Data([1]))
+        }
+        defer { ClipboardLinkMetadataFetcher.fetchOverrideForTesting = nil }
+
+        let bare = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Terminal",
+            deviceName: "Test Mac",
+            contentType: .url,
+            title: "example.com",
+            payload: ClipboardPayload(urlString: "https://example.com/late")
+        ))
+        let enrichment = Task { await store.enrichLinkPreviewMetadataIfNeeded(for: bare) }
+        try await Task.sleep(for: .milliseconds(10))
+        store.setGenerateLinkPreviews(false)
+        await enrichment.value
+
+        let stored = try XCTUnwrap(store.snapshot.items.first { $0.id == bare.id })
+        XCTAssertEqual(stored.title, "example.com")
+        XCTAssertFalse(stored.payload.hasImageAsset)
+    }
     #endif
 
     func testDedupeMergesRicherLinkPreviewFromPeerResend() throws {
@@ -5308,6 +5349,78 @@ final class PasteBuddyStoreTests: XCTestCase {
     private func seedRepository(at databaseURL: URL, snapshot: PasteBuddySnapshot) throws {
         let database = try PasteBuddyDatabase(fileURL: databaseURL)
         try ClipboardItemRepository(database: database).replaceAll(with: snapshot)
+    }
+
+    func testSettingsBehaviorSettersPersistThroughTheStoreOwner() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        var screenSharingChanges: [Bool] = []
+        store.onScreenSharingVisibilityChanged = { screenSharingChanges.append($0) }
+
+        store.setPasteDestination(.clipboard)
+        store.setSoundEffectsEnabled(false)
+        store.setShowDuringScreenSharing(true)
+        store.setGenerateLinkPreviews(false)
+        store.setIgnoreTransientContent(false)
+        await store.flushPendingSave()
+
+        XCTAssertEqual(store.snapshot.settingsBehavior.pasteDestination, .clipboard)
+        XCTAssertFalse(store.snapshot.settingsBehavior.soundEffectsEnabled)
+        XCTAssertTrue(store.snapshot.settingsBehavior.showDuringScreenSharing)
+        XCTAssertFalse(store.snapshot.settingsBehavior.generateLinkPreviews)
+        XCTAssertFalse(store.snapshot.settingsBehavior.ignoreTransientContent)
+        XCTAssertEqual(screenSharingChanges, [true])
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+        XCTAssertEqual(reloaded.snapshot.settingsBehavior, store.snapshot.settingsBehavior)
+    }
+
+    func testSettingsAndPinboardShortcutDefaultsDecodeFromLegacySnapshot() throws {
+        let legacyJSON = """
+        {
+          "schemaVersion": 1,
+          "shortcuts": {
+            "isQuickPasteEnabled": true,
+            "showHidePanel": { "key": "v", "modifiers": ["command", "shift"] },
+            "activatePasteStack": { "key": "c", "modifiers": ["command", "shift"] },
+            "pasteNextStackItem": { "key": "v", "modifiers": ["command", "option"] },
+            "pasteSelectedItem": { "key": "v", "modifiers": ["command", "shift"] },
+            "pasteSelectedPlainText": { "key": "v", "modifiers": ["command", "control"] },
+            "quickPasteModifiers": ["command", "option"],
+            "plainTextQuickPasteModifiers": ["command", "option", "control"]
+          }
+        }
+        """
+
+        let snapshot = try JSONDecoder().decode(PasteBuddySnapshot.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(snapshot.settingsBehavior, SettingsBehaviorConfiguration())
+        XCTAssertEqual(snapshot.shortcuts.showNextPinboard.effectivePhysicalKeyCode, 124)
+        XCTAssertEqual(snapshot.shortcuts.showPreviousPinboard.effectivePhysicalKeyCode, 123)
+    }
+
+    func testLegacyUnsafeQuickPasteShortcutsDecodeToSafeDefaults() throws {
+        let legacyJSON = """
+        {
+          "schemaVersion": 1,
+          "shortcuts": {
+            "isQuickPasteEnabled": true,
+            "activatePasteStack": { "key": "1", "modifiers": ["command", "control"] },
+            "quickPasteModifiers": ["shift"],
+            "plainTextQuickPasteModifiers": ["shift"]
+          }
+        }
+        """
+
+        let shortcuts = try JSONDecoder()
+            .decode(PasteBuddySnapshot.self, from: Data(legacyJSON.utf8))
+            .shortcuts
+
+        XCTAssertEqual(shortcuts.quickPasteModifiers, [.control, .command])
+        XCTAssertEqual(shortcuts.plainTextQuickPasteModifiers, [.control, .shift])
+        XCTAssertEqual(shortcuts.activatePasteStack.key, "c")
     }
 }
 

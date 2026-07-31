@@ -166,6 +166,18 @@ final class StoreKitEntitlementServiceTests: XCTestCase {
         XCTAssertFalse(rawString.contains("revoked"))
     }
 
+    func testStartupReconciliationClearsStoreKitPlanWhenCurrentEntitlementsAreEmpty() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.activatePersonalPlan(.lifetime)
+
+        store.reconcileCurrentStoreEntitlement(nil)
+
+        XCTAssertEqual(store.snapshot.entitlement.plan, .free)
+        XCTAssertEqual(store.snapshot.entitlement.status, .inactive)
+    }
+
     func testRestorePurchasesActivatesRestoredEntitlementOrFailsClosed() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

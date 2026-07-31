@@ -108,9 +108,19 @@ public enum MCPToolServiceError: LocalizedError, Equatable {
 @MainActor
 public final class MCPToolService {
     private let store: PasteBuddyStore
+    private let hydrateItem: @MainActor (ClipboardItem) async throws -> ClipboardItem
 
     public init(store: PasteBuddyStore) {
         self.store = store
+        hydrateItem = { try await store.hydratedItemForTransfer($0) }
+    }
+
+    init(
+        store: PasteBuddyStore,
+        hydrateItem: @escaping @MainActor (ClipboardItem) async throws -> ClipboardItem
+    ) {
+        self.store = store
+        self.hydrateItem = hydrateItem
     }
 
     public func searchHistory(query: String, limit: Int = 5) throws -> MCPHistorySearchResponse {
@@ -137,8 +147,10 @@ public final class MCPToolService {
             }
             try requireMCPVisible(item)
             let responseItem = includeImageData
-                ? try await store.hydratedItemForTransfer(item)
+                ? try await hydrateItem(item)
                 : item
+            try require(.retrieveItem)
+            try requireMCPVisible(responseItem)
             let response = MCPClipboardItemResponse(item: responseItem, includeImageData: includeImageData)
             recordAccess(
                 tool: .retrieveItem,
@@ -247,7 +259,8 @@ public final class MCPToolService {
     private func mcpVisibilityDecision(for item: ClipboardItem) -> PrivacyCaptureDecision {
         store.snapshot.privacy.captureDecision(
             for: item,
-            sourceApplicationName: item.sourceAppName
+            sourceApplicationName: item.sourceAppName,
+            sourceBundleIdentifier: item.sourceBundleIdentifier
         )
     }
 

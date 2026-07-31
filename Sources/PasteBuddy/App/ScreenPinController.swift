@@ -232,6 +232,9 @@ final class ScreenPinController {
         panel.level = state.isAlwaysOnTop ? .floating : .normal
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
+        panel.sharingType = store?.snapshot.settingsBehavior.showDuringScreenSharing == true
+            ? .readOnly
+            : .none
         panel.isFloatingPanel = state.isAlwaysOnTop
         panel.isMovableByWindowBackground = !state.isLocked
         if state.isLocked {

@@ -124,38 +124,44 @@ public struct MCPClientConfigurationGuide: Equatable, Sendable {
 public enum MCPClientConfigurationGuideBuilder {
     public static func developmentGuide(
         for target: MCPClientConfigurationTarget,
-        packagePath: String
+        packagePath: String,
+        authenticationToken: String? = nil
     ) -> MCPClientConfigurationGuide {
         guide(
             for: target,
             command: "swift",
             arguments: ["run", "--package-path", packagePath, "PasteBuddyMCP"],
-            modeNote: "Development mode launches the SwiftPM PasteBuddyMCP target from this checkout."
+            modeNote: "Development mode launches the SwiftPM PasteBuddyMCP target from this checkout.",
+            authenticationToken: authenticationToken
         )
     }
 
     public static func packagedGuide(
         for target: MCPClientConfigurationTarget,
-        executablePath: String
+        executablePath: String,
+        authenticationToken: String? = nil
     ) -> MCPClientConfigurationGuide {
         guide(
             for: target,
             command: executablePath,
             arguments: [],
-            modeNote: "Packaged mode launches the installed PasteBuddyMCP executable directly."
+            modeNote: "Packaged mode launches the installed PasteBuddyMCP executable directly.",
+            authenticationToken: authenticationToken
         )
     }
 
     public static func guide(
         for target: MCPClientConfigurationTarget,
         command: String,
-        arguments: [String]
+        arguments: [String],
+        authenticationToken: String? = nil
     ) -> MCPClientConfigurationGuide {
         guide(
             for: target,
             command: command,
             arguments: arguments,
-            modeNote: "Use this command/args pair for a stdio MCP server entry."
+            modeNote: "Use this command/args pair for a stdio MCP server entry.",
+            authenticationToken: authenticationToken
         )
     }
 
@@ -163,18 +169,30 @@ public enum MCPClientConfigurationGuideBuilder {
         for target: MCPClientConfigurationTarget,
         command: String,
         arguments: [String],
-        modeNote: String
+        modeNote: String,
+        authenticationToken: String?
     ) -> MCPClientConfigurationGuide {
         MCPClientConfigurationGuide(
             target: target,
             command: command,
             arguments: arguments,
-            configurationSnippet: snippet(for: target, command: command, arguments: arguments),
+            configurationSnippet: snippet(
+                for: target,
+                command: command,
+                arguments: arguments,
+                authenticationToken: authenticationToken
+            ),
             configurationHint: target.configurationHint,
             setupNotes: setupNotes(for: target, modeNote: modeNote),
-            installationCommandParts: installationCommandParts(for: target, command: command, arguments: arguments),
-            installationCommand: installationCommand(for: target, command: command, arguments: arguments),
-            installationURL: installationURL(for: target, command: command, arguments: arguments)
+            installationCommandParts: authenticationToken == nil
+                ? installationCommandParts(for: target, command: command, arguments: arguments)
+                : nil,
+            installationCommand: authenticationToken == nil
+                ? installationCommand(for: target, command: command, arguments: arguments)
+                : nil,
+            installationURL: authenticationToken == nil
+                ? installationURL(for: target, command: command, arguments: arguments)
+                : nil
         )
     }
 
@@ -214,7 +232,8 @@ public enum MCPClientConfigurationGuideBuilder {
     private static func snippet(
         for target: MCPClientConfigurationTarget,
         command: String,
-        arguments: [String]
+        arguments: [String],
+        authenticationToken: String?
     ) -> String {
         switch target {
         case .codex:
@@ -222,34 +241,39 @@ public enum MCPClientConfigurationGuideBuilder {
             [mcp_servers.pastebuddy]
             command = \(tomlString(command))
             args = [\(arguments.map(tomlString).joined(separator: ", "))]
+            \(authenticationToken.map { "env = { \(MCPAuthenticationToken.environmentVariable) = \(tomlString($0)) }" } ?? "")
             """
         case .vscode:
             return prettyJSON([
                 "servers": [
-                    "pastebuddy": serverConfiguration(command: command, arguments: arguments, includeType: true)
+                    "pastebuddy": serverConfiguration(command: command, arguments: arguments, authenticationToken: authenticationToken, includeType: true)
                 ]
             ])
         case .opencode:
+            var configuration: [String: Any] = [
+                "type": "local",
+                "command": [command] + arguments,
+                "enabled": true
+            ]
+            if let authenticationToken {
+                configuration["environment"] = [MCPAuthenticationToken.environmentVariable: authenticationToken]
+            }
             return prettyJSON([
                 "$schema": "https://opencode.ai/config.json",
                 "mcp": [
-                    "pastebuddy": [
-                        "type": "local",
-                        "command": [command] + arguments,
-                        "enabled": true
-                    ]
+                    "pastebuddy": configuration
                 ]
             ])
         case .cursor:
             return prettyJSON([
                 "mcpServers": [
-                    "pastebuddy": serverConfiguration(command: command, arguments: arguments, includeType: true)
+                    "pastebuddy": serverConfiguration(command: command, arguments: arguments, authenticationToken: authenticationToken, includeType: true)
                 ]
             ])
         case .claude, .claudeCode, .windsurf, .gemini, .kiro, .custom:
             return prettyJSON([
                 "mcpServers": [
-                    "pastebuddy": serverConfiguration(command: command, arguments: arguments)
+                    "pastebuddy": serverConfiguration(command: command, arguments: arguments, authenticationToken: authenticationToken)
                 ]
             ])
         }
@@ -316,10 +340,18 @@ public enum MCPClientConfigurationGuideBuilder {
         return compactJSON(object)
     }
 
-    private static func serverConfiguration(command: String, arguments: [String], includeType: Bool = false) -> [String: Any] {
+    private static func serverConfiguration(
+        command: String,
+        arguments: [String],
+        authenticationToken: String? = nil,
+        includeType: Bool = false
+    ) -> [String: Any] {
         var configuration: [String: Any] = ["command": command]
         if includeType {
             configuration["type"] = "stdio"
+        }
+        if let authenticationToken {
+            configuration["env"] = [MCPAuthenticationToken.environmentVariable: authenticationToken]
         }
         if arguments.isEmpty {
             return configuration

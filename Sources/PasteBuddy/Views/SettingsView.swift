@@ -1,5 +1,4 @@
 import AppKit
-import CoreImage
 import Foundation
 import PasteBuddyCore
 import SwiftUI
@@ -8,26 +7,24 @@ struct SettingsView: View {
     @Bindable var store: PasteBuddyStore
     @Bindable var irohSync: IrohClipboardSyncService
     @Binding var panelDisplayMode: ClipboardPanelDisplayMode
-    @State private var newCaptureRuleName = ""
-    @State private var newCaptureRulePattern = ""
-    @State private var newCaptureRuleCondition: CaptureRuleCondition = .containsText
-    @State private var newCaptureRuleContentType: ClipboardContentType?
-    @State private var newCaptureRuleApplication: InstalledApplication?
-    @State private var showingCaptureRuleApplicationPicker = false
-    @State private var showingExcludedApplicationsSheet = false
-    @State private var showingMCPAdvancedSettings = false
+    @Bindable var mcpHTTPServer: PasteBuddyMCPHTTPServer
+    let onCloudSyncConfigurationChanged: (Bool) -> Void
     @State private var destructiveConfirmation: SettingsDestructiveAction?
     @State private var selectedSettingsSection: SettingsSidebarSection? = .general
     @State private var selectedMCPClient: MCPClientConfigurationTarget?
+    @State private var showingMCPAdvancedSettings = false
     @State private var mcpClientCandidates: [MCPClientCandidate] = []
     @State private var isRunningMCPClientInstall = false
     @State private var mcpStatusMessage: String?
     @State private var isRestoringPurchases = false
+    @State private var isPurchasingLifetimePlan = false
+    @State private var lifetimeProduct: StoreProductSummary?
+    @State private var subscriptionProductErrorMessage: String?
     @State private var launchAtLoginErrorMessage: String?
 
     var body: some View {
         settingsSplitView
-            .frame(minWidth: 860, idealWidth: 1040, minHeight: 640, idealHeight: 760)
+            .frame(minWidth: 1040, idealWidth: 1040, minHeight: 760, idealHeight: 760)
             .onAppear {
                 applyRequestedSettingsDestination()
                 reloadMCPClientCandidates()
@@ -54,12 +51,6 @@ struct SettingsView: View {
                     Text(destructiveConfirmation.message)
                 }
             }
-            .sheet(isPresented: $showingExcludedApplicationsSheet) {
-                ExcludedApplicationsSheet(store: store)
-            }
-            .sheet(isPresented: $showingMCPAdvancedSettings) {
-                MCPAdvancedSettingsSheet(store: store)
-            }
             .sheet(item: $selectedMCPClient) { target in
                 MCPClientConfigurationSheet(
                     guide: mcpClientGuide(for: target),
@@ -85,35 +76,25 @@ struct SettingsView: View {
                     }
                 )
             }
-            .sheet(isPresented: $showingCaptureRuleApplicationPicker) {
-                InstalledApplicationPickerSheet(
-                    requiresBundleIdentifier: newCaptureRuleCondition == .sourceBundleIdentifier
-                ) { application in
-                    newCaptureRuleApplication = application
-                    newCaptureRulePattern = newCaptureRuleCondition.rulePattern(for: application)
-                }
+            .sheet(isPresented: $showingMCPAdvancedSettings) {
+                MCPAdvancedSettingsSheet(store: store)
             }
     }
 
     private var settingsSplitView: some View {
         NavigationSplitView {
             List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
-                Label {
-                    Text(section.titleKey)
-                } icon: {
-                    Image(systemName: section.systemImageName)
-                }
+                SettingsSidebarLabel(section: section)
                 .tag(section)
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .background(.regularMaterial)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 240)
             .navigationTitle("label.settings")
         } detail: {
             selectedSettingsDetail
                 .navigationTitle(effectiveSettingsSection.titleKey)
         }
-        .background(SettingsSidebarToggleRemover())
         .navigationSplitViewStyle(.balanced)
     }
 
@@ -121,17 +102,15 @@ struct SettingsView: View {
     private var selectedSettingsDetail: some View {
         switch effectiveSettingsSection {
         case .general:
-            generalSettingsForm
-        case .capture:
-            captureSettingsForm
-        case .storage:
-            storageSettingsForm
-        case .plans:
-            plansSettingsForm
+            generalSettings
+        case .privacy:
+            privacySettings
         case .shortcuts:
-            shortcutsSettingsForm
+            shortcutSettings
         case .integrations:
-            integrationsSettingsForm
+            integrationSettings
+        case .subscription:
+            subscriptionSettings
         }
     }
 
@@ -147,41 +126,38 @@ struct SettingsView: View {
         selectedSettingsSection = SettingsSidebarSection(destination)
     }
 
-    private var generalSettingsForm: some View {
+    private var generalSettings: some View {
         Form {
-            Section("label.general") {
-                Toggle(
-                    "label.launch_at_login",
-                    isOn: Binding(
-                        get: { store.snapshot.general.launchAtLoginEnabled },
-                        set: { isEnabled in
-                            store.setLaunchAtLoginEnabled(isEnabled)
-                            launchAtLoginErrorMessage =
-                                store.snapshot.general.launchAtLoginEnabled == isEnabled
-                                ? nil
-                                : store.lastErrorMessage
-                        }
-                    )
-                )
-                .disabled(!LaunchAtLoginService.isAvailable)
-
+            Section {
+                Toggle("label.launch_at_login", isOn: launchAtLoginBinding)
+                    .disabled(!LaunchAtLoginService.isAvailable)
                 if let launchAtLoginErrorMessage {
                     Text(launchAtLoginErrorMessage)
                         .font(.caption)
-                        .foregroundStyle(.red)
-                } else if !LaunchAtLoginService.isAvailable {
-                    Text("message.launch_at_login_is_unavailable_in_this")
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("label.background_running", isOn: backgroundRunningBinding)
+                Toggle("label.enable_icloud_sync", isOn: cloudSyncBinding)
+                if store.snapshot.sync.isCloudSyncEnabled,
+                   let status = store.snapshot.sync.lastSyncStatusMessage ?? store.lastErrorMessage {
+                    Text(status)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Toggle("label.sound_effects", isOn: soundEffectsBinding)
+            }
 
-                Picker("label.panel_style", selection: $panelDisplayMode) {
-                    ForEach(ClipboardPanelDisplayMode.allCases) { mode in
-                        Label(localized(mode.menuTitleKey), systemImage: mode.systemImageName)
-                            .tag(mode)
-                    }
+            Section("label.paste_items") {
+                Picker("label.paste_destination", selection: pasteDestinationBinding) {
+                    Text("label.paste_to_current_application").tag(PasteDestination.activeApplication)
+                    Text("label.paste_to_clipboard").tag(PasteDestination.clipboard)
                 }
+                .labelsHidden()
                 .pickerStyle(.radioGroup)
+
+                Text("message.direct_paste_to_current_application")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Toggle(
                     "action.paste_as_plain_text_by",
@@ -192,250 +168,94 @@ struct SettingsView: View {
                 )
             }
 
-            Section("label.direct_paste") {
-                LabeledContent("label.direct_paste_permission") {
-                    HStack {
-                        Text(AccessibilityPermissionService.isTrusted ? "state.enabled" : "state.required")
-                            .foregroundStyle(AccessibilityPermissionService.isTrusted ? .green : .orange)
-
-                        Button("action.request_accessibility_access") {
-                            AccessibilityPermissionService.requestTrustPrompt()
-                        }
+            Section("label.keep_history") {
+                Slider(value: retentionSliderBinding, in: 0...4, step: 1)
+                    .frame(width: 480)
+                    .accessibilityLabel(Text("label.keep_history"))
+                    .accessibilityValue(Text(retentionChoice.titleKey))
+                HStack {
+                    ForEach(SettingsRetentionChoice.allCases) { choice in
+                        Text(choice.titleKey)
+                            .frame(maxWidth: .infinity, alignment: choice.alignment)
                     }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 480)
+
+                Picker("label.panel_style", selection: $panelDisplayMode) {
+                    Text("label.clipboard_shelf").tag(ClipboardPanelDisplayMode.shelf)
+                    Text("label.side_panel").tag(ClipboardPanelDisplayMode.sidePanel)
+                }
+                .pickerStyle(.radioGroup)
+            }
+
+            Section("label.iroh_clipboard_sync") {
+                LabeledContent("label.status") {
+                    Text(irohStatusText)
+                        .foregroundStyle(irohStatusColor)
+                }
+                TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
+                    .font(.caption.monospaced())
+                    .frame(width: 480)
             }
         }
         .formStyle(.grouped)
+        .toggleStyle(.switch)
         .scenePadding()
     }
 
-    private var captureSettingsForm: some View {
+    private var privacySettings: some View {
         Form {
-            Section("label.capture_and_privacy") {
-                Toggle(
-                    "action.save_clipboard_history",
-                    isOn: Binding(
-                        get: { !store.isCapturePaused },
-                        set: { isActive in
-                            if isActive {
-                                store.resumeCapture()
-                            } else {
-                                store.pauseCaptureIndefinitely()
-                            }
-                        }
+            Section {
+                Toggle(isOn: showDuringScreenSharingBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.show_during_screen_sharing",
+                        detailKey: "message.show_during_screen_sharing"
                     )
-                )
-
-                if let pauseUntil = store.activeCapturePauseUntil {
-                    Text(localized("format.capture_resumes_at", pauseUntil.formatted(date: .omitted, time: .shortened)))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-
-                DisclosureGroup("label.temporary_capture_pause") {
-                    HStack {
-                        Button("action.pause_15m") {
-                            store.pauseCapture(for: 15 * 60)
-                        }
-
-                        Button("action.pause_1h") {
-                            store.pauseCapture(for: 60 * 60)
-                        }
-
-                        Button("action.resume") {
-                            store.resumeCapture()
-                        }
-                        .disabled(!store.isCapturePaused)
-                    }
+                Toggle(isOn: generateLinkPreviewsBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.generate_link_previews",
+                        detailKey: "message.generate_link_previews"
+                    )
                 }
+            }
 
+            Section("label.content_filtering") {
                 Toggle(
-                    "action.save_copied_text",
-                    isOn: Binding(
-                        get: { store.snapshot.privacy.captureText },
-                        set: { _ in store.toggleTextCapture() }
-                    )
-                )
-                Toggle(
-                    "action.save_copied_links",
-                    isOn: Binding(
-                        get: { store.snapshot.privacy.captureURLs },
-                        set: { _ in store.toggleURLCapture() }
-                    )
-                )
-                Toggle(
-                    "action.save_copied_files",
-                    isOn: Binding(
-                        get: { store.snapshot.privacy.captureFiles },
-                        set: { _ in store.toggleFileCapture() }
-                    )
-                )
-                Toggle(
-                    "action.save_copied_images",
-                    isOn: Binding(
-                        get: { store.snapshot.privacy.captureImages },
-                        set: { _ in store.toggleImageCapture() }
-                    )
-                )
-                Toggle(
-                    "label.block_likely_sensitive_text_locally",
                     isOn: Binding(
                         get: { store.snapshot.privacy.blockLikelySensitiveText },
                         set: { _ in store.toggleSensitiveTextBlocking() }
                     )
-                )
-                Toggle(
-                    "action.recognize_text_in_copied_images",
-                    isOn: Binding(
-                        get: { store.snapshot.privacy.runLocalOCRAfterImageCapture },
-                        set: { _ in store.toggleOCR() }
+                ) {
+                    SettingsToggleLabel(
+                        titleKey: "label.ignore_sensitive_content",
+                        detailKey: "message.ignore_sensitive_content"
                     )
-                )
-                .disabled(!store.snapshot.privacy.captureImages)
-
-                Text(
-                    store.snapshot.privacy.captureImages
-                        ? "message.copied_image_ocr_runs_on_device"
-                        : "message.copied_image_ocr_requires_image_history"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            Section("label.excluded_apps") {
-                LabeledContent("label.excluded_apps") {
-                    Button("action.manage_apps") {
-                        showingExcludedApplicationsSheet = true
-                    }
+                }
+                Toggle(isOn: ignoreTransientContentBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.ignore_transient_content",
+                        detailKey: "message.ignore_transient_content"
+                    )
                 }
             }
 
             Section {
-                DisclosureGroup("label.advanced_capture_rules") {
-                    captureRulesEditor
-                }
+                SettingsPrivacyRules(store: store)
             }
-        }
-        .formStyle(.grouped)
-        .scenePadding()
-    }
 
-    @ViewBuilder
-    private var captureRulesEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-                if store.snapshot.privacy.customCaptureRules.isEmpty {
-                    Text("label.no_custom_capture_rules")
-                        .foregroundStyle(.secondary)
-                }
+            Section("label.capture_and_privacy") {
+                Toggle("label.capture_enabled", isOn: backgroundRunningBinding)
+                Toggle("label.capture_text", isOn: captureTextBinding)
+                Toggle("label.capture_links", isOn: captureURLsBinding)
+                Toggle("label.capture_files", isOn: captureFilesBinding)
+                Toggle("label.capture_images", isOn: captureImagesBinding)
+                Toggle("label.run_local_ocr_after_image_capture", isOn: ocrBinding)
+                    .disabled(!store.snapshot.privacy.captureImages)
+            }
 
-                ForEach(store.snapshot.privacy.customCaptureRules) { rule in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Label(rule.name, systemImage: rule.condition.systemImageName)
-                            Spacer()
-                            Toggle(
-                                localized("format.enable_capture_rule", rule.name),
-                                isOn: Binding(
-                                    get: {
-                                        store.snapshot.privacy.customCaptureRules
-                                            .first(where: { $0.id == rule.id })?
-                                            .isEnabled ?? false
-                                    },
-                                    set: { store.setCaptureRule(rule.id, enabled: $0) }
-                                )
-                            )
-                            .labelsHidden()
-                            .accessibilityLabel(localized("format.enable_capture_rule", rule.name))
-
-                            Button(role: .destructive) {
-                                destructiveConfirmation = .removeCaptureRule(rule.id, rule.name)
-                            } label: {
-                                Text(localized("format.remove_capture_rule", rule.name))
-                            }
-                        }
-
-                        Text(localized("format.value", localized(rule.condition.displayName), rule.pattern))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text(rule.scopeDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                TextField("label.rule_name", text: $newCaptureRuleName)
-
-                Picker("label.rule_type", selection: $newCaptureRuleCondition) {
-                    ForEach(CaptureRuleCondition.allCases) { condition in
-                        Text(condition.displayName).tag(condition)
-                    }
-                }
-                .onChange(of: newCaptureRuleCondition) { _, condition in
-                    if condition.requiresInstalledApplication {
-                        newCaptureRulePattern = condition.rulePattern(for: newCaptureRuleApplication)
-                    } else {
-                        newCaptureRuleApplication = nil
-                    }
-                }
-
-                Picker("label.type", selection: $newCaptureRuleContentType) {
-                    Text("label.any_type").tag(Optional<ClipboardContentType>.none)
-                    ForEach(ClipboardContentType.allCases) { contentType in
-                        Text(localized(contentType.displayName)).tag(Optional(contentType))
-                    }
-                }
-
-                if newCaptureRuleCondition.requiresInstalledApplication {
-                    LabeledContent("label.source_app") {
-                        Button {
-                            showingCaptureRuleApplicationPicker = true
-                        } label: {
-                            HStack(spacing: 8) {
-                                if let application = newCaptureRuleApplication {
-                                    InstalledApplicationIcon(application: application)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(application.displayName)
-                                        if let bundleIdentifier = application.bundleIdentifier {
-                                            Text(bundleIdentifier)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                } else {
-                                    Text("label.no_app_selected")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-
-                } else {
-                    TextField("label.rule_pattern", text: $newCaptureRulePattern)
-                }
-
-                Button("action.add_rule") {
-                    let contentTypes = newCaptureRuleContentType.map { Set([$0]) } ?? []
-                    if store.addCaptureRule(
-                        name: newCaptureRuleName,
-                        condition: newCaptureRuleCondition,
-                        pattern: captureRulePatternForSubmit,
-                        contentTypes: contentTypes
-                    ) != nil {
-                        newCaptureRuleName = ""
-                        newCaptureRulePattern = ""
-                        newCaptureRuleCondition = .containsText
-                        newCaptureRuleContentType = nil
-                        newCaptureRuleApplication = nil
-                    }
-                }
-                .disabled(captureRulePatternForSubmit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }
-    }
-
-    private var storageSettingsForm: some View {
-        Form {
             Section("label.storage_security") {
                 Toggle(
                     "label.require_touch_id_for_history",
@@ -444,102 +264,40 @@ struct SettingsView: View {
                         set: { store.setBiometricHistoryLockEnabled($0) }
                     )
                 )
-
-                Text(localized(store.historyAccessStatusLine))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Stepper(
-                    value: Binding(
-                        get: { Int(store.snapshot.security.biometricGracePeriodSeconds) },
-                        set: { store.updateBiometricGracePeriodSeconds(TimeInterval($0)) }
-                    ),
-                    in: 0...300,
-                    step: 15
-                ) {
-                    Text(localized("format.touch_id_grace_period_seconds", Int(store.snapshot.security.biometricGracePeriodSeconds)))
-                }
-                .disabled(!store.snapshot.security.requiresBiometricUnlock)
-
-                DisclosureGroup("label.history_access") {
-                    HStack {
-                        Button("action.unlock_history") {
-                            Task {
-                                await store.unlockHistoryWithTouchID()
-                            }
-                        }
-                        .disabled(!store.snapshot.security.requiresBiometricUnlock || !store.isHistoryAccessLocked)
-
-                        Button("action.lock_history") {
-                            store.lockHistory()
-                        }
-                        .disabled(!store.snapshot.security.requiresBiometricUnlock || store.isHistoryAccessLocked)
-                    }
-                }
-            }
-
-            Section("label.storage_retention") {
-                let storageReport = store.storageUsageReport
                 LabeledContent("label.storage_usage") {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(
-                            ByteCountFormatter.string(
-                                fromByteCount: Int64(storageReport.estimatedBytes),
-                                countStyle: .file
-                            )
-                        )
-                        Text(localized("format.items", storageReport.itemCount))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(localized("format.items", store.storageUsageReport.itemCount))
+                    Text(ByteCountFormatter.string(
+                        fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
+                        countStyle: .file
+                    ))
+                    .foregroundStyle(.secondary)
                 }
+            }
+        }
+        .formStyle(.grouped)
+        .toggleStyle(.switch)
+        .scenePadding()
+    }
 
-                Stepper(
-                    value: Binding(
-                        get: { store.snapshot.storage.retentionDays },
-                        set: { requestRetentionDaysChange($0) }
-                    ),
-                    in: 0...730,
-                    step: 7
-                ) {
-                    Text(retentionDescription)
-                }
-
-                DisclosureGroup("label.advanced_storage") {
-                    LabeledContent("label.storage_mode") {
-                        Text(localized(store.snapshot.security.storageMode.displayName))
-                    }
-                    LabeledContent("label.pinned_history_size") {
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.pinnedEstimatedBytes), countStyle: .file))
-                    }
-                    LabeledContent("label.unpinned_history_size") {
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(storageReport.unpinnedEstimatedBytes), countStyle: .file))
-                    }
-                    ProgressView(value: storageReport.usageFraction) {
-                        Text("label.storage_limit")
-                    } currentValueLabel: {
-                        Text(storageLimitDescription)
-                    }
-
-                    Stepper(
-                        value: Binding(
-                            get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
-                            set: { requestMaxStorageBytesChange($0 * 1_024 * 1_024) }
-                        ),
-                        in: 1...102_400,
-                        step: 50
-                    ) {
-                        Text(localized("format.use_up_to", storageLimitDescription))
-                    }
-                }
-
-                Menu("action.clear_history_ellipsis") {
-                    Button("action.clear_unpinned_history", role: .destructive) {
-                        destructiveConfirmation = .clearUnpinnedHistory
-                    }
-
-                    Button("action.clear_all_history_including_pinned", role: .destructive) {
-                        destructiveConfirmation = .clearAllHistory
+    private var shortcutSettings: some View {
+        Form {
+            Section {
+                SettingsShortcutRow(store: store, titleKey: "action.launch_paste", action: .showHidePanel)
+                SettingsShortcutRow(store: store, titleKey: "label.activate_paste_stack", action: .activatePasteStack)
+            }
+            Section {
+                SettingsShortcutRow(store: store, titleKey: "label.show_next_pinboard", action: .showNextPinboard)
+                SettingsShortcutRow(store: store, titleKey: "label.show_previous_pinboard", action: .showPreviousPinboard)
+            }
+            Section {
+                SettingsModifierShortcutRow(store: store, titleKey: "label.quick_paste", plainText: false)
+                SettingsModifierShortcutRow(store: store, titleKey: "label.plain_text_mode", plainText: true)
+            }
+            Section {
+                HStack {
+                    Spacer()
+                    Button("action.reset_all_shortcuts") {
+                        destructiveConfirmation = .resetShortcuts
                     }
                 }
             }
@@ -548,290 +306,250 @@ struct SettingsView: View {
         .scenePadding()
     }
 
-    private var plansSettingsForm: some View {
+    private var integrationSettings: some View {
         Form {
-            Section("label.plan") {
-                LabeledContent("label.current_plan") {
-                    Text(localizedPlanName(for: store.snapshot.entitlement.plan))
-                }
-
-                if let trialEndsAt = store.snapshot.entitlement.trialEndsAt {
-                    LabeledContent("label.trial_ends") {
-                        Text(trialEndsAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                }
-
-                if let currentPeriodEndsAt = store.snapshot.entitlement.currentPeriodEndsAt {
-                    LabeledContent("label.renews_or_expires") {
-                        Text(currentPeriodEndsAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                }
-
-                Button("action.restore_purchases") {
-                    isRestoringPurchases = true
-                    Task {
-                        _ = await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
-                        await store.flushPendingSave()
-                        isRestoringPurchases = false
-                    }
-                }
-                .disabled(isRestoringPurchases)
-
-                if let restoreStatusMessage {
-                    Text(restoreStatusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .scenePadding()
-    }
-
-    private var shortcutsSettingsForm: some View {
-            Form {
-            Section("label.shortcuts") {
+            Section {
                 Toggle(
-                    "action.enable_quick_paste_1_9",
-                    isOn: Binding(
-                        get: { store.snapshot.shortcuts.isQuickPasteEnabled },
-                        set: { store.setQuickPasteShortcutsEnabled($0) }
-                    )
-                )
-
-                LabeledContent("label.quick_paste") {
-                    Text(store.snapshot.shortcuts.quickPasteDisplayName)
-                }
-
-                LabeledContent("label.plain_text_quick_paste") {
-                    Text(store.snapshot.shortcuts.plainTextQuickPasteDisplayName)
-                }
-
-                ShortcutModifierEditorRow(
-                    store: store,
-                    title: "label.quick_paste_modifiers",
-                    plainText: false
-                )
-
-                ShortcutModifierEditorRow(
-                    store: store,
-                    title: "label.plain_text_quick_paste_modifiers",
-                    plainText: true
-                )
-
-                ForEach(ShortcutAction.allCases) { action in
-                    ShortcutBindingEditorRow(store: store, action: action)
-                }
-
-                Button("action.reset_all_shortcuts") {
-                    destructiveConfirmation = .resetShortcuts
-                }
-            }
-            }
-            .formStyle(.grouped)
-            .scenePadding()
-    }
-
-    private var integrationsSettingsForm: some View {
-        Form {
-            Section("label.mcp_ai_tools") {
-                Toggle(
-                    "action.allow_local_agent_connection",
                     isOn: Binding(
                         get: { store.snapshot.mcp.isServerEnabled },
                         set: { store.setMCPServerEnabled($0) }
                     )
-                )
-
-                Text("message.mcp_allows_ai_apps_to_connect")
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    Menu {
-                        if detectedMCPClientCandidates.isEmpty {
-                            Text("message.no_detected_mcp_clients")
-                        } else {
-                            Section("label.detected_ai_tools") {
-                                ForEach(detectedMCPClientCandidates) { candidate in
-                                    Button {
-                                        selectedMCPClient = candidate.target
-                                    } label: {
-                                        Label(candidate.displayName, systemImage: candidate.target.systemImageName)
-                                    }
-                                }
-                            }
-                        }
-
-                        Section("label.supported_ai_tools") {
-                            ForEach(supportedMCPClientCandidates) { candidate in
-                                Button {
-                                    selectedMCPClient = candidate.target
-                                } label: {
-                                    Label(candidate.displayName, systemImage: candidate.target.systemImageName)
-                                }
-                            }
-                        }
-
-                        Divider()
-
-                        Button {
-                            reloadMCPClientCandidates()
-                        } label: {
-                            Label("action.refresh_detected_ai_tools", systemImage: "arrow.clockwise")
-                        }
-
-                        Button {
-                            selectedMCPClient = .custom
-                        } label: {
-                            Label("action.custom_ai_tool", systemImage: "wrench.and.screwdriver")
-                        }
-                    } label: {
-                        Label("action.connect_ai_tool", systemImage: "plus.circle")
-                    }
-
-                    Button("action.agent_privacy_and_access") {
-                        showingMCPAdvancedSettings = true
-                    }
-
-                    Spacer()
+                ) {
+                    SettingsToggleLabel(
+                        titleKey: "label.enable_mcp",
+                        detailKey: "message.mcp_local_connection"
+                    )
                 }
-
-                if let mcpStatusMessage {
-                    Text(mcpStatusMessage)
+                Label(
+                    mcpHTTPServer.status == .listening
+                        ? "label.mcp_server_enabled"
+                        : "label.mcp_server_disabled",
+                    systemImage: "circle.fill"
+                )
+                    .font(.caption)
+                    .foregroundStyle(mcpHTTPServer.status == .listening ? .green : .secondary)
+                    .textSelection(.enabled)
+                Text(PasteBuddyMCPHTTPServer.endpoint)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                if case .failed(let message) = mcpHTTPServer.status {
+                    Text(message)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.red)
                 }
             }
 
             Section("label.connected_ai_tools") {
-                if let latestAccess = store.snapshot.mcp.accessLog.first {
+                if let latestAccess = mcpHTTPServer.lastClientActivityAt
+                    ?? store.snapshot.mcp.accessLog.first?.accessedAt {
                     LabeledContent("label.local_mcp_client") {
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text(latestAccess.accessedAt.formatted(date: .abbreviated, time: .shortened))
-                            Text(localized("format.mcp_access_count", store.snapshot.mcp.accessLog.count))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text(latestAccess.formatted(date: .abbreviated, time: .shortened))
                     }
                 } else {
                     Text("message.no_connected_ai_tools_yet")
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 54)
-                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 56)
                 }
-            }
-
-            Section("action.sync_sharing") {
-                LabeledContent("label.sync_status") {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(localized(store.snapshot.sync.provider.displayName))
-                        Text(localized(store.syncReadiness.displayName))
-                            .font(.caption)
-                            .foregroundStyle(syncStatusColor)
-                    }
-                }
-
-                if let lastSyncAt = store.snapshot.sync.lastSyncAt {
-                    LabeledContent("label.last_sync") {
-                        Text(lastSyncAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                }
-
-                if store.snapshot.sync.lastSyncConflictCount > 0 {
-                    LabeledContent("label.last_conflicts") {
-                        Text("\(store.snapshot.sync.lastSyncConflictCount)")
-                            .foregroundStyle(.orange)
-                    }
-                }
-
-                Text(syncReadinessDetail)
-                    .foregroundStyle(.secondary)
-
-                if let statusMessage = store.snapshot.sync.lastSyncStatusMessage {
-                    Text(statusMessage)
-                        .foregroundStyle(.secondary)
-                }
-
-                DisclosureGroup("label.sync_recovery_and_sharing") {
-                    Toggle(
-                        "label.shared_pinboards",
-                        isOn: Binding(
-                            get: { store.snapshot.sync.isSharedPinboardsEnabled },
-                            set: { isEnabled in
-                                if isEnabled {
-                                    store.setSharedPinboardsEnabled(true)
-                                } else {
-                                    destructiveConfirmation = .disableSharedPinboards
-                                }
-                            }
-                        )
-                    )
-                    .disabled(!store.syncReadiness.canAttemptCloudSync)
-
-                    if store.snapshot.sync.provider != .none {
-                        Button("label.reset_to_local_only", role: .destructive) {
-                            destructiveConfirmation = .disableCloudSync
+                Menu {
+                    ForEach(mcpClientCandidates) { candidate in
+                        Button(candidate.displayName) {
+                            selectedMCPClient = candidate.target
                         }
                     }
-                }
-            }
-
-            Section("label.device_connections") {
-                LabeledContent("label.status") {
-                    Text(irohStatusText)
-                        .foregroundStyle(irohStatusColor)
-                }
-
-                DisclosureGroup("action.add_device_ellipsis") {
-                    if !irohSync.endpointId.isEmpty {
-                        LabeledContent("label.this_device") {
-                            Text(irohSync.endpointId)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                        }
+                    Divider()
+                    Button("action.custom_ai_tool") {
+                        selectedMCPClient = .custom
                     }
-
-                    if let pairingURL = irohSync.pairingURL {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top, spacing: 12) {
-                                IrohPairingQRCodeView(value: pairingURL.absoluteString)
-                                    .frame(width: 132, height: 132)
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("message.scan_pairing_qr_from_iphone")
-                                        .foregroundStyle(.secondary)
-                                    Text(pairingURL.absoluteString)
-                                        .font(.caption.monospaced())
-                                        .textSelection(.enabled)
-                                    Button("action.copy_pairing_link") {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(pairingURL.absoluteString, forType: .string)
-                                    }
-                                }
-                            }
-                        }
+                    Divider()
+                    Button("action.agent_privacy_and_access") {
+                        showingMCPAdvancedSettings = true
                     }
-
-                    TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption.monospaced())
-
-                    Button("action.connect") {
-                        Task { await irohSync.connectToPeer() }
-                    }
-                    .disabled(irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                } label: {
+                    Text("action.connect_ai_tool")
                 }
-
-                if let lastReceivedTitle = irohSync.lastReceivedTitle {
-                    Text(localized("format.last_received_item", lastReceivedTitle))
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("message.iroh_clipboard_sync_local_peer")
-                    .foregroundStyle(.secondary)
+                .disabled(mcpHTTPServer.configurationToken == nil)
             }
         }
         .formStyle(.grouped)
+        .toggleStyle(.switch)
         .scenePadding()
+    }
+
+    private var subscriptionSettings: some View {
+        VStack(spacing: 12) {
+            Text("message.lifetime_productivity")
+                .font(.system(size: 28, weight: .bold))
+            Text(subscriptionStatusKey)
+                .foregroundStyle(.secondary)
+            Button("action.get_started") {
+                isPurchasingLifetimePlan = true
+                Task {
+                    _ = await store.purchasePersonalPlan(
+                        .lifetime,
+                        using: AppleStoreKitEntitlementProvider()
+                    )
+                    await store.flushPendingSave()
+                    isPurchasingLifetimePlan = false
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+                isPurchasingLifetimePlan
+                    || lifetimeProduct == nil
+                    || (store.snapshot.entitlement.plan == .lifetime
+                        && store.snapshot.entitlement.status == .active)
+            )
+            Button("action.restore_purchases") {
+                isRestoringPurchases = true
+                Task {
+                    _ = await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
+                    await store.flushPendingSave()
+                    isRestoringPurchases = false
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .disabled(isRestoringPurchases)
+            if let statusMessage = restoreStatusMessage ?? subscriptionProductErrorMessage ?? store.lastErrorMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 76)
+        .task {
+            await loadLifetimeProduct()
+        }
+    }
+
+    private func loadLifetimeProduct() async {
+        do {
+            lifetimeProduct = try await AppleStoreKitEntitlementProvider()
+                .fetchProducts()
+                .first(where: { $0.plan == .lifetime })
+            subscriptionProductErrorMessage = nil
+        } catch {
+            lifetimeProduct = nil
+            subscriptionProductErrorMessage = error.localizedDescription
+        }
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.general.launchAtLoginEnabled },
+            set: { isEnabled in
+                store.setLaunchAtLoginEnabled(isEnabled)
+                launchAtLoginErrorMessage = store.snapshot.general.launchAtLoginEnabled == isEnabled
+                    ? nil
+                    : store.lastErrorMessage
+            }
+        )
+    }
+
+    private var backgroundRunningBinding: Binding<Bool> {
+        Binding(
+            get: { !store.isCapturePaused },
+            set: { $0 ? store.resumeCapture() : store.pauseCaptureIndefinitely() }
+        )
+    }
+
+    private var cloudSyncBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.sync.isCloudSyncEnabled },
+            set: { isEnabled in
+                if isEnabled {
+                    store.configureCloudKitSync(
+                        containerIdentifier: store.snapshot.sync.cloudKitContainerIdentifier
+                            ?? "iCloud.com.alexjiang.PasteBuddy",
+                        capabilityConfigured: Bundle.main.object(
+                            forInfoDictionaryKey: "PasteBuddyCloudKitCapabilityConfigured"
+                        ) as? Bool == true
+                    )
+                } else {
+                    store.disableCloudSync()
+                }
+                onCloudSyncConfigurationChanged(isEnabled)
+            }
+        )
+    }
+
+    private var captureTextBinding: Binding<Bool> {
+        Binding(get: { store.snapshot.privacy.captureText }, set: { _ in store.toggleTextCapture() })
+    }
+
+    private var captureURLsBinding: Binding<Bool> {
+        Binding(get: { store.snapshot.privacy.captureURLs }, set: { _ in store.toggleURLCapture() })
+    }
+
+    private var captureFilesBinding: Binding<Bool> {
+        Binding(get: { store.snapshot.privacy.captureFiles }, set: { _ in store.toggleFileCapture() })
+    }
+
+    private var captureImagesBinding: Binding<Bool> {
+        Binding(get: { store.snapshot.privacy.captureImages }, set: { _ in store.toggleImageCapture() })
+    }
+
+    private var ocrBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.privacy.runLocalOCRAfterImageCapture },
+            set: { _ in store.toggleOCR() }
+        )
+    }
+
+    private var retentionSliderBinding: Binding<Double> {
+        Binding(
+            get: { Double(SettingsRetentionChoice.closest(to: store.snapshot.storage.retentionDays).rawValue) },
+            set: { value in
+                guard let choice = SettingsRetentionChoice(rawValue: Int(value.rounded())) else { return }
+                requestRetentionDaysChange(choice.days)
+            }
+        )
+    }
+
+    private var retentionChoice: SettingsRetentionChoice {
+        SettingsRetentionChoice.closest(to: store.snapshot.storage.retentionDays)
+    }
+
+    private var pasteDestinationBinding: Binding<PasteDestination> {
+        Binding(
+            get: { store.snapshot.settingsBehavior.pasteDestination },
+            set: { store.setPasteDestination($0) }
+        )
+    }
+
+    private var soundEffectsBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.settingsBehavior.soundEffectsEnabled },
+            set: { store.setSoundEffectsEnabled($0) }
+        )
+    }
+
+    private var showDuringScreenSharingBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.settingsBehavior.showDuringScreenSharing },
+            set: { store.setShowDuringScreenSharing($0) }
+        )
+    }
+
+    private var generateLinkPreviewsBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.settingsBehavior.generateLinkPreviews },
+            set: { store.setGenerateLinkPreviews($0) }
+        )
+    }
+
+    private var ignoreTransientContentBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.settingsBehavior.ignoreTransientContent },
+            set: { store.setIgnoreTransientContent($0) }
+        )
+    }
+
+    private var subscriptionStatusKey: LocalizedStringKey {
+        store.snapshot.entitlement.plan.isPersonalPaidPlan
+            ? "message.subscription_active"
+            : "message.not_subscribed"
     }
 
     private var isShowingDestructiveConfirmation: Binding<Bool> {
@@ -847,20 +565,8 @@ struct SettingsView: View {
 
     private func performDestructiveAction(_ action: SettingsDestructiveAction) {
         switch action {
-        case .clearUnpinnedHistory:
-            store.clearUnpinnedHistory()
-        case .clearAllHistory:
-            store.clearAllHistoryIncludingPinnedItems()
-        case .disableSharedPinboards:
-            store.setSharedPinboardsEnabled(false)
-        case .disableCloudSync:
-            store.disableCloudSync()
         case .reduceRetentionDays(let days):
             store.updateRetentionDays(days)
-        case .reduceStorageLimit(let bytes):
-            store.updateMaxStorageBytes(bytes)
-        case .removeCaptureRule(let id, _):
-            store.removeCaptureRule(id)
         case .resetShortcuts:
             store.resetShortcutConfiguration()
         }
@@ -874,30 +580,6 @@ struct SettingsView: View {
             destructiveConfirmation = .reduceRetentionDays(value)
         } else {
             store.updateRetentionDays(value)
-        }
-    }
-
-    private func requestMaxStorageBytesChange(_ value: Int) {
-        let value = StorageConfiguration.clampMaxStorageBytes(value)
-        if value < store.snapshot.storage.maxStorageBytes {
-            destructiveConfirmation = .reduceStorageLimit(value)
-        } else {
-            store.updateMaxStorageBytes(value)
-        }
-    }
-
-    private var captureRulePatternForSubmit: String {
-        guard newCaptureRuleCondition.requiresInstalledApplication else {
-            return newCaptureRulePattern
-        }
-        return newCaptureRuleCondition.rulePattern(for: newCaptureRuleApplication)
-    }
-
-    private var syncStatusColor: Color {
-        switch store.syncReadiness {
-        case .localOnly: .secondary
-        case .blocked: .orange
-        case .ready: .green
         }
     }
 
@@ -929,14 +611,6 @@ struct SettingsView: View {
         }
     }
 
-    private var detectedMCPClientCandidates: [MCPClientCandidate] {
-        mcpClientCandidates.filter(\.isDetected)
-    }
-
-    private var supportedMCPClientCandidates: [MCPClientCandidate] {
-        mcpClientCandidates.filter { !$0.isDetected }
-    }
-
     private func reloadMCPClientCandidates() {
         mcpClientCandidates = MCPClientDetector().candidates(
             applications: InstalledApplicationCatalog().applications()
@@ -947,12 +621,14 @@ struct SettingsView: View {
         if FileManager.default.isExecutableFile(atPath: packagedMCPExecutablePath) {
             return MCPClientConfigurationGuideBuilder.packagedGuide(
                 for: target,
-                executablePath: packagedMCPExecutablePath
+                executablePath: packagedMCPExecutablePath,
+                authenticationToken: mcpHTTPServer.configurationToken
             )
         }
         return MCPClientConfigurationGuideBuilder.developmentGuide(
             for: target,
-            packagePath: developmentPackagePath
+            packagePath: developmentPackagePath,
+            authenticationToken: mcpHTTPServer.configurationToken
         )
     }
 
@@ -1038,18 +714,6 @@ struct SettingsView: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    private var syncReadinessDetail: String {
-        switch store.syncReadiness {
-        case .blocked(let requirements):
-            localized(
-                "format.cloud_sync_blocked_until",
-                requirements.map { localized($0.displayName) }.joined(separator: ", ")
-            )
-        case .localOnly, .ready:
-            localized(store.syncReadiness.detail)
-        }
-    }
-
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
@@ -1060,25 +724,6 @@ struct SettingsView: View {
             locale: Locale.current,
             arguments: arguments
         )
-    }
-
-    private func localizedPlanName(for plan: ProductAccessPlan) -> String {
-        switch plan {
-        case .free:
-            localized("label.free")
-        case .trial:
-            localized("label.trial")
-        case .monthly:
-            localized("label.monthly")
-        case .annual:
-            localized("label.annual")
-        case .lifetime:
-            localized("label.lifetime")
-        case .family:
-            localized("label.family")
-        case .team:
-            localized("label.team")
-        }
     }
 
     private var restoreStatusMessage: String? {
@@ -1097,102 +742,198 @@ struct SettingsView: View {
         }
     }
 
-    private var retentionDescription: String {
-        if store.snapshot.storage.keepsHistoryForever {
-            return localized("label.keep_history_forever")
-        }
-        return localized("format.keep_normal_history_for_days", store.snapshot.storage.retentionDays)
-    }
-
-    private var storageLimitDescription: String {
-        ByteCountFormatter.string(
-            fromByteCount: Int64(store.snapshot.storage.maxStorageBytes),
-            countStyle: .file
-        )
-    }
-
 }
 
-private struct SettingsSidebarToggleRemover: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        SettingsSidebarToggleRemovalView()
-    }
+private struct MCPAdvancedSettingsSheet: View {
+    @Bindable var store: PasteBuddyStore
+    @Environment(\.dismiss) private var dismiss
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? SettingsSidebarToggleRemovalView)?.removeSidebarToggle()
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("action.agent_privacy_and_access") {
+                    ForEach(MCPToolName.allCases) { tool in
+                        Toggle(
+                            tool.displayName,
+                            isOn: Binding(
+                                get: { store.snapshot.mcp.isToolEnabled(tool) },
+                                set: { store.setMCPTool(tool, enabled: $0) }
+                            )
+                        )
+                    }
+                    Text("message.retrieve_item_requires_explicit_mcp_opt_in")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    Button("action.revoke_mcp_access", role: .destructive) {
+                        store.revokeMCPAccess()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("action.agent_privacy_and_access")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("action.done") { dismiss() }
+                }
+            }
+        }
+        .frame(width: 520, height: 420)
     }
 }
 
-final class SettingsSidebarToggleRemovalView: NSView {
-    private static let swiftUISidebarToggleIdentifier = NSToolbarItem.Identifier(
-        "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
-    )
+private struct SettingsSidebarLabel: View {
+    let section: SettingsSidebarSection
 
-    private(set) weak var observedToolbar: NSToolbar?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        NotificationCenter.default.removeObserver(self)
-        observedToolbar = nil
-        if let window {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(windowDidUpdate),
-                name: NSWindow.didUpdateNotification,
-                object: window
-            )
+    var body: some View {
+        Label {
+            Text(section.titleKey)
+        } icon: {
+            Image(systemName: section.systemImageName)
+                .accessibilityHidden(true)
         }
-        observeToolbarIfNeeded()
-        removeSidebarToggle()
-        DispatchQueue.main.async { [weak self] in
-            self?.removeSidebarToggle()
-        }
+        .font(.system(size: 13))
+        .frame(height: 32)
+        .accessibilityLabel(Text(section.titleKey))
     }
+}
 
-    @objc private func windowDidUpdate(_ notification: Notification) {
-        observeToolbarIfNeeded()
-        removeSidebarToggle()
-    }
+private struct SettingsToggleLabel: View {
+    let titleKey: LocalizedStringKey
+    let detailKey: LocalizedStringKey
 
-    @objc private func toolbarWillAddItem(_ notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.removeSidebarToggle()
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(titleKey)
+            Text(detailKey)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
+}
 
-    private func observeToolbarIfNeeded() {
-        guard let toolbar = window?.toolbar, toolbar !== observedToolbar else { return }
-        if let observedToolbar {
-            NotificationCenter.default.removeObserver(
-                self,
-                name: NSToolbar.willAddItemNotification,
-                object: observedToolbar
-            )
+private struct SettingsShortcutRow: View {
+    @Bindable var store: PasteBuddyStore
+    let titleKey: LocalizedStringKey
+    let action: ShortcutAction
+    @State private var validationMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            LabeledContent {
+                ShortcutCaptureButton(
+                    displayName: currentBinding.isEnabled ? currentBinding.displayName : localized("label.not_set"),
+                    soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled,
+                    onClear: currentBinding.isEnabled ? { store.clearShortcutBinding(action) } : nil
+                ) { shortcut in
+                    validationMessage = store.setShortcutBinding(
+                        action,
+                        key: shortcut.key,
+                        modifiers: shortcut.modifiers,
+                        keyCode: shortcut.keyCode
+                    ) ? nil : localized("message.shortcut_binding_rejected")
+                }
+            } label: {
+                Text(titleKey)
+            }
+            if let validationMessage {
+                Text(validationMessage)
+                    .font(.caption)
+                .foregroundStyle(.red)
+            }
         }
-        observedToolbar = toolbar
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(toolbarWillAddItem),
-            name: NSToolbar.willAddItemNotification,
-            object: toolbar
-        )
     }
 
-    fileprivate func removeSidebarToggle() {
-        guard let toolbar = window?.toolbar else { return }
-        while let index = toolbar.items.firstIndex(where: Self.isSidebarToggleItem) {
-            toolbar.removeItem(at: index)
+    private var currentBinding: ShortcutBinding {
+        store.snapshot.shortcuts.binding(for: action)
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
+    }
+}
+
+private struct SettingsModifierShortcutRow: View {
+    @Bindable var store: PasteBuddyStore
+    let titleKey: LocalizedStringKey
+    let plainText: Bool
+    @State private var validationMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            LabeledContent {
+                ShortcutCaptureButton(
+                    displayName: displayName,
+                    soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled
+                ) { shortcut in
+                    validationMessage = store.setQuickPasteModifiers(
+                        shortcut.modifiers,
+                        plainText: plainText
+                    ) ? nil : NSLocalizedString("message.shortcut_binding_rejected", comment: "")
+                }
+            } label: {
+                Text(titleKey)
+            }
+            if let validationMessage {
+                Text(validationMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
     }
 
-    static func isSidebarToggleItem(_ item: NSToolbarItem) -> Bool {
-        item.itemIdentifier == .toggleSidebar
-            || item.itemIdentifier == swiftUISidebarToggleIdentifier
-            || item.action == #selector(NSSplitViewController.toggleSidebar(_:))
+    private var displayName: String {
+        let modifiers = plainText
+            ? store.snapshot.shortcuts.plainTextQuickPasteModifiers
+            : store.snapshot.shortcuts.quickPasteModifiers
+        let normalized = ShortcutBinding.normalizedModifiers(modifiers)
+        guard !normalized.isEmpty else {
+            return NSLocalizedString("label.digits_only", comment: "")
+        }
+        return normalized.reversed().map(\.displayName).joined()
+    }
+}
+
+private enum SettingsRetentionChoice: Int, CaseIterable, Identifiable {
+    case day
+    case week
+    case month
+    case year
+    case forever
+
+    var id: Int { rawValue }
+
+    var days: Int {
+        switch self {
+        case .day: 1
+        case .week: 7
+        case .month: 30
+        case .year: 365
+        case .forever: 0
+        }
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
+    var titleKey: LocalizedStringKey {
+        switch self {
+        case .day: "label.day"
+        case .week: "label.week"
+        case .month: "label.month"
+        case .year: "label.year"
+        case .forever: "label.forever"
+        }
+    }
+
+    var alignment: Alignment {
+        switch self {
+        case .day: .leading
+        case .forever: .trailing
+        case .week, .month, .year: .center
+        }
+    }
+
+    static func closest(to days: Int) -> Self {
+        allCases.min { abs($0.days - days) < abs($1.days - days) } ?? .forever
     }
 }
 
@@ -1293,15 +1034,9 @@ private struct MCPClientConfigurationSheet: View {
             Text("label.import_configuration")
                 .font(.headline)
 
-            ScrollView {
-                Text(guide.configurationSnippet)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            }
+            TextEditor(text: .constant(guide.configurationSnippet))
+                .font(.caption.monospaced())
             .frame(minHeight: 160)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
             HStack {
                 Button("action.copy_import_configuration") {
@@ -1344,115 +1079,65 @@ private struct MCPClientConfigurationSheet: View {
     }
 }
 
-private struct MCPAdvancedSettingsSheet: View {
-    @Bindable var store: PasteBuddyStore
-    @Environment(\.dismiss) private var dismiss
+private enum SettingsPrivacyRuleMode: String, CaseIterable, Identifiable {
+    case applications
+    case otherRules
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text("label.mcp_advanced")
-                    .font(.title2.weight(.semibold))
-                Spacer()
-                Button("action.close") {
-                    dismiss()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("label.mcp_tools")
-                    .font(.headline)
-
-                ForEach(MCPToolName.allCases) { tool in
-                    Toggle(
-                        tool.settingsTitleKey,
-                        isOn: Binding(
-                            get: { store.snapshot.mcp.enabledTools.contains(tool) },
-                            set: { store.setMCPTool(tool, enabled: $0) }
-                        )
-                    )
-                }
-            }
-
-            Text("message.retrieve_item_requires_explicit_mcp_opt_in")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            LabeledContent("label.last_mcp_access") {
-                if let latestAccess = store.snapshot.mcp.accessLog.first {
-                    Text(latestAccess.accessedAt.formatted(date: .abbreviated, time: .shortened))
-                } else {
-                    Text("state.none")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack {
-                Button("action.clear_mcp_access_log") {
-                    store.clearMCPAccessLog()
-                }
-                .disabled(store.snapshot.mcp.accessLog.isEmpty)
-
-                Button("action.revoke_mcp_access", role: .destructive) {
-                    store.revokeMCPAccess()
-                }
-                .disabled(!store.snapshot.mcp.isServerEnabled && store.snapshot.mcp.enabledTools.isEmpty)
-
-                Spacer()
-            }
-        }
-        .padding(24)
-        .frame(width: 560)
-        .frame(minHeight: 460)
-    }
+    var id: String { rawValue }
 }
 
-private struct ExcludedApplicationsSheet: View {
+private struct SettingsPrivacyRules: View {
     @Bindable var store: PasteBuddyStore
-    @Environment(\.dismiss) private var dismiss
     @State private var applications: [InstalledApplication] = []
     @State private var selectedRowID: String?
     @State private var showingApplicationPicker = false
+    @State private var mode: SettingsPrivacyRuleMode = .applications
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("label.excluded_apps")
-                .font(.title2.weight(.semibold))
+        VStack(spacing: 12) {
+            Picker("label.ignore_applications", selection: $mode) {
+                Text("label.by_app").tag(SettingsPrivacyRuleMode.applications)
+                Text("label.other_rules").tag(SettingsPrivacyRuleMode.otherRules)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 258)
 
-            VStack(spacing: 0) {
-                HStack {
-                    Text("label.app")
-                        .font(.headline)
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+            switch mode {
+            case .applications:
+                applicationRules
+            case .otherRules:
+                otherRules
+            }
+        }
+        .onAppear(perform: loadApplications)
+        .sheet(isPresented: $showingApplicationPicker) {
+            InstalledApplicationPickerSheet { application in
+                store.excludeApplication(
+                    named: application.displayName,
+                    bundleIdentifier: application.bundleIdentifier
+                )
+                selectedRowID = nil
+                loadApplications()
+            }
+        }
+    }
 
-                Divider()
+    private var applicationRules: some View {
+        VStack(spacing: 10) {
+            Text("message.ignore_applications")
+                .font(.headline)
 
-                ZStack {
-                    List(selection: $selectedRowID) {
-                        ForEach(excludedRows) { row in
-                            ExcludedApplicationRowView(row: row)
-                                .tag(row.id)
-                        }
-                    }
-                    .listStyle(.plain)
-
-                    if excludedRows.isEmpty {
-                        Text("label.no_excluded_apps")
-                            .foregroundStyle(.secondary)
-                    }
+            List(selection: $selectedRowID) {
+                ForEach(excludedRows) { row in
+                    ExcludedApplicationRowView(row: row)
+                        .tag(row.id)
                 }
             }
-            .overlay {
-                Rectangle()
-                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-            }
+            .listStyle(.bordered)
+            .frame(height: 150)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button {
                     showingApplicationPicker = true
                 } label: {
@@ -1467,27 +1152,63 @@ private struct ExcludedApplicationsSheet: View {
                 }
                 .disabled(selectedRowID == nil)
                 .accessibilityLabel("action.remove")
-
                 Spacer()
+            }
+        }
+    }
 
-                Button("action.close") {
-                    dismiss()
-                }
-            }
-        }
-        .padding(28)
-        .frame(width: 720, height: 520)
-        .onAppear(perform: loadApplications)
-        .sheet(isPresented: $showingApplicationPicker) {
-            InstalledApplicationPickerSheet { application in
-                store.excludeApplication(
-                    named: application.displayName,
-                    bundleIdentifier: application.bundleIdentifier
+    private var otherRules: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("label.ignore_remote_clipboard", isOn: behaviorBinding(
+                get: \.ignoreRemoteClipboardContent,
+                set: store.setIgnoreRemoteClipboardContent
+            ))
+            Toggle("label.ignore_concealed_clipboard", isOn: behaviorBinding(
+                get: \.ignoreConcealedContent,
+                set: store.setIgnoreConcealedContent
+            ))
+            Toggle("label.ignore_auto_generated_clipboard", isOn: behaviorBinding(
+                get: \.ignoreAutoGeneratedContent,
+                set: store.setIgnoreAutoGeneratedContent
+            ))
+            Toggle("label.ignore_whitespace_clipboard", isOn: behaviorBinding(
+                get: \.ignoreWhitespaceOnlyContent,
+                set: store.setIgnoreWhitespaceOnlyContent
+            ))
+            Toggle("label.flatten_large_excel_clipboard", isOn: behaviorBinding(
+                get: \.convertLargeExcelContentToPlainText,
+                set: store.setConvertLargeExcelContentToPlainText
+            ))
+            HStack {
+                Text("label.ignore_clipboard_larger_than")
+                TextField(
+                    "0.0",
+                    value: Binding(
+                        get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
+                        set: { store.setMaximumClipboardSizeMegabytes($0) }
+                    ),
+                    format: .number.precision(.fractionLength(1))
                 )
-                selectedRowID = nil
-                loadApplications()
+                .frame(width: 76)
+                .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
+                Text("label.megabytes")
             }
+            Text("message.zero_disables_size_filter")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .toggleStyle(.checkbox)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func behaviorBinding(
+        get: KeyPath<SettingsBehaviorConfiguration, Bool>,
+        set: @escaping (Bool) -> Void
+    ) -> Binding<Bool> {
+        Binding(
+            get: { store.snapshot.settingsBehavior[keyPath: get] },
+            set: { value in set(value) }
+        )
     }
 
     private var excludedRows: [ExcludedApplicationListRow] {
@@ -1540,38 +1261,6 @@ private struct ExcludedApplicationsSheet: View {
             store.removeExcludedBundleIdentifier(bundleIdentifier)
         }
         self.selectedRowID = nil
-    }
-}
-
-private struct IrohPairingQRCodeView: View {
-    let value: String
-
-    var body: some View {
-        if let image = qrImage {
-            Image(nsImage: image)
-                .interpolation(.none)
-                .resizable()
-                .scaledToFit()
-                .padding(8)
-                .background(.white, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(.secondary.opacity(0.2), lineWidth: 1)
-                }
-        }
-    }
-
-    private var qrImage: NSImage? {
-        guard let data = value.data(using: .utf8),
-              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
-        filter.setValue(data, forKey: "inputMessage")
-        filter.setValue("M", forKey: "inputCorrectionLevel")
-        guard let outputImage = filter.outputImage else { return nil }
-        let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
-        let representation = NSCIImageRep(ciImage: scaledImage)
-        let image = NSImage(size: representation.size)
-        image.addRepresentation(representation)
-        return image
     }
 }
 
@@ -1719,40 +1408,21 @@ private struct ExcludedApplicationListRow: Identifiable, Hashable {
     }
 }
 
-private extension CaptureRuleCondition {
-    var requiresInstalledApplication: Bool {
-        self == .sourceApplicationName || self == .sourceBundleIdentifier
-    }
-
-    func rulePattern(for application: InstalledApplication?) -> String {
-        guard let application else { return "" }
-        switch self {
-        case .sourceApplicationName:
-            return application.displayName
-        case .sourceBundleIdentifier:
-            return application.bundleIdentifier ?? ""
-        case .containsText, .regularExpression, .urlHost, .fileExtension:
-            return ""
-        }
-    }
-}
-
 private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashable {
     case general
-    case capture
+    case privacy
     case shortcuts
     case integrations
-    case storage
-    case plans
+    case subscription
 
     init(_ destination: MacSettingsDestination) {
         switch destination {
         case .general:
             self = .general
         case .privacy:
-            self = .capture
+            self = .privacy
         case .storage:
-            self = .storage
+            self = .privacy
         case .shortcuts:
             self = .shortcuts
         case .sync:
@@ -1766,16 +1436,14 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         switch self {
         case .general:
             "label.general"
-        case .capture:
-            "label.capture_and_privacy"
+        case .privacy:
+            "label.privacy"
         case .shortcuts:
-            "label.shortcuts"
+            "label.keyboard_shortcuts"
         case .integrations:
-            "label.integrations"
-        case .storage:
-            "label.storage"
-        case .plans:
-            "label.plans"
+            "label.mcp_ai_tools"
+        case .subscription:
+            "label.subscription"
         }
     }
 
@@ -1783,46 +1451,26 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         switch self {
         case .general:
             "gearshape"
-        case .capture:
+        case .privacy:
             "hand.raised"
         case .shortcuts:
             "keyboard"
         case .integrations:
-            "point.3.connected.trianglepath.dotted"
-        case .storage:
-            "externaldrive"
-        case .plans:
-            "creditcard"
+            "paperclip"
+        case .subscription:
+            "shield"
         }
     }
 }
 
 private enum SettingsDestructiveAction {
-    case clearUnpinnedHistory
-    case clearAllHistory
-    case disableSharedPinboards
-    case disableCloudSync
     case reduceRetentionDays(Int)
-    case reduceStorageLimit(Int)
-    case removeCaptureRule(UUID, String)
     case resetShortcuts
 
     var title: String {
         switch self {
-        case .clearUnpinnedHistory:
-            NSLocalizedString("dialog.clear_unpinned_history", comment: "")
-        case .clearAllHistory:
-            NSLocalizedString("dialog.clear_all_history", comment: "")
-        case .disableSharedPinboards:
-            NSLocalizedString("dialog.disable_shared_pinboards", comment: "")
-        case .disableCloudSync:
-            NSLocalizedString("dialog.reset_sync_to_local_only", comment: "")
         case .reduceRetentionDays:
             NSLocalizedString("dialog.reduce_history_retention", comment: "")
-        case .reduceStorageLimit:
-            NSLocalizedString("dialog.reduce_storage_limit", comment: "")
-        case .removeCaptureRule:
-            NSLocalizedString("dialog.remove_capture_rule", comment: "")
         case .resetShortcuts:
             NSLocalizedString("dialog.reset_all_shortcuts", comment: "")
         }
@@ -1830,31 +1478,11 @@ private enum SettingsDestructiveAction {
 
     var message: String {
         switch self {
-        case .clearUnpinnedHistory:
-            NSLocalizedString("message.this_removes_every_unpinned_clipboard_item_from", comment: "")
-        case .clearAllHistory:
-            NSLocalizedString("message.this_removes_all_local_clipboard_history_including", comment: "")
-        case .disableSharedPinboards:
-            NSLocalizedString("message.disabling_shared_pinboards_removes_sharing_metadata", comment: "")
-        case .disableCloudSync:
-            NSLocalizedString("message.resetting_sync_to_local_only_disables_cloud", comment: "")
         case .reduceRetentionDays(let days):
             String(
                 format: NSLocalizedString("format.reducing_retention_may_remove_history", comment: ""),
                 locale: Locale.current,
                 days
-            )
-        case .reduceStorageLimit(let bytes):
-            String(
-                format: NSLocalizedString("format.reducing_storage_may_remove_history", comment: ""),
-                locale: Locale.current,
-                ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-            )
-        case .removeCaptureRule(_, let name):
-            String(
-                format: NSLocalizedString("format.removing_capture_rule_cannot_be_undone", comment: ""),
-                locale: Locale.current,
-                name
             )
         case .resetShortcuts:
             NSLocalizedString("message.resetting_shortcuts_restores_every_default", comment: "")
@@ -1863,22 +1491,8 @@ private enum SettingsDestructiveAction {
 
     var confirmationButtonTitle: String {
         switch self {
-        case .clearUnpinnedHistory:
-            NSLocalizedString("action.clear_unpinned_history", comment: "")
-        case .clearAllHistory:
-            NSLocalizedString("action.clear_all_history", comment: "")
-        case .disableSharedPinboards:
-            NSLocalizedString("action.disable_shared_pinboards", comment: "")
-        case .disableCloudSync:
-            NSLocalizedString("label.reset_to_local_only", comment: "")
-        case .reduceRetentionDays, .reduceStorageLimit:
+        case .reduceRetentionDays:
             NSLocalizedString("action.apply_storage_limit", comment: "")
-        case .removeCaptureRule(_, let name):
-            String(
-                format: NSLocalizedString("format.remove_capture_rule", comment: ""),
-                locale: Locale.current,
-                name
-            )
         case .resetShortcuts:
             NSLocalizedString("action.reset_all_shortcuts", comment: "")
         }
@@ -2130,97 +1744,6 @@ private extension MCPClientConfigurationTarget {
     }
 }
 
-private extension MCPToolName {
-    var settingsTitleKey: LocalizedStringKey {
-        switch self {
-        case .searchHistory:
-            "mcp.tool.search_history"
-        case .retrieveItem:
-            "mcp.tool.retrieve_item"
-        case .listPinboards:
-            "mcp.tool.list_pinboards"
-        case .createPinboard:
-            "mcp.tool.create_pinboard"
-        case .pinFirstMatch:
-            "mcp.tool.pin_first_match"
-        }
-    }
-}
-
-private struct ShortcutBindingEditorRow: View {
-    @Bindable var store: PasteBuddyStore
-    let action: ShortcutAction
-    @State private var validationMessage: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            LabeledContent(localized(action.settingsTitleKey)) {
-                ShortcutCaptureButton(
-                    displayName: currentBinding.isEnabled
-                        ? currentBinding.displayName
-                        : localized("label.not_set"),
-                    onClear: currentBinding.isEnabled ? {
-                        validationMessage = nil
-                        store.clearShortcutBinding(action)
-                    } : nil
-                ) { shortcut in
-                    validationMessage = store.setShortcutBinding(
-                        action,
-                        key: shortcut.key,
-                        modifiers: shortcut.modifiers,
-                        keyCode: shortcut.keyCode
-                    ) ? nil : localized("message.shortcut_binding_rejected")
-                }
-            }
-            if let validationMessage {
-                Text(validationMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-    }
-
-    private var currentBinding: ShortcutBinding {
-        store.snapshot.shortcuts.binding(for: action)
-    }
-
-    private func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
-    }
-}
-
-private struct ShortcutModifierEditorRow: View {
-    @Bindable var store: PasteBuddyStore
-    let title: String
-    let plainText: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent(localized(title)) {
-                ShortcutCaptureButton(displayName: displayName) { shortcut in
-                    store.setQuickPasteModifiers(shortcut.modifiers, plainText: plainText)
-                }
-            }
-        }
-    }
-
-    private var modifiers: [ShortcutModifier] {
-        plainText
-            ? store.snapshot.shortcuts.plainTextQuickPasteModifiers
-            : store.snapshot.shortcuts.quickPasteModifiers
-    }
-
-    private var displayName: String {
-        let normalized = ShortcutBinding.normalizedModifiers(modifiers)
-        guard !normalized.isEmpty else { return localized("label.digits_only") }
-        return normalized.map(\.displayName).joined()
-    }
-
-    private func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
-    }
-}
-
 private struct RecordedShortcut {
     let key: String
     let modifiers: [ShortcutModifier]
@@ -2238,6 +1761,7 @@ private struct RecordedShortcut {
 
 private struct ShortcutCaptureButton: View {
     let displayName: String
+    let soundEffectsEnabled: Bool
     var onClear: (() -> Void)?
     let onCapture: (RecordedShortcut) -> Void
     @StateObject private var recorder = ShortcutRecorderState()
@@ -2245,14 +1769,16 @@ private struct ShortcutCaptureButton: View {
     var body: some View {
         HStack(spacing: 4) {
             Button {
-                recorder.start(onCapture: onCapture)
+                recorder.start(soundEffectsEnabled: soundEffectsEnabled, onCapture: onCapture)
             } label: {
-                shortcutLabel
+                Text(recorder.isRecording ? "…" : displayName)
+                    .lineLimit(1)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             if let onClear {
                 Button(action: onClear) {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -2271,41 +1797,6 @@ private struct ShortcutCaptureButton: View {
                 : NSLocalizedString("action.record_shortcut", comment: "")
         )
     }
-
-    private var shortcutLabel: some View {
-        Text(recorder.isRecording ? "…" : displayName)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(recorder.isRecording ? .white : .secondary)
-            .lineLimit(1)
-            .frame(minWidth: 76, alignment: .trailing)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(recorder.isRecording ? Color.accentColor : Color.clear)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Color.accentColor.opacity(recorder.isRecording ? 0.7 : 0), lineWidth: 1)
-            }
-    }
-}
-
-private extension ShortcutAction {
-    var settingsTitleKey: String {
-        switch self {
-        case .showHidePanel:
-            "action.show_hide_panel"
-        case .activatePasteStack:
-            "label.activate_paste_stack"
-        case .pasteNextStackItem:
-            "action.paste_next_stack_item"
-        case .pasteSelectedItem:
-            "action.paste_selected"
-        case .pasteSelectedPlainText:
-            "action.paste_selected_plain_text"
-        }
-    }
 }
 
 @MainActor
@@ -2314,7 +1805,10 @@ private final class ShortcutRecorderState: ObservableObject {
     private var eventMonitor: Any?
     private static weak var activeRecorder: ShortcutRecorderState?
 
-    func start(onCapture: @escaping (RecordedShortcut) -> Void) {
+    func start(
+        soundEffectsEnabled: Bool,
+        onCapture: @escaping (RecordedShortcut) -> Void
+    ) {
         Self.activeRecorder?.stop()
         Self.activeRecorder = self
         stop()
@@ -2327,7 +1821,9 @@ private final class ShortcutRecorderState: ObservableObject {
                 return nil
             }
             guard let shortcut = RecordedShortcut(event: event) else {
-                NSSound.beep()
+                if soundEffectsEnabled {
+                    NSSound.beep()
+                }
                 return nil
             }
             onCapture(shortcut)

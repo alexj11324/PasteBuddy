@@ -41,9 +41,20 @@ APP_ICON_NAME="AppIcon.icns"
 INSTALL_BUNDLE_RAW="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
 INSTALL_BUNDLE="$(cd "$(dirname "$INSTALL_BUNDLE_RAW")" && pwd -P)/$(basename "$INSTALL_BUNDLE_RAW")"
 PACKAGE_ZIP="$DIST_DIR/$APP_NAME-installable.zip"
+CLOUDKIT_PROVISIONING_PROFILE="${PASTEBUDDY_PROVISIONING_PROFILE:-}"
+CLOUDKIT_CAPABILITY_CONFIGURED=false
+CLOUDKIT_PROFILE_TEAM_ID=""
+CLOUDKIT_KEYCHAIN_ACCESS_GROUP=""
+CLOUDKIT_CONTAINER_ENVIRONMENT=""
+CLOUDKIT_APP_IDENTIFIER=""
+GENERATED_ENTITLEMENTS="$STAGE_ROOT/PasteBuddy.entitlements"
 SENTRY_KEYCHAIN_SERVICE="${PASTEBUDDY_SENTRY_KEYCHAIN_SERVICE:-PasteBuddy Sentry DSN}"
 SENTRY_KEYCHAIN_ACCOUNT="${PASTEBUDDY_SENTRY_KEYCHAIN_ACCOUNT:-$BUNDLE_ID}"
 SENTRY_KEYCHAIN_FALLBACK_ACCOUNT="${PASTEBUDDY_SENTRY_KEYCHAIN_FALLBACK_ACCOUNT:-pastebuddy}"
+SWIFT_PACKAGE_ARGS=()
+if [[ -n "${PASTEBUDDY_SWIFT_SCRATCH_PATH:-}" ]]; then
+  SWIFT_PACKAGE_ARGS+=(--scratch-path "$PASTEBUDDY_SWIFT_SCRATCH_PATH")
+fi
 
 die() {
   echo "$*" >&2
@@ -349,7 +360,7 @@ run_required_test_filter() {
   local filter="$1"
   local output
   output="$(mktemp /private/tmp/pastebuddy-required-test.XXXXXX)"
-  if ! swift test --filter "$filter" 2>&1 | /usr/bin/tee "$output"; then
+  if ! swift test "${SWIFT_PACKAGE_ARGS[@]}" --filter "$filter" 2>&1 | /usr/bin/tee "$output"; then
     rm -f "$output"
     return 1
   fi
@@ -383,15 +394,19 @@ kill_existing_app() {
 assert_coordinated_install_source
 run_coordinated_install_gate_tests
 
-swift build
-BUILD_DIR="$(swift build --show-bin-path)"
+swift build "${SWIFT_PACKAGE_ARGS[@]}"
+BUILD_DIR="$(swift build "${SWIFT_PACKAGE_ARGS[@]}" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$EXECUTABLE_NAME"
+MCP_BUILD_BINARY="$BUILD_DIR/PasteBuddyMCP"
 RESOURCE_BUNDLE="$BUILD_DIR/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 /usr/bin/ditto --norsrc --noextattr "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+[[ -x "$MCP_BUILD_BINARY" ]] || die "Missing PasteBuddyMCP executable: $MCP_BUILD_BINARY"
+/usr/bin/ditto --norsrc --noextattr "$MCP_BUILD_BINARY" "$APP_MACOS/PasteBuddyMCP"
+chmod +x "$APP_MACOS/PasteBuddyMCP"
 [[ -d "$RESOURCE_BUNDLE" ]] || die "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE"
 /usr/bin/ditto --norsrc --noextattr "$RESOURCE_BUNDLE" "$APP_RESOURCES/$(basename "$RESOURCE_BUNDLE")"
 "$ROOT_DIR/script/copy_compiled_localizations.sh" "$RESOURCE_BUNDLE" "$APP_RESOURCES" \
@@ -450,6 +465,75 @@ if [[ "$SIGNING_CHANNEL" == "development" && "$BUNDLE_ID" == "com.alexjiang.Past
     '[{"CFBundleURLName":"com.alexjiang.PasteBuddy.dev.panel","CFBundleURLSchemes":["pastebuddy-dev"]}]' \
     "$INFO_PLIST"
 fi
+plist_array_contains() {
+  local plist="$1"
+  local key_path="$2"
+  local expected="$3"
+  local index=0 value
+  while value="$(/usr/libexec/PlistBuddy -c "Print :$key_path:$index" "$plist" 2>/dev/null)"; do
+    [[ "$value" == "$expected" ]] && return 0
+    index=$((index + 1))
+  done
+  return 1
+}
+
+validate_cloudkit_provisioning_profile() {
+  local profile="$1"
+  local decoded="$STAGE_ROOT/provisioning-profile.plist"
+  local platform prefix app_identifier cloud_environment expected_environment
+  /usr/bin/security cms -D -i "$profile" -o "$decoded" \
+    || die "Could not decode CloudKit provisioning profile: $profile"
+  /usr/bin/python3 -c 'import datetime, plistlib, sys; p=plistlib.load(open(sys.argv[1], "rb")); created=p.get("CreationDate"); expires=p.get("ExpirationDate"); now=datetime.datetime.now(expires.tzinfo) if expires and expires.tzinfo else datetime.datetime.utcnow(); ok=created is not None and expires is not None and created <= now < expires; raise SystemExit(0 if ok else 1)' "$decoded" \
+    || die "CloudKit provisioning profile is not currently valid."
+
+  platform="$(/usr/libexec/PlistBuddy -c 'Print :Platform:0' "$decoded" 2>/dev/null || true)"
+  [[ "$platform" == "OSX" || "$platform" == "macOS" ]] \
+    || die "CloudKit provisioning profile is not a macOS profile (Platform=$platform)."
+  prefix="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationIdentifierPrefix:0' "$decoded" 2>/dev/null || true)"
+  CLOUDKIT_PROFILE_TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$decoded" 2>/dev/null || true)"
+  [[ -n "$prefix" && -n "$CLOUDKIT_PROFILE_TEAM_ID" ]] \
+    || die "CloudKit provisioning profile is missing its application prefix or Team ID."
+  app_identifier="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$decoded" 2>/dev/null || true)"
+  if [[ "$app_identifier" != "$prefix$BUNDLE_ID" ]]; then
+    [[ "$app_identifier" == *"*" && "$prefix$BUNDLE_ID" == "${app_identifier%\*}"* ]] \
+      || die "CloudKit provisioning profile does not authorize bundle '$BUNDLE_ID'."
+  fi
+  plist_array_contains "$decoded" "Entitlements:com.apple.developer.icloud-services" "CloudKit" \
+    || die "Provisioning profile does not authorize CloudKit."
+  plist_array_contains "$decoded" "Entitlements:com.apple.developer.icloud-container-identifiers" "iCloud.com.alexjiang.PasteBuddy" \
+    || die "Provisioning profile does not authorize iCloud.com.alexjiang.PasteBuddy."
+
+  expected_environment="Development"
+  [[ "$SIGNING_CHANNEL" == "development" ]] || expected_environment="Production"
+  cloud_environment="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.icloud-container-environment' "$decoded" 2>/dev/null || true)"
+  [[ "$cloud_environment" == "$expected_environment" ]] \
+    || die "CloudKit profile environment '$cloud_environment' does not match signing channel '$SIGNING_CHANNEL'."
+  CLOUDKIT_CONTAINER_ENVIRONMENT="$cloud_environment"
+
+  CLOUDKIT_KEYCHAIN_ACCESS_GROUP="${prefix}com.alexjiang.PasteBuddy.shared"
+  CLOUDKIT_APP_IDENTIFIER="${prefix}${BUNDLE_ID}"
+  plist_array_contains "$decoded" "Entitlements:keychain-access-groups" "$CLOUDKIT_KEYCHAIN_ACCESS_GROUP" \
+    || die "Provisioning profile does not authorize shared Keychain group '$CLOUDKIT_KEYCHAIN_ACCESS_GROUP'."
+
+  /bin/cp "$ROOT_DIR/Support/Entitlements/PasteBuddy.entitlements" "$GENERATED_ENTITLEMENTS"
+  /usr/bin/plutil -replace keychain-access-groups -json "[\"$CLOUDKIT_KEYCHAIN_ACCESS_GROUP\"]" "$GENERATED_ENTITLEMENTS"
+  /usr/bin/plutil -replace com.apple.developer.icloud-container-environment -string "$CLOUDKIT_CONTAINER_ENVIRONMENT" "$GENERATED_ENTITLEMENTS"
+  /usr/bin/plutil -insert com.apple.developer.team-identifier -string "$CLOUDKIT_PROFILE_TEAM_ID" "$GENERATED_ENTITLEMENTS"
+  /usr/bin/plutil -insert com.apple.application-identifier -string "$CLOUDKIT_APP_IDENTIFIER" "$GENERATED_ENTITLEMENTS"
+}
+
+if [[ -n "$CLOUDKIT_PROVISIONING_PROFILE" ]]; then
+  [[ -f "$CLOUDKIT_PROVISIONING_PROFILE" ]] \
+    || die "Configured CloudKit provisioning profile does not exist: $CLOUDKIT_PROVISIONING_PROFILE"
+  validate_cloudkit_provisioning_profile "$CLOUDKIT_PROVISIONING_PROFILE"
+  /usr/bin/ditto --norsrc --noextattr "$CLOUDKIT_PROVISIONING_PROFILE" \
+    "$APP_CONTENTS/embedded.provisionprofile"
+  CLOUDKIT_CAPABILITY_CONFIGURED=true
+  /usr/bin/plutil -insert PasteBuddyKeychainAccessGroup -string \
+    "$CLOUDKIT_KEYCHAIN_ACCESS_GROUP" "$INFO_PLIST"
+fi
+/usr/bin/plutil -insert PasteBuddyCloudKitCapabilityConfigured -bool \
+  "$CLOUDKIT_CAPABILITY_CONFIGURED" "$INFO_PLIST"
 
 assert_safe_bundle_path() {
   local bundle="$1"
@@ -461,6 +545,7 @@ assert_safe_bundle_path() {
 verify_code_signature() {
   local bundle="$1"
   local details
+  local signed_entitlements="$STAGE_ROOT/signed-entitlements.plist"
 
   /usr/bin/codesign --verify --deep --strict --verbose=4 "$bundle" >/dev/null
   details="$(/usr/bin/codesign -dvvv "$bundle" 2>&1)"
@@ -474,6 +559,23 @@ verify_code_signature() {
   if [[ "$details" == *"TeamIdentifier=not set"* ]]; then
     die "Code signature has no TeamIdentifier for $bundle."
   fi
+  if [[ -n "$CLOUDKIT_PROFILE_TEAM_ID" && "$details" != *"TeamIdentifier=$CLOUDKIT_PROFILE_TEAM_ID"* ]]; then
+    die "Signing identity Team ID does not match the CloudKit provisioning profile."
+  fi
+  if [[ "$CLOUDKIT_CAPABILITY_CONFIGURED" == true ]]; then
+    /usr/bin/codesign -d --entitlements :- "$bundle" >"$signed_entitlements" 2>/dev/null \
+      || die "Could not read signed CloudKit entitlements from $bundle."
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$signed_entitlements" 2>/dev/null || true)" == "$CLOUDKIT_PROFILE_TEAM_ID" ]] \
+      || die "Signed app Team entitlement does not match the provisioning profile."
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.application-identifier' "$signed_entitlements" 2>/dev/null || true)" == "$CLOUDKIT_APP_IDENTIFIER" ]] \
+      || die "Signed app application identifier does not match '$BUNDLE_ID'."
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-environment' "$signed_entitlements" 2>/dev/null || true)" == "$CLOUDKIT_CONTAINER_ENVIRONMENT" ]] \
+      || die "Signed app CloudKit environment does not match the provisioning profile."
+    plist_array_contains "$signed_entitlements" "com.apple.developer.icloud-container-identifiers" "iCloud.com.alexjiang.PasteBuddy" \
+      || die "Signed app is missing its CloudKit container entitlement."
+    plist_array_contains "$signed_entitlements" "keychain-access-groups" "$CLOUDKIT_KEYCHAIN_ACCESS_GROUP" \
+      || die "Signed app is missing its shared Keychain access group."
+  fi
   if [[ "$details" != *"Identifier=$BUNDLE_ID"* ]]; then
     printf '%s\n' "$details" >&2
     die "Signed bundle identifier does not match expected '$BUNDLE_ID'."
@@ -486,10 +588,17 @@ verify_code_signature() {
 sign_app() {
   local bundle="$1"
   assert_safe_bundle_path "$bundle"
-  local codesign_args=(--force --deep --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID")
+  local nested_binary="$bundle/Contents/MacOS/PasteBuddyMCP"
+  local nested_codesign_args=(--force --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID.mcp")
+  local codesign_args=(--force --sign "$CODESIGN_IDENTITY" --identifier "$BUNDLE_ID")
   if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
+    nested_codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
     codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
   fi
+  if [[ "$CLOUDKIT_CAPABILITY_CONFIGURED" == true ]]; then
+    codesign_args+=(--entitlements "$GENERATED_ENTITLEMENTS")
+  fi
+  /usr/bin/codesign "${nested_codesign_args[@]}" "$nested_binary"
   /usr/bin/codesign "${codesign_args[@]}" "$bundle"
   verify_code_signature "$bundle"
 }

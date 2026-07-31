@@ -125,6 +125,9 @@ public final class CloudKitSyncService: @unchecked Sendable {
         guard let latestRecord = try await transport.fetchLatest(limit: 1).first else {
             return nil
         }
+        guard latestRecord.packageID != snapshot.sync.lastImportedPackageID else {
+            return nil
+        }
 
         let result = try importer.importPackage(
             latestRecord.makePackage(),

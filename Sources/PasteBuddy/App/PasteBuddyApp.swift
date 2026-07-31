@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     var flushPendingSave: (() async -> Void)?
+    var screenSharingVisibilityProvider: (() -> Bool)?
     private var didFinishLaunching = false
     private var didRequestRuntimeStart = false
     private var pendingDevelopmentURLs: [URL] = []
@@ -29,7 +30,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "accessibilityTrustCheckedAtLaunch"
         )
         didFinishLaunching = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowOcclusionStateDidChange(_:)),
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: nil
+        )
         startRuntimeIfReady()
+    }
+
+    @objc private func windowOcclusionStateDidChange(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              let isVisible = screenSharingVisibilityProvider?() else { return }
+        window.sharingType = isVisible ? .readOnly : .none
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -76,6 +89,9 @@ struct PasteBuddyApp: App {
     @State private var statusItemController: PasteBuddyStatusItemController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
     @State private var irohSync = IrohClipboardSyncService()
+    @State private var mcpHTTPServer = PasteBuddyMCPHTTPServer()
+    @State private var cloudSyncTask: Task<Void, Never>?
+    @State private var transactionUpdateTask: Task<Void, Never>?
 
     init() {
         Self.printRuntimeDiagnosticsIfNeeded()
@@ -94,9 +110,15 @@ struct PasteBuddyApp: App {
                 panelDisplayMode: Binding(
                     get: { panelDisplayMode },
                     set: { panelDisplayMode = $0 }
-                )
+                ),
+                mcpHTTPServer: mcpHTTPServer,
+                onCloudSyncConfigurationChanged: { isEnabled in
+                    updateCloudSyncRuntime(isEnabled: isEnabled)
+                }
             )
         }
+        .defaultSize(width: 1040, height: 760)
+        .windowToolbarStyle(.unified(showsTitle: false))
     }
 
     private func configureAppDelegate() {
@@ -240,13 +262,20 @@ struct PasteBuddyApp: App {
         ) {
             Task { @MainActor in
                 if let item = store.pasteNextStackItem() {
-                    store.recordDirectPasteResult(
+                    let result = if store.snapshot.settingsBehavior.pasteDestination == .clipboard {
+                        Self.copyItemToClipboard(
+                            item,
+                            format: store.defaultPasteFormat,
+                            soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled
+                        )
+                    } else {
                         await Self.pasteItemToTarget(
                             item,
                             format: store.defaultPasteFormat,
                             tracker: frontmostApplicationTracker
                         )
-                    )
+                    }
+                    store.recordDirectPasteResult(result)
                 }
             }
         })
@@ -420,6 +449,33 @@ struct PasteBuddyApp: App {
         await storeLoadGate.loadIfNeeded {
             await store.loadAsync()
         }
+        store.onScreenSharingVisibilityChanged = { isVisible in
+            Self.applyScreenSharingVisibility(isVisible)
+        }
+        appDelegate.screenSharingVisibilityProvider = {
+            store.snapshot.settingsBehavior.showDuringScreenSharing
+        }
+        Self.applyScreenSharingVisibility(store.snapshot.settingsBehavior.showDuringScreenSharing)
+        if transactionUpdateTask == nil {
+            let provider = AppleStoreKitEntitlementProvider()
+            store.reconcileCurrentStoreEntitlement(await provider.currentEntitlement())
+            transactionUpdateTask = StoreTransactionUpdateObserver(provider: provider).start(
+                onUpdate: { [store] update in
+                    await store.applyStoreEntitlementUpdate(update)
+                },
+                onError: { [store] error in
+                    await store.recordStoreTransactionUpdateError(error)
+                }
+            )
+        }
+        updateCloudSyncRuntime(isEnabled: store.snapshot.sync.isCloudSyncEnabled)
+        store.onMCPServerConfigurationChanged = { isEnabled in
+            updateMCPHTTPRuntime(isEnabled: isEnabled)
+        }
+        store.onMCPAccessRevoked = {
+            mcpHTTPServer.revokeAuthenticationToken()
+        }
+        updateMCPHTTPRuntime(isEnabled: store.snapshot.mcp.isServerEnabled)
         ScreenPinController.shared.configure(store: store)
         irohSync.onItemReceived = { [store] item in
             _ = store.addSyncedItem(item)
@@ -451,10 +507,24 @@ struct PasteBuddyApp: App {
                 placement: shelfPlacement,
                 displayMode: panelDisplayMode,
                 directPasteItem: { item, format in
-                    await Self.pasteItemToTarget(item, format: format, tracker: frontmostApplicationTracker)
+                    if store.snapshot.settingsBehavior.pasteDestination == .clipboard {
+                        return Self.copyItemToClipboard(
+                            item,
+                            format: format,
+                            soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled
+                        )
+                    }
+                    return await Self.pasteItemToTarget(item, format: format, tracker: frontmostApplicationTracker)
                 },
                 directPasteItems: { items, format in
-                    await Self.pasteItemsToTarget(items, format: format, tracker: frontmostApplicationTracker)
+                    if store.snapshot.settingsBehavior.pasteDestination == .clipboard {
+                        return Self.copyItemsToClipboard(
+                            items,
+                            format: format,
+                            soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled
+                        )
+                    }
+                    return await Self.pasteItemsToTarget(items, format: format, tracker: frontmostApplicationTracker)
                 },
                 shouldIgnoreDismissalAt: { point in
                     statusController?.containsScreenPoint(point) == true
@@ -472,6 +542,9 @@ struct PasteBuddyApp: App {
                         await showClipboardPanel(.sidePanel)
                     }
                 },
+                onPasteStack: {
+                    store.togglePasteStack()
+                },
                 onShelf: {
                     Task { @MainActor in
                         await showClipboardPanel(.shelf)
@@ -479,18 +552,110 @@ struct PasteBuddyApp: App {
                 },
                 onPinClipboard: {
                     ScreenPinController.shared.pinClipboard()
+                },
+                onNextPinboard: {
+                    Task { @MainActor in
+                        await showClipboardPanel(panelDisplayMode)
+                        NotificationCenter.default.post(
+                            name: .pasteBuddyCyclePanelPinboard,
+                            object: PinboardCycleDirection.next
+                        )
+                    }
+                },
+                onPreviousPinboard: {
+                    Task { @MainActor in
+                        await showClipboardPanel(panelDisplayMode)
+                        NotificationCenter.default.post(
+                            name: .pasteBuddyCyclePanelPinboard,
+                            object: PinboardCycleDirection.previous
+                        )
+                    }
+                },
+                onQuickPaste: { index, format in
+                    Task { @MainActor in
+                        guard let item = store.quickPasteItem(atOneBasedIndex: index + 1) else { return }
+                        do {
+                            let hydrated = try await store.hydratedItemForTransfer(item)
+                            let result = if store.snapshot.settingsBehavior.pasteDestination == .clipboard {
+                                Self.copyItemToClipboard(
+                                    hydrated,
+                                    format: format,
+                                    soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled
+                                )
+                            } else {
+                                await Self.pasteItemToTarget(
+                                    hydrated,
+                                    format: format,
+                                    tracker: frontmostApplicationTracker
+                                )
+                            }
+                            store.recordDirectPasteResult(result)
+                        } catch {
+                            store.lastErrorMessage = error.localizedDescription
+                        }
+                    }
                 }
             )
+            panelHotKeyController?.updateShortcuts(store.snapshot.shortcuts)
         }
         if let panelHotKeyController {
             store.onShortcutConfigurationChanged = { [weak panelHotKeyController] shortcuts in
-                panelHotKeyController?.updateSidePanelShortcut(shortcuts.showHidePanel)
+                panelHotKeyController?.updateShortcuts(shortcuts)
             }
         }
         if irohSync.connectionState != .binding {
             Task { @MainActor in
                 await irohSync.start()
             }
+        }
+    }
+
+    private func updateCloudSyncRuntime(isEnabled: Bool) {
+        guard isEnabled else {
+            cloudSyncTask?.cancel()
+            cloudSyncTask = nil
+            return
+        }
+        guard cloudSyncTask == nil,
+              store.snapshot.sync.readiness.canAttemptCloudSync,
+              let containerIdentifier = store.snapshot.sync.cloudKitContainerIdentifier else {
+            return
+        }
+
+        let service = CloudKitSyncService(
+            transport: CloudKitRemoteRecordTransport(containerIdentifier: containerIdentifier)
+        )
+        cloudSyncTask = Task { @MainActor in
+            var lastUploadedDataRevision: Int?
+            while !Task.isCancelled {
+                let imported = await store.importLatestCloudSyncSnapshot(using: service)
+                guard !Task.isCancelled else { return }
+                guard imported != nil || store.lastErrorMessage == nil else {
+                    do {
+                        try await Task.sleep(for: .seconds(60))
+                    } catch {
+                        return
+                    }
+                    continue
+                }
+                if lastUploadedDataRevision != store.dataRevision,
+                   await store.uploadCloudSyncSnapshot(using: service) != nil {
+                    lastUploadedDataRevision = store.dataRevision
+                }
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func updateMCPHTTPRuntime(isEnabled: Bool) {
+        if isEnabled {
+            mcpHTTPServer.start(store: store)
+        } else {
+            mcpHTTPServer.stop()
         }
     }
 
@@ -543,6 +708,47 @@ struct PasteBuddyApp: App {
         )
         PasteBuddyDiagnostics.record(.directPaste, "writerFinished", detail: "outcome=\(result.outcome.rawValue)")
         return result
+    }
+
+    private static func copyItemToClipboard(
+        _ item: ClipboardItem,
+        format: PasteFormat,
+        soundEffectsEnabled: Bool
+    ) -> DirectPasteResult {
+        let succeeded = PasteboardWriter.copy(item, format: format)
+        if succeeded, soundEffectsEnabled {
+            NSSound(named: "Tink")?.play()
+        }
+        return DirectPasteResult(
+            outcome: succeeded ? .copiedToClipboard : .failedPasteboardWrite,
+            itemCount: 1,
+            format: format
+        )
+    }
+
+    private static func copyItemsToClipboard(
+        _ items: [ClipboardItem],
+        format: PasteFormat,
+        soundEffectsEnabled: Bool
+    ) -> DirectPasteResult {
+        guard !items.isEmpty else {
+            return DirectPasteResult(outcome: .emptySelection, itemCount: 0, format: format)
+        }
+        let succeeded = PasteboardWriter.copy(items, format: format)
+        if succeeded, soundEffectsEnabled {
+            NSSound(named: "Tink")?.play()
+        }
+        return DirectPasteResult(
+            outcome: succeeded ? .copiedToClipboard : .failedPasteboardWrite,
+            itemCount: items.count,
+            format: format
+        )
+    }
+
+    private static func applyScreenSharingVisibility(_ isVisible: Bool) {
+        for window in NSApp.windows {
+            window.sharingType = isVisible ? .readOnly : .none
+        }
     }
 
     private static func pasteItemsToTarget(

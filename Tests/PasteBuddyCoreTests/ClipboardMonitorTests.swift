@@ -104,6 +104,87 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(store.snapshot.items.first?.id, firstCapture.id)
     }
 
+    func testTransientPasteboardContentFollowsThePersistedPrivacySetting() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteBuddyTransientTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
+        let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+
+        pasteboard.declareTypes([.string, transientType], owner: nil)
+        pasteboard.setString("transient payload", forType: .string)
+        pasteboard.setData(Data([1]), forType: transientType)
+        monitor.pollOnce()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(store.snapshot.items.isEmpty)
+
+        store.setIgnoreTransientContent(false)
+        pasteboard.declareTypes([.string, transientType], owner: nil)
+        pasteboard.setString("allowed transient payload", forType: .string)
+        pasteboard.setData(Data([1]), forType: transientType)
+        monitor.pollOnce()
+        try await waitUntil { store.snapshot.items.count == 1 }
+        XCTAssertEqual(store.snapshot.items.first?.payload.text, "allowed transient payload")
+    }
+
+    func testFigmaPrivacyRulesFilterMarkersSizeWhitespaceAndLargeExcelRichText() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteBuddyPrivacyRules-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let privacy = PrivacyConfiguration()
+
+        for marker in ClipboardMonitor.SpecialPasteboardMarker.allCases {
+            pasteboard.declareTypes([.string, NSPasteboard.PasteboardType(marker.rawValue)], owner: nil)
+            pasteboard.setString("payload", forType: .string)
+            pasteboard.setData(Data([1]), forType: NSPasteboard.PasteboardType(marker.rawValue))
+            XCTAssertTrue(ClipboardMonitor.containsMarker(marker, in: pasteboard))
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setString(" \n ", forType: .string)
+        XCTAssertNil(ClipboardMonitor.makeItem(
+            from: pasteboard,
+            sourceApp: "TextEdit",
+            sourceBundleIdentifier: "com.apple.TextEdit",
+            privacy: privacy
+        ))
+        var behavior = SettingsBehaviorConfiguration(ignoreWhitespaceOnlyContent: false)
+        XCTAssertNotNil(ClipboardMonitor.makeItem(
+            from: pasteboard,
+            sourceApp: "TextEdit",
+            sourceBundleIdentifier: "com.apple.TextEdit",
+            privacy: privacy,
+            behavior: behavior
+        ))
+
+        pasteboard.clearContents()
+        pasteboard.setString(String(repeating: "x", count: 2_048), forType: .string)
+        behavior.maximumClipboardSizeMegabytes = 0.001
+        XCTAssertNil(ClipboardMonitor.makeItem(
+            from: pasteboard,
+            sourceApp: "TextEdit",
+            sourceBundleIdentifier: "com.apple.TextEdit",
+            privacy: privacy,
+            behavior: behavior
+        ))
+
+        pasteboard.declareTypes([.string, .html], owner: nil)
+        pasteboard.setString("Excel value", forType: .string)
+        pasteboard.setString(String(repeating: "<b>x</b>", count: 20_000), forType: .html)
+        behavior.maximumClipboardSizeMegabytes = 0
+        behavior.convertLargeExcelContentToPlainText = true
+        let excelItem = ClipboardMonitor.makeItem(
+            from: pasteboard,
+            sourceApp: "Microsoft Excel",
+            sourceBundleIdentifier: "com.microsoft.Excel",
+            privacy: privacy,
+            behavior: behavior
+        )
+        XCTAssertEqual(excelItem?.payload.text, "Excel value")
+        XCTAssertNil(excelItem?.payload.htmlString)
+    }
+
     func testCopiedImageStillCreatesImageHistoryItemWithOCRPending() throws {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteBuddyMonitorTests-\(UUID().uuidString)"))
         defer { pasteboard.releaseGlobally() }

@@ -88,6 +88,10 @@ struct ClipboardSidePanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
             pasteSelected(format: store.defaultPasteFormat)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCyclePanelPinboard)) { notification in
+            guard let direction = notification.object as? PinboardCycleDirection else { return }
+            cyclePinboard(direction)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
             guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
             handlePanelArrowKey(request)
@@ -524,6 +528,16 @@ struct ClipboardSidePanelView: View {
             sideScope = scope
             store.selectedScope = scope
         }
+    }
+
+    private func cyclePinboard(_ direction: PinboardCycleDirection) {
+        guard let destination = PinboardCycleSelection.destination(
+            from: sideScope,
+            pinboardIDs: store.userPinboards.map(\.id),
+            direction: direction
+        ) else { return }
+        dismissPreparedPreview()
+        sideScope = destination
     }
 
     private func isSmartCategorySelected(_ category: SmartPinboardCategory) -> Bool {
