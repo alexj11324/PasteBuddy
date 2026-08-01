@@ -26,7 +26,7 @@ struct SettingsView: View {
 
     var body: some View {
         settingsSplitView
-            .frame(width: 640, height: 592)
+            .frame(width: 640, height: 560)
             .onAppear {
                 applyRequestedSettingsDestination()
                 reloadMCPClientCandidates()
@@ -85,7 +85,13 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var settingsSplitView: some View {
-        settingsSplitViewContent
+        if #available(macOS 15.0, *) {
+            settingsSplitViewContent
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            settingsSplitViewContent
+                .toolbarBackground(.hidden, for: .windowToolbar)
+        }
     }
 
     private var settingsSplitViewContent: some View {
