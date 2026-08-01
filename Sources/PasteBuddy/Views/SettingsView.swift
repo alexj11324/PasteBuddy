@@ -227,6 +227,7 @@ struct SettingsView: View {
                     },
                     onEditingChanged: retentionSliderEditingChanged
                 )
+                .labelsHidden()
 
                 if retentionSliderIsEditing {
                     Text(retentionOption.localizedTitle)

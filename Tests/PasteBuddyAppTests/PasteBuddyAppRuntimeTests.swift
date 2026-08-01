@@ -2015,6 +2015,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("SliderTick(0)"))
         XCTAssertTrue(source.contains("SliderTick(4)"))
         XCTAssertTrue(source.contains("label: {\n                        EmptyView()"))
+        XCTAssertTrue(source.contains("onEditingChanged: retentionSliderEditingChanged\n                )\n                .labelsHidden()"))
         XCTAssertTrue(source.contains("if retentionSliderIsEditing"))
         XCTAssertTrue(source.contains("Text(retentionOption.localizedTitle)\n                        .frame(maxWidth: .infinity, alignment: .center)"))
         XCTAssertTrue(source.contains(".frame(height: 22)\n                        .accessibilityHidden(true)"))
