@@ -1440,11 +1440,12 @@ private struct InstalledApplicationPickerSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("label.installed_apps")
-                    .font(.title2.weight(.semibold))
+                    .font(.headline)
                 Spacer()
                 Button("action.close") {
                     dismiss()
                 }
+                .keyboardShortcut(.cancelAction)
             }
 
             TextField("label.search_apps", text: $searchText)
@@ -1473,7 +1474,8 @@ private struct InstalledApplicationPickerSheet: View {
                 }
             }
         }
-        .frame(width: 560, height: 560)
+        .padding(20)
+        .frame(width: 480, height: 420)
         .onAppear {
             if applications.isEmpty {
                 applications = InstalledApplicationCatalog().applications()

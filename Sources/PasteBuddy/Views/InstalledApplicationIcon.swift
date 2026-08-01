@@ -1,39 +1,50 @@
-import Foundation
+import QuickLookThumbnailing
 import SwiftUI
 
 struct InstalledApplicationIcon: View {
     var application: InstalledApplication?
 
-    @ViewBuilder
+    @Environment(\.displayScale) private var displayScale
+    @State private var iconImage: CGImage?
+
     var body: some View {
-        if let iconResource {
-            Image(iconResource.name, bundle: iconResource.bundle)
-                .resizable()
-                .frame(width: 24, height: 24)
-        } else {
-            Image(systemName: "app")
-                .resizable()
-                .frame(width: 24, height: 24)
-                .foregroundStyle(.secondary)
+        Group {
+            if let iconImage {
+                Image(decorative: iconImage, scale: displayScale)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "app")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 24, height: 24)
+        .task(id: application?.url) {
+            await loadIcon()
         }
     }
 
-    private var iconResource: (name: String, bundle: Bundle)? {
-        guard let application,
-              let bundle = Bundle(url: application.url) else {
-            return nil
-        }
+    @MainActor
+    private func loadIcon() async {
+        iconImage = nil
+        guard let application else { return }
 
-        if let iconName = bundle.object(forInfoDictionaryKey: "CFBundleIconName") as? String,
-           !iconName.isEmpty {
-            return (iconName, bundle)
-        }
+        let request = QLThumbnailGenerator.Request(
+            fileAt: application.url,
+            size: CGSize(width: 48, height: 48),
+            scale: displayScale,
+            representationTypes: [.icon]
+        )
+        request.iconMode = true
 
-        guard let iconFile = bundle.object(forInfoDictionaryKey: "CFBundleIconFile") as? String,
-              !iconFile.isEmpty else {
-            return nil
+        do {
+            let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
+            guard !Task.isCancelled else { return }
+            iconImage = representation.cgImage
+        } catch {
+            // The SF Symbol remains visible when Quick Look cannot resolve an icon.
         }
-        let iconName = URL(fileURLWithPath: iconFile).deletingPathExtension().lastPathComponent
-        return (iconName, bundle)
     }
 }

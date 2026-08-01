@@ -2051,8 +2051,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let iconSource = try sourceFileContents("Sources/PasteBuddy/Views/InstalledApplicationIcon.swift")
 
         XCTAssertTrue(source.contains("InstalledApplicationPickerSheet"))
+        XCTAssertTrue(source.contains(".frame(width: 480, height: 420)"))
+        XCTAssertFalse(source.contains(".frame(width: 560, height: 560)"))
+        XCTAssertTrue(iconSource.contains("import QuickLookThumbnailing"))
+        XCTAssertTrue(iconSource.contains("representationTypes: [.icon]"))
+        XCTAssertTrue(iconSource.contains("representation.cgImage"))
         XCTAssertTrue(source.contains("SettingsPrivacyRuleMode"))
         XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
         XCTAssertTrue(source.contains("label.ignore_remote_clipboard"))
