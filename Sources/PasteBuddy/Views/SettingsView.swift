@@ -881,14 +881,19 @@ private struct SettingsSidebarLabel: View {
     let isSelected: Bool
 
     var body: some View {
-        Label {
-            Text(section.titleKey)
-        } icon: {
+        Group {
             if section == .integrations {
-                MCPBrandIcon(isSelected: isSelected)
+                HStack(spacing: 8) {
+                    MCPBrandIcon(isSelected: isSelected)
+                    Text(section.titleKey)
+                }
             } else if let systemImageName = section.systemImageName {
-                Image(systemName: systemImageName)
-                    .accessibilityHidden(true)
+                Label {
+                    Text(section.titleKey)
+                } icon: {
+                    Image(systemName: systemImageName)
+                        .accessibilityHidden(true)
+                }
             }
         }
         .font(.system(size: 13))
@@ -904,10 +909,10 @@ private struct MCPBrandIcon: View {
         GeometryReader { geometry in
             ZStack {
                 Image("mcp-brand-base", bundle: .module)
-                    .renderingMode(isSelected ? .template : .original)
+                    .renderingMode(.template)
                     .resizable()
                 Image("mcp-brand-inset", bundle: .module)
-                    .renderingMode(isSelected ? .template : .original)
+                    .renderingMode(.template)
                     .resizable()
                     .frame(
                         width: geometry.size.width * 0.665,
@@ -920,7 +925,7 @@ private struct MCPBrandIcon: View {
             }
         }
         .frame(width: 16, height: 16)
-        .foregroundStyle(isSelected ? Color.white : Color.primary)
+        .foregroundStyle(isSelected ? Color.white : Color.accentColor)
         .accessibilityHidden(true)
     }
 }
