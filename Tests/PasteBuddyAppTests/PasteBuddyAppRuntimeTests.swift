@@ -1999,15 +1999,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(appSource.contains(".windowToolbarStyle(.unified(showsTitle: true))"))
         XCTAssertFalse(source.contains("ToolbarItem(placement: .navigation)"))
         XCTAssertTrue(source.contains(".navigationTitle(effectiveSettingsSection.titleKey)"))
-        XCTAssertTrue(source.contains(".toolbarBackgroundVisibility(.hidden, for: .windowToolbar)"))
+        XCTAssertTrue(source.contains("toolbar.centeredItemIdentifiers = []"))
+        XCTAssertTrue(source.contains("SettingsToolbarConfiguration.visibleIdentifiers("))
+        XCTAssertTrue(source.contains("toolbar.itemIdentifiers = visibleIdentifiers"))
+        XCTAssertTrue(source.contains("configureToolbarAfterSwiftUIUpdate(in: window)"))
         XCTAssertTrue(appSource.contains(".defaultSize(width: 640, height: 592)"))
         XCTAssertTrue(source.contains("frame.size = NSSize(width: 640, height: 592)"))
-        XCTAssertTrue(source.contains(".toolbar(removing: .sidebarToggle)"))
-        XCTAssertTrue(source.contains("currentValueLabel:"))
-        XCTAssertTrue(source.contains("SliderTick(0) { Text(SettingsRetentionAnchor.day.titleKey) }"))
-        XCTAssertTrue(source.contains("SliderTick(4) { Text(SettingsRetentionAnchor.forever.titleKey) }"))
-        XCTAssertTrue(source.contains("label: {\n                    EmptyView()"))
+        let sidebarToggleRemoval = try XCTUnwrap(source.range(of: ".toolbar(removing: .sidebarToggle)"))
+        XCTAssertLessThan(sidebarToggleRemoval.lowerBound, generalStart.lowerBound)
+        XCTAssertTrue(source.contains("SliderTick(0)"))
+        XCTAssertTrue(source.contains("SliderTick(4)"))
+        XCTAssertTrue(source.contains("label: {\n                        EmptyView()"))
         XCTAssertTrue(source.contains("if retentionSliderIsEditing"))
+        XCTAssertTrue(source.contains("Text(retentionOption.localizedTitle)\n                        .frame(maxWidth: .infinity, alignment: .center)"))
+        XCTAssertTrue(source.contains(".frame(height: 22)\n                        .accessibilityHidden(true)"))
         XCTAssertTrue(source.contains("retentionLabelPosition(in width: CGFloat)"))
         XCTAssertTrue(source.contains("case privacy"))
         XCTAssertTrue(source.contains("case .privacy:"))
@@ -2037,6 +2042,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(SettingsRetentionOption.closest(toDays: 120).days, 120)
         XCTAssertEqual(SettingsRetentionOption.closest(toDays: 150).days, 150)
         XCTAssertEqual(SettingsRetentionOption.closest(toDays: 0).days, 0)
+    }
+
+    func testSettingsToolbarConfigurationRemovesEverySidebarToggleIdentifier() {
+        let identifiers: [NSToolbarItem.Identifier] = [
+            .init("leading-item"),
+            .toggleSidebar,
+            .init("com.apple.SwiftUI.navigationSplitView.toggleSidebar"),
+            .init("trailing-item")
+        ]
+
+        XCTAssertEqual(
+            SettingsToolbarConfiguration.visibleIdentifiers(from: identifiers),
+            [.init("leading-item"), .init("trailing-item")]
+        )
     }
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {

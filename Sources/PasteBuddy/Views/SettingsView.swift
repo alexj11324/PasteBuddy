@@ -86,12 +86,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var settingsSplitView: some View {
-        if #available(macOS 15.0, *) {
-            settingsSplitViewContent
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        } else {
-            settingsSplitViewContent
-        }
+        settingsSplitViewContent
     }
 
     private var settingsSplitViewContent: some View {
@@ -107,12 +102,12 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
             .navigationTitle("label.settings")
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             selectedSettingsDetail
                 .navigationTitle(effectiveSettingsSection.titleKey)
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar(removing: .sidebarToggle)
     }
 
     @ViewBuilder
@@ -212,24 +207,32 @@ struct SettingsView: View {
     @ViewBuilder
     private var retentionSlider: some View {
         if #available(macOS 26.0, *) {
-            Slider(
-                value: retentionSliderBinding,
-                in: 0...4,
-                label: {
-                    EmptyView()
-                },
-                currentValueLabel: {
+            VStack(spacing: 6) {
+                Slider(
+                    value: retentionSliderBinding,
+                    in: 0...4,
+                    label: {
+                        EmptyView()
+                    },
+                    ticks: {
+                        SliderTick(0)
+                        SliderTick(1)
+                        SliderTick(2)
+                        SliderTick(3)
+                        SliderTick(4)
+                    },
+                    onEditingChanged: retentionSliderEditingChanged
+                )
+
+                if retentionSliderIsEditing {
                     Text(retentionOption.localizedTitle)
-                },
-                ticks: {
-                    SliderTick(0) { Text(SettingsRetentionAnchor.day.titleKey) }
-                    SliderTick(1) { Text(SettingsRetentionAnchor.week.titleKey) }
-                    SliderTick(2) { Text(SettingsRetentionAnchor.month.titleKey) }
-                    SliderTick(3) { Text(SettingsRetentionAnchor.year.titleKey) }
-                    SliderTick(4) { Text(SettingsRetentionAnchor.forever.titleKey) }
-                },
-                onEditingChanged: retentionSliderEditingChanged
-            )
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .frame(height: 22)
+                        .accessibilityHidden(true)
+                } else {
+                    retentionAnchorLabels
+                }
+            }
             .frame(maxWidth: .infinity)
             .accessibilityLabel(Text("label.keep_history"))
             .accessibilityValue(Text(retentionOption.localizedTitle))
@@ -271,6 +274,7 @@ struct SettingsView: View {
         .frame(height: 22)
         .font(.caption)
         .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
     }
 
     private var privacySettings: some View {
@@ -931,7 +935,9 @@ private struct SettingsWindowChromeConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        view.window?.titlebarSeparatorStyle = .none
+        guard let window = view.window else { return }
+        SettingsWindowChromeView.configureToolbar(in: window)
+        SettingsWindowChromeView.configureToolbarAfterSwiftUIUpdate(in: window)
     }
 }
 
@@ -941,7 +947,8 @@ private final class SettingsWindowChromeView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else { return }
-        window.titlebarSeparatorStyle = .none
+        Self.configureToolbar(in: window)
+        Self.configureToolbarAfterSwiftUIUpdate(in: window)
         guard configuredWindow !== window else { return }
 
         var frame = window.frame
@@ -949,6 +956,31 @@ private final class SettingsWindowChromeView: NSView {
         frame.size = NSSize(width: 640, height: 592)
         window.setFrame(frame, display: true)
         configuredWindow = window
+    }
+
+    @MainActor
+    static func configureToolbar(in window: NSWindow) {
+        window.titlebarSeparatorStyle = .none
+        guard let toolbar = window.toolbar else { return }
+
+        toolbar.centeredItemIdentifiers = []
+
+        if #available(macOS 15.0, *) {
+            let visibleIdentifiers = SettingsToolbarConfiguration.visibleIdentifiers(
+                from: toolbar.itemIdentifiers
+            )
+            if visibleIdentifiers != toolbar.itemIdentifiers {
+                toolbar.itemIdentifiers = visibleIdentifiers
+            }
+        }
+    }
+
+    @MainActor
+    static func configureToolbarAfterSwiftUIUpdate(in window: NSWindow) {
+        Task { @MainActor [weak window] in
+            guard let window else { return }
+            configureToolbar(in: window)
+        }
     }
 }
 
