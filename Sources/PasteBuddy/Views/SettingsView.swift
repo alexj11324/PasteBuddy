@@ -84,7 +84,17 @@ struct SettingsView: View {
             }
     }
 
+    @ViewBuilder
     private var settingsSplitView: some View {
+        if #available(macOS 15.0, *) {
+            settingsSplitViewContent
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            settingsSplitViewContent
+        }
+    }
+
+    private var settingsSplitViewContent: some View {
         NavigationSplitView {
             List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
                 SettingsSidebarLabel(
@@ -99,10 +109,15 @@ struct SettingsView: View {
             .navigationTitle("label.settings")
         } detail: {
             selectedSettingsDetail
-                .navigationTitle(effectiveSettingsSection.titleKey)
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar(removing: .sidebarToggle)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Text(effectiveSettingsSection.titleKey)
+                    .font(.title2.weight(.semibold))
+            }
+        }
     }
 
     @ViewBuilder
@@ -202,36 +217,25 @@ struct SettingsView: View {
     @ViewBuilder
     private var retentionSlider: some View {
         if #available(macOS 26.0, *) {
-            VStack(spacing: 4) {
-                Slider(
-                    value: retentionSliderBinding,
-                    in: 0...4,
-                    label: { EmptyView() },
-                    ticks: {
-                        SliderTick(0)
-                        SliderTick(1)
-                        SliderTick(2)
-                        SliderTick(3)
-                        SliderTick(4)
-                    },
-                    onEditingChanged: retentionSliderEditingChanged
-                )
-                .labelsHidden()
-
-                if retentionSliderIsEditing {
-                    GeometryReader { geometry in
-                        Text(retentionOption.localizedTitle)
-                            .fixedSize()
-                            .position(
-                                x: retentionLabelPosition(in: geometry.size.width),
-                                y: geometry.size.height / 2
-                            )
-                    }
-                    .frame(height: 22)
-                } else {
-                    retentionAnchorLabels
-                }
-            }
+            Slider(
+                value: retentionSliderBinding,
+                in: 0...4,
+                label: {
+                    Text("label.keep_history")
+                },
+                currentValueLabel: {
+                    Text(retentionOption.localizedTitle)
+                },
+                ticks: {
+                    SliderTick(0) { Text(SettingsRetentionAnchor.day.titleKey) }
+                    SliderTick(1) { Text(SettingsRetentionAnchor.week.titleKey) }
+                    SliderTick(2) { Text(SettingsRetentionAnchor.month.titleKey) }
+                    SliderTick(3) { Text(SettingsRetentionAnchor.year.titleKey) }
+                    SliderTick(4) { Text(SettingsRetentionAnchor.forever.titleKey) }
+                },
+                onEditingChanged: retentionSliderEditingChanged
+            )
+            .labelsHidden()
             .frame(maxWidth: .infinity)
             .accessibilityLabel(Text("label.keep_history"))
             .accessibilityValue(Text(retentionOption.localizedTitle))
