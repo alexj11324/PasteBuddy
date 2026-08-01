@@ -5377,6 +5377,24 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.settingsBehavior, store.snapshot.settingsBehavior)
     }
 
+    func testScreenSharingVisibilityPersistsThroughStandardDevelopmentStorage() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PasteBuddyScreenSharingTests-\(UUID().uuidString)", isDirectory: true)
+        let snapshotStore = EncryptedSnapshotStore(
+            fileURL: directory.appendingPathComponent("clipboard.pbstore"),
+            storageMode: .standard
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = PasteBuddyStore(diskStore: snapshotStore)
+        store.setShowDuringScreenSharing(true)
+
+        let reloaded = PasteBuddyStore(diskStore: snapshotStore)
+        reloaded.load()
+
+        XCTAssertTrue(reloaded.snapshot.settingsBehavior.showDuringScreenSharing)
+    }
+
     func testSettingsAndPinboardShortcutDefaultsDecodeFromLegacySnapshot() throws {
         let legacyJSON = """
         {

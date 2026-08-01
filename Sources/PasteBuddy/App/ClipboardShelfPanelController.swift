@@ -163,7 +163,7 @@ enum ClipboardPanelDisplayMode: String, CaseIterable, Identifiable {
 }
 
 @MainActor
-final class ClipboardShelfPanelController {
+final class ClipboardShelfPanelController: NSObject {
     private static let shelfEntranceDuration: CFTimeInterval = 0.18
     private static let shelfExitDuration: CFTimeInterval = 0.12
     private static let sidePanelPreferredSize = CGSize(width: 360, height: 697)
@@ -216,6 +216,7 @@ final class ClipboardShelfPanelController {
         self.directPasteItem = directPasteItem
         self.directPasteItems = directPasteItems
         self.shouldIgnoreDismissalAt = shouldIgnoreDismissalAt
+        super.init()
     }
 
     var isVisible: Bool {
@@ -636,6 +637,13 @@ final class ClipboardShelfPanelController {
             }
         }
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(auxiliaryWindowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil,
+        )
+
         appResignActiveObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: NSApp,
@@ -652,6 +660,11 @@ final class ClipboardShelfPanelController {
             NotificationCenter.default.removeObserver(panelResignKeyObserver)
             self.panelResignKeyObserver = nil
         }
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
         if let appResignActiveObserver {
             NotificationCenter.default.removeObserver(appResignActiveObserver)
             self.appResignActiveObserver = nil
@@ -681,15 +694,36 @@ final class ClipboardShelfPanelController {
 
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
+        let keyWindow = NSApp.keyWindow
+        if let keyWindow, Self.isShelfAuxiliaryWindow(keyWindow) {
+            keyWindow.sharingType = panel.sharingType
+            return
+        }
         guard !isPinned else { return }
         if shouldIgnoreDismissalAt(NSEvent.mouseLocation) {
             return
         }
-        let keyWindow = NSApp.keyWindow
-        if keyWindow === panel || Self.isShelfAuxiliaryWindow(keyWindow) {
+        if keyWindow === panel {
             return
         }
         hide()
+    }
+
+    @objc private func auxiliaryWindowDidBecomeKey(_ notification: Notification) {
+        guard let panel, let candidate = notification.object as? NSWindow else { return }
+        let hasProtectedAuxiliaryWindow = NSApp.windows.contains { window in
+            window !== candidate
+                && window.isVisible
+                && Self.isShelfAuxiliaryWindow(window)
+                && window.sharingType == .none
+        }
+        guard Self.shouldProtectNestedShelfAuxiliaryWindow(
+            isShelfVisible: panel.isVisible,
+            hidesShelfFromCapture: panel.sharingType == .none,
+            isCandidateAuxiliaryWindow: Self.isShelfAuxiliaryWindow(candidate),
+            hasProtectedAuxiliaryWindow: hasProtectedAuxiliaryWindow
+        ) else { return }
+        candidate.sharingType = .none
     }
 
     private func hideIfOutsideClick(at location: CGPoint) {
@@ -738,6 +772,18 @@ final class ClipboardShelfPanelController {
         guard !isPinned else { return false }
         guard !isIgnoredDismissalTargetHit else { return false }
         return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
+    }
+
+    static func shouldProtectNestedShelfAuxiliaryWindow(
+        isShelfVisible: Bool,
+        hidesShelfFromCapture: Bool,
+        isCandidateAuxiliaryWindow: Bool,
+        hasProtectedAuxiliaryWindow: Bool
+    ) -> Bool {
+        isShelfVisible
+            && hidesShelfFromCapture
+            && isCandidateAuxiliaryWindow
+            && hasProtectedAuxiliaryWindow
     }
 
     private func hideIfAppLostFocus() {
@@ -814,7 +860,7 @@ final class ClipboardShelfPanelController {
     }
 }
 
-final class ClipboardShelfPanel: NSPanel {
+final class ClipboardShelfPanel: NSPanel, PasteBuddyScreenSharingProtectedWindow {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }

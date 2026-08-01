@@ -3,6 +3,8 @@ import Darwin
 import PasteBuddyCore
 import SwiftUI
 
+protocol PasteBuddyScreenSharingProtectedWindow: AnyObject {}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var startRuntime: (() -> Void)? {
@@ -42,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func windowOcclusionStateDidChange(_ notification: Notification) {
         guard let window = notification.object as? NSWindow,
               let isVisible = screenSharingVisibilityProvider?() else { return }
-        window.sharingType = isVisible ? .readOnly : .none
+        window.sharingType = PasteBuddyApp.screenSharingType(for: window, showContent: isVisible)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -118,7 +120,7 @@ struct PasteBuddyApp: App {
             )
         }
         .defaultSize(width: 640, height: 592)
-        .windowToolbarStyle(.unified(showsTitle: false))
+        .windowToolbarStyle(.unified(showsTitle: true))
     }
 
     private func configureAppDelegate() {
@@ -745,10 +747,30 @@ struct PasteBuddyApp: App {
         )
     }
 
-    private static func applyScreenSharingVisibility(_ isVisible: Bool) {
+    static func applyScreenSharingVisibility(_ isVisible: Bool) {
         for window in NSApp.windows {
-            window.sharingType = isVisible ? .readOnly : .none
+            window.sharingType = screenSharingType(for: window, showContent: isVisible)
         }
+    }
+
+    static func screenSharingType(
+        for window: NSWindow,
+        showContent: Bool
+    ) -> NSWindow.SharingType {
+        screenSharingType(
+            isProtectedContentWindow: window is PasteBuddyScreenSharingProtectedWindow,
+            showContent: showContent
+        )
+    }
+
+    static func screenSharingType(
+        isProtectedContentWindow: Bool,
+        showContent: Bool
+    ) -> NSWindow.SharingType {
+        guard isProtectedContentWindow else {
+            return .readOnly
+        }
+        return showContent ? .readOnly : .none
     }
 
     private static func pasteItemsToTarget(

@@ -210,6 +210,7 @@ final class CopyConfirmationFeedbackController {
         panel.contentView = contentView
         panel.setContentSize(contentView.fittingSize)
         position(panel, on: sourceWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first)
+        panel.sharingType = sourceWindow?.sharingType ?? .readOnly
 
         if panel.isVisible {
             panel.alphaValue = 1
@@ -330,7 +331,7 @@ private struct CopyConfirmationFeedbackView: View {
     }
 }
 
-private final class CopyConfirmationPanel: NSPanel {
+private final class CopyConfirmationPanel: NSPanel, PasteBuddyScreenSharingProtectedWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }

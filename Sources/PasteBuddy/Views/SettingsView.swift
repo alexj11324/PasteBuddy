@@ -208,14 +208,16 @@ struct SettingsView: View {
                     in: 0...4,
                     label: { EmptyView() },
                     ticks: {
-                        SliderTick("label.day", 0)
-                        SliderTick("label.week", 1)
-                        SliderTick("label.month", 2)
-                        SliderTick("label.year", 3)
-                        SliderTick("label.forever", 4)
+                        SliderTick(0)
+                        SliderTick(1)
+                        SliderTick(2)
+                        SliderTick(3)
+                        SliderTick(4)
                     },
                     onEditingChanged: retentionSliderEditingChanged
                 )
+                .labelsHidden()
+
                 if retentionSliderIsEditing {
                     GeometryReader { geometry in
                         Text(retentionOption.localizedTitle)
@@ -226,6 +228,8 @@ struct SettingsView: View {
                             )
                     }
                     .frame(height: 22)
+                } else {
+                    retentionAnchorLabels
                 }
             }
             .frame(maxWidth: .infinity)
@@ -238,21 +242,37 @@ struct SettingsView: View {
                     in: 0...4,
                     onEditingChanged: retentionSliderEditingChanged
                 )
-                HStack {
-                    ForEach(SettingsRetentionAnchor.allCases) { anchor in
-                        Text(anchor.titleKey)
-                            .frame(maxWidth: .infinity, alignment: anchor.alignment)
+                .labelsHidden()
+                if retentionSliderIsEditing {
+                    GeometryReader { geometry in
+                        Text(retentionOption.localizedTitle)
+                            .fixedSize()
+                            .position(
+                                x: retentionLabelPosition(in: geometry.size.width),
+                                y: geometry.size.height / 2
+                            )
                     }
+                    .frame(height: 22)
+                } else {
+                    retentionAnchorLabels
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Text(retentionOption.localizedTitle)
-                    .font(.caption)
             }
             .frame(maxWidth: .infinity)
             .accessibilityLabel(Text("label.keep_history"))
             .accessibilityValue(Text(retentionOption.localizedTitle))
         }
+    }
+
+    private var retentionAnchorLabels: some View {
+        HStack(spacing: 0) {
+            ForEach(SettingsRetentionAnchor.allCases) { anchor in
+                Text(anchor.titleKey)
+                    .frame(maxWidth: .infinity, alignment: anchor.alignment)
+            }
+        }
+        .frame(height: 22)
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private var privacySettings: some View {
@@ -571,7 +591,12 @@ struct SettingsView: View {
     }
 
     private func retentionLabelPosition(in width: CGFloat) -> CGFloat {
-        min(max(width * retentionOption.position / 4, 36), width - 36)
+        let trackInset: CGFloat = 10
+        let trackWidth = max(0, width - trackInset * 2)
+        return min(
+            max(trackInset + trackWidth * retentionOption.position / 4, 36),
+            width - 36
+        )
     }
 
     private var pasteDestinationBinding: Binding<PasteDestination> {

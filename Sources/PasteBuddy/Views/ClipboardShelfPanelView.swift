@@ -2406,6 +2406,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
 
             let contentSize = NSSize(width: width, height: SourceAppSuggestionMetrics.panelHeight(for: appNames.count))
             let panel = suggestionPanel(parentWindow: window)
+            panel.sharingType = window.sharingType
             let wasVisible = panel.isVisible
             isClosingPanel = false
             panelAnimationGeneration += 1
@@ -2616,7 +2617,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
     }
 }
 
-private final class SourceAppSuggestionPanel: NSPanel {
+private final class SourceAppSuggestionPanel: NSPanel, PasteBuddyScreenSharingProtectedWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }

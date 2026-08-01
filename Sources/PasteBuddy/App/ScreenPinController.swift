@@ -638,7 +638,7 @@ final class ScreenPinController {
     }
 }
 
-private final class ScreenPinPanel: NSPanel {
+private final class ScreenPinPanel: NSPanel, PasteBuddyScreenSharingProtectedWindow {
     var onClose: (() -> Void)?
     var observerTokens: [NSObjectProtocol] = []
 

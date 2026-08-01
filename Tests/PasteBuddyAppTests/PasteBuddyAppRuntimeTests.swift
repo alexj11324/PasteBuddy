@@ -8,6 +8,57 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
+    func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
+        XCTAssertEqual(
+            PasteBuddyApp.screenSharingType(
+                isProtectedContentWindow: false,
+                showContent: false
+            ),
+            .readOnly
+        )
+        XCTAssertEqual(
+            PasteBuddyApp.screenSharingType(
+                isProtectedContentWindow: true,
+                showContent: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            PasteBuddyApp.screenSharingType(
+                isProtectedContentWindow: true,
+                showContent: true
+            ),
+            .readOnly
+        )
+    }
+
+    func testNestedShelfAuxiliaryWindowRequiresProtectedShelfMenuChain() {
+        XCTAssertTrue(
+            ClipboardShelfPanelController.shouldProtectNestedShelfAuxiliaryWindow(
+                isShelfVisible: true,
+                hidesShelfFromCapture: true,
+                isCandidateAuxiliaryWindow: true,
+                hasProtectedAuxiliaryWindow: true
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldProtectNestedShelfAuxiliaryWindow(
+                isShelfVisible: true,
+                hidesShelfFromCapture: true,
+                isCandidateAuxiliaryWindow: true,
+                hasProtectedAuxiliaryWindow: false
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldProtectNestedShelfAuxiliaryWindow(
+                isShelfVisible: true,
+                hidesShelfFromCapture: false,
+                isCandidateAuxiliaryWindow: true,
+                hasProtectedAuxiliaryWindow: true
+            )
+        )
+    }
+
     func testAppDelegateFallsBackToDefaultReopenWhenDockHandlerIsMissing() {
         let delegate = AppDelegate()
 
@@ -1945,12 +1996,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)"))
         XCTAssertFalse(source.contains("SettingsSidebarToggleRemover"))
         XCTAssertFalse(source.contains("toolbar.removeItem(at: index)"))
-        XCTAssertTrue(appSource.contains(".windowToolbarStyle(.unified(showsTitle: false))"))
+        XCTAssertTrue(appSource.contains(".windowToolbarStyle(.unified(showsTitle: true))"))
+        XCTAssertTrue(source.contains(".navigationTitle(effectiveSettingsSection.titleKey)"))
         XCTAssertTrue(appSource.contains(".defaultSize(width: 640, height: 592)"))
         XCTAssertTrue(source.contains("frame.size = NSSize(width: 640, height: 592)"))
         XCTAssertTrue(source.contains(".toolbar(removing: .sidebarToggle)"))
         XCTAssertFalse(source.contains(".padding"))
         XCTAssertTrue(source.contains("if retentionSliderIsEditing"))
+        XCTAssertTrue(source.contains("SliderTick(0)"))
+        XCTAssertTrue(source.contains("SliderTick(4)"))
+        XCTAssertTrue(source.contains(".labelsHidden()"))
+        XCTAssertTrue(source.contains("retentionAnchorLabels"))
         XCTAssertTrue(source.contains("case privacy"))
         XCTAssertTrue(source.contains("case .privacy:"))
         XCTAssertTrue(source.contains("self = .privacy"))
