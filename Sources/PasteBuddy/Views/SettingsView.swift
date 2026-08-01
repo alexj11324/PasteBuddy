@@ -22,10 +22,12 @@ struct SettingsView: View {
     @State private var subscriptionProductErrorMessage: String?
     @State private var launchAtLoginErrorMessage: String?
     @State private var retentionSliderDraft: Double?
+    @State private var retentionSliderIsEditing = false
 
     var body: some View {
         settingsSplitView
-            .frame(minWidth: 640, idealWidth: 640, minHeight: 592, idealHeight: 592)
+            .frame(width: 640)
+            .background(SettingsWindowChromeConfigurator())
             .onAppear {
                 applyRequestedSettingsDestination()
                 reloadMCPClientCandidates()
@@ -85,7 +87,10 @@ struct SettingsView: View {
     private var settingsSplitView: some View {
         NavigationSplitView {
             List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
-                SettingsSidebarLabel(section: section)
+                SettingsSidebarLabel(
+                    section: section,
+                    isSelected: selectedSettingsSection == section
+                )
                 .tag(section)
             }
             .listStyle(.sidebar)
@@ -97,6 +102,7 @@ struct SettingsView: View {
                 .navigationTitle(effectiveSettingsSection.titleKey)
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar(removing: .sidebarToggle)
     }
 
     @ViewBuilder
@@ -191,26 +197,37 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)
-        .scenePadding()
     }
 
     @ViewBuilder
     private var retentionSlider: some View {
         if #available(macOS 26.0, *) {
-            Slider(
-                value: retentionSliderBinding,
-                in: 0...4,
-                label: { EmptyView() },
-                currentValueLabel: { Text(retentionOption.localizedTitle) },
-                ticks: {
-                    SliderTick("label.day", 0)
-                    SliderTick("label.week", 1)
-                    SliderTick("label.month", 2)
-                    SliderTick("label.year", 3)
-                    SliderTick("label.forever", 4)
-                },
-                onEditingChanged: retentionSliderEditingChanged
-            )
+            VStack(spacing: 4) {
+                Slider(
+                    value: retentionSliderBinding,
+                    in: 0...4,
+                    label: { EmptyView() },
+                    ticks: {
+                        SliderTick("label.day", 0)
+                        SliderTick("label.week", 1)
+                        SliderTick("label.month", 2)
+                        SliderTick("label.year", 3)
+                        SliderTick("label.forever", 4)
+                    },
+                    onEditingChanged: retentionSliderEditingChanged
+                )
+                if retentionSliderIsEditing {
+                    GeometryReader { geometry in
+                        Text(retentionOption.localizedTitle)
+                            .fixedSize()
+                            .position(
+                                x: retentionLabelPosition(in: geometry.size.width),
+                                y: geometry.size.height / 2
+                            )
+                    }
+                    .frame(height: 22)
+                }
+            }
             .frame(maxWidth: .infinity)
             .accessibilityLabel(Text("label.keep_history"))
             .accessibilityValue(Text(retentionOption.localizedTitle))
@@ -309,7 +326,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)
-        .scenePadding()
     }
 
     private var shortcutSettings: some View {
@@ -336,7 +352,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .scenePadding()
     }
 
     private var integrationSettings: some View {
@@ -405,7 +420,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)
-        .scenePadding()
     }
 
     private var subscriptionSettings: some View {
@@ -450,7 +464,6 @@ struct SettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, 76)
         .task {
             await loadLifetimeProduct()
         }
@@ -547,6 +560,7 @@ struct SettingsView: View {
     }
 
     private func retentionSliderEditingChanged(_ isEditing: Bool) {
+        retentionSliderIsEditing = isEditing
         if isEditing {
             retentionSliderDraft = retentionOption.position
         } else if let retentionSliderDraft {
@@ -554,6 +568,10 @@ struct SettingsView: View {
             self.retentionSliderDraft = nil
             requestRetentionDaysChange(option.days)
         }
+    }
+
+    private func retentionLabelPosition(in width: CGFloat) -> CGFloat {
+        min(max(width * retentionOption.position / 4, 36), width - 36)
     }
 
     private var pasteDestinationBinding: Binding<PasteDestination> {
@@ -830,13 +848,14 @@ private struct MCPAdvancedSettingsSheet: View {
 
 private struct SettingsSidebarLabel: View {
     let section: SettingsSidebarSection
+    let isSelected: Bool
 
     var body: some View {
         Label {
             Text(section.titleKey)
         } icon: {
             if section == .integrations {
-                MCPBrandIcon()
+                MCPBrandIcon(isSelected: isSelected)
             } else if let systemImageName = section.systemImageName {
                 Image(systemName: systemImageName)
                     .accessibilityHidden(true)
@@ -849,15 +868,15 @@ private struct SettingsSidebarLabel: View {
 }
 
 private struct MCPBrandIcon: View {
+    let isSelected: Bool
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Image("mcp-brand-base", bundle: .module)
+                svgImage(named: "mcp-brand-base")
                     .resizable()
-                    .renderingMode(.template)
-                Image("mcp-brand-inset", bundle: .module)
+                svgImage(named: "mcp-brand-inset")
                     .resizable()
-                    .renderingMode(.template)
                     .frame(
                         width: geometry.size.width * 0.665,
                         height: geometry.size.height * 0.598
@@ -869,7 +888,44 @@ private struct MCPBrandIcon: View {
             }
         }
         .frame(width: 16, height: 16)
+        .foregroundStyle(isSelected ? Color.white : Color.primary)
         .accessibilityHidden(true)
+    }
+
+    private func svgImage(named name: String) -> Image {
+        guard let url = Bundle.module.url(forResource: name, withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else {
+            preconditionFailure("Missing MCP icon layer: \(name).svg")
+        }
+        image.isTemplate = isSelected
+        return Image(nsImage: image)
+    }
+}
+
+private struct SettingsWindowChromeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        SettingsWindowChromeView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        view.window?.titlebarSeparatorStyle = .none
+    }
+}
+
+private final class SettingsWindowChromeView: NSView {
+    private weak var configuredWindow: NSWindow?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        window.titlebarSeparatorStyle = .none
+        guard configuredWindow !== window else { return }
+
+        var frame = window.frame
+        frame.origin.y += frame.height - 592
+        frame.size = NSSize(width: 640, height: 592)
+        window.setFrame(frame, display: true)
+        configuredWindow = window
     }
 }
 
@@ -1177,7 +1233,6 @@ private struct MCPClientConfigurationSheet: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(24)
         .frame(width: 600)
         .frame(minHeight: 500)
     }
@@ -1417,7 +1472,6 @@ private struct InstalledApplicationPickerSheet: View {
                 }
             }
         }
-        .padding(24)
         .frame(width: 560, height: 560)
         .onAppear {
             if applications.isEmpty {
@@ -1451,7 +1505,6 @@ private struct InstalledApplicationPickerRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -1470,7 +1523,6 @@ private struct ExcludedApplicationRowView: View {
                 }
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
