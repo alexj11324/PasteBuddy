@@ -1942,16 +1942,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection)"))
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
-        XCTAssertTrue(source.contains(".navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 240)"))
+        XCTAssertTrue(source.contains(".navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)"))
         XCTAssertFalse(source.contains("SettingsSidebarToggleRemover"))
         XCTAssertFalse(source.contains("toolbar.removeItem(at: index)"))
         XCTAssertTrue(appSource.contains(".windowToolbarStyle(.unified(showsTitle: false))"))
-        XCTAssertTrue(appSource.contains(".defaultSize(width: 1040, height: 760)"))
+        XCTAssertTrue(appSource.contains(".defaultSize(width: 640, height: 592)"))
         XCTAssertTrue(source.contains("case privacy"))
         XCTAssertTrue(source.contains("case .privacy:"))
         XCTAssertTrue(source.contains("self = .privacy"))
         XCTAssertTrue(source.contains("case .sync:"))
         XCTAssertTrue(source.contains("self = .integrations"))
+        XCTAssertTrue(source.contains("Image(\"mcp-brand-base\", bundle: .module)"))
+        XCTAssertTrue(source.contains("Image(\"mcp-brand-inset\", bundle: .module)"))
+        XCTAssertFalse(source.contains("\"paperclip\""))
         XCTAssertTrue(generalSource.contains("label.launch_at_login"))
         XCTAssertTrue(generalSource.contains("label.panel_style"))
         XCTAssertTrue(generalSource.contains("action.paste_as_plain_text_by"))
@@ -1963,6 +1966,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
+    }
+
+    func testRetentionSliderSupportsIntermediateDurations() {
+        XCTAssertEqual(SettingsRetentionOption.closest(toDays: 14).days, 14)
+        XCTAssertEqual(SettingsRetentionOption.closest(toDays: 21).days, 21)
+        XCTAssertEqual(SettingsRetentionOption.closest(toDays: 60).days, 60)
+        XCTAssertEqual(SettingsRetentionOption.closest(toDays: 120).days, 120)
+        XCTAssertEqual(SettingsRetentionOption.closest(toDays: 150).days, 150)
+        XCTAssertEqual(SettingsRetentionOption.closest(toDays: 0).days, 0)
     }
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {

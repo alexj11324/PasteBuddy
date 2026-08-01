@@ -21,10 +21,11 @@ struct SettingsView: View {
     @State private var lifetimeProduct: StoreProductSummary?
     @State private var subscriptionProductErrorMessage: String?
     @State private var launchAtLoginErrorMessage: String?
+    @State private var retentionSliderDraft: Double?
 
     var body: some View {
         settingsSplitView
-            .frame(minWidth: 1040, idealWidth: 1040, minHeight: 760, idealHeight: 760)
+            .frame(minWidth: 640, idealWidth: 640, minHeight: 592, idealHeight: 592)
             .onAppear {
                 applyRequestedSettingsDestination()
                 reloadMCPClientCandidates()
@@ -89,7 +90,7 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 240)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
             .navigationTitle("label.settings")
         } detail: {
             selectedSettingsDetail
@@ -169,19 +170,7 @@ struct SettingsView: View {
             }
 
             Section("label.keep_history") {
-                Slider(value: retentionSliderBinding, in: 0...4, step: 1)
-                    .frame(width: 480)
-                    .accessibilityLabel(Text("label.keep_history"))
-                    .accessibilityValue(Text(retentionChoice.titleKey))
-                HStack {
-                    ForEach(SettingsRetentionChoice.allCases) { choice in
-                        Text(choice.titleKey)
-                            .frame(maxWidth: .infinity, alignment: choice.alignment)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 480)
+                retentionSlider
 
                 Picker("label.panel_style", selection: $panelDisplayMode) {
                     Text("label.clipboard_shelf").tag(ClipboardPanelDisplayMode.shelf)
@@ -197,12 +186,56 @@ struct SettingsView: View {
                 }
                 TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
                     .font(.caption.monospaced())
-                    .frame(width: 480)
+                    .frame(maxWidth: .infinity)
             }
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)
         .scenePadding()
+    }
+
+    @ViewBuilder
+    private var retentionSlider: some View {
+        if #available(macOS 26.0, *) {
+            Slider(
+                value: retentionSliderBinding,
+                in: 0...4,
+                label: { EmptyView() },
+                currentValueLabel: { Text(retentionOption.localizedTitle) },
+                ticks: {
+                    SliderTick("label.day", 0)
+                    SliderTick("label.week", 1)
+                    SliderTick("label.month", 2)
+                    SliderTick("label.year", 3)
+                    SliderTick("label.forever", 4)
+                },
+                onEditingChanged: retentionSliderEditingChanged
+            )
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel(Text("label.keep_history"))
+            .accessibilityValue(Text(retentionOption.localizedTitle))
+        } else {
+            VStack(spacing: 6) {
+                Slider(
+                    value: retentionSliderBinding,
+                    in: 0...4,
+                    onEditingChanged: retentionSliderEditingChanged
+                )
+                HStack {
+                    ForEach(SettingsRetentionAnchor.allCases) { anchor in
+                        Text(anchor.titleKey)
+                            .frame(maxWidth: .infinity, alignment: anchor.alignment)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Text(retentionOption.localizedTitle)
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel(Text("label.keep_history"))
+            .accessibilityValue(Text(retentionOption.localizedTitle))
+        }
     }
 
     private var privacySettings: some View {
@@ -499,16 +532,28 @@ struct SettingsView: View {
 
     private var retentionSliderBinding: Binding<Double> {
         Binding(
-            get: { Double(SettingsRetentionChoice.closest(to: store.snapshot.storage.retentionDays).rawValue) },
+            get: { retentionSliderDraft ?? retentionOption.position },
             set: { value in
-                guard let choice = SettingsRetentionChoice(rawValue: Int(value.rounded())) else { return }
-                requestRetentionDaysChange(choice.days)
+                retentionSliderDraft = SettingsRetentionOption.closest(toPosition: value).position
             }
         )
     }
 
-    private var retentionChoice: SettingsRetentionChoice {
-        SettingsRetentionChoice.closest(to: store.snapshot.storage.retentionDays)
+    private var retentionOption: SettingsRetentionOption {
+        if let retentionSliderDraft {
+            return SettingsRetentionOption.closest(toPosition: retentionSliderDraft)
+        }
+        return SettingsRetentionOption.closest(toDays: store.snapshot.storage.retentionDays)
+    }
+
+    private func retentionSliderEditingChanged(_ isEditing: Bool) {
+        if isEditing {
+            retentionSliderDraft = retentionOption.position
+        } else if let retentionSliderDraft {
+            let option = SettingsRetentionOption.closest(toPosition: retentionSliderDraft)
+            self.retentionSliderDraft = nil
+            requestRetentionDaysChange(option.days)
+        }
     }
 
     private var pasteDestinationBinding: Binding<PasteDestination> {
@@ -790,12 +835,41 @@ private struct SettingsSidebarLabel: View {
         Label {
             Text(section.titleKey)
         } icon: {
-            Image(systemName: section.systemImageName)
-                .accessibilityHidden(true)
+            if section == .integrations {
+                MCPBrandIcon()
+            } else if let systemImageName = section.systemImageName {
+                Image(systemName: systemImageName)
+                    .accessibilityHidden(true)
+            }
         }
         .font(.system(size: 13))
         .frame(height: 32)
         .accessibilityLabel(Text(section.titleKey))
+    }
+}
+
+private struct MCPBrandIcon: View {
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Image("mcp-brand-base", bundle: .module)
+                    .resizable()
+                    .renderingMode(.template)
+                Image("mcp-brand-inset", bundle: .module)
+                    .resizable()
+                    .renderingMode(.template)
+                    .frame(
+                        width: geometry.size.width * 0.665,
+                        height: geometry.size.height * 0.598
+                    )
+                    .offset(
+                        x: geometry.size.width * 0.011,
+                        y: geometry.size.height * -0.062
+                    )
+            }
+        }
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
     }
 }
 
@@ -895,7 +969,7 @@ private struct SettingsModifierShortcutRow: View {
     }
 }
 
-private enum SettingsRetentionChoice: Int, CaseIterable, Identifiable {
+private enum SettingsRetentionAnchor: Int, CaseIterable, Identifiable {
     case day
     case week
     case month
@@ -903,16 +977,6 @@ private enum SettingsRetentionChoice: Int, CaseIterable, Identifiable {
     case forever
 
     var id: Int { rawValue }
-
-    var days: Int {
-        switch self {
-        case .day: 1
-        case .week: 7
-        case .month: 30
-        case .year: 365
-        case .forever: 0
-        }
-    }
 
     var titleKey: LocalizedStringKey {
         switch self {
@@ -932,8 +996,52 @@ private enum SettingsRetentionChoice: Int, CaseIterable, Identifiable {
         }
     }
 
-    static func closest(to days: Int) -> Self {
-        allCases.min { abs($0.days - days) < abs($1.days - days) } ?? .forever
+}
+
+struct SettingsRetentionOption: Equatable {
+    let days: Int
+    let position: Double
+    private let components: DateComponents?
+
+    static let all: [Self] =
+        (1...6).map { option(days: $0, position: Double($0 - 1) / 6, day: $0) }
+        + (1...3).map { option(days: $0 * 7, position: 1 + Double($0 - 1) / 3, week: $0) }
+        + (1...11).map { option(days: $0 * 30, position: 2 + Double($0 - 1) / 11, month: $0) }
+        + (1...10).map { option(days: $0 * 365, position: 3 + Double($0 - 1) / 10, year: $0) }
+        + [Self(days: 0, position: 4, components: nil)]
+
+    var localizedTitle: String {
+        guard let components else {
+            return NSLocalizedString("label.forever", comment: "")
+        }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.maximumUnitCount = 1
+        return formatter.string(from: components) ?? NSLocalizedString("label.forever", comment: "")
+    }
+
+    static func closest(toDays days: Int) -> Self {
+        if days == 0 { return all[all.count - 1] }
+        return all.dropLast().min { abs($0.days - days) < abs($1.days - days) } ?? all[0]
+    }
+
+    static func closest(toPosition position: Double) -> Self {
+        all.min { abs($0.position - position) < abs($1.position - position) } ?? all[0]
+    }
+
+    private static func option(
+        days: Int,
+        position: Double,
+        day: Int? = nil,
+        week: Int? = nil,
+        month: Int? = nil,
+        year: Int? = nil
+    ) -> Self {
+        Self(
+            days: days,
+            position: position,
+            components: DateComponents(year: year, month: month, day: day, weekOfMonth: week)
+        )
     }
 }
 
@@ -1070,7 +1178,7 @@ private struct MCPClientConfigurationSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 680)
+        .frame(width: 600)
         .frame(minHeight: 500)
     }
 
@@ -1447,7 +1555,7 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         }
     }
 
-    var systemImageName: String {
+    var systemImageName: String? {
         switch self {
         case .general:
             "gearshape"
@@ -1456,7 +1564,7 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
         case .shortcuts:
             "keyboard"
         case .integrations:
-            "paperclip"
+            nil
         case .subscription:
             "shield"
         }
