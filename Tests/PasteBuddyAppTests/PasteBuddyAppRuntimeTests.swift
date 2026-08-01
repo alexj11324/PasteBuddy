@@ -1990,8 +1990,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let privacySource = String(source[privacyStart.lowerBound..<shortcutsStart.lowerBound])
 
         XCTAssertTrue(source.contains("NavigationSplitView"))
-        XCTAssertTrue(source.contains(".toolbarBackgroundVisibility(.hidden, for: .windowToolbar)"))
-        XCTAssertTrue(source.contains(".toolbarBackground(.hidden, for: .windowToolbar)"))
+        XCTAssertTrue(source.contains(".toolbarBackgroundVisibility(.visible, for: .windowToolbar)"))
+        XCTAssertTrue(source.contains(".toolbarBackground(.visible, for: .windowToolbar)"))
+        XCTAssertFalse(source.contains(".toolbarBackgroundVisibility(.hidden, for: .windowToolbar)"))
+        XCTAssertFalse(source.contains(".toolbarBackground(.hidden, for: .windowToolbar)"))
         XCTAssertTrue(source.contains("List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection)"))
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))

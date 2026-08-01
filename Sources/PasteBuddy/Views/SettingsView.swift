@@ -87,10 +87,10 @@ struct SettingsView: View {
     private var settingsSplitView: some View {
         if #available(macOS 15.0, *) {
             settingsSplitViewContent
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         } else {
             settingsSplitViewContent
-                .toolbarBackground(.hidden, for: .windowToolbar)
+                .toolbarBackground(.visible, for: .windowToolbar)
         }
     }
 
