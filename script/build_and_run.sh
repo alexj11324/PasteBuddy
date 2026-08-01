@@ -21,6 +21,13 @@ esac
 APP_NAME="${PASTEBUDDY_APP_NAME:-$DEFAULT_APP_NAME}"
 BUNDLE_ID="${PASTEBUDDY_BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
 MIN_SYSTEM_VERSION="14.5"
+MACOS_SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
+MACOS_SDK_VERSION="$(/usr/bin/xcrun --sdk macosx --show-sdk-version)"
+[[ -d "$MACOS_SDK_PATH" ]] || {
+  echo "Could not resolve the macOS SDK: $MACOS_SDK_PATH" >&2
+  exit 1
+}
+export SDKROOT="$MACOS_SDK_PATH"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INTEGRATION_BRANCH="codex/integrated-delivery"
@@ -55,6 +62,13 @@ SWIFT_PACKAGE_ARGS=()
 if [[ -n "${PASTEBUDDY_SWIFT_SCRATCH_PATH:-}" ]]; then
   SWIFT_PACKAGE_ARGS+=(--scratch-path "$PASTEBUDDY_SWIFT_SCRATCH_PATH")
 fi
+SWIFT_PACKAGE_ARGS+=(
+  --sdk "$MACOS_SDK_PATH"
+  -Xlinker -platform_version
+  -Xlinker macos
+  -Xlinker "$MIN_SYSTEM_VERSION"
+  -Xlinker "$MACOS_SDK_VERSION"
+)
 
 die() {
   echo "$*" >&2
@@ -404,6 +418,9 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 /usr/bin/ditto --norsrc --noextattr "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+LINKED_SDK_VERSION="$(/usr/bin/xcrun vtool -show-build "$APP_BINARY" | /usr/bin/awk '/^[[:space:]]+sdk / { print $2; exit }')"
+[[ "$LINKED_SDK_VERSION" == "$MACOS_SDK_VERSION" ]] \
+  || die "PasteBuddy linked against macOS SDK $LINKED_SDK_VERSION; expected $MACOS_SDK_VERSION."
 [[ -x "$MCP_BUILD_BINARY" ]] || die "Missing PasteBuddyMCP executable: $MCP_BUILD_BINARY"
 /usr/bin/ditto --norsrc --noextattr "$MCP_BUILD_BINARY" "$APP_MACOS/PasteBuddyMCP"
 chmod +x "$APP_MACOS/PasteBuddyMCP"
