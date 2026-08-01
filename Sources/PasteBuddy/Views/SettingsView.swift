@@ -109,15 +109,10 @@ struct SettingsView: View {
             .navigationTitle("label.settings")
         } detail: {
             selectedSettingsDetail
+                .navigationTitle(effectiveSettingsSection.titleKey)
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar(removing: .sidebarToggle)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Text(effectiveSettingsSection.titleKey)
-                    .font(.title2.weight(.semibold))
-            }
-        }
     }
 
     @ViewBuilder
@@ -221,7 +216,7 @@ struct SettingsView: View {
                 value: retentionSliderBinding,
                 in: 0...4,
                 label: {
-                    Text("label.keep_history")
+                    EmptyView()
                 },
                 currentValueLabel: {
                     Text(retentionOption.localizedTitle)
@@ -235,7 +230,6 @@ struct SettingsView: View {
                 },
                 onEditingChanged: retentionSliderEditingChanged
             )
-            .labelsHidden()
             .frame(maxWidth: .infinity)
             .accessibilityLabel(Text("label.keep_history"))
             .accessibilityValue(Text(retentionOption.localizedTitle))

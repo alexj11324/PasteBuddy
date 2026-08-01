@@ -120,7 +120,7 @@ struct PasteBuddyApp: App {
             )
         }
         .defaultSize(width: 640, height: 592)
-        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        .windowToolbarStyle(.unified(showsTitle: true))
     }
 
     private func configureAppDelegate() {
