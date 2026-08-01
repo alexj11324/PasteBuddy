@@ -56,6 +56,20 @@ public enum PasteboardWriter {
     }
 
     @discardableResult
+    public static func copyText(_ text: String) -> Bool {
+        copyText(text, to: .general)
+    }
+
+    @discardableResult
+    static func copyText(_ text: String, to pasteboard: NSPasteboard) -> Bool {
+        pasteboard.clearContents()
+        return finalizeInternalCopy(
+            pasteboard.setString(text, forType: .string),
+            on: pasteboard
+        )
+    }
+
+    @discardableResult
     public static func copy(
         _ item: ClipboardItem,
         format: PasteFormat = .original,

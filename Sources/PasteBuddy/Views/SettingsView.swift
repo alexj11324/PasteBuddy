@@ -1,9 +1,9 @@
-import AppKit
 import Foundation
 import PasteBuddyCore
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.openURL) private var openURL
     @Bindable var store: PasteBuddyStore
     @Bindable var irohSync: IrohClipboardSyncService
     @Binding var panelDisplayMode: ClipboardPanelDisplayMode
@@ -26,8 +26,7 @@ struct SettingsView: View {
 
     var body: some View {
         settingsSplitView
-            .frame(width: 640)
-            .background(SettingsWindowChromeConfigurator())
+            .frame(width: 640, height: 592)
             .onAppear {
                 applyRequestedSettingsDestination()
                 reloadMCPClientCandidates()
@@ -101,7 +100,6 @@ struct SettingsView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
-            .navigationTitle("label.settings")
             .toolbar(removing: .sidebarToggle)
         } detail: {
             selectedSettingsDetail
@@ -779,7 +777,7 @@ struct SettingsView: View {
               let url = URL(string: urlString) else {
             return
         }
-        NSWorkspace.shared.open(url)
+        openURL(url)
         mcpStatusMessage = localized("format.opened_mcp_install_link_for", target.displayName)
     }
 
@@ -800,8 +798,7 @@ struct SettingsView: View {
     }
 
     private func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        PasteboardWriter.copyText(text)
     }
 
     private func localized(_ key: String) -> String {
@@ -900,9 +897,11 @@ private struct MCPBrandIcon: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                svgImage(named: "mcp-brand-base")
+                Image("mcp-brand-base", bundle: .module)
+                    .renderingMode(isSelected ? .template : .original)
                     .resizable()
-                svgImage(named: "mcp-brand-inset")
+                Image("mcp-brand-inset", bundle: .module)
+                    .renderingMode(isSelected ? .template : .original)
                     .resizable()
                     .frame(
                         width: geometry.size.width * 0.665,
@@ -917,70 +916,6 @@ private struct MCPBrandIcon: View {
         .frame(width: 16, height: 16)
         .foregroundStyle(isSelected ? Color.white : Color.primary)
         .accessibilityHidden(true)
-    }
-
-    private func svgImage(named name: String) -> Image {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "svg"),
-              let image = NSImage(contentsOf: url) else {
-            preconditionFailure("Missing MCP icon layer: \(name).svg")
-        }
-        image.isTemplate = isSelected
-        return Image(nsImage: image)
-    }
-}
-
-private struct SettingsWindowChromeConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        SettingsWindowChromeView()
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        guard let window = view.window else { return }
-        SettingsWindowChromeView.configureToolbar(in: window)
-        SettingsWindowChromeView.configureToolbarAfterSwiftUIUpdate(in: window)
-    }
-}
-
-private final class SettingsWindowChromeView: NSView {
-    private weak var configuredWindow: NSWindow?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let window else { return }
-        Self.configureToolbar(in: window)
-        Self.configureToolbarAfterSwiftUIUpdate(in: window)
-        guard configuredWindow !== window else { return }
-
-        var frame = window.frame
-        frame.origin.y += frame.height - 592
-        frame.size = NSSize(width: 640, height: 592)
-        window.setFrame(frame, display: true)
-        configuredWindow = window
-    }
-
-    @MainActor
-    static func configureToolbar(in window: NSWindow) {
-        window.titlebarSeparatorStyle = .none
-        guard let toolbar = window.toolbar else { return }
-
-        toolbar.centeredItemIdentifiers = []
-
-        if #available(macOS 15.0, *) {
-            let visibleIdentifiers = SettingsToolbarConfiguration.visibleIdentifiers(
-                from: toolbar.itemIdentifiers
-            )
-            if visibleIdentifiers != toolbar.itemIdentifiers {
-                toolbar.itemIdentifiers = visibleIdentifiers
-            }
-        }
-    }
-
-    @MainActor
-    static func configureToolbarAfterSwiftUIUpdate(in window: NSWindow) {
-        Task { @MainActor [weak window] in
-            guard let window else { return }
-            configureToolbar(in: window)
-        }
     }
 }
 
@@ -1578,24 +1513,6 @@ private struct ExcludedApplicationRowView: View {
                 }
             }
         }
-    }
-}
-
-private struct InstalledApplicationIcon: View {
-    var application: InstalledApplication?
-
-    var body: some View {
-        Image(nsImage: icon)
-            .resizable()
-            .frame(width: 24, height: 24)
-    }
-
-    private var icon: NSImage {
-        let image = application
-            .map { NSWorkspace.shared.icon(forFile: $0.url.path) }
-            ?? NSWorkspace.shared.icon(for: .applicationBundle)
-        image.size = NSSize(width: 24, height: 24)
-        return image
     }
 }
 

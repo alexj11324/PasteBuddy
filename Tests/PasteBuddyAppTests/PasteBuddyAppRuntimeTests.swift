@@ -1994,17 +1994,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
         XCTAssertTrue(source.contains(".scrollContentBackground(.hidden)"))
         XCTAssertTrue(source.contains(".navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)"))
-        XCTAssertFalse(source.contains("SettingsSidebarToggleRemover"))
-        XCTAssertFalse(source.contains("toolbar.removeItem(at: index)"))
+        XCTAssertFalse(source.contains("import AppKit"))
+        XCTAssertFalse(source.contains("NSViewRepresentable"))
+        XCTAssertFalse(source.contains("NSWindow"))
+        XCTAssertFalse(source.contains("NSToolbar"))
+        XCTAssertFalse(source.contains("SettingsWindowChromeConfigurator"))
+        XCTAssertFalse(source.contains("SettingsToolbarConfiguration"))
         XCTAssertTrue(appSource.contains(".windowToolbarStyle(.unified(showsTitle: true))"))
         XCTAssertFalse(source.contains("ToolbarItem(placement: .navigation)"))
+        XCTAssertFalse(source.contains(".navigationTitle(\"label.settings\")"))
         XCTAssertTrue(source.contains(".navigationTitle(effectiveSettingsSection.titleKey)"))
-        XCTAssertTrue(source.contains("toolbar.centeredItemIdentifiers = []"))
-        XCTAssertTrue(source.contains("SettingsToolbarConfiguration.visibleIdentifiers("))
-        XCTAssertTrue(source.contains("toolbar.itemIdentifiers = visibleIdentifiers"))
-        XCTAssertTrue(source.contains("configureToolbarAfterSwiftUIUpdate(in: window)"))
         XCTAssertTrue(appSource.contains(".defaultSize(width: 640, height: 592)"))
-        XCTAssertTrue(source.contains("frame.size = NSSize(width: 640, height: 592)"))
+        XCTAssertTrue(source.contains(".frame(width: 640, height: 592)"))
         let sidebarToggleRemoval = try XCTUnwrap(source.range(of: ".toolbar(removing: .sidebarToggle)"))
         XCTAssertLessThan(sidebarToggleRemoval.lowerBound, generalStart.lowerBound)
         XCTAssertTrue(source.contains("SliderTick(0)"))
@@ -2019,8 +2020,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("self = .privacy"))
         XCTAssertTrue(source.contains("case .sync:"))
         XCTAssertTrue(source.contains("self = .integrations"))
-        XCTAssertTrue(source.contains("svgImage(named: \"mcp-brand-base\")"))
-        XCTAssertTrue(source.contains("svgImage(named: \"mcp-brand-inset\")"))
+        XCTAssertTrue(source.contains("Image(\"mcp-brand-base\", bundle: .module)"))
+        XCTAssertTrue(source.contains("Image(\"mcp-brand-inset\", bundle: .module)"))
+        XCTAssertTrue(source.contains(".renderingMode(isSelected ? .template : .original)"))
         XCTAssertFalse(source.contains("\"paperclip\""))
         XCTAssertTrue(generalSource.contains("label.launch_at_login"))
         XCTAssertTrue(generalSource.contains("label.panel_style"))
@@ -2042,20 +2044,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(SettingsRetentionOption.closest(toDays: 120).days, 120)
         XCTAssertEqual(SettingsRetentionOption.closest(toDays: 150).days, 150)
         XCTAssertEqual(SettingsRetentionOption.closest(toDays: 0).days, 0)
-    }
-
-    func testSettingsToolbarConfigurationRemovesEverySidebarToggleIdentifier() {
-        let identifiers: [NSToolbarItem.Identifier] = [
-            .init("leading-item"),
-            .toggleSidebar,
-            .init("com.apple.SwiftUI.navigationSplitView.toggleSidebar"),
-            .init("trailing-item")
-        ]
-
-        XCTAssertEqual(
-            SettingsToolbarConfiguration.visibleIdentifiers(from: identifiers),
-            [.init("leading-item"), .init("trailing-item")]
-        )
     }
 
     func testCaptureRuleAppValuesUseInstalledApplicationPicker() throws {

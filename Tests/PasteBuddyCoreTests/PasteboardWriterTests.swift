@@ -6,6 +6,17 @@ import XCTest
 
 @MainActor
 final class PasteboardWriterTests: XCTestCase {
+    func testCopyTextWritesStringAndInternalReceipt() throws {
+        let pasteboard = try XCTUnwrap(
+            NSPasteboard(name: NSPasteboard.Name("PasteBuddyCopyText-\(UUID().uuidString)"))
+        )
+        defer { pasteboard.releaseGlobally() }
+
+        XCTAssertTrue(PasteboardWriter.copyText("MCP configuration", to: pasteboard))
+        XCTAssertEqual(pasteboard.string(forType: .string), "MCP configuration")
+        XCTAssertTrue(PasteboardWriter.containsInternalCopyMarker(pasteboard))
+    }
+
     func testClipboardMonitorRunsInjectedOCRAfterImageCaptureAndStoresSearchableMetadata() async throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
