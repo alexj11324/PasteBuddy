@@ -154,18 +154,21 @@ Snapshot field: `pinboardInvitationInbox`
 1. Create an iCloud container, for example `iCloud.com.alexjiang.PasteBuddy`.
 2. Add iCloud + CloudKit capability to the signed macOS target.
 3. Add matching entitlements when producing a signed app bundle.
-4. Replace the SwiftPM debug bundle flow with an Xcode or signing pipeline that
-   can apply those entitlements.
-5. Deploy the CloudKit public database schema for public identities and
+4. Provide a matching macOS provisioning profile through
+   `PASTEBUDDY_PROVISIONING_PROFILE`; `script/build_and_run.sh` applies the
+   CloudKit entitlements only when that profile is present.
+5. Encrypted history sync uses the private CloudKit database and a symmetric
+   key stored in synchronizable iCloud Keychain. Users must enable iCloud
+   Keychain on every participating device.
+6. Deploy the CloudKit public database schema for public identities and
    invitation packages, then wire signed-app identity, push notification
    entitlements/background modes, system notification callback registration,
    account error handling, and signed-app account/corruption/lost-key recovery
    UI before sending real shared-pinboard invitations.
-6. Wire `CloudKitRemoteRecordTransport` into the signed app with the production
-   container identifier and account/error recovery UI.
+7. Add account/corruption/lost-key recovery UI before treating shared pinboard
+   invitations as production-ready.
 
-An entitlement template is available at
-`Support/Entitlements/PasteBuddy.entitlements.example`.
+The signed entitlement file is `Support/Entitlements/PasteBuddy.entitlements`.
 
 ## Security Rules
 

@@ -31,6 +31,7 @@ the existing settings, permission, and StoreKit owners above.
 | Ready/success | `checkmark.circle.fill` | Explicit ready message; never success by color/icon alone |
 | Warning/failure | `exclamationmark.triangle.fill` | Localized error plus recovery action |
 | Unlock paid features | `lock.open.fill` | Paywall title and entitlement state in text |
+| Subscription sidebar | `shield` | “Subscription” text label; sidebar state is never icon-only |
 | Monthly plan | `calendar` | StoreKit display name and localized price |
 | Annual plan | `calendar.badge.clock` | StoreKit display name and localized price |
 | Lifetime plan | `infinity` | StoreKit display name and localized price |

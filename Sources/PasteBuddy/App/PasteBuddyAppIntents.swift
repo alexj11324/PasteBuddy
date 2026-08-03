@@ -37,13 +37,16 @@ struct PasteBuddyCopyFirstMatchIntent: AppIntent {
         let store = PasteBuddyStore()
         await store.loadAsync()
         let service = AutomationActionService(store: store)
-        let result = try service.transferFirstMatchingItem(
-            query: query,
-            format: plainText == true ? .plainText : store.defaultPasteFormat,
+        let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
+        let item = try await store.hydratedItemForTransfer(
+            service.firstMatchingItem(query: query)
+        )
+        PasteboardWriter.copy(item, format: format)
+        let result = AutomationItemTransferResult(
+            item: item,
+            format: format,
             destination: .clipboard
-        ) { item, format in
-            PasteboardWriter.copy(item, format: format)
-        }
+        )
         return .result(dialog: IntentDialog(stringLiteral: result.displaySummary))
     }
 }
@@ -64,7 +67,9 @@ struct PasteBuddyPasteFirstMatchIntent: AppIntent {
         await store.loadAsync()
         let service = AutomationActionService(store: store)
         let format: PasteFormat = plainText == true ? .plainText : store.defaultPasteFormat
-        let item = try service.firstMatchingItem(query: query)
+        let item = try await store.hydratedItemForTransfer(
+            service.firstMatchingItem(query: query)
+        )
         let result = AutomationItemTransferResult(
             item: item,
             format: format,

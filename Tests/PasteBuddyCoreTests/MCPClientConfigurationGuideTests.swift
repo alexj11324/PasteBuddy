@@ -2,6 +2,40 @@ import XCTest
 @testable import PasteBuddyCore
 
 final class MCPClientConfigurationGuideTests: XCTestCase {
+    func testAuthenticatedGuideInjectsTokenIntoConfigurationAndCopiedServerCommand() throws {
+        let token = "private-token"
+        let guide = MCPClientConfigurationGuideBuilder.packagedGuide(
+            for: .claude,
+            executablePath: "/Applications/PasteBuddy.app/Contents/MacOS/PasteBuddyMCP",
+            authenticationToken: token
+        )
+
+        let configuration = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(guide.configurationSnippet.utf8)) as? [String: Any]
+        )
+        let servers = try XCTUnwrap(configuration["mcpServers"] as? [String: Any])
+        let pasteBuddy = try XCTUnwrap(servers["pastebuddy"] as? [String: Any])
+        let environment = try XCTUnwrap(pasteBuddy["env"] as? [String: String])
+
+        XCTAssertEqual(environment[MCPAuthenticationToken.environmentVariable], token)
+        XCTAssertEqual(
+            guide.serverCommand,
+            "env \(MCPAuthenticationToken.environmentVariable)=\(token) /Applications/PasteBuddy.app/Contents/MacOS/PasteBuddyMCP"
+        )
+        XCTAssertNil(guide.installationURL)
+        XCTAssertNil(guide.installationCommand)
+        XCTAssertFalse(guide.arguments.contains(token))
+    }
+
+    func testMCPAuthenticationTokenUsesExactConstantTimeComparison() {
+        let token = Data(repeating: 0x5A, count: 32)
+        let encoded = MCPAuthenticationToken.encoded(token)
+
+        XCTAssertTrue(MCPAuthenticationToken.constantTimeMatches(encoded, token: token))
+        XCTAssertFalse(MCPAuthenticationToken.constantTimeMatches(encoded + "x", token: token))
+        XCTAssertFalse(MCPAuthenticationToken.constantTimeMatches(String(encoded.dropLast()) + "A", token: token))
+    }
+
     func testCodexGuideEmitsTomlConfiguration() {
         let guide = MCPClientConfigurationGuideBuilder.developmentGuide(
             for: .codex,

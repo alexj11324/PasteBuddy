@@ -5,6 +5,18 @@ import CloudKit
 #endif
 
 final class EncryptionServiceTests: XCTestCase {
+    func testCloudSyncKeyMaterialUsesSynchronizableKeychainStorage() {
+        let store = KeychainKeyMaterialStore(
+            service: "com.pastebuddy.tests.cloud-sync",
+            account: UUID().uuidString,
+            synchronizesAcrossDevices: true,
+            accessGroup: "TEAM.com.alexjiang.PasteBuddy.shared"
+        )
+
+        XCTAssertTrue(store.synchronizesAcrossDevices)
+        XCTAssertEqual(store.accessGroup, "TEAM.com.alexjiang.PasteBuddy.shared")
+    }
+
     private func makeTemporaryStoreFile(
         filename: String = "clipboard.pbenc"
     ) throws -> URL {
@@ -528,6 +540,46 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(Set(download.snapshot.items.map(\.id)), Set([localItem.id, remoteItem.id]))
         XCTAssertEqual(download.report.addedItems, 1)
         XCTAssertEqual(download.snapshot.sync.lastImportedPackageID, upload.record.packageID)
+        let repeatedDownload = try await syncService.downloadLatest(into: download.snapshot)
+        XCTAssertNil(repeatedDownload)
+    }
+
+    func testCloudSyncImporterDecryptsLegacyPrimaryKeyPackages() throws {
+        let legacyService = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "local-primary-v1"
+        )
+        let cloudService = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "icloud-keychain-v1"
+        )
+        defer {
+            try? legacyService.deleteKeyForTesting()
+            try? cloudService.deleteKeyForTesting()
+        }
+
+        let remoteItem = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Legacy Mac",
+            contentType: .text,
+            title: "Legacy Cloud Snapshot",
+            payload: ClipboardPayload(text: "legacy encrypted payload")
+        )
+        let sync = readySyncConfiguration()
+        let package = try CloudSyncPackageBuilder(encryptor: legacyService).makeUploadPackage(
+            from: PasteBuddySnapshot(items: [remoteItem], sync: sync)
+        )
+
+        let result = try CloudSyncPackageImporter(
+            decryptor: cloudService,
+            legacyDecryptor: legacyService
+        ).importPackage(package, into: PasteBuddySnapshot(sync: sync))
+
+        XCTAssertEqual(result.snapshot.items.first?.id, remoteItem.id)
+        XCTAssertEqual(result.snapshot.items.first?.payload.text, "legacy encrypted payload")
+        XCTAssertEqual(result.snapshot.sync.lastImportedPackageID, package.id)
     }
 
     func testCloudKitSyncServiceRejectsBlockedReadinessBeforeRemoteSave() async throws {

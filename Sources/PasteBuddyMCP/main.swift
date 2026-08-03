@@ -1,299 +1,105 @@
 import Foundation
 import PasteBuddyCore
 
-@MainActor
 private final class PasteBuddyMCPServer {
-    private let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .secondsSince1970
-        encoder.outputFormatting = [.sortedKeys]
-        return encoder
-    }()
-
     func run() async {
+        let token = ProcessInfo.processInfo.environment[MCPAuthenticationToken.environmentVariable]
         while let line = readLine() {
-            guard let data = line.data(using: .utf8),
-                  let request = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let request = line.data(using: .utf8) else { continue }
+            guard let token else {
+                if let response = errorResponse(for: request, message: "PasteBuddy MCP authentication is not configured.") {
+                    write(response)
+                }
                 continue
             }
-            guard request["id"] != nil else {
-                continue
-            }
-            let response = await handle(request)
+            guard let response = await proxy(request, token: token) else { continue }
             write(response)
         }
     }
 
-    private func handle(_ request: [String: Any]) async -> [String: Any] {
-        let id = request["id"] ?? NSNull()
-        guard let method = request["method"] as? String else {
-            return errorResponse(id: id, code: -32600, message: "Invalid JSON-RPC request.")
-        }
-
+    private func proxy(_ body: Data, token: String) async -> Data? {
         do {
-            switch method {
-            case "initialize":
-                return successResponse(id: id, result: initializeResult())
-            case "ping":
-                return successResponse(id: id, result: [:])
-            case "tools/list":
-                return successResponse(id: id, result: ["tools": try await toolDefinitions()])
-            case "tools/call":
-                return successResponse(id: id, result: try await callTool(params: request["params"] as? [String: Any] ?? [:]))
+            guard let tokenData = Data(base64Encoded: token), tokenData.count == 32,
+                  let sessionToken = try await authenticateServer(token: tokenData) else {
+                return errorResponse(for: body, message: "PasteBuddy MCP server authentication failed.")
+            }
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:18789/mcp")!)
+            request.httpMethod = "POST"
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+            request.setValue(sessionToken, forHTTPHeaderField: "X-PasteBuddy-Session")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let response = response as? HTTPURLResponse else {
+                return errorResponse(for: body, message: "PasteBuddy MCP returned an invalid HTTP response.")
+            }
+            switch response.statusCode {
+            case 200:
+                return data
+            case 202:
+                return nil
+            case 401:
+                return errorResponse(for: body, message: "PasteBuddy MCP authentication was rejected.")
             default:
-                return errorResponse(id: id, code: -32601, message: "Method not found: \(method).")
+                return errorResponse(for: body, message: "PasteBuddy MCP is unavailable (HTTP \(response.statusCode)).")
             }
         } catch {
-            return errorResponse(id: id, code: -32000, message: error.localizedDescription)
+            return errorResponse(for: body, message: "PasteBuddy MCP is unavailable. Open PasteBuddy and enable Agent Connection.")
         }
     }
 
-    private func initializeResult() -> [String: Any] {
-        [
-            "protocolVersion": "2025-11-25",
-            "capabilities": [
-                "tools": [
-                    "listChanged": false
-                ]
-            ],
-            "serverInfo": [
-                "name": "pastebuddy-mcp",
-                "title": "PasteBuddy Local MCP",
-                "version": "0.1.0"
-            ],
-            "instructions": "Local-first PasteBuddy MCP server. Turn on Agent Connection in PasteBuddy Settings before calling tools. Tool details are exposed here for the connected Agent, not in the user settings UI."
-        ]
+    private func authenticateServer(token: Data) async throws -> String? {
+        let url = URL(string: "http://127.0.0.1:18789/mcp/auth")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (nonceResponseData, nonceResponse) = try await URLSession.shared.data(for: request)
+        guard (nonceResponse as? HTTPURLResponse)?.statusCode == 200,
+              let nonceObject = try JSONSerialization.jsonObject(with: nonceResponseData) as? [String: Any],
+              let nonceValue = nonceObject["serverNonce"] as? String,
+              let nonce = Data(base64Encoded: nonceValue), nonce.count == 32 else { return nil }
+
+        let challenge = try MCPAuthenticationToken.randomChallenge()
+        request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(nonceValue, forHTTPHeaderField: "X-PasteBuddy-Server-Nonce")
+        request.setValue(challenge.base64EncodedString(), forHTTPHeaderField: "X-PasteBuddy-Challenge")
+        request.setValue(
+            MCPAuthenticationToken.clientProof(challenge: nonce + challenge, token: token),
+            forHTTPHeaderField: "X-PasteBuddy-Client-Proof"
+        )
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let proof = object["proof"] as? String,
+              let sessionToken = object["sessionToken"] as? String,
+              let sessionData = Data(base64Encoded: sessionToken), sessionData.count == 32 else { return nil }
+        guard MCPAuthenticationToken.constantTimeMatches(
+            proof,
+            expected: MCPAuthenticationToken.serverProof(
+                challenge: nonce + challenge + sessionData,
+                token: token
+            )
+        ) else { return nil }
+        return sessionToken
     }
 
-    private func toolDefinitions() async throws -> [[String: Any]] {
-        let store = await loadStore()
-        guard store.snapshot.mcp.isServerEnabled else { return [] }
-
-        return MCPToolName.allCases
-            .filter { store.snapshot.mcp.enabledTools.contains($0) }
-            .map(toolDefinition(for:))
-    }
-
-    private func toolDefinition(for tool: MCPToolName) -> [String: Any] {
-        switch tool {
-        case .searchHistory:
-            return [
-                "name": tool.rawValue,
-                "title": tool.displayName,
-                "description": "Search local PasteBuddy history and return metadata summaries without raw clipboard payloads.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "query": ["type": "string"],
-                        "limit": ["type": "integer", "minimum": 1, "maximum": 25]
-                    ],
-                    "required": ["query"],
-                    "additionalProperties": false
-                ]
-            ]
-        case .retrieveItem:
-            return [
-                "name": tool.rawValue,
-                "title": tool.displayName,
-                "description": "Retrieve one local clipboard item payload by ID. This tool is disabled by default and must be explicitly enabled because it can return clipboard text, URLs, file paths, OCR text, and optionally image bytes.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "itemID": ["type": "string"],
-                        "includeImageData": ["type": "boolean"]
-                    ],
-                    "required": ["itemID"],
-                    "additionalProperties": false
-                ]
-            ]
-        case .listPinboards:
-            return [
-                "name": tool.rawValue,
-                "title": tool.displayName,
-                "description": "List local PasteBuddy pinboards with item counts and sharing state.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [:],
-                    "additionalProperties": false
-                ]
-            ]
-        case .createPinboard:
-            return [
-                "name": tool.rawValue,
-                "title": tool.displayName,
-                "description": "Create a local PasteBuddy pinboard.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "name": ["type": "string"],
-                        "colorHex": ["type": "string"]
-                    ],
-                    "required": ["name"],
-                    "additionalProperties": false
-                ]
-            ]
-        case .pinFirstMatch:
-            return [
-                "name": tool.rawValue,
-                "title": tool.displayName,
-                "description": "Search local history and pin the first matching item to a pinboard.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "query": ["type": "string"],
-                        "pinboardID": ["type": "string"],
-                        "pinboardName": ["type": "string"]
-                    ],
-                    "required": ["query"],
-                    "additionalProperties": false
-                ]
-            ]
-        }
-    }
-
-    private func callTool(params: [String: Any]) async throws -> [String: Any] {
-        guard let name = params["name"] as? String,
-              let tool = MCPToolName(rawValue: name) else {
-            throw MCPToolServiceError.missingArgument("name")
-        }
-        let arguments = params["arguments"] as? [String: Any] ?? [:]
-        let store = await loadStore()
-        let service = MCPToolService(store: store)
-
-        do {
-            let payload: Encodable
-            switch tool {
-            case .searchHistory:
-                payload = try service.searchHistory(
-                    query: requiredString("query", in: arguments),
-                    limit: intValue("limit", in: arguments) ?? 5
-                )
-            case .retrieveItem:
-                payload = try service.retrieveItem(
-                    itemID: try requiredUUID("itemID", in: arguments),
-                    includeImageData: boolValue("includeImageData", in: arguments) ?? false
-                )
-            case .listPinboards:
-                payload = try service.listPinboards()
-            case .createPinboard:
-                payload = try service.createPinboard(
-                    name: requiredString("name", in: arguments),
-                    colorHex: arguments["colorHex"] as? String
-                )
-            case .pinFirstMatch:
-                payload = try service.pinFirstMatch(
-                    query: requiredString("query", in: arguments),
-                    pinboardID: uuidValue("pinboardID", in: arguments),
-                    pinboardName: arguments["pinboardName"] as? String
-                )
-            }
-
-            await store.flushPendingSave()
-            let json = try jsonString(payload)
-            return [
-                "content": [
-                    [
-                        "type": "text",
-                        "text": json
-                    ]
-                ]
-            ]
-        } catch {
-            await store.flushPendingSave()
-            throw error
-        }
-    }
-
-    private func loadStore() async -> PasteBuddyStore {
-        let store = PasteBuddyStore()
-        await store.loadAsync()
-        return store
-    }
-
-    private func requiredString(_ name: String, in arguments: [String: Any]) throws -> String {
-        guard let value = arguments[name] as? String,
-              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw MCPToolServiceError.missingArgument(name)
-        }
-        return value
-    }
-
-    private func intValue(_ name: String, in arguments: [String: Any]) -> Int? {
-        if let value = arguments[name] as? Int {
-            return value
-        }
-        if let value = arguments[name] as? NSNumber {
-            return value.intValue
-        }
-        return nil
-    }
-
-    private func uuidValue(_ name: String, in arguments: [String: Any]) -> UUID? {
-        guard let value = arguments[name] as? String else { return nil }
-        return UUID(uuidString: value)
-    }
-
-    private func requiredUUID(_ name: String, in arguments: [String: Any]) throws -> UUID {
-        guard let value = uuidValue(name, in: arguments) else {
-            throw MCPToolServiceError.missingArgument(name)
-        }
-        return value
-    }
-
-    private func boolValue(_ name: String, in arguments: [String: Any]) -> Bool? {
-        if let value = arguments[name] as? Bool {
-            return value
-        }
-        if let value = arguments[name] as? NSNumber {
-            return value.boolValue
-        }
-        return nil
-    }
-
-    private func jsonString(_ value: Encodable) throws -> String {
-        let data = try encoder.encode(AnyEncodable(value))
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    private func successResponse(id: Any, result: [String: Any]) -> [String: Any] {
-        [
+    private func errorResponse(for request: Data, message: String) -> Data? {
+        guard let object = try? JSONSerialization.jsonObject(with: request) as? [String: Any],
+              let id = object["id"] else { return nil }
+        return try? JSONSerialization.data(withJSONObject: [
             "jsonrpc": "2.0",
             "id": id,
-            "result": result
-        ]
+            "error": ["code": -32_000, "message": message]
+        ], options: [.sortedKeys])
     }
 
-    private func errorResponse(id: Any, code: Int, message: String) -> [String: Any] {
-        [
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": [
-                "code": code,
-                "message": message
-            ]
-        ]
-    }
-
-    private func write(_ object: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object),
-              let line = String(data: data, encoding: .utf8) else {
-            return
-        }
-        print(line)
-        fflush(stdout)
-    }
-}
-
-private struct AnyEncodable: Encodable {
-    private let encodeValue: (Encoder) throws -> Void
-
-    init(_ value: Encodable) {
-        self.encodeValue = value.encode(to:)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        try encodeValue(encoder)
+    private func write(_ response: Data) {
+            FileHandle.standardOutput.write(response)
+            FileHandle.standardOutput.write(Data([0x0A]))
     }
 }
 

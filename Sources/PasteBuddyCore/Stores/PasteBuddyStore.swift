@@ -73,6 +73,9 @@ public final class PasteBuddyStore {
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
     @ObservationIgnored public var onShortcutConfigurationChanged: (@MainActor (ShortcutConfiguration) -> Void)?
+    @ObservationIgnored public var onScreenSharingVisibilityChanged: (@MainActor (Bool) -> Void)?
+    @ObservationIgnored public var onMCPServerConfigurationChanged: (@MainActor (Bool) -> Void)?
+    @ObservationIgnored public var onMCPAccessRevoked: (@MainActor () -> Void)?
     @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
@@ -178,14 +181,14 @@ public final class PasteBuddyStore {
         do {
             let repositoryHasStoredSnapshot = try clipboardRepository?.hasStoredSnapshot() == true
             var loadedSnapshot = if repositoryHasStoredSnapshot, let clipboardRepository {
-                try clipboardRepository.exportSnapshot()
+                try clipboardRepository.exportSnapshot(hydrateAssets: false)
             } else {
                 try diskStore.load()
             }
             if !repositoryHasStoredSnapshot,
                Self.needsExternalAssetHydration(loadedSnapshot),
                let clipboardRepository {
-                let repositorySnapshot = try clipboardRepository.exportSnapshot()
+                let repositorySnapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
                 if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
                     loadedSnapshot = repositorySnapshot
                 }
@@ -228,7 +231,7 @@ public final class PasteBuddyStore {
             let repositoryHasStoredSnapshot = try await repositorySyncActor?.hasStoredSnapshot() == true
             let result: SnapshotPersistenceLoadResult
             if repositoryHasStoredSnapshot, let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
+                let repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
                 result = SnapshotPersistenceLoadResult(
                     snapshot: repositorySnapshot,
                     loadedStorageMode: repositorySnapshot.security.storageMode
@@ -240,7 +243,7 @@ public final class PasteBuddyStore {
             if !repositoryHasStoredSnapshot,
                Self.needsExternalAssetHydration(loadedSnapshot),
                let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot()
+                let repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
                 if !repositorySnapshot.items.isEmpty || loadedSnapshot.items.isEmpty {
                     loadedSnapshot = repositorySnapshot
                 }
@@ -608,6 +611,15 @@ public final class PasteBuddyStore {
     }
 
     public func hydratedItem(for item: ClipboardItem) async -> ClipboardItem {
+        do {
+            return try await hydratedItemForTransfer(item)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return item
+        }
+    }
+
+    public func hydratedItemForTransfer(_ item: ClipboardItem) async throws -> ClipboardItem {
         let needsImageData = item.payload.imageData == nil && item.payload.imageAssetID != nil
         let needsRTFData = item.payload.rtfData == nil && item.payload.rtfAssetID != nil
         guard needsImageData || needsRTFData else {
@@ -621,14 +633,16 @@ public final class PasteBuddyStore {
             }
         }
         guard let repositorySyncActor else {
-            return item
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
         }
-        do {
-            return try await repositorySyncActor.hydrateAssets(for: item)
-        } catch {
-            lastErrorMessage = error.localizedDescription
-            return item
+        let hydrated = try await repositorySyncActor.hydrateAssets(for: item)
+        if needsImageData && hydrated.payload.imageData == nil {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
         }
+        if needsRTFData && hydrated.payload.rtfData == nil {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+        return hydrated
     }
 
     public func hydratedItems(for items: [ClipboardItem]) async -> [ClipboardItem] {
@@ -656,6 +670,35 @@ public final class PasteBuddyStore {
             lastErrorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    public func portableSnapshot() async throws -> PasteBuddySnapshot {
+        var portable = snapshot
+        let needsHydration = portable.items.contains { item in
+            (item.payload.imageData == nil && item.payload.imageAssetID != nil)
+                || (item.payload.rtfData == nil && item.payload.rtfAssetID != nil)
+        }
+        guard needsHydration else {
+            return portable
+        }
+        guard let repositorySyncActor else {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+        let hydratedItems = try await repositorySyncActor.hydrateAssets(for: portable.items)
+        for (original, hydrated) in zip(portable.items, hydratedItems) {
+            if original.payload.imageData == nil,
+               original.payload.imageAssetID != nil,
+               hydrated.payload.imageData == nil {
+                throw PasteBuddyDatabaseError.repositoryOutOfSync
+            }
+            if original.payload.rtfData == nil,
+               original.payload.rtfAssetID != nil,
+               hydrated.payload.rtfData == nil {
+                throw PasteBuddyDatabaseError.repositoryOutOfSync
+            }
+        }
+        portable.items = hydratedItems
+        return portable
     }
 
     public var selectedItemsInDisplayOrder: [ClipboardItem] {
@@ -1140,7 +1183,8 @@ public final class PasteBuddyStore {
 
     #if os(macOS)
     public func enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem) async {
-        guard snapshot.privacy.captureImages,
+        guard snapshot.settingsBehavior.generateLinkPreviews,
+              snapshot.privacy.captureImages,
               item.presentationContentType == .url,
               !item.payload.hasImageAsset,
               let urlString = item.payload.presentationURLString,
@@ -1156,6 +1200,7 @@ public final class PasteBuddyStore {
         }
 
         guard let metadata = await ClipboardLinkMetadataFetcher.fetch(for: urlString),
+              snapshot.settingsBehavior.generateLinkPreviews,
               metadata.title != nil || metadata.imageData != nil,
               let index = snapshot.items.firstIndex(where: { $0.id == item.id }),
               !snapshot.items[index].payload.hasImageAsset else {
@@ -1424,6 +1469,67 @@ public final class PasteBuddyStore {
 
     public func clearRequestedSettingsDestination() {
         requestedSettingsDestination = nil
+    }
+
+    public func setPasteDestination(_ destination: PasteDestination) {
+        snapshot.settingsBehavior.pasteDestination = destination
+        saveAndFlush()
+    }
+
+    public func setSoundEffectsEnabled(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.soundEffectsEnabled = isEnabled
+        saveAndFlush()
+    }
+
+    public func setShowDuringScreenSharing(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.showDuringScreenSharing = isEnabled
+        onScreenSharingVisibilityChanged?(isEnabled)
+        saveAndFlush()
+    }
+
+    public func setGenerateLinkPreviews(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.generateLinkPreviews = isEnabled
+        if isEnabled {
+            completedLinkPreviewMetadataRequests.removeAll()
+        } else {
+            linkPreviewMetadataRequests.removeAll()
+        }
+        saveAndFlush()
+    }
+
+    public func setIgnoreTransientContent(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.ignoreTransientContent = isEnabled
+        saveAndFlush()
+    }
+
+    public func setIgnoreRemoteClipboardContent(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.ignoreRemoteClipboardContent = isEnabled
+        saveAndFlush()
+    }
+
+    public func setIgnoreConcealedContent(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.ignoreConcealedContent = isEnabled
+        saveAndFlush()
+    }
+
+    public func setIgnoreAutoGeneratedContent(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.ignoreAutoGeneratedContent = isEnabled
+        saveAndFlush()
+    }
+
+    public func setIgnoreWhitespaceOnlyContent(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.ignoreWhitespaceOnlyContent = isEnabled
+        saveAndFlush()
+    }
+
+    public func setConvertLargeExcelContentToPlainText(_ isEnabled: Bool) {
+        snapshot.settingsBehavior.convertLargeExcelContentToPlainText = isEnabled
+        saveAndFlush()
+    }
+
+    public func setMaximumClipboardSizeMegabytes(_ value: Double) {
+        snapshot.settingsBehavior.maximumClipboardSizeMegabytes = value.isFinite ? max(0, value) : 0
+        saveAndFlush()
     }
 
     public func toggleCapturePaused() {
@@ -1761,8 +1867,12 @@ public final class PasteBuddyStore {
     }
 
     public func applyStoreEntitlementUpdate(_ update: StoreEntitlementUpdate) {
-        snapshot.entitlement = update.entitlement
-        switch update.entitlement.status {
+        applyStoreEntitlement(update.entitlement)
+    }
+
+    public func applyStoreEntitlement(_ entitlement: EntitlementConfiguration) {
+        snapshot.entitlement = entitlement
+        switch entitlement.status {
         case .active:
             lastErrorMessage = nil
         case .revoked:
@@ -1775,6 +1885,18 @@ public final class PasteBuddyStore {
             lastErrorMessage = nil
         }
         save()
+    }
+
+    public func reconcileCurrentStoreEntitlement(_ entitlement: EntitlementConfiguration?) {
+        if let entitlement {
+            applyStoreEntitlement(entitlement)
+        } else if snapshot.entitlement.plan.isPersonalPaidPlan {
+            snapshot.entitlement = EntitlementConfiguration(
+                restoreState: snapshot.entitlement.restoreState
+            )
+            lastErrorMessage = nil
+            save()
+        }
     }
 
     public func recordStoreTransactionUpdateError(_ error: any Error) {
@@ -1830,6 +1952,7 @@ public final class PasteBuddyStore {
 
     public func setQuickPasteShortcutsEnabled(_ isEnabled: Bool) {
         snapshot.shortcuts.isQuickPasteEnabled = isEnabled
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
     }
 
@@ -1845,6 +1968,7 @@ public final class PasteBuddyStore {
               binding.isValidUserShortcut,
               !binding.conflictsWithFixedProductShortcut,
               action != .showHidePanel || binding.isValidShowHidePanelShortcut,
+              !bindingConflictsWithQuickPaste(binding),
               !ShortcutAction.allCases.contains(where: {
                   $0 != action
                       && action.sharesShortcutScope(with: $0)
@@ -1867,13 +1991,34 @@ public final class PasteBuddyStore {
         save()
     }
 
-    public func setQuickPasteModifiers(_ modifiers: [ShortcutModifier], plainText: Bool = false) {
+    @discardableResult
+    public func setQuickPasteModifiers(_ modifiers: [ShortcutModifier], plainText: Bool = false) -> Bool {
+        let normalized = ShortcutBinding.normalizedModifiers(modifiers)
+        let other = plainText
+            ? snapshot.shortcuts.quickPasteModifiers
+            : snapshot.shortcuts.plainTextQuickPasteModifiers
+        guard normalized.contains(.command) || normalized.contains(.control),
+              normalized != other,
+              !ShortcutAction.allCases.contains(where: { action in
+                  let binding = snapshot.shortcuts.binding(for: action)
+                  return binding.key.flatMap(Int.init).map({ (1...9).contains($0) }) == true
+                      && ShortcutBinding.normalizedModifiers(binding.modifiers) == normalized
+              }) else { return false }
         if plainText {
-            snapshot.shortcuts.plainTextQuickPasteModifiers = ShortcutBinding.normalizedModifiers(modifiers)
+            snapshot.shortcuts.plainTextQuickPasteModifiers = normalized
         } else {
-            snapshot.shortcuts.quickPasteModifiers = ShortcutBinding.normalizedModifiers(modifiers)
+            snapshot.shortcuts.quickPasteModifiers = normalized
         }
+        onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
+        return true
+    }
+
+    private func bindingConflictsWithQuickPaste(_ binding: ShortcutBinding) -> Bool {
+        guard binding.key.flatMap(Int.init).map({ (1...9).contains($0) }) == true else { return false }
+        let modifiers = ShortcutBinding.normalizedModifiers(binding.modifiers)
+        return modifiers == snapshot.shortcuts.quickPasteModifiers
+            || modifiers == snapshot.shortcuts.plainTextQuickPasteModifiers
     }
 
     public func resetShortcutConfiguration() {
@@ -1888,6 +2033,7 @@ public final class PasteBuddyStore {
             snapshot.mcp.enabledTools = MCPToolName.defaultEnabledTools
         }
         save()
+        onMCPServerConfigurationChanged?(isEnabled)
     }
 
     public func setMCPTool(_ tool: MCPToolName, enabled isEnabled: Bool) {
@@ -1917,6 +2063,8 @@ public final class PasteBuddyStore {
         snapshot.mcp.enabledTools = []
         snapshot.mcp.lastAccessRevokedAt = date
         save()
+        onMCPServerConfigurationChanged?(false)
+        onMCPAccessRevoked?()
     }
 
     public func updateRetentionDays(_ value: Int) {
@@ -2059,8 +2207,9 @@ public final class PasteBuddyStore {
         using service: CloudKitSyncService
     ) async -> CloudSyncUploadResult? {
         do {
-            let result = try await service.upload(snapshot)
+            let result = try await service.upload(try await portableSnapshot())
             snapshot.sync.lastSyncAt = result.package.createdAt
+            snapshot.sync.lastImportedPackageID = result.package.id
             snapshot.sync.lastSyncStatusMessage = "Encrypted CloudKit sync uploaded."
             lastErrorMessage = nil
             save()
@@ -2075,11 +2224,23 @@ public final class PasteBuddyStore {
     public func importLatestCloudSyncSnapshot(
         using service: CloudKitSyncService
     ) async -> CloudSyncDownloadResult? {
+        let expectedSync = snapshot.sync
         do {
             guard let result = try await service.downloadLatest(into: snapshot) else {
+                guard snapshot.sync.isCloudSyncEnabled,
+                      snapshot.sync.lastImportedPackageID == nil,
+                      snapshot.sync.lastSyncStatusMessage != "No encrypted CloudKit records found." else {
+                    return nil
+                }
                 snapshot.sync.lastSyncStatusMessage = "No encrypted CloudKit records found."
                 lastErrorMessage = nil
                 save()
+                return nil
+            }
+            guard snapshot.sync.isCloudSyncEnabled,
+                  snapshot.sync.cloudKitContainerIdentifier == expectedSync.cloudKitContainerIdentifier,
+                  snapshot.sync.keyHierarchyVersion == expectedSync.keyHierarchyVersion,
+                  snapshot.sync.isCloudKitCapabilityConfigured == expectedSync.isCloudKitCapabilityConfigured else {
                 return nil
             }
             snapshot = result.snapshot
@@ -2604,8 +2765,19 @@ public final class PasteBuddyStore {
         }
     }
 
-    public func pasteNextStackItem() -> ClipboardItem? {
+    public var nextPasteStackItem: ClipboardItem? {
         guard !pasteStackItems.isEmpty else { return nil }
+        switch pasteStackDirection {
+        case .topToBottom:
+            return pasteStackItems.first
+        case .bottomToTop:
+            return pasteStackItems.last
+        }
+    }
+
+    @discardableResult
+    public func commitNextPasteStackItem(id expectedID: UUID) -> ClipboardItem? {
+        guard nextPasteStackItem?.id == expectedID else { return nil }
         let item: ClipboardItem
         switch pasteStackDirection {
         case .topToBottom:
@@ -2617,6 +2789,11 @@ public final class PasteBuddyStore {
             selectSingleItem(filteredItems.first?.id)
         }
         return item
+    }
+
+    public func pasteNextStackItem() -> ClipboardItem? {
+        guard let item = nextPasteStackItem else { return nil }
+        return commitNextPasteStackItem(id: item.id)
     }
 
     @discardableResult

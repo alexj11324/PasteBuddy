@@ -56,6 +56,20 @@ public enum PasteboardWriter {
     }
 
     @discardableResult
+    public static func copyText(_ text: String) -> Bool {
+        copyText(text, to: .general)
+    }
+
+    @discardableResult
+    static func copyText(_ text: String, to pasteboard: NSPasteboard) -> Bool {
+        pasteboard.clearContents()
+        return finalizeInternalCopy(
+            pasteboard.setString(text, forType: .string),
+            on: pasteboard
+        )
+    }
+
+    @discardableResult
     public static func copy(
         _ item: ClipboardItem,
         format: PasteFormat = .original,
@@ -83,7 +97,8 @@ public enum PasteboardWriter {
             }
         case .url:
             if let value = item.payload.urlString, let url = URL(string: value) {
-                succeeded = pasteboard.writeObjects([url as NSURL])
+                succeeded = pasteboard.writeObjects([url as NSURL]) || succeeded
+                succeeded = pasteboard.setString(value, forType: .string) || succeeded
             } else if let value = item.payload.urlString {
                 succeeded = pasteboard.setString(value, forType: .string)
             }
@@ -441,8 +456,16 @@ public enum PasteboardWriter {
         case .text:
             return [textProvider(for: item, hydrate: hydrate)]
         case .url:
-            if let value = item.payload.urlString, let url = URL(string: value) {
-                return [NSItemProvider(object: url as NSURL)]
+            if let value = item.payload.urlString, URL(string: value) != nil {
+                let provider = textProvider(for: item, hydrate: hydrate)
+                provider.registerDataRepresentation(
+                    forTypeIdentifier: UTType.url.identifier,
+                    visibility: .all
+                ) { completion in
+                    completion(Data(value.utf8), nil)
+                    return nil
+                }
+                return [provider]
             }
         case .file:
             let providers = item.payload.allFileURLStrings
@@ -610,7 +633,7 @@ public enum PasteboardWriter {
             return .failedAccessibilityPermissionRequired
         case .copiedOnlyNoTargetApplication:
             return .failedNoTargetApplication
-        case .pastedToFrontmostApp, .failedAccessibilityPermissionRequired, .failedNoTargetApplication,
+        case .pastedToFrontmostApp, .copiedToClipboard, .failedAccessibilityPermissionRequired, .failedNoTargetApplication,
              .failedPasteboardWrite, .emptySelection:
             return copyOutcome
         }

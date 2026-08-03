@@ -149,9 +149,8 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
 
 - Apple developer signing, bundle identifiers, app groups, iCloud/CloudKit
   containers, extension entitlements, and App Store products.
-- App Store Connect product setup, signed StoreKit UI/app-lifecycle wiring, and
-  optional server-side entitlement reconciliation.
-- Signed-app CloudKit container/account wiring, deployed shared-pinboard public
+- App Store Connect product setup and optional server-side entitlement reconciliation.
+- A matching macOS CloudKit provisioning profile, deployed shared-pinboard public
   database schema, push/background registration for invitation subscriptions,
   and account/corruption/lost-key recovery UX beyond local preflight
   diagnostics.

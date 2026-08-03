@@ -383,30 +383,43 @@ public final class AppleStoreKitEntitlementProvider: StoreEntitlementProviding, 
         )
     }
 
+    public func currentEntitlement(
+        configuration: StoreProductConfiguration = StoreProductConfiguration(),
+        now: Date = Date()
+    ) async -> EntitlementConfiguration? {
+        var transactions: [VerifiedStoreTransaction] = []
+        for await verification in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = verification else { continue }
+            transactions.append(VerifiedStoreTransaction(transaction: transaction))
+        }
+        return StoreEntitlementMapper.bestActiveEntitlement(
+            from: transactions,
+            configuration: configuration,
+            restoredAt: now,
+            now: now
+        )
+    }
+
     public func entitlementUpdates(
         configuration: StoreProductConfiguration = StoreProductConfiguration(),
         receivedAt: @Sendable @escaping () -> Date = { Date() }
     ) -> AsyncThrowingStream<StoreEntitlementUpdate, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                do {
-                    for await verification in Transaction.updates {
-                        let transaction = try verifiedTransaction(from: verification)
-                        guard let update = StoreEntitlementMapper.update(
-                            from: VerifiedStoreTransaction(transaction: transaction),
-                            configuration: configuration,
-                            receivedAt: receivedAt()
-                        ) else {
-                            await transaction.finish()
-                            continue
-                        }
-                        continuation.yield(update)
+                for await verification in Transaction.updates {
+                    guard case .verified(let transaction) = verification else { continue }
+                    guard let update = StoreEntitlementMapper.update(
+                        from: VerifiedStoreTransaction(transaction: transaction),
+                        configuration: configuration,
+                        receivedAt: receivedAt()
+                    ) else {
                         await transaction.finish()
+                        continue
                     }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+                    continuation.yield(update)
+                    await transaction.finish()
                 }
+                continuation.finish()
             }
 
             continuation.onTermination = { _ in

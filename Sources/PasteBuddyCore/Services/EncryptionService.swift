@@ -64,10 +64,19 @@ public protocol EncryptionKeyMaterialStore: Sendable {
 public final class KeychainKeyMaterialStore: EncryptionKeyMaterialStore, @unchecked Sendable {
     public let service: String
     public let account: String
+    public let synchronizesAcrossDevices: Bool
+    public let accessGroup: String?
 
-    public init(service: String, account: String) {
+    public init(
+        service: String,
+        account: String,
+        synchronizesAcrossDevices: Bool = false,
+        accessGroup: String? = nil
+    ) {
         self.service = service
         self.account = account
+        self.synchronizesAcrossDevices = synchronizesAcrossDevices
+        self.accessGroup = accessGroup
     }
 
     public func loadOrCreateKeyData() throws -> Data {
@@ -91,11 +100,23 @@ public final class KeychainKeyMaterialStore: EncryptionKeyMaterialStore, @unchec
 
         let keyData = try Self.randomKeyData()
         var addQuery = keychainBaseQuery()
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        addQuery[kSecAttrAccessible as String] = synchronizesAcrossDevices
+            ? kSecAttrAccessibleAfterFirstUnlock
+            : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         addQuery[kSecValueData as String] = keyData
         addQuery[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
 
         let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        if addStatus == errSecDuplicateItem {
+            var existingItem: CFTypeRef?
+            let existingStatus = SecItemCopyMatching(query as CFDictionary, &existingItem)
+            guard existingStatus == errSecSuccess,
+                  let existingData = existingItem as? Data,
+                  existingData.count == 32 else {
+                throw EncryptionServiceError.keychainReadFailed(existingStatus)
+            }
+            return existingData
+        }
         guard addStatus == errSecSuccess else {
             throw EncryptionServiceError.keychainWriteFailed(addStatus)
         }
@@ -112,11 +133,18 @@ public final class KeychainKeyMaterialStore: EncryptionKeyMaterialStore, @unchec
     }
 
     private func keychainBaseQuery() -> [String: Any] {
-        [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+        if synchronizesAcrossDevices {
+            query[kSecAttrSynchronizable as String] = true
+        }
+        if let accessGroup {
+            query[kSecAttrAccessGroup as String] = accessGroup
+        }
+        return query
     }
 
     static func randomKeyData() throws -> Data {
@@ -378,6 +406,21 @@ public final class EncryptionService: @unchecked Sendable {
             account: account,
             keyID: keyID,
             keyMaterialStore: SecureEnclaveWrappedKeyStore(service: service, account: account)
+        )
+    }
+
+    public static func cloudSync() -> EncryptionService {
+        EncryptionService(
+            account: "cloud-sync-key-v1",
+            keyID: "icloud-keychain-v1",
+            keyMaterialStore: KeychainKeyMaterialStore(
+                service: "com.pastebuddy.encryption",
+                account: "cloud-sync-key-v1",
+                synchronizesAcrossDevices: true,
+                accessGroup: Bundle.main.object(
+                    forInfoDictionaryKey: "PasteBuddyKeychainAccessGroup"
+                ) as? String
+            )
         )
     }
 

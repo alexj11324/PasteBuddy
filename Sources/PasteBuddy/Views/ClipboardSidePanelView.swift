@@ -88,6 +88,10 @@ struct ClipboardSidePanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
             pasteSelected(format: store.defaultPasteFormat)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCyclePanelPinboard)) { notification in
+            guard let direction = notification.object as? PinboardCycleDirection else { return }
+            cyclePinboard(direction)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
             guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
             handlePanelArrowKey(request)
@@ -97,6 +101,19 @@ struct ClipboardSidePanelView: View {
                   !isSearchFocused else { return }
             toggleSelectedItemPreview()
             request.markHandled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelQuickPaste)) { notification in
+            guard let request = notification.object as? ClipboardPanelQuickPasteRequest,
+                  ClipboardPanelHistoryAvailability.allowsActions(
+                      scope: sideScope,
+                      errorMessage: store.historyQueryErrorMessage
+                  ),
+                  let item = store.quickPasteItem(
+                      atOneBasedIndex: request.oneBasedIndex,
+                      in: sideScope
+                  ) else { return }
+            request.markHandled()
+            pasteItem(item, format: request.format)
         }
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
@@ -522,8 +539,17 @@ struct ClipboardSidePanelView: View {
         if sideScope != scope {
             dismissPreparedPreview()
             sideScope = scope
-            store.selectedScope = scope
         }
+    }
+
+    private func cyclePinboard(_ direction: PinboardCycleDirection) {
+        guard let destination = PinboardCycleSelection.destination(
+            from: sideScope,
+            pinboardIDs: store.userPinboards.map(\.id),
+            direction: direction
+        ) else { return }
+        dismissPreparedPreview()
+        sideScope = destination
     }
 
     private func isSmartCategorySelected(_ category: SmartPinboardCategory) -> Bool {

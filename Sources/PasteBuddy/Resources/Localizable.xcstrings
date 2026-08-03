@@ -20603,6 +20603,722 @@
         }
       }
     },
+    "action.get_started": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get Started"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始使用"
+          }
+        }
+      }
+    },
+    "label.background_running": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run in Background"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台运行"
+          }
+        }
+      }
+    },
+    "label.capture_enabled": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture Enabled"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捕获已启用"
+          }
+        }
+      }
+    },
+    "label.content_filtering": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Content Filtering"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容过滤"
+          }
+        }
+      }
+    },
+    "label.day": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Day"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "天"
+          }
+        }
+      }
+    },
+    "label.enable_icloud_sync": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable iCloud Sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用 iCloud 同步"
+          }
+        }
+      }
+    },
+    "label.enable_mcp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable MCP"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用 MCP"
+          }
+        }
+      }
+    },
+    "label.forever": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forever"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "永久"
+          }
+        }
+      }
+    },
+    "label.generate_link_previews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generate Link Previews"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "生成链接预览"
+          }
+        }
+      }
+    },
+    "label.ignore_applications": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore Applications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "忽略应用程序"
+          }
+        }
+      }
+    },
+    "label.ignore_sensitive_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore Sensitive Content"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "忽略机密内容"
+          }
+        }
+      }
+    },
+    "label.ignore_transient_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore Transient Content"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "忽略瞬时内容"
+          }
+        }
+      }
+    },
+    "label.keep_history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留历史"
+          }
+        }
+      }
+    },
+    "label.keyboard_shortcuts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard Shortcuts"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "键盘快捷键"
+          }
+        }
+      }
+    },
+    "label.month": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Month"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "月"
+          }
+        }
+      }
+    },
+    "label.no_more_items": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No more items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有更多项目"
+          }
+        }
+      }
+    },
+    "label.paste_items": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴项目"
+          }
+        }
+      }
+    },
+    "label.paste_to_clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste to Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴到剪贴板"
+          }
+        }
+      }
+    },
+    "label.paste_to_current_application": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste to Current Application"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴到当前活动应用"
+          }
+        }
+      }
+    },
+    "label.plain_text_mode": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plain Text Mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纯文本模式"
+          }
+        }
+      }
+    },
+    "label.run_local_ocr_after_image_capture": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run Local Apple OCR After Image Capture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图像捕获后运行本地 Apple OCR"
+          }
+        }
+      }
+    },
+    "label.show_during_screen_sharing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show During Screen Sharing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在屏幕共享期间显示"
+          }
+        }
+      }
+    },
+    "label.show_next_pinboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Next Pinboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示下一个 Pinboard"
+          }
+        }
+      }
+    },
+    "label.show_previous_pinboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Previous Pinboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示上一个 Pinboard"
+          }
+        }
+      }
+    },
+    "label.sound_effects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sound Effects"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音效"
+          }
+        }
+      }
+    },
+    "label.subscription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subscription"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "订阅"
+          }
+        }
+      }
+    },
+    "label.week": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Week"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周"
+          }
+        }
+      }
+    },
+    "label.year": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Year"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "年"
+          }
+        }
+      }
+    },
+    "message.direct_paste_to_current_application": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste selected items directly into the application you are currently using."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将选定的项目直接粘贴到您当前正在使用的应用程序中。"
+          }
+        }
+      }
+    },
+    "message.generate_link_previews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fetch and persist titles and preview images for URL items."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "为 URL 项目抓取标题与预览图并持久化。"
+          }
+        }
+      }
+    },
+    "message.ignore_applications": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Do not save content copied from the following applications."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不要保存从以下应用程序复制的内容。"
+          }
+        }
+      }
+    },
+    "message.ignore_sensitive_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Do not save passwords and sensitive data when detected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在检测到时不保存密码和敏感数据。"
+          }
+        }
+      }
+    },
+    "message.ignore_transient_content": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Do not save temporary data generated by other applications."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不要保存其他应用程序生成的临时数据。"
+          }
+        }
+      }
+    },
+    "message.lifetime_productivity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One Purchase. Endless Productivity."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次订阅、无尽的生产力"
+          }
+        }
+      }
+    },
+    "message.mcp_local_connection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow AI applications to connect to PasteBuddy through local MCP."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许 AI 应用通过本地 MCP 连接 PasteBuddy。"
+          }
+        }
+      }
+    },
+    "message.not_subscribed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You are not subscribed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "您尚未订阅。"
+          }
+        }
+      }
+    },
+    "message.show_during_screen_sharing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Control whether PasteBuddy panels are visible during screen sharing or recording."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在屏幕共享或录制时控制 PasteBuddy 面板是否可见。"
+          }
+        }
+      }
+    },
+    "message.subscription_active": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your PasteBuddy subscription is active."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "您的 PasteBuddy 订阅已激活。"
+          }
+        }
+      }
+    },
+    "label.by_app": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "By App" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "根据 App" } }
+      }
+    },
+    "label.flatten_large_excel_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Store Excel content over 100 KB as plain text only" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "当 Excel 中的内容超过 100 KB 时，仅存为纯文本" } }
+      }
+    },
+    "label.ignore_auto_generated_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ignore clipboard data marked as auto-generated" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "忽略标记为自动生成的剪贴板数据" } }
+      }
+    },
+    "label.ignore_clipboard_larger_than": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ignore clipboard data larger than" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "忽略剪贴板数据大于" } }
+      }
+    },
+    "label.ignore_concealed_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ignore clipboard data marked as confidential" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "忽略标记为机密的剪贴板数据" } }
+      }
+    },
+    "label.ignore_remote_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ignore clipboard data from iOS devices" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "忽略来自 iOS 设备的剪贴板数据" } }
+      }
+    },
+    "label.ignore_whitespace_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ignore clipboard data containing only spaces or blank lines" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "忽略带有空格或空行的剪贴板数据" } }
+      }
+    },
+    "label.local_stdio_server": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local stdio server · PasteBuddyMCP" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地 stdio 服务 · PasteBuddyMCP" } }
+      }
+    },
+    "label.megabytes": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "MB" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "兆字节" } }
+      }
+    },
+    "label.other_rules": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Other Rules" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "其他规则" } }
+      }
+    },
+    "message.zero_disables_size_filter": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Set to zero to disable size filtering." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "如果您不想按大小忽略，请设置为零" } }
+      }
+    },
+    "action.launch_paste": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Launch Paste" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "启动 Paste" } }
+      }
+    },
+    "format.copied_items_to_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copied %d items to the clipboard." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已将 %d 个项目复制到剪贴板。" } }
+      }
+    },
+    "label.mcp_server_disabled": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local MCP server is off" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地 MCP 服务已关闭" } }
+      }
+    },
+    "label.mcp_server_enabled": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local MCP server is running" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地 MCP 服务正在运行" } }
+      }
+    },
+    "label.paste_destination": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Paste destination" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "粘贴目标" } }
+      }
+    },
+    "message.copied_one_item_to_clipboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copied 1 item to the clipboard." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已将 1 个项目复制到剪贴板。" } }
+      }
+    },
+    "message.copied_to_clipboard_title": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copied to clipboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已复制到剪贴板" } }
+      }
+    },
     "state.selected": {
       "localizations": {
         "en": {

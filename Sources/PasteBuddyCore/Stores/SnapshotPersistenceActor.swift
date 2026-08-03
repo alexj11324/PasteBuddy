@@ -72,6 +72,10 @@ public actor ClipboardRepositorySyncActor {
         try repository.hydrateAssets(for: item)
     }
 
+    public func hydrateAssets(for items: [ClipboardItem]) throws -> [ClipboardItem] {
+        try repository.hydrateAssets(for: items)
+    }
+
     public func imageData(for item: ClipboardItem) throws -> Data? {
         try repository.imageData(for: item)
     }
@@ -80,8 +84,8 @@ public actor ClipboardRepositorySyncActor {
         try repository.rtfData(for: item)
     }
 
-    public func exportSnapshot() throws -> PasteBuddySnapshot {
-        try repository.exportSnapshot()
+    public func exportSnapshot(hydrateAssets: Bool = true) throws -> PasteBuddySnapshot {
+        try repository.exportSnapshot(hydrateAssets: hydrateAssets)
     }
 
     public func hasStoredSnapshot() throws -> Bool {

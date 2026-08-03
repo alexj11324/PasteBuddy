@@ -208,6 +208,10 @@ struct ClipboardShelfPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPastePanelSelection)) { _ in
             pasteSelected(format: store.defaultPasteFormat)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyCyclePanelPinboard)) { notification in
+            guard let direction = notification.object as? PinboardCycleDirection else { return }
+            cyclePinboard(direction)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelArrowKey)) { notification in
             guard let request = notification.object as? ClipboardPanelArrowKeyRequest else { return }
             handlePanelArrowKey(request)
@@ -217,6 +221,19 @@ struct ClipboardShelfPanelView: View {
                   !isSearchFocused else { return }
             toggleSelectedItemPreview()
             request.markHandled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelQuickPaste)) { notification in
+            guard let request = notification.object as? ClipboardPanelQuickPasteRequest,
+                  ClipboardPanelHistoryAvailability.allowsActions(
+                      scope: shelfScope,
+                      errorMessage: store.historyQueryErrorMessage
+                  ),
+                  let item = store.quickPasteItem(
+                      atOneBasedIndex: request.oneBasedIndex,
+                      in: shelfScope
+                  ) else { return }
+            request.markHandled()
+            pasteItem(item, format: request.format)
         }
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
@@ -798,7 +815,16 @@ struct ClipboardShelfPanelView: View {
         guard shelfScope != scope else { return }
         dismissPreparedPreview()
         shelfScope = scope
-        store.selectedScope = scope
+    }
+
+    private func cyclePinboard(_ direction: PinboardCycleDirection) {
+        guard let destination = PinboardCycleSelection.destination(
+            from: shelfScope,
+            pinboardIDs: store.userPinboards.map(\.id),
+            direction: direction
+        ) else { return }
+        dismissPreparedPreview()
+        shelfScope = destination
     }
 
     private func isSmartCategorySelected(_ category: SmartPinboardCategory) -> Bool {
@@ -2143,7 +2169,6 @@ private struct ShelfLinkPreviewCardBody: View {
                     .frame(maxWidth: .infinity)
                     .clipped()
                     metadataFooter
-                        .frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight)
                 }
                 .frame(height: ClipboardShelfMetrics.cardPreviewHeight)
                 .frame(maxWidth: .infinity)
@@ -2194,6 +2219,7 @@ private struct ShelfLinkPreviewCardBody: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: ClipboardShelfMetrics.linkMetadataFooterHeight, alignment: .leading)
         .background(Color.black.opacity(0.78))
     }
 }
@@ -2392,6 +2418,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
 
             let contentSize = NSSize(width: width, height: SourceAppSuggestionMetrics.panelHeight(for: appNames.count))
             let panel = suggestionPanel(parentWindow: window)
+            panel.sharingType = window.sharingType
             let wasVisible = panel.isVisible
             isClosingPanel = false
             panelAnimationGeneration += 1
@@ -2602,7 +2629,7 @@ struct SourceAppSuggestionPanelPresenter: NSViewRepresentable {
     }
 }
 
-private final class SourceAppSuggestionPanel: NSPanel {
+private final class SourceAppSuggestionPanel: NSPanel, PasteBuddyScreenSharingProtectedWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
