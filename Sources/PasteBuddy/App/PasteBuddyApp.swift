@@ -263,21 +263,28 @@ struct PasteBuddyApp: App {
             enabled: !store.pasteStackItems.isEmpty
         ) {
             Task { @MainActor in
-                if let item = store.pasteNextStackItem() {
+                guard let item = store.nextPasteStackItem else { return }
+                do {
+                    let hydrated = try await store.hydratedItemForTransfer(item)
                     let result = if store.snapshot.settingsBehavior.pasteDestination == .clipboard {
                         Self.copyItemToClipboard(
-                            item,
+                            hydrated,
                             format: store.defaultPasteFormat,
                             soundEffectsEnabled: store.snapshot.settingsBehavior.soundEffectsEnabled
                         )
                     } else {
                         await Self.pasteItemToTarget(
-                            item,
+                            hydrated,
                             format: store.defaultPasteFormat,
                             tracker: frontmostApplicationTracker
                         )
                     }
+                    if result.didTransferContent {
+                        store.commitNextPasteStackItem(id: item.id)
+                    }
                     store.recordDirectPasteResult(result)
+                } catch {
+                    store.lastErrorMessage = error.localizedDescription
                 }
             }
         })
@@ -575,7 +582,14 @@ struct PasteBuddyApp: App {
                 },
                 onQuickPaste: { index, format in
                     Task { @MainActor in
-                        guard let item = store.quickPasteItem(atOneBasedIndex: index + 1) else { return }
+                        let oneBasedIndex = index + 1
+                        if shelfPanelController?.routeQuickPasteToVisiblePanel(
+                            oneBasedIndex: oneBasedIndex,
+                            format: format
+                        ) == true {
+                            return
+                        }
+                        guard let item = store.quickPasteItem(atOneBasedIndex: oneBasedIndex) else { return }
                         do {
                             let hydrated = try await store.hydratedItemForTransfer(item)
                             let result = if store.snapshot.settingsBehavior.pasteDestination == .clipboard {

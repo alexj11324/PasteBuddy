@@ -222,6 +222,19 @@ struct ClipboardShelfPanelView: View {
             toggleSelectedItemPreview()
             request.markHandled()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelQuickPaste)) { notification in
+            guard let request = notification.object as? ClipboardPanelQuickPasteRequest,
+                  ClipboardPanelHistoryAvailability.allowsActions(
+                      scope: shelfScope,
+                      errorMessage: store.historyQueryErrorMessage
+                  ),
+                  let item = store.quickPasteItem(
+                      atOneBasedIndex: request.oneBasedIndex,
+                      in: shelfScope
+                  ) else { return }
+            request.markHandled()
+            pasteItem(item, format: request.format)
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleShelfKeyPress(keyPress, allowsPreview: true)
         }
@@ -802,7 +815,6 @@ struct ClipboardShelfPanelView: View {
         guard shelfScope != scope else { return }
         dismissPreparedPreview()
         shelfScope = scope
-        store.selectedScope = scope
     }
 
     private func cyclePinboard(_ direction: PinboardCycleDirection) {

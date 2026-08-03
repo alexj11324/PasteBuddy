@@ -7,6 +7,8 @@ public protocol EnvelopeEncrypting: Sendable {
 }
 
 public protocol EnvelopeDecrypting: Sendable {
+    var keyID: String { get }
+
     func decrypt<T: Decodable>(_ type: T.Type, from envelope: EncryptedEnvelope) throws -> T
 }
 
@@ -180,9 +182,14 @@ public final class CloudSyncPackageBuilder: @unchecked Sendable {
 
 public final class CloudSyncPackageImporter: @unchecked Sendable {
     private let decryptor: any EnvelopeDecrypting
+    private let legacyDecryptor: (any EnvelopeDecrypting)?
 
-    public init(decryptor: any EnvelopeDecrypting = EncryptionService.cloudSync()) {
+    public init(
+        decryptor: any EnvelopeDecrypting = EncryptionService.cloudSync(),
+        legacyDecryptor: (any EnvelopeDecrypting)? = EncryptionService()
+    ) {
         self.decryptor = decryptor
+        self.legacyDecryptor = legacyDecryptor
     }
 
     public func importPackage(
@@ -209,7 +216,15 @@ public final class CloudSyncPackageImporter: @unchecked Sendable {
             )
         }
 
-        let remoteSnapshot = try decryptor.decrypt(PasteBuddySnapshot.self, from: package.encryptedSnapshot)
+        let envelope = package.encryptedSnapshot
+        let selectedDecryptor = if envelope.keyID == decryptor.keyID {
+            decryptor
+        } else if let legacyDecryptor, envelope.keyID == legacyDecryptor.keyID {
+            legacyDecryptor
+        } else {
+            decryptor
+        }
+        let remoteSnapshot = try selectedDecryptor.decrypt(PasteBuddySnapshot.self, from: envelope)
         var merged = localSnapshot
         var report = CloudSyncMergeReport(packageID: package.id, importedAt: importedAt)
 

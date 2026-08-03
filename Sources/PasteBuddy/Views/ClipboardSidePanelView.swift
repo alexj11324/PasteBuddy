@@ -102,6 +102,19 @@ struct ClipboardSidePanelView: View {
             toggleSelectedItemPreview()
             request.markHandled()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteBuddyPanelQuickPaste)) { notification in
+            guard let request = notification.object as? ClipboardPanelQuickPasteRequest,
+                  ClipboardPanelHistoryAvailability.allowsActions(
+                      scope: sideScope,
+                      errorMessage: store.historyQueryErrorMessage
+                  ),
+                  let item = store.quickPasteItem(
+                      atOneBasedIndex: request.oneBasedIndex,
+                      in: sideScope
+                  ) else { return }
+            request.markHandled()
+            pasteItem(item, format: request.format)
+        }
         .onKeyPress(phases: .down) { keyPress in
             handleKeyPress(keyPress)
         }
@@ -526,7 +539,6 @@ struct ClipboardSidePanelView: View {
         if sideScope != scope {
             dismissPreparedPreview()
             sideScope = scope
-            store.selectedScope = scope
         }
     }
 

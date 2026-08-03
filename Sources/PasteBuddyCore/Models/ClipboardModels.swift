@@ -2900,6 +2900,17 @@ public struct DirectPasteResult: Codable, Equatable, Sendable {
         outcome == .copiedOnlyAccessibilityRequired || outcome == .failedAccessibilityPermissionRequired
     }
 
+    public var didTransferContent: Bool {
+        switch outcome {
+        case .pastedToFrontmostApp, .copiedToClipboard, .copiedOnlyAccessibilityRequired,
+             .copiedOnlyNoTargetApplication:
+            true
+        case .failedAccessibilityPermissionRequired, .failedNoTargetApplication,
+             .failedPasteboardWrite, .emptySelection:
+            false
+        }
+    }
+
     public var permissionGuidance: DirectPastePermissionGuidance? {
         switch outcome {
         case .copiedOnlyAccessibilityRequired:

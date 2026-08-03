@@ -349,6 +349,27 @@ struct SettingsView: View {
                     ))
                     .foregroundStyle(.secondary)
                 }
+                LabeledContent("label.storage_limit") {
+                    Text(storageLimitDescription)
+                }
+                ProgressView(value: store.storageUsageReport.usageFraction)
+                    .accessibilityLabel(Text("label.storage_usage"))
+                    .accessibilityValue(Text(
+                        ByteCountFormatter.string(
+                            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
+                            countStyle: .file
+                        )
+                    ))
+                Stepper(
+                    value: Binding(
+                        get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
+                        set: { requestMaxStorageBytesChange($0 * 1_024 * 1_024) }
+                    ),
+                    in: 1...102_400,
+                    step: 50
+                ) {
+                    Text(localized("format.use_up_to", storageLimitDescription))
+                }
             }
         }
         .formStyle(.grouped)
@@ -662,6 +683,8 @@ struct SettingsView: View {
         switch action {
         case .reduceRetentionDays(let days):
             store.updateRetentionDays(days)
+        case .reduceStorageLimit(let bytes):
+            store.updateMaxStorageBytes(bytes)
         case .resetShortcuts:
             store.resetShortcutConfiguration()
         }
@@ -676,6 +699,22 @@ struct SettingsView: View {
         } else {
             store.updateRetentionDays(value)
         }
+    }
+
+    private func requestMaxStorageBytesChange(_ value: Int) {
+        let value = StorageConfiguration.clampMaxStorageBytes(value)
+        if value < store.snapshot.storage.maxStorageBytes {
+            destructiveConfirmation = .reduceStorageLimit(value)
+        } else {
+            store.updateMaxStorageBytes(value)
+        }
+    }
+
+    private var storageLimitDescription: String {
+        ByteCountFormatter.string(
+            fromByteCount: Int64(store.snapshot.storage.maxStorageBytes),
+            countStyle: .file
+        )
     }
 
     private var irohStatusText: String {
@@ -749,7 +788,7 @@ struct SettingsView: View {
 
     private func copyMCPServerCommand(for target: MCPClientConfigurationTarget) {
         let guide = mcpClientGuide(for: target)
-        copyToPasteboard(commandSummary(for: guide))
+        copyToPasteboard(guide.serverCommand)
         mcpStatusMessage = localized("format.copied_mcp_server_command_for", target.displayName)
     }
 
@@ -798,10 +837,6 @@ struct SettingsView: View {
         guard let url = mcpClientGuide(for: target).installationURL else { return }
         copyToPasteboard(url)
         mcpStatusMessage = localized("format.copied_mcp_install_link_for", target.displayName)
-    }
-
-    private func commandSummary(for guide: MCPClientConfigurationGuide) -> String {
-        ([guide.command] + guide.arguments).joined(separator: " ")
     }
 
     private func copyToPasteboard(_ text: String) {
@@ -1611,12 +1646,15 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
 
 private enum SettingsDestructiveAction {
     case reduceRetentionDays(Int)
+    case reduceStorageLimit(Int)
     case resetShortcuts
 
     var title: String {
         switch self {
         case .reduceRetentionDays:
             NSLocalizedString("dialog.reduce_history_retention", comment: "")
+        case .reduceStorageLimit:
+            NSLocalizedString("dialog.reduce_storage_limit", comment: "")
         case .resetShortcuts:
             NSLocalizedString("dialog.reset_all_shortcuts", comment: "")
         }
@@ -1630,6 +1668,12 @@ private enum SettingsDestructiveAction {
                 locale: Locale.current,
                 days
             )
+        case .reduceStorageLimit(let bytes):
+            String(
+                format: NSLocalizedString("format.reducing_storage_may_remove_history", comment: ""),
+                locale: Locale.current,
+                ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+            )
         case .resetShortcuts:
             NSLocalizedString("message.resetting_shortcuts_restores_every_default", comment: "")
         }
@@ -1637,7 +1681,7 @@ private enum SettingsDestructiveAction {
 
     var confirmationButtonTitle: String {
         switch self {
-        case .reduceRetentionDays:
+        case .reduceRetentionDays, .reduceStorageLimit:
             NSLocalizedString("action.apply_storage_limit", comment: "")
         case .resetShortcuts:
             NSLocalizedString("action.reset_all_shortcuts", comment: "")

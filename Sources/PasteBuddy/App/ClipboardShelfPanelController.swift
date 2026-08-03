@@ -9,6 +9,7 @@ extension Notification.Name {
     static let pasteBuddyPastePanelSelection = Notification.Name("PasteBuddyPastePanelSelection")
     static let pasteBuddyPanelArrowKey = Notification.Name("PasteBuddyPanelArrowKey")
     static let pasteBuddyPanelPreviewKey = Notification.Name("PasteBuddyPanelPreviewKey")
+    static let pasteBuddyPanelQuickPaste = Notification.Name("PasteBuddyPanelQuickPaste")
 }
 
 @MainActor
@@ -87,6 +88,22 @@ final class ClipboardPanelArrowKeyRequest {
 @MainActor
 final class ClipboardPanelPreviewKeyRequest {
     private(set) var isHandled = false
+
+    func markHandled() {
+        isHandled = true
+    }
+}
+
+@MainActor
+final class ClipboardPanelQuickPasteRequest {
+    let oneBasedIndex: Int
+    let format: PasteFormat
+    private(set) var isHandled = false
+
+    init(oneBasedIndex: Int, format: PasteFormat) {
+        self.oneBasedIndex = oneBasedIndex
+        self.format = format
+    }
 
     func markHandled() {
         isHandled = true
@@ -221,6 +238,13 @@ final class ClipboardShelfPanelController: NSObject {
 
     var isVisible: Bool {
         panel?.isVisible == true
+    }
+
+    func routeQuickPasteToVisiblePanel(oneBasedIndex: Int, format: PasteFormat) -> Bool {
+        guard isVisible else { return false }
+        let request = ClipboardPanelQuickPasteRequest(oneBasedIndex: oneBasedIndex, format: format)
+        NotificationCenter.default.post(name: .pasteBuddyPanelQuickPaste, object: request)
+        return request.isHandled
     }
 
     func toggle() {

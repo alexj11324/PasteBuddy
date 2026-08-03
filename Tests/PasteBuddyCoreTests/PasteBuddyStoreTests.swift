@@ -3406,6 +3406,35 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(store.pasteNextStackItem()?.title, "First")
     }
 
+    func testPasteStackCommitsOnlyTheItemThatWasPreparedForTransfer() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.startPasteStack()
+        let first = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First",
+            payload: ClipboardPayload(text: "first")
+        ))
+        _ = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second",
+            payload: ClipboardPayload(text: "second")
+        ))
+
+        XCTAssertEqual(store.nextPasteStackItem?.id, first.id)
+        XCTAssertEqual(store.pasteStackItems.count, 2, "Preparing hydration must not remove the stack item.")
+        XCTAssertNil(store.commitNextPasteStackItem(id: UUID()))
+        XCTAssertEqual(store.pasteStackItems.count, 2, "A stale transfer must not remove a newer stack item.")
+        XCTAssertEqual(store.commitNextPasteStackItem(id: first.id)?.id, first.id)
+        XCTAssertEqual(store.pasteStackItems.map(\.title), ["Second"])
+    }
+
     func testPasteStackCanAcceptExistingItemsByID() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

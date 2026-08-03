@@ -2,7 +2,7 @@ import XCTest
 @testable import PasteBuddyCore
 
 final class MCPClientConfigurationGuideTests: XCTestCase {
-    func testAuthenticatedGuideInjectsTokenOnlyIntoEnvironmentConfiguration() throws {
+    func testAuthenticatedGuideInjectsTokenIntoConfigurationAndCopiedServerCommand() throws {
         let token = "private-token"
         let guide = MCPClientConfigurationGuideBuilder.packagedGuide(
             for: .claude,
@@ -18,6 +18,10 @@ final class MCPClientConfigurationGuideTests: XCTestCase {
         let environment = try XCTUnwrap(pasteBuddy["env"] as? [String: String])
 
         XCTAssertEqual(environment[MCPAuthenticationToken.environmentVariable], token)
+        XCTAssertEqual(
+            guide.serverCommand,
+            "env \(MCPAuthenticationToken.environmentVariable)=\(token) /Applications/PasteBuddy.app/Contents/MacOS/PasteBuddyMCP"
+        )
         XCTAssertNil(guide.installationURL)
         XCTAssertNil(guide.installationCommand)
         XCTAssertFalse(guide.arguments.contains(token))

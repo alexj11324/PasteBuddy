@@ -2765,8 +2765,19 @@ public final class PasteBuddyStore {
         }
     }
 
-    public func pasteNextStackItem() -> ClipboardItem? {
+    public var nextPasteStackItem: ClipboardItem? {
         guard !pasteStackItems.isEmpty else { return nil }
+        switch pasteStackDirection {
+        case .topToBottom:
+            return pasteStackItems.first
+        case .bottomToTop:
+            return pasteStackItems.last
+        }
+    }
+
+    @discardableResult
+    public func commitNextPasteStackItem(id expectedID: UUID) -> ClipboardItem? {
+        guard nextPasteStackItem?.id == expectedID else { return nil }
         let item: ClipboardItem
         switch pasteStackDirection {
         case .topToBottom:
@@ -2778,6 +2789,11 @@ public final class PasteBuddyStore {
             selectSingleItem(filteredItems.first?.id)
         }
         return item
+    }
+
+    public func pasteNextStackItem() -> ClipboardItem? {
+        guard let item = nextPasteStackItem else { return nil }
+        return commitNextPasteStackItem(id: item.id)
     }
 
     @discardableResult

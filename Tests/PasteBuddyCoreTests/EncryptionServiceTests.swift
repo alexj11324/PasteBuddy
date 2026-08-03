@@ -544,6 +544,44 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertNil(repeatedDownload)
     }
 
+    func testCloudSyncImporterDecryptsLegacyPrimaryKeyPackages() throws {
+        let legacyService = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "local-primary-v1"
+        )
+        let cloudService = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "icloud-keychain-v1"
+        )
+        defer {
+            try? legacyService.deleteKeyForTesting()
+            try? cloudService.deleteKeyForTesting()
+        }
+
+        let remoteItem = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Legacy Mac",
+            contentType: .text,
+            title: "Legacy Cloud Snapshot",
+            payload: ClipboardPayload(text: "legacy encrypted payload")
+        )
+        let sync = readySyncConfiguration()
+        let package = try CloudSyncPackageBuilder(encryptor: legacyService).makeUploadPackage(
+            from: PasteBuddySnapshot(items: [remoteItem], sync: sync)
+        )
+
+        let result = try CloudSyncPackageImporter(
+            decryptor: cloudService,
+            legacyDecryptor: legacyService
+        ).importPackage(package, into: PasteBuddySnapshot(sync: sync))
+
+        XCTAssertEqual(result.snapshot.items.first?.id, remoteItem.id)
+        XCTAssertEqual(result.snapshot.items.first?.payload.text, "legacy encrypted payload")
+        XCTAssertEqual(result.snapshot.sync.lastImportedPackageID, package.id)
+    }
+
     func testCloudKitSyncServiceRejectsBlockedReadinessBeforeRemoteSave() async throws {
         let transport = InMemoryCloudSyncRemoteTransport()
         let syncService = CloudKitSyncService(transport: transport)

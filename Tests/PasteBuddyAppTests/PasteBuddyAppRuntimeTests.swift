@@ -845,7 +845,6 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "store.applySourceAppSuggestion(appName)",
             "store.clearSourceAppFilter()",
             "ClipboardPanelFiltersMenu(store: store)",
-            "store.selectedScope = scope",
             "store.selectSingleItem(item.id)",
             "ClipboardPanelHistoryAvailability.visibleItems(",
             "PinboardItemDragPayload.itemProvider(",
@@ -856,6 +855,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             for requirement in sharedRequirements {
                 XCTAssertTrue(source.contains(requirement), "Missing shared panel semantic: \(requirement)")
             }
+            XCTAssertFalse(source.contains("store.selectedScope = scope"))
             XCTAssertFalse(source.contains("store.searchQuery = \"\"\\n            store.clearFilters()"))
         }
         XCTAssertEqual(
@@ -2147,9 +2147,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(privacySource.contains("label.storage_usage"))
         XCTAssertTrue(privacySource.contains("storageUsageReport.itemCount"))
         XCTAssertTrue(privacySource.contains("storageUsageReport.estimatedBytes"))
+        XCTAssertTrue(privacySource.contains("label.storage_limit"))
+        XCTAssertTrue(privacySource.contains("storageUsageReport.usageFraction"))
+        XCTAssertTrue(privacySource.contains("requestMaxStorageBytesChange"))
         XCTAssertFalse(privacySource.contains("maxHistoryItems"))
         XCTAssertTrue(source.contains("destructiveConfirmation = .reduceRetentionDays(value)"))
         XCTAssertTrue(source.contains("case .reduceRetentionDays(let days):"))
+        XCTAssertTrue(source.contains("destructiveConfirmation = .reduceStorageLimit(value)"))
+        XCTAssertTrue(source.contains("case .reduceStorageLimit(let bytes):"))
     }
 
     func testPanelHotKeyControllerPausesGlobalHotKeysWhileRecordingShortcuts() throws {
@@ -2387,7 +2392,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testPinboardCycleHotKeysAndLocalScopeWrapping() {
+    func testPinboardCycleHotKeysAndLocalScopeWrapping() throws {
         let shortcuts = ShortcutConfiguration()
         XCTAssertEqual(
             PasteBuddyPanelHotKeyMatcher.action(
@@ -2455,6 +2460,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             ),
             .pinboard(second)
         )
+
+        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        XCTAssertTrue(appSource.contains("routeQuickPasteToVisiblePanel"))
+        XCTAssertTrue(controllerSource.contains("pasteBuddyPanelQuickPaste"))
+        XCTAssertTrue(shelfSource.contains("in: shelfScope"))
+        XCTAssertTrue(sideSource.contains("in: sideScope"))
     }
 
     func testRuntimeInstallsConfiguredHotKeysBeforeStartingNetworkSync() throws {

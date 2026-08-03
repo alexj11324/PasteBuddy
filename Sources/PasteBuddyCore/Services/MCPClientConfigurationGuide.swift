@@ -91,6 +91,7 @@ public struct MCPClientConfigurationGuide: Equatable, Sendable {
     public var target: MCPClientConfigurationTarget
     public var command: String
     public var arguments: [String]
+    public var serverCommand: String
     public var configurationSnippet: String
     public var configurationHint: String
     public var setupNotes: [String]
@@ -102,6 +103,7 @@ public struct MCPClientConfigurationGuide: Equatable, Sendable {
         target: MCPClientConfigurationTarget,
         command: String,
         arguments: [String],
+        serverCommand: String? = nil,
         configurationSnippet: String,
         configurationHint: String,
         setupNotes: [String],
@@ -112,6 +114,7 @@ public struct MCPClientConfigurationGuide: Equatable, Sendable {
         self.target = target
         self.command = command
         self.arguments = arguments
+        self.serverCommand = serverCommand ?? ([command] + arguments).joined(separator: " ")
         self.configurationSnippet = configurationSnippet
         self.configurationHint = configurationHint
         self.setupNotes = setupNotes
@@ -176,6 +179,11 @@ public enum MCPClientConfigurationGuideBuilder {
             target: target,
             command: command,
             arguments: arguments,
+            serverCommand: serverCommand(
+                command: command,
+                arguments: arguments,
+                authenticationToken: authenticationToken
+            ),
             configurationSnippet: snippet(
                 for: target,
                 command: command,
@@ -286,6 +294,21 @@ public enum MCPClientConfigurationGuideBuilder {
     ) -> String? {
         guard let parts = installationCommandParts(for: target, command: command, arguments: arguments) else {
             return nil
+        }
+        return shellCommandLine(parts)
+    }
+
+    private static func serverCommand(
+        command: String,
+        arguments: [String],
+        authenticationToken: String?
+    ) -> String {
+        var parts = [command] + arguments
+        if let authenticationToken {
+            parts = [
+                "env",
+                "\(MCPAuthenticationToken.environmentVariable)=\(authenticationToken)"
+            ] + parts
         }
         return shellCommandLine(parts)
     }
