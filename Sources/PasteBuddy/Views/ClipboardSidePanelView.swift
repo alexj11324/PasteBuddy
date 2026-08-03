@@ -985,7 +985,11 @@ private struct ClipboardSidePanelListRow: View {
                     }
                 }
             }
-            Button(localized(isExcludedFromAISearch ? "action.add_to_ai_search" : "action.remove_from_ai_search")) {
+            Button(
+                isExcludedFromAISearch
+                    ? LocalizedStringKey("action.add_to_ai_search")
+                    : LocalizedStringKey("action.remove_from_ai_search")
+            ) {
                 onToggleAISearchIndex()
             }
             Button("action.delete", role: .destructive) {

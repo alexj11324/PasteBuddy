@@ -171,7 +171,13 @@ struct ClipboardShelfPanelView: View {
         .onChange(of: shelfQueryState) {
             refreshShelfItems()
         }
-        .onChange(of: activeToolbarStatusCount) {
+        .onChange(of: visibleActiveFilterSummaries.count) {
+            Task { @MainActor in
+                await Task.yield()
+                onLayoutChange()
+            }
+        }
+        .onChange(of: semanticToolbarStatusCount) {
             Task { @MainActor in
                 await Task.yield()
                 onLayoutChange()
@@ -472,14 +478,16 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var activeToolbarStatusCount: Int {
-        visibleActiveFilterSummaries.count + {
-            switch store.semanticSearchState {
-            case .applied(_) where store.semanticSearchScope == shelfScope: return 1
-            case .failed: return 1
-            case .applied(_): return 0
-            case .idle, .loading: return 0
-            }
-        }()
+        visibleActiveFilterSummaries.count + semanticToolbarStatusCount
+    }
+
+    private var semanticToolbarStatusCount: Int {
+        switch store.semanticSearchState {
+        case .applied(_) where store.semanticSearchScope == shelfScope: return 1
+        case .failed: return 1
+        case .applied(_): return 0
+        case .idle, .loading: return 0
+        }
     }
 
     private var collectionStrip: some View {

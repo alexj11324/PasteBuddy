@@ -14,7 +14,7 @@ public struct MobileClipboardBrowserView: View {
 
     public init(store: PasteBuddyStore, irohSync: IrohClipboardSyncService? = nil) {
         self.store = store
-        self.irohSync = irohSync
+        self.irohSync = PasteBuddyFeatureAvailability.irohClipboardSync ? irohSync : nil
     }
 
     public var body: some View {

@@ -197,14 +197,16 @@ struct SettingsView: View {
                 .pickerStyle(.radioGroup)
             }
 
-            Section("label.iroh_clipboard_sync") {
-                LabeledContent("label.status") {
-                    Text(irohStatusText)
-                        .foregroundStyle(irohStatusColor)
+            if PasteBuddyFeatureAvailability.irohClipboardSync {
+                Section("label.iroh_clipboard_sync") {
+                    LabeledContent("label.status") {
+                        Text(irohStatusText)
+                            .foregroundStyle(irohStatusColor)
+                    }
+                    TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
+                        .font(.caption.monospaced())
+                        .frame(maxWidth: .infinity)
                 }
-                TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
-                    .font(.caption.monospaced())
-                    .frame(maxWidth: .infinity)
             }
         }
         .formStyle(.grouped)
@@ -407,7 +409,7 @@ struct SettingsView: View {
 
     private var aiSearchSettings: some View {
         Form {
-            Section("label.ai_access") {
+            Section {
                 LabeledContent("label.current_plan") {
                     Text(verbatim: store.snapshot.entitlement.plan.displayName)
                 }
@@ -419,6 +421,8 @@ struct SettingsView: View {
                 } label: {
                     Text(aiConfigurationActionKey)
                 }
+            } header: {
+                Text("label.ai_access")
             } footer: {
                 Text("message.ai_subscription_expiry_boundary")
             }

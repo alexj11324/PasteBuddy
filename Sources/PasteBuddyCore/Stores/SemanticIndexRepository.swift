@@ -121,12 +121,14 @@ public final class SemanticIndexRepository: @unchecked Sendable {
             for row in rows {
                 let idString: String = row["id"]
                 let itemIDString: String = row["item_id"]
+                let contentHash: String = row["content_hash"]
+                let attemptCount: Int = row["attempt_count"]
                 guard let itemID = UUID(uuidString: itemIDString) else { continue }
                 try db.execute(
                     sql: "UPDATE semantic_index_outbox SET state = ?, updated_at = ? WHERE id = ?",
                     arguments: [SemanticIndexState.indexing.rawValue, now.timeIntervalSince1970, idString]
                 )
-                jobs.append(SemanticIndexJob(id: id, itemID: itemID, contentHash: row["content_hash"], attemptCount: row["attempt_count"]))
+                jobs.append(SemanticIndexJob(id: idString, itemID: itemID, contentHash: contentHash, attemptCount: attemptCount))
             }
             return jobs
         }

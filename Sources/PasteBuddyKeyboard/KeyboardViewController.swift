@@ -25,8 +25,10 @@ final class KeyboardViewController: UIInputViewController {
         resolvedStore.setKeyboardExtensionEnabled(true, fullAccess: hasFullAccess)
         store = resolvedStore
 
-        let syncService = MobileStoreFactory.makeIrohSyncService()
-        syncService.onItemReceived = { [resolvedStore] item in
+        let syncService = PasteBuddyFeatureAvailability.irohClipboardSync
+            ? MobileStoreFactory.makeIrohSyncService()
+            : nil
+        syncService?.onItemReceived = { [resolvedStore] item in
             _ = resolvedStore.addSyncedItem(item)
         }
         irohSync = syncService
@@ -72,7 +74,9 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func startSyncIfAllowed() {
-        guard hasFullAccess, let irohSync else { return }
+        guard PasteBuddyFeatureAvailability.irohClipboardSync,
+              hasFullAccess,
+              let irohSync else { return }
         switch irohSync.connectionState {
         case .connecting, .connected:
             return
