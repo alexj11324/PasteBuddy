@@ -223,7 +223,7 @@ public struct MobileKeyboardHistoryView: View {
     ) {
         self.store = store
         self.pasteService = pasteService
-        self.irohSync = irohSync
+        self.irohSync = PasteBuddyFeatureAvailability.irohClipboardSync ? irohSync : nil
         self.onDeleteBackward = onDeleteBackward
         self.onInsertReturn = onInsertReturn
         self.onAdvanceToNextInputMode = onAdvanceToNextInputMode

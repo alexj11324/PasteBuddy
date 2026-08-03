@@ -23,6 +23,10 @@
 - IMPORTANT: macOS SwiftPM 与全部 iOS targets 必须共同使用 `Sources/PasteBuddy/Resources/Localizable.xcstrings`；不要重新引入 `Localizable.strings` 资源或第二份 localization table。
 - IMPORTANT: Dify API key 只能从 `DIFY_WORKFLOW_API_KEY` 或 Google Secret Manager `general-secrets-store/dify-pastebuddy-localization-workflow-api-key` 读取，禁止写入仓库、`.env`、临时脚本常量或长期本地文件。
 
+## Iroh 临时下线状态（IMPORTANT）
+- IMPORTANT: Iroh clipboard sync 当前通过 `PasteBuddyFeatureAvailability.irohClipboardSync` 在 macOS、iOS 与扩展统一临时关闭；运行时不得启动、连接、发送或接收，用户界面不得显示 Iroh 配对或同步入口。
+- IMPORTANT: 临时下线期间保留 Iroh 实现、依赖以及已有配对配置，不删除或迁移用户数据；恢复时必须只修改统一 capability，并重新完成全平台运行验证。
+
 ## macOS UI/HID 验证（IMPORTANT）
 - IMPORTANT: 验证 macOS 原生窗口、popover、panel、shelf、Dock 覆盖、点击关闭、拖拽、双击等交互时，禁止凭截图、经验值或硬编码坐标猜测点击位置。
 - IMPORTANT: 每次 UI/HID 验证前，必须先通过 Apple 推荐的系统接口读取真实运行时几何信息，例如 `NSScreen.screens`、`NSWindow/NSPanel.frame`、Accessibility frame、`CGWindowListCopyWindowInfo` 或目标 view/window 的实际 frame。

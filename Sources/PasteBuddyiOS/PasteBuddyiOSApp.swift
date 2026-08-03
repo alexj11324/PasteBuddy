@@ -16,8 +16,12 @@ struct PasteBuddyiOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            MobileClipboardBrowserView(store: store, irohSync: irohSync)
+            MobileClipboardBrowserView(
+                store: store,
+                irohSync: PasteBuddyFeatureAvailability.irohClipboardSync ? irohSync : nil
+            )
                 .task {
+                    guard PasteBuddyFeatureAvailability.irohClipboardSync else { return }
                     irohSync.onItemReceived = { [store] item in
                         guard let storedItem = store.addSyncedItem(item) else { return }
                         MobilePasteboardWriter.copy(storedItem)
