@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-private struct BYOKSemanticDocumentPayload: Codable {
+struct BYOKSemanticDocumentPayload: Codable {
     var modality: SemanticIndexModality
     var summary: String
     var keywords: [String]
@@ -13,11 +13,32 @@ private struct BYOKSemanticDocumentPayload: Codable {
     var searchIntents: [String]
     var language: String?
 
+    private static let exactKeys: Set<String> = [
+        "modality", "summary", "keywords", "aliases", "entities",
+        "visualTextHints", "searchIntents", "language"
+    ]
+
+    static func decodeStrict(from data: Data) throws -> Self {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(object.keys) == exactKeys else {
+            throw SemanticIndexError.malformedProviderResponse
+        }
+        do {
+            return try JSONDecoder.pasteBuddy.decode(Self.self, from: data)
+        } catch {
+            throw SemanticIndexError.malformedProviderResponse
+        }
+    }
+
     func document(source: SemanticIndexSource, modelName: String) throws -> SemanticIndexDocument {
-        let lists = [keywords, aliases, entities, visualTextHints, searchIntents]
         guard !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               summary.count <= 2_000,
-              lists.allSatisfy({ $0.count <= 20 && $0.allSatisfy { !$0.isEmpty && $0.count <= 240 } }) else {
+              [keywords, aliases, entities, visualTextHints].allSatisfy({
+                  $0.count <= 20 && $0.allSatisfy { !$0.isEmpty && $0.count <= 160 }
+              }),
+              searchIntents.count <= 20,
+              searchIntents.allSatisfy({ !$0.isEmpty && $0.count <= 240 }),
+              language.map({ $0.count <= 32 }) ?? true else {
             throw SemanticIndexError.malformedProviderResponse
         }
         return SemanticIndexDocument(
@@ -112,11 +133,23 @@ public final class OpenAICompatibleSemanticProvider: SemanticDocumentGenerating,
     }
 
     public func generate(from source: SemanticIndexSource) async throws -> SemanticIndexDocument {
+        let response = try await post(path: "chat/completions", body: try documentRequestBody(for: source))
+        guard let choices = response["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let text = message["content"] as? String,
+              let data = text.data(using: .utf8) else {
+            throw SemanticIndexError.malformedProviderResponse
+        }
+        let payload = try BYOKSemanticDocumentPayload.decodeStrict(from: data)
+        return try payload.document(source: source, modelName: configuration.documentModel)
+    }
+
+    func documentRequestBody(for source: SemanticIndexSource) throws -> [String: Any] {
         var content: [[String: Any]] = [["type": "text", "text": try BYOKSemanticPrompt.userPayload(for: source)]]
         if let base64 = source.imageDataBase64 {
             content.append(["type": "image_url", "image_url": ["url": "data:\(source.imageMediaType ?? "image/jpeg");base64,\(base64)"]])
         }
-        let response = try await post(path: "chat/completions", body: [
+        return [
             "model": configuration.documentModel,
             "temperature": 0,
             "messages": [
@@ -124,14 +157,7 @@ public final class OpenAICompatibleSemanticProvider: SemanticDocumentGenerating,
                 ["role": "user", "content": content]
             ],
             "response_format": ["type": "json_object"]
-        ])
-        guard let choices = response["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any],
-              let text = message["content"] as? String,
-              let data = text.data(using: .utf8),
-              let payload = try? JSONDecoder.pasteBuddy.decode(BYOKSemanticDocumentPayload.self, from: data),
-              !payload.summary.isEmpty else { throw SemanticIndexError.malformedProviderResponse }
-        return try payload.document(source: source, modelName: configuration.documentModel)
+        ]
     }
 
     public func embedDocuments(_ inputs: [SemanticEmbeddingInput]) async throws -> [SemanticEmbedding] {
@@ -196,27 +222,31 @@ public final class GeminiSemanticProvider: SemanticDocumentGenerating, SemanticE
     }
 
     public func generate(from source: SemanticIndexSource) async throws -> SemanticIndexDocument {
-        var parts: [[String: Any]] = [["text": try BYOKSemanticPrompt.userPayload(for: source)]]
-        if let data = source.imageDataBase64 {
-            parts.append(["inlineData": ["mimeType": source.imageMediaType ?? "image/jpeg", "data": data]])
-        }
         let response = try await post(
             path: "models/\(configuration.documentModel):generateContent",
-            body: [
-                "systemInstruction": ["parts": [["text": BYOKSemanticPrompt.systemText]]],
-                "contents": [["role": "user", "parts": parts]],
-                "generationConfig": ["temperature": 0, "responseMimeType": "application/json"]
-            ]
+            body: try documentRequestBody(for: source)
         )
         guard let candidates = response["candidates"] as? [[String: Any]],
               let content = candidates.first?["content"] as? [String: Any],
               let responseParts = content["parts"] as? [[String: Any]],
               let text = responseParts.first?["text"] as? String,
-              let data = text.data(using: .utf8),
-              let payload = try? JSONDecoder.pasteBuddy.decode(BYOKSemanticDocumentPayload.self, from: data) else {
+              let data = text.data(using: .utf8) else {
             throw SemanticIndexError.malformedProviderResponse
         }
+        let payload = try BYOKSemanticDocumentPayload.decodeStrict(from: data)
         return try payload.document(source: source, modelName: configuration.documentModel)
+    }
+
+    func documentRequestBody(for source: SemanticIndexSource) throws -> [String: Any] {
+        var parts: [[String: Any]] = [["text": try BYOKSemanticPrompt.userPayload(for: source)]]
+        if let data = source.imageDataBase64 {
+            parts.append(["inlineData": ["mimeType": source.imageMediaType ?? "image/jpeg", "data": data]])
+        }
+        return [
+            "systemInstruction": ["parts": [["text": BYOKSemanticPrompt.systemText]]],
+            "contents": [["role": "user", "parts": parts]],
+            "generationConfig": ["temperature": 0, "responseMimeType": "application/json"]
+        ]
     }
 
     public func embedDocuments(_ inputs: [SemanticEmbeddingInput]) async throws -> [SemanticEmbedding] {
