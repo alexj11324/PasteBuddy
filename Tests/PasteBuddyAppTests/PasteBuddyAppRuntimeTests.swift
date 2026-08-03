@@ -417,10 +417,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             "exclamationmark.triangle.fill",
             "lock.open.fill",
             "shield",
+            "sparkles",
+            "key.fill",
+            "arrow.triangle.branch",
             "calendar",
             "calendar.badge.clock",
-            "infinity",
-            "person.2.fill",
             "arrow.clockwise",
             "arrow.right",
             "xmark",
@@ -2386,34 +2387,35 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testSubscriptionSettingsUsesVerifiedStoreKitInfrastructure() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let plansStart = try XCTUnwrap(source.range(of: "private var subscriptionSettings"))
-        let bindingsStart = try XCTUnwrap(source.range(of: "private var launchAtLoginBinding"))
-        let plansSource = String(source[plansStart.lowerBound..<bindingsStart.lowerBound])
+        let settingsSource = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let plansSource = try sourceFileContents("Sources/PasteBuddy/Views/AISearchSetupSheet.swift")
 
         XCTAssertTrue(plansSource.contains("action.restore_purchases"))
         XCTAssertTrue(plansSource.contains("AppleStoreKitEntitlementProvider()"))
         XCTAssertTrue(plansSource.contains("fetchProducts()"))
-        XCTAssertFalse(plansSource.contains("displayPrice"))
-        XCTAssertTrue(plansSource.contains("lifetimeProduct == nil"))
-        XCTAssertTrue(plansSource.contains("await store.flushPendingSave()"))
+        XCTAssertTrue(plansSource.contains("displayPrice"))
+        XCTAssertTrue(plansSource.contains(".byokAnnual"))
+        XCTAssertTrue(plansSource.contains(".cloudMonthly"))
+        XCTAssertTrue(plansSource.contains(".cloudAnnual"))
+        XCTAssertTrue(settingsSource.contains("AISearchSetupSheet(store: store)"))
         XCTAssertFalse(plansSource.contains("action.start_trial"))
         XCTAssertFalse(plansSource.contains("action.cancel_trial"))
         XCTAssertFalse(plansSource.contains("store.activatePersonalPlan"))
-        XCTAssertFalse(plansSource.contains("markRestorePurchasesFailed"))
-        XCTAssertFalse(plansSource.contains("statusName"))
-        XCTAssertFalse(plansSource.contains("accessState"))
-        XCTAssertFalse(plansSource.contains("trialState.displayName"))
-        XCTAssertFalse(plansSource.contains("trialSummary"))
-        XCTAssertFalse(plansSource.contains("trialOutcomeStatement"))
-        XCTAssertFalse(plansSource.contains("crossDeviceStatement"))
-        XCTAssertFalse(plansSource.contains("label.device_unlock"))
-        XCTAssertFalse(plansSource.contains("restoreActionStatement"))
-        XCTAssertFalse(plansSource.contains("purchaseOptions"))
-        XCTAssertFalse(plansSource.contains("billingSafetyStatement"))
-        XCTAssertFalse(plansSource.contains("StoreKit restore"))
-        XCTAssertFalse(plansSource.contains("option.detail"))
-        XCTAssertFalse(plansSource.contains("option.unlockSummary"))
+        XCTAssertFalse(plansSource.contains("lifetime"))
+    }
+
+    func testAISetupAndResultControlsExistOnBothClipboardPanels() throws {
+        let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelf, side] {
+            XCTAssertTrue(source.contains("AISearchSetupSheet(store: store)"))
+            XCTAssertTrue(source.contains("store.canRunConfiguredAISource"))
+            XCTAssertTrue(source.contains("label.ai_results_applied"))
+            XCTAssertTrue(source.contains("label.ai_search_failed"))
+            XCTAssertTrue(source.contains("store.invalidateSemanticSearch()"))
+            XCTAssertTrue(source.contains("store.toggleSemanticIndexExclusion"))
+        }
     }
 
     func testIntegrationSettingsUsesRealMCPConfigurationActions() throws {

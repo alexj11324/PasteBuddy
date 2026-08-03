@@ -1551,14 +1551,20 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(cleared.displayName, "Not set")
     }
 
-    func testFreeTrialLifecyclePersistsThroughEncryptedStore() throws {
+    func testVerifiedTrialEntitlementPersistsThroughEncryptedStore() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
 
         let store = PasteBuddyStore(diskStore: harness.snapshotStore)
         let now = Date(timeIntervalSince1970: 1_000)
 
-        store.startFreeTrial(days: 14, now: now)
+        store.applyStoreEntitlement(EntitlementConfiguration(
+            plan: .trial,
+            status: .trialing,
+            trialStartedAt: now,
+            trialEndsAt: now.addingTimeInterval(14 * 24 * 60 * 60),
+            unlocksAllDevicesForAccount: true
+        ))
 
         XCTAssertEqual(store.snapshot.entitlement.plan, .trial)
         XCTAssertEqual(store.snapshot.entitlement.status, .trialing)
@@ -1570,7 +1576,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("When the trial ends"))
         XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("limited mode"))
         XCTAssertTrue(activeOverview.crossDeviceStatement.contains("Mac, iPhone, and iPad"))
-        XCTAssertEqual(activeOverview.purchaseOptions.map(\.plan), [.monthly, .annual, .lifetime, .family])
+        XCTAssertEqual(activeOverview.purchaseOptions.map(\.plan), [.byokAnnual, .cloudMonthly, .cloudAnnual])
         XCTAssertTrue(activeOverview.billingSafetyStatement.contains("Payment details stay with the App Store"))
 
         let endingSoonOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(12 * 24 * 60 * 60))
@@ -1581,21 +1587,12 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(endedOverview.trialSummary.contains("Trial ended"))
         XCTAssertTrue(endedOverview.trialOutcomeStatement.contains("do not delete local clipboard data"))
 
-        store.cancelFreeTrial(now: now.addingTimeInterval(120))
-
-        XCTAssertEqual(store.snapshot.entitlement.status, .canceled)
-        XCTAssertFalse(store.snapshot.entitlement.hasFullAccess(now: now.addingTimeInterval(180)))
-        let canceledOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(180))
-        XCTAssertEqual(canceledOverview.trialState, .canceled)
-        XCTAssertTrue(canceledOverview.trialSummary.contains("Trial canceled"))
-
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()
 
         XCTAssertEqual(reloaded.snapshot.entitlement.plan, .trial)
-        XCTAssertEqual(reloaded.snapshot.entitlement.status, .canceled)
-        let trialCanceledAt = try XCTUnwrap(reloaded.snapshot.entitlement.trialCanceledAt)
-        XCTAssertEqual(trialCanceledAt.timeIntervalSince1970, now.addingTimeInterval(120).timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(reloaded.snapshot.entitlement.status, .trialing)
+        XCTAssertTrue(reloaded.snapshot.entitlement.hasCloudAccess(now: now.addingTimeInterval(120)))
     }
 
     func testPaidPlansUnlockAllDevicesAndCanExpire() throws {
@@ -1606,12 +1603,21 @@ final class PasteBuddyStoreTests: XCTestCase {
         let now = Date()
         let renewal = now.addingTimeInterval(30 * 24 * 60 * 60)
 
-        store.activatePersonalPlan(.monthly, purchasedAt: now, currentPeriodEndsAt: renewal)
+        store.applyStoreEntitlement(EntitlementConfiguration(
+            plan: .cloudMonthly,
+            status: .active,
+            purchasedAt: now,
+            currentPeriodEndsAt: renewal,
+            expiresAt: renewal,
+            unlocksAllDevicesForAccount: true
+        ))
 
-        XCTAssertEqual(store.snapshot.entitlement.plan, .monthly)
+        XCTAssertEqual(store.snapshot.entitlement.plan, .cloudMonthly)
         XCTAssertEqual(store.snapshot.entitlement.status, .active)
         XCTAssertTrue(store.snapshot.entitlement.unlocksAllDevicesForAccount)
         XCTAssertTrue(store.snapshot.entitlement.hasActivePaidAccess(now: now.addingTimeInterval(60)))
+        XCTAssertTrue(store.snapshot.entitlement.hasBYOKAccess(now: now.addingTimeInterval(60)))
+        XCTAssertTrue(store.snapshot.entitlement.hasCloudAccess(now: now.addingTimeInterval(60)))
         let activeOverview = store.snapshot.entitlement.personalOverview(now: now.addingTimeInterval(60))
         XCTAssertEqual(activeOverview.accessState, "Unlocked")
         XCTAssertEqual(activeOverview.trialState, .converted)

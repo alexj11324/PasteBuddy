@@ -79,6 +79,12 @@ public struct MCPPinFirstMatchResponse: Codable, Equatable, Sendable {
     public var pinboard: MCPPinboardSummary
 }
 
+public struct MCPSemanticHistorySearchResponse: Codable, Equatable, Sendable {
+    public var query: String
+    public var items: [AutomationItemSummary]
+    public var payloadsOmitted: Bool = true
+}
+
 public enum MCPToolServiceError: LocalizedError, Equatable {
     case serverDisabled
     case toolDisabled(MCPToolName)
@@ -216,6 +222,28 @@ public final class MCPToolService {
             )
         } catch {
             recordFailure(tool: .pinFirstMatch, error: error, pinboardID: pinboardID)
+            throw error
+        }
+    }
+
+    public func semanticSearchHistory(query: String, limit: Int = 5) async throws -> MCPSemanticHistorySearchResponse {
+        do {
+            try require(.semanticSearchHistory)
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
+            let hits = try await store.semanticSearch(
+                query: trimmed,
+                limit: min(max(limit, 1), 25),
+                respectCurrentFilters: false
+            )
+            let itemByID = Dictionary(uniqueKeysWithValues: store.snapshot.items.map { ($0.id, $0) })
+            let items = hits.compactMap { itemByID[$0.itemID] }
+                .filter(isMCPVisible)
+                .map(AutomationItemSummary.init(item:))
+            recordAccess(tool: .semanticSearchHistory, outcome: .succeeded, resultCount: items.count)
+            return MCPSemanticHistorySearchResponse(query: trimmed, items: items)
+        } catch {
+            recordFailure(tool: .semanticSearchHistory, error: error)
             throw error
         }
     }
