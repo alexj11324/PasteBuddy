@@ -1,10 +1,18 @@
+import CryptoKit
 import Foundation
 import Security
 
+public enum AIProviderCredentialRole: String, CaseIterable, Sendable {
+    case document
+    case embedding
+}
+
 public protocol AIProviderCredentialStoring: Sendable {
-    func apiKey(for provider: BYOKProviderPreset) throws -> String?
-    func saveAPIKey(_ apiKey: String, for provider: BYOKProviderPreset) throws
-    func deleteAPIKey(for provider: BYOKProviderPreset) throws
+    func apiKey(for provider: BYOKProviderPreset, role: AIProviderCredentialRole, baseURL: String) throws -> String?
+    func legacyAPIKey(for provider: BYOKProviderPreset) throws -> String?
+    func saveAPIKey(_ apiKey: String, for provider: BYOKProviderPreset, role: AIProviderCredentialRole, baseURL: String) throws
+    func deleteAPIKey(for provider: BYOKProviderPreset, role: AIProviderCredentialRole, baseURL: String) throws
+    func deleteLegacyAPIKey(for provider: BYOKProviderPreset) throws
 }
 
 public final class KeychainAIProviderCredentialStore: AIProviderCredentialStoring, @unchecked Sendable {
@@ -16,8 +24,20 @@ public final class KeychainAIProviderCredentialStore: AIProviderCredentialStorin
         accountPrefix = bundleIdentifier ?? "com.alexjiang.PasteBuddy"
     }
 
-    public func apiKey(for provider: BYOKProviderPreset) throws -> String? {
-        var query = baseQuery(for: provider)
+    public func apiKey(
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) throws -> String? {
+        try apiKey(query: baseQuery(for: provider, role: role, baseURL: baseURL))
+    }
+
+    public func legacyAPIKey(for provider: BYOKProviderPreset) throws -> String? {
+        try apiKey(query: legacyBaseQuery(for: provider))
+    }
+
+    private func apiKey(query baseQuery: [String: Any]) throws -> String? {
+        var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
@@ -32,12 +52,17 @@ public final class KeychainAIProviderCredentialStore: AIProviderCredentialStorin
         return value
     }
 
-    public func saveAPIKey(_ apiKey: String, for provider: BYOKProviderPreset) throws {
+    public func saveAPIKey(
+        _ apiKey: String,
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) throws {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
             throw EncryptionServiceError.invalidKeyMaterial
         }
-        var query = baseQuery(for: provider)
+        var query = baseQuery(for: provider, role: role, baseURL: baseURL)
         let status = SecItemCopyMatching(query as CFDictionary, nil)
         if status == errSecSuccess {
             let updateStatus = SecItemUpdate(
@@ -56,8 +81,12 @@ public final class KeychainAIProviderCredentialStore: AIProviderCredentialStorin
         guard addStatus == errSecSuccess else { throw EncryptionServiceError.keychainWriteFailed(addStatus) }
     }
 
-    public func deleteAPIKey(for provider: BYOKProviderPreset) throws {
-        var query = baseQuery(for: provider)
+    public func deleteAPIKey(
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) throws {
+        var query = baseQuery(for: provider, role: role, baseURL: baseURL)
         query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -65,11 +94,40 @@ public final class KeychainAIProviderCredentialStore: AIProviderCredentialStorin
         }
     }
 
-    private func baseQuery(for provider: BYOKProviderPreset) -> [String: Any] {
+    public func deleteLegacyAPIKey(for provider: BYOKProviderPreset) throws {
+        var query = legacyBaseQuery(for: provider)
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw EncryptionServiceError.keychainDeleteFailed(status)
+        }
+    }
+
+    private func baseQuery(
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "\(accountPrefix).\(role.rawValue).\(provider.rawValue).\(endpointID(baseURL))"
+        ]
+    }
+
+    private func legacyBaseQuery(for provider: BYOKProviderPreset) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: "\(accountPrefix).\(provider.rawValue)"
         ]
+    }
+
+    private func endpointID(_ baseURL: String) -> String {
+        let normalized = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return SHA256.hash(data: Data(normalized.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }

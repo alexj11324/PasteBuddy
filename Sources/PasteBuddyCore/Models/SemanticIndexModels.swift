@@ -87,6 +87,8 @@ public enum BYOKProviderPreset: String, CaseIterable, Codable, Identifiable, Sen
     case openAI = "openai"
     case gemini
     case openAICompatible = "openai_compatible"
+    case sub2API = "sub2api"
+    case openRouter = "openrouter"
     public var id: String { rawValue }
 }
 
@@ -94,6 +96,8 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
     public var preset: BYOKProviderPreset
     public var baseURL: String
     public var documentModel: String
+    public var embeddingPreset: BYOKProviderPreset
+    public var embeddingBaseURL: String
     public var embeddingModel: String
     public var organizationID: String
     public var projectID: String
@@ -102,6 +106,8 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
         preset: BYOKProviderPreset = .openAI,
         baseURL: String = "https://api.openai.com/v1",
         documentModel: String = "gpt-4.1-mini",
+        embeddingPreset: BYOKProviderPreset? = nil,
+        embeddingBaseURL: String? = nil,
         embeddingModel: String = "text-embedding-3-small",
         organizationID: String = "",
         projectID: String = ""
@@ -109,6 +115,8 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
         self.preset = preset
         self.baseURL = baseURL
         self.documentModel = documentModel
+        self.embeddingPreset = embeddingPreset ?? preset
+        self.embeddingBaseURL = embeddingBaseURL ?? baseURL
         self.embeddingModel = embeddingModel
         self.organizationID = organizationID
         self.projectID = projectID
@@ -127,7 +135,38 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
             )
         case .openAICompatible:
             Self(preset: .openAICompatible, baseURL: "", documentModel: "", embeddingModel: "")
+        case .sub2API:
+            Self(
+                preset: .sub2API,
+                baseURL: "https://sub2.nebula-spaces.com/v1",
+                documentModel: "gpt-5.6-luna",
+                embeddingModel: ""
+            )
+        case .openRouter:
+            Self(
+                preset: .openRouter,
+                baseURL: "https://openrouter.ai/api/v1",
+                documentModel: "",
+                embeddingModel: "qwen/qwen3-embedding-8b"
+            )
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case preset, baseURL, documentModel, embeddingPreset, embeddingBaseURL, embeddingModel
+        case organizationID, projectID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        preset = try container.decodeIfPresent(BYOKProviderPreset.self, forKey: .preset) ?? .openAI
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? "https://api.openai.com/v1"
+        documentModel = try container.decodeIfPresent(String.self, forKey: .documentModel) ?? "gpt-4.1-mini"
+        embeddingPreset = try container.decodeIfPresent(BYOKProviderPreset.self, forKey: .embeddingPreset) ?? preset
+        embeddingBaseURL = try container.decodeIfPresent(String.self, forKey: .embeddingBaseURL) ?? baseURL
+        embeddingModel = try container.decodeIfPresent(String.self, forKey: .embeddingModel) ?? "text-embedding-3-small"
+        organizationID = try container.decodeIfPresent(String.self, forKey: .organizationID) ?? ""
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID) ?? ""
     }
 }
 

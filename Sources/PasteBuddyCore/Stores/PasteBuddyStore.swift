@@ -221,6 +221,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            migrateLegacyBYOKCredentialIfNeeded()
             let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = diskStore.lastLoadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
@@ -277,6 +278,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            migrateLegacyBYOKCredentialIfNeeded()
             let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = result.loadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
@@ -981,13 +983,20 @@ public final class PasteBuddyStore {
     public var hasBYOKAccess: Bool { snapshot.entitlement.hasBYOKAccess() }
     public var hasCloudAIAccess: Bool { snapshot.entitlement.hasCloudAccess() }
     public var hasConfiguredBYOKKey: Bool {
-        hasBYOKAPIKey(for: snapshot.semanticIndex.byok.preset)
+        let configuration = snapshot.semanticIndex.byok
+        return hasBYOKAPIKey(role: .document, configuration: configuration)
+            && hasBYOKAPIKey(role: .embedding, configuration: configuration)
     }
-    public func hasBYOKAPIKey(for provider: BYOKProviderPreset) -> Bool {
-        ((try? aiCredentialStore.apiKey(for: provider)) ?? nil)?.isEmpty == false
+    public func hasBYOKAPIKey(
+        role: AIProviderCredentialRole,
+        configuration: BYOKProviderConfiguration
+    ) -> Bool {
+        ((try? byokAPIKey(role: role, configuration: configuration)) ?? nil)?.isEmpty == false
     }
     public var hasAnyConfiguredBYOKKey: Bool {
-        BYOKProviderPreset.allCases.contains { hasBYOKAPIKey(for: $0) }
+        hasConfiguredBYOKKey || BYOKProviderPreset.allCases.contains {
+            ((try? aiCredentialStore.legacyAPIKey(for: $0)) ?? nil)?.isEmpty == false
+        }
     }
     public var canRunConfiguredAISource: Bool {
         switch snapshot.semanticIndex.inferenceSource {
@@ -2175,23 +2184,39 @@ public final class PasteBuddyStore {
 
     public func testAndSaveBYOKConfiguration(
         _ configuration: BYOKProviderConfiguration,
-        apiKey: String
+        documentAPIKey: String,
+        embeddingAPIKey: String
     ) async -> Bool {
         aiProviderConnectionState = .testing
-        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let effectiveKey = !trimmedKey.isEmpty
-            ? trimmedKey
-            : ((try? aiCredentialStore.apiKey(for: configuration.preset)) ?? nil)
+        let trimmedDocumentKey = documentAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmbeddingKey = embeddingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard hasBYOKAccess else {
             aiProviderConnectionState = .failed(SemanticIndexError.entitlementRequired.localizedDescription)
             return false
         }
-        guard let effectiveKey, !effectiveKey.isEmpty else {
+        let sharesEndpoint = Self.byokRolesShareEndpoint(configuration)
+        let storedDocumentKey = (try? byokAPIKey(role: .document, configuration: configuration)) ?? nil
+        let storedEmbeddingKey = (try? byokAPIKey(role: .embedding, configuration: configuration)) ?? nil
+        let effectiveKeys = Self.resolveBYOKAPIKeys(
+            sharesEndpoint: sharesEndpoint,
+            documentAPIKey: trimmedDocumentKey,
+            embeddingAPIKey: trimmedEmbeddingKey,
+            storedDocumentKey: storedDocumentKey,
+            storedEmbeddingKey: storedEmbeddingKey
+        )
+        let effectiveDocumentKey = effectiveKeys.document
+        let effectiveEmbeddingKey = effectiveKeys.embedding
+        guard let effectiveDocumentKey, !effectiveDocumentKey.isEmpty,
+              let effectiveEmbeddingKey, !effectiveEmbeddingKey.isEmpty else {
             aiProviderConnectionState = .failed(SemanticIndexError.providerConfigurationRequired.localizedDescription)
             return false
         }
         do {
-            let providers = try Self.makeBYOKProviders(configuration: configuration, apiKey: effectiveKey)
+            let providers = try Self.makeBYOKProviders(
+                configuration: configuration,
+                documentAPIKey: effectiveDocumentKey,
+                embeddingAPIKey: effectiveEmbeddingKey
+            )
             _ = try await providers.embedding.embedQuery("PasteBuddy connection test")
             let source = SemanticIndexSource(
                 itemID: UUID(), contentHash: "connection-test", capturedAt: Date(),
@@ -2204,8 +2229,21 @@ public final class PasteBuddyStore {
                 currentConfiguration: snapshot.semanticIndex.byok,
                 savedConfiguration: configuration
             )
-            if !trimmedKey.isEmpty {
-                try aiCredentialStore.saveAPIKey(trimmedKey, for: configuration.preset)
+            try aiCredentialStore.saveAPIKey(
+                effectiveDocumentKey,
+                for: configuration.preset,
+                role: .document,
+                baseURL: configuration.baseURL
+            )
+            try aiCredentialStore.saveAPIKey(
+                effectiveEmbeddingKey,
+                for: configuration.embeddingPreset,
+                role: .embedding,
+                baseURL: configuration.embeddingBaseURL
+            )
+            try aiCredentialStore.deleteLegacyAPIKey(for: configuration.preset)
+            if configuration.embeddingPreset != configuration.preset {
+                try aiCredentialStore.deleteLegacyAPIKey(for: configuration.embeddingPreset)
             }
             snapshot.semanticIndex.byok = configuration
             snapshot.semanticIndex.inferenceSource = .byok
@@ -2220,16 +2258,38 @@ public final class PasteBuddyStore {
         }
     }
 
-    public func deleteBYOKAPIKey(for provider: BYOKProviderPreset? = nil) {
+    public func deleteBYOKAPIKey(
+        role: AIProviderCredentialRole,
+        configuration: BYOKProviderConfiguration
+    ) {
+        let provider = role == .document ? configuration.preset : configuration.embeddingPreset
+        let baseURL = role == .document ? configuration.baseURL : configuration.embeddingBaseURL
+        let activeConfiguration = snapshot.semanticIndex.byok
+        let isActiveCredential = switch role {
+        case .document:
+            provider == activeConfiguration.preset
+                && Self.normalizedBYOKBaseURL(baseURL) == Self.normalizedBYOKBaseURL(activeConfiguration.baseURL)
+        case .embedding:
+            provider == activeConfiguration.embeddingPreset
+                && Self.normalizedBYOKBaseURL(baseURL) == Self.normalizedBYOKBaseURL(activeConfiguration.embeddingBaseURL)
+        }
         do {
-            let resolvedProvider = provider ?? snapshot.semanticIndex.byok.preset
-            try aiCredentialStore.deleteAPIKey(for: resolvedProvider)
-            aiProviderConnectionState = .idle
-            if resolvedProvider == snapshot.semanticIndex.byok.preset {
-                invalidateSemanticSearch()
+            try aiCredentialStore.deleteAPIKey(for: provider, role: role, baseURL: baseURL)
+            if Self.byokRolesShareEndpoint(configuration) {
+                let otherRole: AIProviderCredentialRole = role == .document ? .embedding : .document
+                try aiCredentialStore.deleteAPIKey(
+                    for: provider,
+                    role: otherRole,
+                    baseURL: baseURL
+                )
+                try aiCredentialStore.deleteLegacyAPIKey(for: provider)
             }
         } catch {
             lastErrorMessage = error.localizedDescription
+        }
+        aiProviderConnectionState = .idle
+        if isActiveCredential {
+            invalidateSemanticSearch()
         }
     }
 
@@ -2505,25 +2565,127 @@ public final class PasteBuddyStore {
             )
             return (provider, provider)
         case .byok:
+            let configuration = snapshot.semanticIndex.byok
             guard hasBYOKAccess,
-                  let key = try aiCredentialStore.apiKey(for: snapshot.semanticIndex.byok.preset),
-                  !key.isEmpty else { throw SemanticIndexError.entitlementRequired }
-            return try Self.makeBYOKProviders(configuration: snapshot.semanticIndex.byok, apiKey: key)
+                  let documentKey = try byokAPIKey(role: .document, configuration: configuration),
+                  !documentKey.isEmpty,
+                  let embeddingKey = try byokAPIKey(role: .embedding, configuration: configuration),
+                  !embeddingKey.isEmpty else { throw SemanticIndexError.entitlementRequired }
+            return try Self.makeBYOKProviders(
+                configuration: configuration,
+                documentAPIKey: documentKey,
+                embeddingAPIKey: embeddingKey
+            )
         }
     }
 
     private nonisolated static func makeBYOKProviders(
         configuration: BYOKProviderConfiguration,
-        apiKey: String
+        documentAPIKey: String,
+        embeddingAPIKey: String
     ) throws -> (document: any SemanticDocumentGenerating, embedding: any SemanticEmbeddingProviding) {
+        let embeddingConfiguration = BYOKProviderConfiguration(
+            preset: configuration.embeddingPreset,
+            baseURL: configuration.embeddingBaseURL,
+            documentModel: configuration.documentModel,
+            embeddingPreset: configuration.embeddingPreset,
+            embeddingBaseURL: configuration.embeddingBaseURL,
+            embeddingModel: configuration.embeddingModel,
+            organizationID: byokRolesShareEndpoint(configuration) ? configuration.organizationID : "",
+            projectID: byokRolesShareEndpoint(configuration) ? configuration.projectID : ""
+        )
+
+        let document: any SemanticDocumentGenerating
         switch configuration.preset {
-        case .openAI, .openAICompatible:
-            let provider = OpenAICompatibleSemanticProvider(configuration: configuration, apiKey: apiKey)
-            return (provider, provider)
         case .gemini:
-            let provider = GeminiSemanticProvider(configuration: configuration, apiKey: apiKey)
-            return (provider, provider)
+            document = GeminiSemanticProvider(configuration: configuration, apiKey: documentAPIKey)
+        case .openAI, .openAICompatible, .sub2API, .openRouter:
+            document = OpenAICompatibleSemanticProvider(configuration: configuration, apiKey: documentAPIKey)
         }
+
+        let embedding: any SemanticEmbeddingProviding
+        switch configuration.embeddingPreset {
+        case .gemini:
+            embedding = GeminiSemanticProvider(configuration: embeddingConfiguration, apiKey: embeddingAPIKey)
+        case .openAI, .openAICompatible, .sub2API, .openRouter:
+            embedding = OpenAICompatibleSemanticProvider(configuration: embeddingConfiguration, apiKey: embeddingAPIKey)
+        }
+        return (document, embedding)
+    }
+
+    private func byokAPIKey(
+        role: AIProviderCredentialRole,
+        configuration: BYOKProviderConfiguration
+    ) throws -> String? {
+        let provider = role == .document ? configuration.preset : configuration.embeddingPreset
+        let baseURL = role == .document ? configuration.baseURL : configuration.embeddingBaseURL
+        if let key = try aiCredentialStore.apiKey(for: provider, role: role, baseURL: baseURL),
+           !key.isEmpty {
+            return key
+        }
+        return nil
+    }
+
+    private func migrateLegacyBYOKCredentialIfNeeded() {
+        let configuration = snapshot.semanticIndex.byok
+        guard Self.byokRolesShareEndpoint(configuration) else { return }
+        do {
+            guard let legacyKey = try aiCredentialStore.legacyAPIKey(for: configuration.preset),
+                  !legacyKey.isEmpty else { return }
+            if try aiCredentialStore.apiKey(
+                for: configuration.preset,
+                role: .document,
+                baseURL: configuration.baseURL
+            )?.isEmpty != false {
+                try aiCredentialStore.saveAPIKey(
+                    legacyKey,
+                    for: configuration.preset,
+                    role: .document,
+                    baseURL: configuration.baseURL
+                )
+            }
+            if try aiCredentialStore.apiKey(
+                for: configuration.embeddingPreset,
+                role: .embedding,
+                baseURL: configuration.embeddingBaseURL
+            )?.isEmpty != false {
+                try aiCredentialStore.saveAPIKey(
+                    legacyKey,
+                    for: configuration.embeddingPreset,
+                    role: .embedding,
+                    baseURL: configuration.embeddingBaseURL
+                )
+            }
+            try aiCredentialStore.deleteLegacyAPIKey(for: configuration.preset)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private nonisolated static func byokRolesShareEndpoint(_ configuration: BYOKProviderConfiguration) -> Bool {
+        configuration.preset == configuration.embeddingPreset
+            && normalizedBYOKBaseURL(configuration.baseURL) == normalizedBYOKBaseURL(configuration.embeddingBaseURL)
+    }
+
+    nonisolated static func resolveBYOKAPIKeys(
+        sharesEndpoint: Bool,
+        documentAPIKey: String,
+        embeddingAPIKey: String,
+        storedDocumentKey: String?,
+        storedEmbeddingKey: String?
+    ) -> (document: String?, embedding: String?) {
+        let document = !documentAPIKey.isEmpty
+            ? documentAPIKey
+            : ((!embeddingAPIKey.isEmpty && sharesEndpoint) ? embeddingAPIKey : storedDocumentKey)
+        let embedding = sharesEndpoint
+            ? document
+            : (!embeddingAPIKey.isEmpty ? embeddingAPIKey : storedEmbeddingKey)
+        return (document, embedding)
+    }
+
+    private nonisolated static func normalizedBYOKBaseURL(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     nonisolated static func shouldRebuildSemanticIndexAfterSavingBYOK(

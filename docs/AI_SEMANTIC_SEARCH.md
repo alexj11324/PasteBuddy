@@ -8,7 +8,7 @@ The implementation is native PasteBuddy code rather than Mem0: GRDB/SQLite alrea
 
 - Clipboard items, semantic documents, Float16 embeddings, query cache, exclusions, failures, and the indexing outbox are stored in the existing local GRDB/SQLite database. Dense ranking uses Accelerate/vDSP cosine on Apple platforms and semantic FTS5 participates in reciprocal-rank fusion.
 - The gateway is stateless. It accepts bounded inference requests, returns the result, and has no persistence integration.
-- BYOK requests go directly from the app to OpenAI, Gemini, or an OpenAI-compatible endpoint. API keys are stored with `AfterFirstUnlockThisDeviceOnly` Keychain accessibility and are never sent to PasteBuddy's gateway.
+- BYOK document generation and embedding endpoints are configured independently, so each role can use OpenAI, Gemini, Sub2 API, OpenRouter, or another OpenAI-compatible service. Each provider's API key is stored separately with `AfterFirstUnlockThisDeviceOnly` Keychain accessibility and is never sent to PasteBuddy's gateway.
 - Eligible images are resized, metadata-stripped, and sent directly to a multimodal model. OCR is not a prerequisite and OCR text is not included in the inference request; existing local OCR is used only for the deterministic sensitive-content deny check.
 - Deterministic privacy policy and sensitive-text detection run before upload. Provider accounts must be configured for zero data retention.
 - Gateway authorization uses App Store signed app/entitlement transactions and short-lived feature JWTs. PasteBuddy does not create an account system.
@@ -31,6 +31,8 @@ The existing local MCP service exposes the same semantic search path when semant
 ## Semantic document prompt contract
 
 Cloud and BYOK document generation use the same versioned `semantic-index-v2` contract. Stable indexing policy is sent as a system instruction, while trusted capture metadata and untrusted clipboard content are serialized into separate sections of the user payload. Clipboard text, filenames, file text, images, and visible image text can never supply instructions.
+
+The current development configuration uses `gpt-5.6-luna` through Sub2 API for multimodal semantic-document generation and `qwen/qwen3-embedding-8b` through OpenRouter for document/query embeddings. The model IDs and endpoints remain user-configurable; this pairing is not encoded into the SQLite schema.
 
 The contract is evidence-grounded and preserves retrieval-critical names, filenames, identifiers, error codes, versions, dates, quantities, negation, uncertainty, and status. `capturedAt` is available for explicit relative-date interpretation, source-app fields remain provenance rather than inferred entities, and complete credentials must not be reproduced in derived fields. Responses contain one strict JSON document with no additional keys. This derived document remains an item-level search artifact; it is not an agent memory, user profile, persona, or cross-item ADD/UPDATE/DELETE system.
 

@@ -38,6 +38,88 @@ final class SemanticIndexTests: XCTestCase {
         XCTAssertEqual(document.indexedAt.timeIntervalSince1970, capturedAt.timeIntervalSince1970, accuracy: 0.001)
     }
 
+    func testLegacyBYOKConfigurationUsesTheDocumentEndpointForEmbeddings() throws {
+        let data = Data(#"{"preset":"openai_compatible","baseURL":"https://legacy.example/v1","documentModel":"vision-model","embeddingModel":"embedding-model","organizationID":"","projectID":""}"#.utf8)
+
+        let configuration = try JSONDecoder().decode(BYOKProviderConfiguration.self, from: data)
+
+        XCTAssertEqual(configuration.embeddingPreset, .openAICompatible)
+        XCTAssertEqual(configuration.embeddingBaseURL, "https://legacy.example/v1")
+    }
+
+    func testSub2DocumentAndOpenRouterEmbeddingConfigurationRoundTrips() throws {
+        let configuration = BYOKProviderConfiguration(
+            preset: .sub2API,
+            baseURL: "https://sub2.nebula-spaces.com/v1",
+            documentModel: "gpt-5.6-luna",
+            embeddingPreset: .openRouter,
+            embeddingBaseURL: "https://openrouter.ai/api/v1",
+            embeddingModel: "qwen/qwen3-embedding-8b"
+        )
+
+        let decoded = try JSONDecoder().decode(
+            BYOKProviderConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+
+        XCTAssertEqual(decoded, configuration)
+        XCTAssertEqual(BYOKProviderConfiguration.defaults(for: .sub2API).documentModel, "gpt-5.6-luna")
+        XCTAssertEqual(
+            BYOKProviderConfiguration.defaults(for: .openRouter).embeddingModel,
+            "qwen/qwen3-embedding-8b"
+        )
+    }
+
+    func testSharedEndpointNeverUsesHiddenEmbeddingCredential() {
+        let keys = PasteBuddyStore.resolveBYOKAPIKeys(
+            sharesEndpoint: true,
+            documentAPIKey: "document-key",
+            embeddingAPIKey: "stale-hidden-embedding-key",
+            storedDocumentKey: nil,
+            storedEmbeddingKey: "old-embedding-key"
+        )
+
+        XCTAssertEqual(keys.document, "document-key")
+        XCTAssertEqual(keys.embedding, "document-key")
+    }
+
+    @MainActor
+    func testLegacyCredentialIsNotReusedAcrossDifferentEndpoints() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let configuration = BYOKProviderConfiguration(
+            preset: .openAICompatible,
+            baseURL: "https://documents.example/v1",
+            documentModel: "document-model",
+            embeddingPreset: .openAICompatible,
+            embeddingBaseURL: "https://embeddings.example/v1",
+            embeddingModel: "embedding-model"
+        )
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            aiCredentialStore: FakeAIProviderCredentialStore(keys: [.openAICompatible: "legacy-key"])
+        )
+
+        XCTAssertFalse(store.hasBYOKAPIKey(role: .document, configuration: configuration))
+        XCTAssertFalse(store.hasBYOKAPIKey(role: .embedding, configuration: configuration))
+    }
+
+    @MainActor
+    func testLoadingLegacyConfigurationMigratesCredentialIntoBothEndpointScopes() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try harness.snapshotStore.save(PasteBuddySnapshot())
+        let credentials = FakeAIProviderCredentialStore(keys: [.openAI: "legacy-key"])
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, aiCredentialStore: credentials)
+
+        store.load()
+
+        let configuration = store.snapshot.semanticIndex.byok
+        XCTAssertTrue(store.hasBYOKAPIKey(role: .document, configuration: configuration))
+        XCTAssertTrue(store.hasBYOKAPIKey(role: .embedding, configuration: configuration))
+        XCTAssertNil(try credentials.legacyAPIKey(for: .openAI))
+    }
+
     func testSemanticPromptSeparatesTrustedMetadataFromUntrustedClipboardContent() throws {
         let capturedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-03T12:34:56Z"))
         let injectedText = """
@@ -322,7 +404,10 @@ final class SemanticIndexTests: XCTestCase {
     func testBYOKCapabilityRequiresSubscriptionAndDeviceCredential() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
-        let credentials = FakeAIProviderCredentialStore(keys: [.openAI: "test-key"])
+        let credentials = FakeAIProviderCredentialStore(scopedKeys: [
+            (.openAI, .document, "https://api.openai.com/v1", "test-key"),
+            (.openAI, .embedding, "https://api.openai.com/v1", "test-key")
+        ])
         let store = PasteBuddyStore(diskStore: harness.snapshotStore, aiCredentialStore: credentials)
         let now = Date()
         store.applyStoreEntitlement(EntitlementConfiguration(
@@ -337,8 +422,80 @@ final class SemanticIndexTests: XCTestCase {
         XCTAssertFalse(store.hasCloudAIAccess)
         XCTAssertTrue(store.canRunConfiguredAISource)
 
-        store.deleteBYOKAPIKey(for: .openAI)
+        store.deleteBYOKAPIKey(
+            role: .document,
+            configuration: store.snapshot.semanticIndex.byok
+        )
         XCTAssertFalse(store.canRunConfiguredAISource)
+        XCTAssertNil(try credentials.apiKey(
+            for: .openAI,
+            role: .document,
+            baseURL: "https://api.openai.com/v1"
+        ))
+        XCTAssertNil(try credentials.apiKey(
+            for: .openAI,
+            role: .embedding,
+            baseURL: "https://api.openai.com/v1"
+        ))
+    }
+
+    @MainActor
+    func testSplitBYOKCapabilityRequiresBothProviderCredentials() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let bothHarness = try StoreHarness()
+        defer { bothHarness.cleanup() }
+        var snapshot = PasteBuddySnapshot()
+        snapshot.semanticIndex.byok = BYOKProviderConfiguration(
+            preset: .sub2API,
+            baseURL: "https://sub2.nebula-spaces.com/v1",
+            documentModel: "gpt-5.6-luna",
+            embeddingPreset: .openRouter,
+            embeddingBaseURL: "https://openrouter.ai/api/v1",
+            embeddingModel: "qwen/qwen3-embedding-8b"
+        )
+        try harness.snapshotStore.save(snapshot)
+        try bothHarness.snapshotStore.save(snapshot)
+        let now = Date()
+
+        let missingEmbedding = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            aiCredentialStore: FakeAIProviderCredentialStore(scopedKeys: [
+                (.sub2API, .document, "https://sub2.nebula-spaces.com/v1", "sub2-key")
+            ])
+        )
+        missingEmbedding.load()
+        missingEmbedding.applyStoreEntitlement(EntitlementConfiguration(
+            plan: .byokAnnual,
+            status: .active,
+            currentPeriodEndsAt: now.addingTimeInterval(60),
+            expiresAt: now.addingTimeInterval(60)
+        ))
+        missingEmbedding.setSemanticInferenceSource(.byok)
+        XCTAssertFalse(missingEmbedding.canRunConfiguredAISource)
+
+        let bothProviders = PasteBuddyStore(
+            diskStore: bothHarness.snapshotStore,
+            aiCredentialStore: FakeAIProviderCredentialStore(scopedKeys: [
+                (.sub2API, .document, "https://sub2.nebula-spaces.com/v1", "sub2-key"),
+                (.openRouter, .embedding, "https://openrouter.ai/api/v1", "openrouter-key")
+            ])
+        )
+        bothProviders.load()
+        bothProviders.applyStoreEntitlement(EntitlementConfiguration(
+            plan: .byokAnnual,
+            status: .active,
+            currentPeriodEndsAt: now.addingTimeInterval(60),
+            expiresAt: now.addingTimeInterval(60)
+        ))
+        bothProviders.setSemanticInferenceSource(.byok)
+        XCTAssertEqual(bothProviders.snapshot.semanticIndex.byok.preset, .sub2API)
+        XCTAssertEqual(bothProviders.snapshot.semanticIndex.byok.embeddingPreset, .openRouter)
+        XCTAssertTrue(bothProviders.hasBYOKAPIKey(role: .document, configuration: bothProviders.snapshot.semanticIndex.byok))
+        XCTAssertTrue(bothProviders.hasBYOKAPIKey(role: .embedding, configuration: bothProviders.snapshot.semanticIndex.byok))
+        XCTAssertTrue(bothProviders.hasBYOKAccess)
+        XCTAssertEqual(bothProviders.snapshot.semanticIndex.inferenceSource, .byok)
+        XCTAssertTrue(bothProviders.canRunConfiguredAISource)
     }
 
     func testSavingBYOKRebuildsWhenOnlyInferenceSourceChanges() {
@@ -748,13 +905,49 @@ final class SemanticIndexTests: XCTestCase {
 }
 
 private final class FakeAIProviderCredentialStore: AIProviderCredentialStoring, @unchecked Sendable {
-    private var keys: [BYOKProviderPreset: String]
-
-    init(keys: [BYOKProviderPreset: String] = [:]) {
-        self.keys = keys
+    private struct Scope: Hashable {
+        var provider: BYOKProviderPreset
+        var role: AIProviderCredentialRole
+        var baseURL: String
     }
 
-    func apiKey(for provider: BYOKProviderPreset) throws -> String? { keys[provider] }
-    func saveAPIKey(_ apiKey: String, for provider: BYOKProviderPreset) throws { keys[provider] = apiKey }
-    func deleteAPIKey(for provider: BYOKProviderPreset) throws { keys[provider] = nil }
+    private var scopedKeys: [Scope: String]
+    private var legacyKeys: [BYOKProviderPreset: String]
+
+    init(keys: [BYOKProviderPreset: String] = [:]) {
+        scopedKeys = [:]
+        legacyKeys = keys
+    }
+
+    init(scopedKeys: [(BYOKProviderPreset, AIProviderCredentialRole, String, String)]) {
+        self.scopedKeys = Dictionary(uniqueKeysWithValues: scopedKeys.map {
+            (Scope(provider: $0.0, role: $0.1, baseURL: $0.2), $0.3)
+        })
+        legacyKeys = [:]
+    }
+
+    func apiKey(
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) throws -> String? { scopedKeys[Scope(provider: provider, role: role, baseURL: baseURL)] }
+
+    func legacyAPIKey(for provider: BYOKProviderPreset) throws -> String? { legacyKeys[provider] }
+
+    func saveAPIKey(
+        _ apiKey: String,
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) throws { scopedKeys[Scope(provider: provider, role: role, baseURL: baseURL)] = apiKey }
+
+    func deleteAPIKey(
+        for provider: BYOKProviderPreset,
+        role: AIProviderCredentialRole,
+        baseURL: String
+    ) throws { scopedKeys[Scope(provider: provider, role: role, baseURL: baseURL)] = nil }
+
+    func deleteLegacyAPIKey(for provider: BYOKProviderPreset) throws {
+        legacyKeys[provider] = nil
+    }
 }
