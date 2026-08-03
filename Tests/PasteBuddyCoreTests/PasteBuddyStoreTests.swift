@@ -1574,7 +1574,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(activeOverview.trialState, .active)
         XCTAssertTrue(activeOverview.trialSummary.contains("14 days remaining"))
         XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("When the trial ends"))
-        XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("limited mode"))
+        XCTAssertTrue(activeOverview.trialOutcomeStatement.contains("locks AI inference"))
         XCTAssertTrue(activeOverview.crossDeviceStatement.contains("Mac, iPhone, and iPad"))
         XCTAssertEqual(activeOverview.purchaseOptions.map(\.plan), [.byokAnnual, .cloudMonthly, .cloudAnnual])
         XCTAssertTrue(activeOverview.billingSafetyStatement.contains("Payment details stay with the App Store"))

@@ -26,6 +26,12 @@ The implementation is native PasteBuddy code rather than Mem0: GRDB/SQLite alrea
 
 The sparkle button performs a one-shot semantic search for the current query. Results use reciprocal-rank fusion of the existing lexical search and local embedding similarity while preserving content type, source app, device, date, pinboard, and Paste Stack scope. Editing the query or filters invalidates the prior AI result through a generation gate.
 
+## Semantic document prompt contract
+
+Cloud and BYOK document generation use the same versioned `semantic-index-v2` contract. Stable indexing policy is sent as a system instruction, while trusted capture metadata and untrusted clipboard content are serialized into separate sections of the user payload. Clipboard text, filenames, file text, images, and visible image text can never supply instructions.
+
+The contract is evidence-grounded and preserves retrieval-critical names, filenames, identifiers, error codes, versions, dates, quantities, negation, uncertainty, and status. `capturedAt` is available for explicit relative-date interpretation, source-app fields remain provenance rather than inferred entities, and complete credentials must not be reproduced in derived fields. Responses contain one strict JSON document with no additional keys. This derived document remains an item-level search artifact; it is not an agent memory, user profile, persona, or cross-item ADD/UPDATE/DELETE system.
+
 ## Future local models
 
 The pipeline depends on `SemanticDocumentGenerating` and `SemanticEmbeddingProviding`, not a cloud SDK. Cloud and BYOK are already adapters behind those protocols. A future MLX implementation can replace either provider without changing SQLite schema, search fusion, deletion, UI, or MCP contracts.
