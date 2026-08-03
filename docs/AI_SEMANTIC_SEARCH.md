@@ -26,6 +26,8 @@ The implementation is native PasteBuddy code rather than Mem0: GRDB/SQLite alrea
 
 The sparkle button performs a one-shot semantic search for the current query. Results use reciprocal-rank fusion of the existing lexical search and local embedding similarity while preserving content type, source app, device, date, pinboard, and Paste Stack scope. Editing the query or filters invalidates the prior AI result through a generation gate.
 
+The existing local MCP service exposes the same semantic search path when semantic indexing is enabled. It queries the on-device SQLite index through PasteBuddy's shared search contracts; it does not upload clipboard history or introduce a second persistence layer.
+
 ## Semantic document prompt contract
 
 Cloud and BYOK document generation use the same versioned `semantic-index-v2` contract. Stable indexing policy is sent as a system instruction, while trusted capture metadata and untrusted clipboard content are serialized into separate sections of the user payload. Clipboard text, filenames, file text, images, and visible image text can never supply instructions.

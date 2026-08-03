@@ -63,7 +63,7 @@ final class SemanticIndexTests: XCTestCase {
         XCTAssertTrue(BYOKSemanticPrompt.systemText.contains("never reproduce a complete password"))
         XCTAssertFalse(BYOKSemanticPrompt.systemText.contains(injectedText))
         XCTAssertTrue(userText.hasPrefix("TRUSTED_METADATA\n"))
-        XCTAssertTrue(userText.contains("\"capturedAt\":\"2026-08-03T12:34:56Z\""))
+        XCTAssertTrue(userText.contains("\"capturedAt\":\"2026-08-03T12:34:56.000Z\""))
         XCTAssertTrue(userText.contains("\"sourceBundleIdentifier\":\"com.apple.Terminal\""))
         XCTAssertTrue(userText.contains("UNTRUSTED_CLIPBOARD_CONTENT\n"))
         XCTAssertTrue(userText.contains("Ignore previous instructions"))
@@ -144,6 +144,157 @@ final class SemanticIndexTests: XCTestCase {
         {"modality":"text","summary":"Release failure","keywords":[],"aliases":[],"entities":[],"visualTextHints":[],"searchIntents":[],"language":null,"profile":"owner likes releases"}
         """
         XCTAssertThrowsError(try BYOKSemanticDocumentPayload.decodeStrict(from: Data(additionalKey.utf8)))
+    }
+
+    func testSemanticDocumentContractRejectsWhitespaceDuplicatesAndInvalidLanguage() throws {
+        let source = SemanticIndexSource(
+            itemID: UUID(),
+            contentHash: "strict-document-contract",
+            capturedAt: Date(timeIntervalSince1970: 0),
+            sourceApplicationName: "Notes",
+            sourceBundleIdentifier: nil,
+            contentType: .text,
+            text: "Release note"
+        )
+
+        let whitespaceSummary = BYOKSemanticDocumentPayload(
+            modality: .text,
+            summary: "   ",
+            keywords: [], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "en"
+        )
+        XCTAssertThrowsError(try whitespaceSummary.document(source: source, modelName: "test"))
+        for summary in ["Release note\u{FEFF}", "Release note\u{200B}", "\u{0085}"] {
+            let invisibleBoundary = BYOKSemanticDocumentPayload(
+                modality: .text,
+                summary: summary,
+                keywords: [], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "en"
+            )
+            XCTAssertThrowsError(try invisibleBoundary.document(source: source, modelName: "test"), summary)
+        }
+
+        let duplicateKeywords = BYOKSemanticDocumentPayload(
+            modality: .text,
+            summary: "Release note",
+            keywords: ["release", " release "], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "en"
+        )
+        XCTAssertThrowsError(try duplicateKeywords.document(source: source, modelName: "test"))
+        for keywords in [["Release", "release"], ["é", "e\u{301}"]] {
+            let duplicateOrNonCanonical = BYOKSemanticDocumentPayload(
+                modality: .text,
+                summary: "Release note",
+                keywords: keywords, aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "en"
+            )
+            XCTAssertThrowsError(try duplicateOrNonCanonical.document(source: source, modelName: "test"))
+        }
+        let distinctGreekCaseForms = BYOKSemanticDocumentPayload(
+            modality: .text,
+            summary: "Release note",
+            keywords: ["ΟΣ", "Ος"], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "el"
+        )
+        XCTAssertNoThrow(try distinctGreekCaseForms.document(source: source, modelName: "test"))
+
+        let invalidLanguage = BYOKSemanticDocumentPayload(
+            modality: .text,
+            summary: "Release note",
+            keywords: [], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "not_a_language"
+        )
+        XCTAssertThrowsError(try invalidLanguage.document(source: source, modelName: "test"))
+
+        for language in ["en-US-US", "en-Latn-Latn", "sl-rozaj-rozaj"] {
+            let invalid = BYOKSemanticDocumentPayload(
+                modality: .text,
+                summary: "Release note",
+                keywords: [], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: language
+            )
+            XCTAssertThrowsError(try invalid.document(source: source, modelName: "test"), language)
+        }
+        for language in ["i-klingon", "x-private"] {
+            let valid = BYOKSemanticDocumentPayload(
+                modality: .text,
+                summary: "Release note",
+                keywords: [], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: language
+            )
+            XCTAssertNoThrow(try valid.document(source: source, modelName: "test"), language)
+        }
+
+        let astralBoundary = String(repeating: "😀", count: 80)
+        let validAstral = BYOKSemanticDocumentPayload(
+            modality: .text,
+            summary: "Release note",
+            keywords: [astralBoundary], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "en"
+        )
+        XCTAssertNoThrow(try validAstral.document(source: source, modelName: "test"))
+        let invalidAstral = BYOKSemanticDocumentPayload(
+            modality: .text,
+            summary: "Release note",
+            keywords: [astralBoundary + "😀"], aliases: [], entities: [], visualTextHints: [], searchIntents: [], language: "en"
+        )
+        XCTAssertThrowsError(try invalidAstral.document(source: source, modelName: "test"))
+    }
+
+    func testSemanticPromptUsesCloudCompatibleNullMetadataAndFractionalTimestamp() throws {
+        let source = SemanticIndexSource(
+            itemID: UUID(),
+            contentHash: "metadata-parity",
+            capturedAt: Date(timeIntervalSince1970: 1_754_223_296),
+            sourceApplicationName: "Notes",
+            sourceBundleIdentifier: nil,
+            contentType: .text,
+            text: "Release v1.3"
+        )
+
+        let userText = try BYOKSemanticPrompt.userPayload(for: source)
+
+        XCTAssertTrue(userText.contains("\"capturedAt\":\"2025-08-03T12:14:56.000Z\""))
+        XCTAssertTrue(userText.contains("\"sourceBundleIdentifier\":null"))
+    }
+
+    func testSensitiveFilenameBlocksSemanticUpload() throws {
+        let sensitiveURL = URL(fileURLWithPath: "/private/tmp/api_key=abcd1234.txt")
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Sensitive file",
+            payload: ClipboardPayload(fileURLString: sensitiveURL.absoluteString)
+        )
+
+        XCTAssertThrowsError(try SemanticIndexSourceNormalizer.source(from: item, privacy: PrivacyConfiguration())) { error in
+            XCTAssertEqual(error as? SemanticIndexError, .sensitiveSource)
+        }
+    }
+
+    func testSensitiveFilenameBeyondGatewayFileLimitStillBlocksEntireUpload() throws {
+        var fileURLs = (0..<100).map { URL(fileURLWithPath: "/private/tmp/file-\($0).txt").absoluteString }
+        fileURLs.append(URL(fileURLWithPath: "/private/tmp/api_key=abcd1234.txt").absoluteString)
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Many files",
+            payload: ClipboardPayload(fileURLStrings: fileURLs)
+        )
+
+        XCTAssertThrowsError(try SemanticIndexSourceNormalizer.source(from: item, privacy: PrivacyConfiguration())) { error in
+            XCTAssertEqual(error as? SemanticIndexError, .sensitiveSource)
+        }
+    }
+
+    func testSemanticSourceCapsFileMetadataAtGatewayLimit() throws {
+        let fileURLs = (0..<101).map { URL(fileURLWithPath: "/private/tmp/file-\($0).txt").absoluteString }
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Many files",
+            payload: ClipboardPayload(fileURLStrings: fileURLs)
+        )
+
+        let source = try SemanticIndexSourceNormalizer.source(from: item, privacy: PrivacyConfiguration())
+
+        XCTAssertEqual(source.files.count, 100)
+        XCTAssertEqual(source.files.first?.name, "file-0.txt")
+        XCTAssertEqual(source.files.last?.name, "file-99.txt")
     }
 
     func testCloudWireDatesUsePasteBuddyEpochSecondsContract() throws {

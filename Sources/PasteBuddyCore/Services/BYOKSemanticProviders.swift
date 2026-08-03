@@ -31,14 +31,15 @@ struct BYOKSemanticDocumentPayload: Codable {
     }
 
     func document(source: SemanticIndexSource, modelName: String) throws -> SemanticIndexDocument {
-        guard !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              summary.count <= 2_000,
-              [keywords, aliases, entities, visualTextHints].allSatisfy({
-                  $0.count <= 20 && $0.allSatisfy { !$0.isEmpty && $0.count <= 160 }
-              }),
-              searchIntents.count <= 20,
-              searchIntents.allSatisfy({ !$0.isEmpty && $0.count <= 240 }),
-              language.map({ $0.count <= 32 }) ?? true else {
+        guard SemanticIndexContract.isValid(
+            summary: summary,
+            keywords: keywords,
+            aliases: aliases,
+            entities: entities,
+            visualTextHints: visualTextHints,
+            searchIntents: searchIntents,
+            language: language
+        ) else {
             throw SemanticIndexError.malformedProviderResponse
         }
         return SemanticIndexDocument(
@@ -65,6 +66,23 @@ enum BYOKSemanticPrompt {
         var sourceApplicationName: String
         var sourceBundleIdentifier: String?
         var hasAttachedImage: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case capturedAt, contentType, sourceApplicationName, sourceBundleIdentifier, hasAttachedImage
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(capturedAt, forKey: .capturedAt)
+            try container.encode(contentType, forKey: .contentType)
+            try container.encode(sourceApplicationName, forKey: .sourceApplicationName)
+            if let sourceBundleIdentifier {
+                try container.encode(sourceBundleIdentifier, forKey: .sourceBundleIdentifier)
+            } else {
+                try container.encodeNil(forKey: .sourceBundleIdentifier)
+            }
+            try container.encode(hasAttachedImage, forKey: .hasAttachedImage)
+        }
     }
 
     struct UntrustedContent: Codable {
@@ -72,7 +90,7 @@ enum BYOKSemanticPrompt {
         var files: [SemanticFileMetadata]
     }
 
-    static let version = "semantic-index-v2"
+    static let version = SemanticIndexContract.promptVersion
 
     static let systemText = """
     You are a deterministic semantic-index compiler for exactly one clipboard item. Produce a local derived search document, not conversational memory, a user profile, a persona, or an action plan.
@@ -100,8 +118,10 @@ enum BYOKSemanticPrompt {
 
     static func userPayload(for source: SemanticIndexSource) throws -> String {
         let encoder = JSONEncoder.pasteBuddy
+        let timestampFormatter = ISO8601DateFormatter()
+        timestampFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let trusted = try String(decoding: encoder.encode(TrustedMetadata(
-            capturedAt: ISO8601DateFormatter().string(from: source.capturedAt),
+            capturedAt: timestampFormatter.string(from: source.capturedAt),
             contentType: source.contentType.rawValue,
             sourceApplicationName: source.sourceApplicationName,
             sourceBundleIdentifier: source.sourceBundleIdentifier,

@@ -2454,16 +2454,22 @@ public final class PasteBuddyStore {
               let semanticIndexRepository,
               let clipboardRepository else { return 0 }
         await flushPendingSave()
-        guard let providers = try? semanticProviders() else { return 0 }
-        let worker = SemanticIndexWorker(
-            semanticRepository: semanticIndexRepository,
-            clipboardRepository: clipboardRepository,
-            documentProvider: providers.document,
-            embeddingProvider: providers.embedding
-        )
-        let count = await worker.processNextBatch(privacy: snapshot.privacy, limit: limit)
-        refreshSemanticIndexStatistics()
-        return count
+        do {
+            let providers = try semanticProviders()
+            let worker = SemanticIndexWorker(
+                semanticRepository: semanticIndexRepository,
+                clipboardRepository: clipboardRepository,
+                documentProvider: providers.document,
+                embeddingProvider: providers.embedding
+            )
+            let count = try await worker.processNextBatch(privacy: snapshot.privacy, limit: limit)
+            refreshSemanticIndexStatistics()
+            return count
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            refreshSemanticIndexStatistics()
+            return 0
+        }
     }
 
     private func drainSemanticIndexQueue() {

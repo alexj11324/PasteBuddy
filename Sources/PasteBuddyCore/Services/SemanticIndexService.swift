@@ -137,8 +137,14 @@ public enum SemanticIndexSourceNormalizer {
             throw SemanticIndexError.sensitiveSource
         }
 
+        let allFileURLStrings = item.payload.allFileURLStrings
+        guard !allFileURLStrings.contains(where: { value in
+            URL(string: value).map { SensitiveContentDetector.isLikelySensitive($0.lastPathComponent) } ?? false
+        }) else {
+            throw SemanticIndexError.sensitiveSource
+        }
         var remainingFileTextBytes = maximumAggregateFileTextBytes
-        let files = item.payload.allFileURLStrings.prefix(maximumFileCount).compactMap { value in
+        let files = allFileURLStrings.prefix(maximumFileCount).compactMap { value in
             fileMetadata(value, remainingTextBytes: &remainingFileTextBytes)
         }
         let imageData = item.payload.imageData.flatMap(sanitizedImageData)
@@ -256,7 +262,17 @@ public final class CloudSemanticIndexProvider: SemanticDocumentGenerating, Seman
         let response: DocumentResponse = try await post(path: "v1/inference/semantic-document", body: DocumentRequest(source: source))
         guard response.document.itemID == source.itemID,
               response.document.contentHash == source.contentHash,
-              !response.document.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              response.document.promptVersion == SemanticIndexContract.promptVersion,
+              !response.document.modelName.isEmpty,
+              SemanticIndexContract.isValid(
+                  summary: response.document.summary,
+                  keywords: response.document.keywords,
+                  aliases: response.document.aliases,
+                  entities: response.document.entities,
+                  visualTextHints: response.document.visualTextHints,
+                  searchIntents: response.document.searchIntents,
+                  language: response.document.language
+              ) else {
             throw SemanticIndexError.malformedProviderResponse
         }
         return response.document
@@ -345,9 +361,10 @@ public actor SemanticIndexWorker {
     }
 
     @discardableResult
-    public func processNextBatch(privacy: PrivacyConfiguration, limit: Int = 2) async -> Int {
-        guard let jobs = try? semanticRepository.nextJobs(limit: limit), !jobs.isEmpty else { return 0 }
-        let documents = await withTaskGroup(of: (SemanticIndexJob, SemanticIndexDocument)?.self) { group in
+    public func processNextBatch(privacy: PrivacyConfiguration, limit: Int = 2) async throws -> Int {
+        let jobs = try semanticRepository.nextJobs(limit: limit)
+        guard !jobs.isEmpty else { return 0 }
+        let documents = try await withThrowingTaskGroup(of: (SemanticIndexJob, SemanticIndexDocument)?.self) { group in
             for job in jobs {
                 group.addTask { [semanticRepository, clipboardRepository, documentProvider] in
                     do {
@@ -363,51 +380,60 @@ public actor SemanticIndexWorker {
                         let document = try await documentProvider.generate(from: source)
                         return (job, document)
                     } catch SemanticIndexError.sensitiveSource {
-                        try? semanticRepository.discard(job: job, errorCode: "privacy_blocked")
+                        try semanticRepository.discard(job: job, errorCode: "privacy_blocked")
                     } catch SemanticIndexError.emptySource {
-                        try? semanticRepository.discard(job: job, errorCode: "unsupported_content")
+                        try semanticRepository.discard(job: job, errorCode: "unsupported_content")
                     } catch {
-                        try? semanticRepository.markFailed(job: job, errorCode: String(describing: type(of: error)))
+                        try semanticRepository.markFailed(job: job, errorCode: Self.diagnosticCode(for: error))
                     }
                     return nil
                 }
             }
             var values: [(SemanticIndexJob, SemanticIndexDocument)] = []
-            for await value in group {
+            for try await value in group {
                 if let value { values.append(value) }
             }
             return values
         }
         guard !documents.isEmpty else { return jobs.count }
+        let embeddings: [SemanticEmbedding]
         do {
-            let embeddings = try await embeddingProvider.embedDocuments(documents.map {
+            embeddings = try await embeddingProvider.embedDocuments(documents.map {
                 SemanticEmbeddingInput(id: $0.1.itemID, text: $0.1.embeddingText)
             })
-            var embeddingByID: [UUID: SemanticEmbedding] = [:]
-            for embedding in embeddings where embeddingByID[embedding.id] == nil {
-                embeddingByID[embedding.id] = embedding
-            }
-            for (job, document) in documents {
-                guard let embedding = embeddingByID[document.itemID] else {
-                    try? semanticRepository.markFailed(job: job, errorCode: "embedding_missing")
-                    continue
-                }
-                do {
-                    try semanticRepository.commit(
-                        document: document,
-                        embedding: embedding,
-                        jobID: job.id,
-                        expectedGeneration: job.generation
-                    )
-                } catch {
-                    try? semanticRepository.markFailed(job: job, errorCode: String(describing: type(of: error)))
-                }
-            }
         } catch {
             for (job, _) in documents {
-                try? semanticRepository.markFailed(job: job, errorCode: String(describing: type(of: error)))
+                try semanticRepository.markFailed(job: job, errorCode: Self.diagnosticCode(for: error))
+            }
+            return jobs.count
+        }
+        var embeddingByID: [UUID: SemanticEmbedding] = [:]
+        for embedding in embeddings where embeddingByID[embedding.id] == nil {
+            embeddingByID[embedding.id] = embedding
+        }
+        for (job, document) in documents {
+            guard let embedding = embeddingByID[document.itemID] else {
+                try semanticRepository.markFailed(job: job, errorCode: "embedding_missing")
+                continue
+            }
+            do {
+                try semanticRepository.commit(
+                    document: document,
+                    embedding: embedding,
+                    jobID: job.id,
+                    expectedGeneration: job.generation
+                )
+            } catch {
+                try semanticRepository.markFailed(job: job, errorCode: Self.diagnosticCode(for: error))
             }
         }
         return jobs.count
+    }
+
+    private nonisolated static func diagnosticCode(for error: Error) -> String {
+        if let semanticError = error as? SemanticIndexError {
+            return "semantic_\(String(describing: semanticError))"
+        }
+        return String(reflecting: type(of: error))
     }
 }

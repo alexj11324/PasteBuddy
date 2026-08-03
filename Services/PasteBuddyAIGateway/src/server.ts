@@ -6,10 +6,9 @@ import { jwtVerify, SignJWT } from "jose";
 import { z } from "zod";
 import {
   semanticDocumentResultSchema,
-  semanticDocumentUserPrompt,
+  semanticDocumentModelRequest,
   semanticIndexPromptVersion,
-  semanticIndexSourceSchema,
-  semanticIndexSystemPrompt
+  semanticIndexSourceSchema
 } from "./semantic-contract.js";
 
 const env = z.object({
@@ -101,18 +100,10 @@ app.get("/healthz", async () => ({ ok: true, persistence: "none" }));
 
 app.post("/v1/inference/semantic-document", async request => {
   const { source } = z.object({ source: semanticIndexSourceSchema }).parse(request.body);
-  const content: Array<Record<string, unknown>> = [{ type: "text", text: semanticDocumentUserPrompt(source) }];
-  if (source.imageDataBase64) content.push({
-    type: "image_url",
-    image_url: { url: `data:${source.imageMediaType ?? "image/jpeg"};base64,${source.imageDataBase64}` }
-  });
-  const raw = await modelJSON("chat/completions", {
-    model: env.MULTIMODAL_MODEL, temperature: 0, messages: [
-      { role: "system", content: semanticIndexSystemPrompt },
-      { role: "user", content }
-    ],
-    response_format: { type: "json_object" }
-  });
+  const raw = await modelJSON(
+    "chat/completions",
+    semanticDocumentModelRequest(source, env.MULTIMODAL_MODEL)
+  );
   const decoded = semanticDocumentResultSchema.parse(JSON.parse(raw.choices[0].message.content));
   return { document: { ...decoded, itemID: source.itemID, contentHash: source.contentHash, modelName: env.MULTIMODAL_MODEL, promptVersion: semanticIndexPromptVersion, indexedAt: Date.now() / 1000 } };
 });
