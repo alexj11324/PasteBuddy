@@ -92,13 +92,9 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
   overview model and Settings copy distinguish Team from personal plans and
   center the value proposition on shared pinboards for ideas, links, files,
   images, snippets, and staying in sync.
-- DAY123-53: Trial, monthly, annual, lifetime, family, restore, all-devices
-  entitlement model, StoreKit product configuration, StoreKit 2 purchase/restore
-  adapter, transaction update observer, verified entitlement mapping, and a
-  Settings-facing personal entitlement overview covering trial reminders/trial
-  end behavior, same-account Mac/iPhone/iPad unlocks, restore guidance for
-  reinstall/device changes, purchase option summaries, and encrypted
-  billing-safety boundaries.
+- DAY123-53: Verified App Store subscription entitlement model with BYOK Annual,
+  Cloud Monthly, and Cloud Annual capability gates; StoreKit 2 purchase/restore,
+  transaction updates, expiry fail-closed behavior, and contextual setup UI.
 - DAY123-54: VoiceOver labels on core flows, semantic appearance, Differentiate
   Without Color pinboard selection, flexible Settings sizing, and initial
   English/Simplified Chinese localization resources with parity tests for

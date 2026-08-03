@@ -5,29 +5,25 @@ import StoreKit
 #endif
 
 public struct StoreProductConfiguration: Codable, Equatable, Sendable {
-    public var monthlyProductID: String
-    public var annualProductID: String
-    public var lifetimeProductID: String
-    public var familyProductID: String
+    public var byokAnnualProductID: String
+    public var cloudMonthlyProductID: String
+    public var cloudAnnualProductID: String
 
     public init(
-        monthlyProductID: String = "com.pastebuddy.subscription.monthly",
-        annualProductID: String = "com.pastebuddy.subscription.annual",
-        lifetimeProductID: String = "com.pastebuddy.lifetime",
-        familyProductID: String = "com.pastebuddy.family"
+        byokAnnualProductID: String = "com.pastebuddy.ai.byok.annual",
+        cloudMonthlyProductID: String = "com.pastebuddy.ai.cloud.monthly",
+        cloudAnnualProductID: String = "com.pastebuddy.ai.cloud.annual"
     ) {
-        self.monthlyProductID = monthlyProductID
-        self.annualProductID = annualProductID
-        self.lifetimeProductID = lifetimeProductID
-        self.familyProductID = familyProductID
+        self.byokAnnualProductID = byokAnnualProductID
+        self.cloudMonthlyProductID = cloudMonthlyProductID
+        self.cloudAnnualProductID = cloudAnnualProductID
     }
 
     public var allProductIDs: [String] {
         [
-            monthlyProductID,
-            annualProductID,
-            lifetimeProductID,
-            familyProductID
+            byokAnnualProductID,
+            cloudMonthlyProductID,
+            cloudAnnualProductID
         ].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
@@ -35,14 +31,12 @@ public struct StoreProductConfiguration: Codable, Equatable, Sendable {
     public func productID(for plan: ProductAccessPlan) -> String? {
         let productID: String
         switch plan {
-        case .monthly:
-            productID = monthlyProductID
-        case .annual:
-            productID = annualProductID
-        case .lifetime:
-            productID = lifetimeProductID
-        case .family:
-            productID = familyProductID
+        case .byokAnnual:
+            productID = byokAnnualProductID
+        case .cloudMonthly:
+            productID = cloudMonthlyProductID
+        case .cloudAnnual:
+            productID = cloudAnnualProductID
         case .free, .trial, .team:
             return nil
         }
@@ -54,14 +48,12 @@ public struct StoreProductConfiguration: Codable, Equatable, Sendable {
     public func plan(for productID: String) -> ProductAccessPlan? {
         let trimmed = productID.trimmingCharacters(in: .whitespacesAndNewlines)
         switch trimmed {
-        case monthlyProductID:
-            return .monthly
-        case annualProductID:
-            return .annual
-        case lifetimeProductID:
-            return .lifetime
-        case familyProductID:
-            return .family
+        case byokAnnualProductID:
+            return .byokAnnual
+        case cloudMonthlyProductID:
+            return .cloudMonthly
+        case cloudAnnualProductID:
+            return .cloudAnnual
         default:
             return nil
         }
@@ -113,7 +105,8 @@ public struct VerifiedStoreTransaction: Codable, Equatable, Sendable {
 
     public func isActive(now: Date = Date()) -> Bool {
         guard revocationDate == nil else { return false }
-        return expirationDate.map { $0 > now } ?? true
+        guard let expirationDate else { return false }
+        return expirationDate > now
     }
 }
 
@@ -220,22 +213,20 @@ public enum StoreEntitlementMapper {
         let status: EntitlementStatus
         if transaction.revocationDate != nil {
             status = .revoked
-        } else if transaction.expirationDate.map({ $0 <= now }) ?? false {
+        } else if transaction.expirationDate.map({ $0 <= now }) ?? true {
             status = .expired
         } else {
             status = .active
         }
 
-        let currentPeriodEndsAt = plan == .monthly || plan == .annual || plan == .family
-            ? transaction.expirationDate
-            : nil
+        let currentPeriodEndsAt = transaction.expirationDate
         return EntitlementConfiguration(
             plan: plan,
             status: status,
             purchasedAt: transaction.purchaseDate,
             currentPeriodEndsAt: currentPeriodEndsAt,
             expiresAt: transaction.expirationDate ?? transaction.revocationDate,
-            isFamilySharingEnabled: transaction.isFamilyShared || plan == .family,
+            isFamilySharingEnabled: false,
             unlocksAllDevicesForAccount: status == .active,
             restoreState: restoreState
         )
@@ -294,13 +285,11 @@ public enum StoreEntitlementMapper {
 
     private static func planPriority(_ plan: ProductAccessPlan) -> Int {
         switch plan {
-        case .lifetime:
-            4
-        case .family:
+        case .cloudAnnual:
             3
-        case .annual:
+        case .cloudMonthly:
             2
-        case .monthly:
+        case .byokAnnual:
             1
         case .free, .trial, .team:
             0

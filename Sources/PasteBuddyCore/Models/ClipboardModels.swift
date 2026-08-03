@@ -1611,29 +1611,48 @@ public struct GeneralConfiguration: Codable, Equatable, Sendable {
 public enum ProductAccessPlan: String, CaseIterable, Codable, Identifiable, Sendable {
     case free
     case trial
-    case monthly
-    case annual
-    case lifetime
-    case family
+    case byokAnnual = "byok_annual"
+    case cloudMonthly = "cloud_monthly"
+    case cloudAnnual = "cloud_annual"
     case team
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
-        case .free: "Free"
-        case .trial: "Free Trial"
-        case .monthly: "Monthly"
-        case .annual: "Annual"
-        case .lifetime: "Lifetime"
-        case .family: "Family"
-        case .team: "Team"
+        case .free: PasteBuddyLocalization.string("label.plan_free", defaultValue: "Free")
+        case .trial: PasteBuddyLocalization.string("label.plan_free_trial", defaultValue: "Free Trial")
+        case .byokAnnual: PasteBuddyLocalization.string("label.plan_byok_annual", defaultValue: "BYOK Annual")
+        case .cloudMonthly: PasteBuddyLocalization.string("label.plan_cloud_monthly", defaultValue: "Cloud Monthly")
+        case .cloudAnnual: PasteBuddyLocalization.string("label.plan_cloud_annual", defaultValue: "Cloud Annual")
+        case .team: PasteBuddyLocalization.string("label.plan_team", defaultValue: "Team")
         }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case "monthly", "annual", "lifetime", "family":
+            self = .free
+        default:
+            guard let plan = Self(rawValue: value) else {
+                throw DecodingError.dataCorruptedError(
+                    in: try decoder.singleValueContainer(),
+                    debugDescription: "Unknown PasteBuddy access plan: \(value)"
+                )
+            }
+            self = plan
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 
     public var isPersonalPaidPlan: Bool {
         switch self {
-        case .monthly, .annual, .lifetime, .family:
+        case .byokAnnual, .cloudMonthly, .cloudAnnual:
             true
         case .free, .trial, .team:
             false
@@ -1784,7 +1803,10 @@ public struct TeamPlanOverview: Codable, Equatable, Sendable {
             ? "Managed distribution enabled for team deployment."
             : "Managed distribution is off; members install individually."
         primaryValueStatement = "Team plans center on shared pinboards for reusable ideas, links, files, images, and snippets that stay in sync for collaborators."
-        purchasePositioning = "Team is a business plan distinct from personal monthly, annual, lifetime, and family plans, with seat billing and admin-visible license state."
+        purchasePositioning = PasteBuddyLocalization.string(
+            "message.team_purchase_positioning",
+            defaultValue: "Team is a business plan distinct from personal BYOK and Cloud subscriptions, with seat billing and admin-visible license state."
+        )
         valuePropositions = [
             TeamPlanValueProposition(
                 id: "shared-pinboards",
@@ -1883,29 +1905,22 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
 
     private static let allPurchaseOptions: [PersonalPurchaseOption] = [
         PersonalPurchaseOption(
-            plan: .monthly,
-            title: "Monthly",
-            detail: "Subscription billed monthly for users who want flexibility.",
-            unlockSummary: "Unlocks the same paid feature set on Mac, iPhone, and iPad while active."
+            plan: .byokAnnual,
+            title: PasteBuddyLocalization.string("label.plan_byok_annual", defaultValue: "BYOK Annual"),
+            detail: PasteBuddyLocalization.string("message.byok_annual_option_detail", defaultValue: "Annual subscription for AI Search using your own provider keys."),
+            unlockSummary: PasteBuddyLocalization.string("message.byok_annual_unlock", defaultValue: "Unlocks BYOK while the subscription remains active.")
         ),
         PersonalPurchaseOption(
-            plan: .annual,
-            title: "Annual",
-            detail: "Subscription billed annually for long-running personal use.",
-            unlockSummary: "Unlocks the same paid feature set on Mac, iPhone, and iPad while active."
+            plan: .cloudMonthly,
+            title: PasteBuddyLocalization.string("label.plan_cloud_monthly", defaultValue: "Cloud Monthly"),
+            detail: PasteBuddyLocalization.string("message.cloud_monthly_option_detail", defaultValue: "Monthly subscription with PasteBuddy Cloud inference and BYOK."),
+            unlockSummary: PasteBuddyLocalization.string("message.cloud_subscription_unlock", defaultValue: "Unlocks Cloud and BYOK while the subscription remains active.")
         ),
         PersonalPurchaseOption(
-            plan: .lifetime,
-            title: "Lifetime",
-            detail: "One-time personal purchase without renewal.",
-            unlockSummary: "Unlocks the same paid feature set on Mac, iPhone, and iPad for the same user."
-        ),
-        PersonalPurchaseOption(
-            plan: .family,
-            title: "Family",
-            detail: "Family entitlement for StoreKit Family Sharing where available.",
-            unlockSummary: "Unlocks supported devices for the entitled family member when StoreKit reports Family Sharing.",
-            includesFamilySharing: true
+            plan: .cloudAnnual,
+            title: PasteBuddyLocalization.string("label.plan_cloud_annual", defaultValue: "Cloud Annual"),
+            detail: PasteBuddyLocalization.string("message.cloud_annual_option_detail", defaultValue: "Annual subscription with PasteBuddy Cloud inference and BYOK."),
+            unlockSummary: PasteBuddyLocalization.string("message.cloud_subscription_unlock", defaultValue: "Unlocks Cloud and BYOK while the subscription remains active.")
         )
     ]
 
@@ -1965,9 +1980,9 @@ public struct PersonalEntitlementOverview: Codable, Equatable, Sendable {
     ) -> String {
         switch state {
         case .active, .endingSoon:
-            return "When the trial ends, PasteBuddy keeps local data and returns paid-only features to limited mode unless monthly, annual, lifetime, or family access is active."
+            return PasteBuddyLocalization.string("message.ai_trial_end_outcome", defaultValue: "When the trial ends, PasteBuddy keeps local data and locks AI inference unless an active BYOK or Cloud subscription is available.")
         case .canceled:
-            return "Canceled trials stop granting full access; users can still activate monthly, annual, lifetime, or family access later."
+            return PasteBuddyLocalization.string("message.ai_trial_canceled_outcome", defaultValue: "Canceled trials stop granting AI access; users can still activate a BYOK or Cloud subscription later.")
         case .ended:
             return "Ended trials do not delete local clipboard data; they only stop granting paid access."
         case .converted:
@@ -2077,17 +2092,30 @@ public struct EntitlementConfiguration: Codable, Equatable, Sendable {
     public func hasActivePaidAccess(now: Date = Date()) -> Bool {
         guard status == .active else { return false }
         switch plan {
-        case .monthly, .annual, .family:
-            return (expiresAt ?? currentPeriodEndsAt ?? .distantFuture) > now
-        case .lifetime, .team:
-            return expiresAt.map { $0 > now } ?? true
+        case .byokAnnual, .cloudMonthly, .cloudAnnual:
+            guard let endDate = expiresAt ?? currentPeriodEndsAt else { return false }
+            return endDate > now
+        case .team:
+            return team != nil
         case .free, .trial:
             return false
         }
     }
 
     public func hasFullAccess(now: Date = Date()) -> Bool {
-        isTrialActive(now: now) || hasActivePaidAccess(now: now)
+        (plan == .team && hasActivePaidAccess(now: now)) || hasBYOKAccess(now: now)
+    }
+
+    public func hasBYOKAccess(now: Date = Date()) -> Bool {
+        if isTrialActive(now: now) { return true }
+        guard plan == .byokAnnual || plan == .cloudMonthly || plan == .cloudAnnual else { return false }
+        return hasActivePaidAccess(now: now)
+    }
+
+    public func hasCloudAccess(now: Date = Date()) -> Bool {
+        if isTrialActive(now: now) { return true }
+        guard hasActivePaidAccess(now: now) else { return false }
+        return plan == .cloudMonthly || plan == .cloudAnnual
     }
 
     public var accessSummary: String {
@@ -3269,6 +3297,7 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
     case listPinboards = "pastebuddy.list_pinboards"
     case createPinboard = "pastebuddy.create_pinboard"
     case pinFirstMatch = "pastebuddy.pin_first_match"
+    case semanticSearchHistory = "pastebuddy.semantic_search_history"
 
     public var id: String { rawValue }
 
@@ -3283,6 +3312,11 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
         case .listPinboards: "List Pinboards"
         case .createPinboard: "Create Pinboard"
         case .pinFirstMatch: "Pin First Matching Item"
+        case .semanticSearchHistory:
+            PasteBuddyLocalization.string(
+                "mcp.semantic_search_history",
+                defaultValue: "Semantic Search History"
+            )
         }
     }
 }
@@ -3455,6 +3489,7 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
     public var settingsBehavior: SettingsBehaviorConfiguration
     public var shortcuts: ShortcutConfiguration
     public var mcp: MCPConfiguration
+    public var semanticIndex: SemanticIndexConfiguration
     public var security: SecurityConfiguration
 
     public init(
@@ -3472,6 +3507,7 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         settingsBehavior: SettingsBehaviorConfiguration = SettingsBehaviorConfiguration(),
         shortcuts: ShortcutConfiguration = ShortcutConfiguration(),
         mcp: MCPConfiguration = MCPConfiguration(),
+        semanticIndex: SemanticIndexConfiguration = SemanticIndexConfiguration(),
         security: SecurityConfiguration = SecurityConfiguration()
     ) {
         self.schemaVersion = schemaVersion
@@ -3488,6 +3524,7 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         self.settingsBehavior = settingsBehavior
         self.shortcuts = shortcuts
         self.mcp = mcp
+        self.semanticIndex = semanticIndex
         self.security = security
     }
 
@@ -3506,6 +3543,7 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         case settingsBehavior
         case shortcuts
         case mcp
+        case semanticIndex
         case security
     }
 
@@ -3528,6 +3566,7 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         ) ?? SettingsBehaviorConfiguration()
         shortcuts = try container.decodeIfPresent(ShortcutConfiguration.self, forKey: .shortcuts) ?? ShortcutConfiguration()
         mcp = try container.decodeIfPresent(MCPConfiguration.self, forKey: .mcp) ?? MCPConfiguration()
+        semanticIndex = try container.decodeIfPresent(SemanticIndexConfiguration.self, forKey: .semanticIndex) ?? SemanticIndexConfiguration()
         security = try container.decodeIfPresent(SecurityConfiguration.self, forKey: .security) ?? SecurityConfiguration()
     }
 }
