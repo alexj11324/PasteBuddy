@@ -98,10 +98,7 @@ struct SettingsView: View {
     private var settingsSplitViewContent: some View {
         NavigationSplitView {
             List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
-                SettingsSidebarLabel(
-                    section: section,
-                    isSelected: selectedSettingsSection == section
-                )
+                SettingsSidebarLabel(section: section)
                 .tag(section)
             }
             .listStyle(.sidebar)
@@ -1015,13 +1012,12 @@ private struct MCPAdvancedSettingsSheet: View {
 
 private struct SettingsSidebarLabel: View {
     let section: SettingsSidebarSection
-    let isSelected: Bool
 
     var body: some View {
         Group {
             if section == .integrations {
                 HStack(spacing: 8) {
-                    MCPBrandIcon(isSelected: isSelected)
+                    MCPBrandIcon()
                     Text(section.titleKey)
                 }
             } else if let systemImageName = section.systemImageName {
@@ -1040,8 +1036,6 @@ private struct SettingsSidebarLabel: View {
 }
 
 private struct MCPBrandIcon: View {
-    let isSelected: Bool
-
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -1062,7 +1056,6 @@ private struct MCPBrandIcon: View {
             }
         }
         .frame(width: 16, height: 16)
-        .foregroundStyle(isSelected ? Color.white : Color.accentColor)
         .accessibilityHidden(true)
     }
 }
