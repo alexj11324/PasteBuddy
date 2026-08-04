@@ -47,7 +47,6 @@ struct ClipboardSidePanelView: View {
             toolbar
             Divider().opacity(0.32)
             itemList
-            footer
         }
         .padding(.top, 14)
         .padding(.horizontal, 14)
@@ -249,13 +248,18 @@ struct ClipboardSidePanelView: View {
                                     for: direction,
                                     order: collectionOrder,
                                     frames: collectionFrames
-                                ) else { return }
+                                ) else { return false }
                                 withAnimation(.linear(duration: 0.12)) {
                                     proxy.scrollTo(
                                         target,
                                         anchor: direction == .leading ? .leading : .trailing
                                     )
+                                    _ = collectionDragSession.previewMove(
+                                        relativeTo: target,
+                                        afterTarget: direction == .trailing
+                                    )
                                 }
+                                return true
                             }
                         )
                     }
@@ -298,7 +302,7 @@ struct ClipboardSidePanelView: View {
     private func collectionChip(
         for collection: ClipboardCollectionID,
         in collectionOrder: [ClipboardCollectionID],
-        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Bool
     ) -> some View {
         let canMoveLeft = collectionOrder.first != collection
         let canMoveRight = collectionOrder.last != collection
@@ -346,7 +350,7 @@ struct ClipboardSidePanelView: View {
         collectionOrder: [ClipboardCollectionID],
         title: String,
         isSelected: Bool,
-        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void,
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Bool,
         canMoveLeft: Bool,
         canMoveRight: Bool,
         action: @escaping () -> Void
@@ -476,24 +480,6 @@ struct ClipboardSidePanelView: View {
 
         }
         .padding(.vertical, 10)
-    }
-
-    private var footer: some View {
-        Group {
-            if paging.items.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel(localized("label.clipboard"))
-                    .accessibilityValue(localized("state.connecting"))
-            } else {
-                Text(localized("format.items", paging.totalCount))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 32)
-        .padding(.horizontal, 4)
     }
 
     private var queryState: ClipboardSidePanelQueryState {
@@ -906,7 +892,7 @@ private struct ClipboardSidePanelFilterChip: View {
     let title: String
     let isSelected: Bool
     let scrollViewport: ClipboardCollectionScrollViewport
-    let onAutoScroll: (ClipboardCollectionAutoScrollDirection) -> Void
+    let onAutoScroll: (ClipboardCollectionAutoScrollDirection) -> Bool
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
     let canMoveLeft: Bool
     let canMoveRight: Bool
