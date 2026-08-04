@@ -876,6 +876,20 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
+    public func hasStoredSettingsBehaviorMetadata() throws -> Bool {
+        try database.read { db in
+            try String.fetchOne(
+                db,
+                sql: """
+                    SELECT json_type(value_json, '$.settingsBehavior')
+                    FROM snapshot_metadata
+                    WHERE key = ?
+                    """,
+                arguments: [Self.metadataKey]
+            ) == "object"
+        }
+    }
+
     public func availableSourceApps() throws -> [String] {
         try database.read { db in
             try String.fetchAll(
@@ -1779,6 +1793,7 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
     var pinboardInvitationInbox: PinboardInvitationInbox
     var storage: StorageConfiguration
     var paste: PasteConfiguration
+    var settingsBehavior: SettingsBehaviorConfiguration
     var shortcuts: ShortcutConfiguration
     var mcp: MCPConfiguration
     var semanticIndex: SemanticIndexConfiguration
@@ -1794,6 +1809,7 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
         pinboardInvitationInbox = snapshot.pinboardInvitationInbox
         storage = snapshot.storage
         paste = snapshot.paste
+        settingsBehavior = snapshot.settingsBehavior
         shortcuts = snapshot.shortcuts
         mcp = snapshot.mcp
         semanticIndex = snapshot.semanticIndex
@@ -1811,6 +1827,10 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
         pinboardInvitationInbox = try container.decode(PinboardInvitationInbox.self, forKey: .pinboardInvitationInbox)
         storage = try container.decode(StorageConfiguration.self, forKey: .storage)
         paste = try container.decode(PasteConfiguration.self, forKey: .paste)
+        settingsBehavior = try container.decodeIfPresent(
+            SettingsBehaviorConfiguration.self,
+            forKey: .settingsBehavior
+        ) ?? SettingsBehaviorConfiguration()
         shortcuts = try container.decode(ShortcutConfiguration.self, forKey: .shortcuts)
         mcp = try container.decode(MCPConfiguration.self, forKey: .mcp)
         semanticIndex = try container.decodeIfPresent(SemanticIndexConfiguration.self, forKey: .semanticIndex) ?? SemanticIndexConfiguration()
@@ -1830,6 +1850,7 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
             pinboardInvitationInbox: pinboardInvitationInbox,
             storage: storage,
             paste: paste,
+            settingsBehavior: settingsBehavior,
             shortcuts: shortcuts,
             mcp: mcp,
             semanticIndex: semanticIndex,

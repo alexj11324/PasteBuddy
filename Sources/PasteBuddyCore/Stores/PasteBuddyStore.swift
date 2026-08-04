@@ -207,10 +207,15 @@ public final class PasteBuddyStore {
         guard let diskStore else { return }
         do {
             let repositoryHasStoredSnapshot = try clipboardRepository?.hasStoredSnapshot() == true
-            var loadedSnapshot = if repositoryHasStoredSnapshot, let clipboardRepository {
-                try clipboardRepository.exportSnapshot(hydrateAssets: false)
+            var loadedSnapshot: PasteBuddySnapshot
+            if repositoryHasStoredSnapshot, let clipboardRepository {
+                var repositorySnapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
+                if try !clipboardRepository.hasStoredSettingsBehaviorMetadata() {
+                    repositorySnapshot.settingsBehavior = try diskStore.load().settingsBehavior
+                }
+                loadedSnapshot = repositorySnapshot
             } else {
-                try diskStore.load()
+                loadedSnapshot = try diskStore.load()
             }
             if !repositoryHasStoredSnapshot,
                Self.needsExternalAssetHydration(loadedSnapshot),
@@ -260,7 +265,10 @@ public final class PasteBuddyStore {
             let repositoryHasStoredSnapshot = try await repositorySyncActor?.hasStoredSnapshot() == true
             let result: SnapshotPersistenceLoadResult
             if repositoryHasStoredSnapshot, let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+                var repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+                if try await !repositorySyncActor.hasStoredSettingsBehaviorMetadata() {
+                    repositorySnapshot.settingsBehavior = try await persistenceActor.load().snapshot.settingsBehavior
+                }
                 result = SnapshotPersistenceLoadResult(
                     snapshot: repositorySnapshot,
                     loadedStorageMode: repositorySnapshot.security.storageMode

@@ -5585,6 +5585,75 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.snapshot.settingsBehavior.showDuringScreenSharing)
     }
 
+    func testSettingsBehaviorPersistsThroughRepositoryBackedRelaunch() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+
+        store.setPasteDestination(.clipboard)
+        store.setSoundEffectsEnabled(false)
+        store.setShowDuringScreenSharing(true)
+        store.setGenerateLinkPreviews(false)
+        store.setIgnoreTransientContent(false)
+        await store.flushPendingSave()
+
+        let reloaded = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        await reloaded.loadAsync()
+
+        XCTAssertEqual(reloaded.snapshot.settingsBehavior, store.snapshot.settingsBehavior)
+    }
+
+    func testLegacyRepositoryMetadataRecoversSettingsBehaviorFromSnapshotStore() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        var diskSnapshot = PasteBuddySnapshot()
+        diskSnapshot.settingsBehavior.showDuringScreenSharing = true
+        try harness.snapshotStore.save(diskSnapshot)
+        try repository.replaceAll(with: PasteBuddySnapshot())
+        try database.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE snapshot_metadata
+                    SET value_json = json_remove(value_json, '$.settingsBehavior')
+                    WHERE key = 'snapshot'
+                    """
+            )
+        }
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        await store.loadAsync()
+
+        XCTAssertTrue(store.snapshot.settingsBehavior.showDuringScreenSharing)
+        let storedSettingsType = try database.read { db in
+            try String.fetchOne(
+                db,
+                sql: """
+                    SELECT json_type(value_json, '$.settingsBehavior')
+                    FROM snapshot_metadata
+                    WHERE key = 'snapshot'
+                    """
+            )
+        }
+        XCTAssertEqual(storedSettingsType, "object")
+    }
+
     func testSettingsAndPinboardShortcutDefaultsDecodeFromLegacySnapshot() throws {
         let legacyJSON = """
         {

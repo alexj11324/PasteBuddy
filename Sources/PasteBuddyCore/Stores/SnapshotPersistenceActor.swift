@@ -91,4 +91,8 @@ public actor ClipboardRepositorySyncActor {
     public func hasStoredSnapshot() throws -> Bool {
         try repository.hasStoredSnapshot()
     }
+
+    public func hasStoredSettingsBehaviorMetadata() throws -> Bool {
+        try repository.hasStoredSettingsBehaviorMetadata()
+    }
 }
