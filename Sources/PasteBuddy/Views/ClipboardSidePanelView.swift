@@ -39,9 +39,6 @@ struct ClipboardSidePanelView: View {
     @State private var previewRequestID: UUID?
     @State private var pinnedState: Bool?
     @State private var timestampReference = Date()
-    @State private var collectionDragSession = ClipboardCollectionDragSession()
-    @State private var collectionFrames: [ClipboardCollectionID: CGRect] = [:]
-    @State private var collectionScrollViewport = ClipboardCollectionScrollViewport()
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -63,7 +60,6 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
-            collectionDragSession.cancel()
             dismissPreparedPreview()
         }
         .onChange(of: queryState) {
@@ -233,144 +229,85 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        let collectionOrder = collectionDragSession.displayOrder(
-            fallback: store.collectionOrder.filter { $0 != .pasteStack }
-        )
-        return ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(collectionOrder) { collection in
-                        collectionChip(
-                            for: collection,
-                            in: collectionOrder,
-                            onAutoScroll: { direction in
-                                guard let target = collectionScrollViewport.target(
-                                    for: direction,
-                                    order: collectionOrder,
-                                    frames: collectionFrames
-                                ) else { return false }
-                                withAnimation(.linear(duration: 0.12)) {
-                                    proxy.scrollTo(
-                                        target,
-                                        anchor: direction == .leading ? .leading : .trailing
-                                    )
-                                    _ = collectionDragSession.previewMove(
-                                        relativeTo: target,
-                                        afterTarget: direction == .trailing
-                                    )
-                                }
-                                return true
-                            }
-                        )
-                    }
+        let collectionOrder = store.collectionOrder.filter { $0 != .pasteStack }
+        return HStack(spacing: 8) {
+            ClipboardCollectionStrip(
+                items: collectionOrder.compactMap {
+                    collectionStripItem(for: $0, in: collectionOrder)
+                },
+                style: .sidePanel,
+                accessibilityLabel: localized("label.clipboard_collections"),
+                onReorder: reorderCollection
+            )
 
-                    Button {
-                        createNamedPinboard()
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 30, height: 30)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .labelStyle(.iconOnly)
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .help(localized("label.new_pinboard"))
-                    .accessibilityLabel(localized("label.new_pinboard"))
-                }
-                .onGeometryChange(
-                    for: CGFloat.self,
-                    of: {
-                        $0.frame(
-                            in: .named(ClipboardCollectionViewportCoordinateSpace.sidePanel)
-                        ).minX
-                    }
-                ) { collectionScrollViewport.contentMinX = $0 }
-                .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
-                .padding(.vertical, 1)
+            Button {
+                createNamedPinboard()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
-            .coordinateSpace(name: ClipboardCollectionViewportCoordinateSpace.sidePanel)
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) {
-                collectionScrollViewport.width = $0
-            }
-            .scrollIndicators(.never, axes: .horizontal)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .help(localized("label.new_pinboard"))
+            .accessibilityLabel(localized("label.new_pinboard"))
         }
     }
 
-    @ViewBuilder
-    private func collectionChip(
+    private func collectionStripItem(
         for collection: ClipboardCollectionID,
-        in collectionOrder: [ClipboardCollectionID],
-        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Bool
-    ) -> some View {
+        in collectionOrder: [ClipboardCollectionID]
+    ) -> ClipboardCollectionStripItem? {
         let canMoveLeft = collectionOrder.first != collection
         let canMoveRight = collectionOrder.last != collection
+        let moveLeft = { moveCollection(collection, in: collectionOrder, by: -1) }
+        let moveRight = { moveCollection(collection, in: collectionOrder, by: 1) }
 
         switch collection {
         case .history:
-            reorderableSideChip(
-                collection: collection,
-                collectionOrder: collectionOrder,
+            return ClipboardCollectionStripItem(
+                id: collection,
                 title: localized("label.clipboard"),
                 isSelected: sideScope == .history,
-                onAutoScroll: onAutoScroll,
+                onDropPayloads: nil,
                 canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight
-            ) { setSideScope(.history) }
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { setSideScope(.history) }
+            )
         case .pasteStack:
-            EmptyView()
+            return nil
         case .smart(let category):
-            reorderableSideChip(
-                collection: collection,
-                collectionOrder: collectionOrder,
+            return ClipboardCollectionStripItem(
+                id: collection,
                 title: localized(category.displayName),
                 isSelected: isSmartCategorySelected(category),
-                onAutoScroll: onAutoScroll,
+                onDropPayloads: nil,
                 canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight
-            ) { selectSmartCategory(category) }
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { selectSmartCategory(category) }
+            )
         case .pinboard(let id):
-            if let pinboard = store.userPinboards.first(where: { $0.id == id }) {
-                reorderableSideChip(
-                    collection: collection,
-                    collectionOrder: collectionOrder,
-                    title: pinboard.name,
-                    isSelected: sideScope == .pinboard(pinboard.id),
-                    onAutoScroll: onAutoScroll,
-                    canMoveLeft: canMoveLeft,
-                    canMoveRight: canMoveRight
-                ) { setSideScope(.pinboard(pinboard.id)) }
+            guard let pinboard = store.userPinboards.first(where: { $0.id == id }) else {
+                return nil
             }
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: pinboard.name,
+                isSelected: sideScope == .pinboard(pinboard.id),
+                onDropPayloads: nil,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { setSideScope(.pinboard(pinboard.id)) }
+            )
         }
-    }
-
-    private func reorderableSideChip(
-        collection: ClipboardCollectionID,
-        collectionOrder: [ClipboardCollectionID],
-        title: String,
-        isSelected: Bool,
-        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Bool,
-        canMoveLeft: Bool,
-        canMoveRight: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        ClipboardSidePanelFilterChip(
-            collection: collection,
-            collectionOrder: collectionOrder,
-            dragSession: $collectionDragSession,
-            collectionFrames: $collectionFrames,
-            title: title,
-            isSelected: isSelected,
-            scrollViewport: collectionScrollViewport,
-            onAutoScroll: onAutoScroll,
-            onReorder: reorderCollection,
-            canMoveLeft: canMoveLeft,
-            canMoveRight: canMoveRight,
-            onMoveLeft: { moveCollection(collection, by: -1) },
-            onMoveRight: { moveCollection(collection, by: 1) },
-            action: action
-        )
     }
 
     private func createNamedPinboard() {
@@ -631,8 +568,19 @@ struct ClipboardSidePanelView: View {
         store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)
     }
 
-    private func moveCollection(_ collection: ClipboardCollectionID, by offset: Int) {
-        _ = store.moveCollection(collection, by: offset)
+    private func moveCollection(
+        _ collection: ClipboardCollectionID,
+        in visibleOrder: [ClipboardCollectionID],
+        by offset: Int
+    ) {
+        guard let sourceIndex = visibleOrder.firstIndex(of: collection) else { return }
+        let destinationIndex = sourceIndex + offset
+        guard visibleOrder.indices.contains(destinationIndex) else { return }
+        _ = store.moveCollection(
+            collection,
+            relativeTo: visibleOrder[destinationIndex],
+            afterTarget: offset > 0
+        )
     }
 
     private func selectItem(_ item: ClipboardItem) {
@@ -881,69 +829,6 @@ struct ClipboardSidePanelView: View {
         )
     }
 
-}
-
-private struct ClipboardSidePanelFilterChip: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let collection: ClipboardCollectionID
-    let collectionOrder: [ClipboardCollectionID]
-    @Binding var dragSession: ClipboardCollectionDragSession
-    @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
-    let title: String
-    let isSelected: Bool
-    let scrollViewport: ClipboardCollectionScrollViewport
-    let onAutoScroll: (ClipboardCollectionAutoScrollDirection) -> Bool
-    let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
-    let action: () -> Void
-    @State private var isDropTargeted = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
-                .padding(.horizontal, 10)
-                .frame(height: 30)
-                .background {
-                    Capsule()
-                        .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
-                }
-                .clipShape(Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .modifier(
-            ClipboardCollectionReorderModifier(
-                collection: collection,
-                collectionOrder: collectionOrder,
-                session: $dragSession,
-                collectionFrames: $collectionFrames,
-                isTargeted: $isDropTargeted,
-                scrollViewport: scrollViewport,
-                animation: reduceMotion ? nil : .snappy(duration: 0.18),
-                onAutoScroll: onAutoScroll,
-                onReorder: onReorder,
-                onDropPayloads: nil
-            )
-        )
-        .help(title)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(isSelected ? NSLocalizedString("state.selected", comment: "") : NSLocalizedString("label.not_selected", comment: ""))
-        .accessibilityActions {
-            if canMoveLeft {
-                Button(NSLocalizedString("action.move_left", comment: ""), action: onMoveLeft)
-            }
-            if canMoveRight {
-                Button(NSLocalizedString("action.move_right", comment: ""), action: onMoveRight)
-            }
-        }
-    }
 }
 
 private struct ClipboardSidePanelListRow: View {
