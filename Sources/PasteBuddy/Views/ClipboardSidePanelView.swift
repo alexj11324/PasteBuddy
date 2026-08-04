@@ -39,6 +39,8 @@ struct ClipboardSidePanelView: View {
     @State private var previewRequestID: UUID?
     @State private var pinnedState: Bool?
     @State private var timestampReference = Date()
+    @State private var collectionDragSession = ClipboardCollectionDragSession()
+    @State private var collectionFrames: [ClipboardCollectionID: CGRect] = [:]
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -61,6 +63,7 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
+            collectionDragSession.cancel()
             dismissPreparedPreview()
         }
         .onChange(of: queryState) {
@@ -230,46 +233,11 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        ScrollView(.horizontal) {
+        let collectionOrder = collectionDragSession.displayOrder(fallback: store.collectionOrder)
+        return ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ClipboardSidePanelFilterChip(
-                    title: localized("label.clipboard"),
-                    systemImageName: "clock.arrow.circlepath",
-                    color: store.isCapturePaused ? .orange : .blue,
-                    isSelected: sideScope == .history
-                ) {
-                    setSideScope(.history)
-                }
-
-                ClipboardSidePanelFilterChip(
-                    title: localized("action.paste_stack"),
-                    systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                    color: store.isPasteStackActive ? .green : .secondary,
-                    isSelected: sideScope == .pasteStack
-                ) {
-                    setSideScope(.pasteStack)
-                }
-
-                ForEach(SmartPinboardCategory.allCases) { category in
-                    ClipboardSidePanelFilterChip(
-                        title: localized(category.displayName),
-                        systemImageName: category.systemImageName,
-                        color: Color(hex: category.colorHex) ?? .accentColor,
-                        isSelected: isSmartCategorySelected(category)
-                    ) {
-                        selectSmartCategory(category)
-                    }
-                }
-
-                ForEach(store.userPinboards) { pinboard in
-                    ClipboardSidePanelFilterChip(
-                        title: pinboard.name,
-                        systemImageName: "pin.fill",
-                        color: Color(hex: pinboard.colorHex) ?? .blue,
-                        isSelected: sideScope == .pinboard(pinboard.id)
-                    ) {
-                        setSideScope(.pinboard(pinboard.id))
-                    }
+                ForEach(collectionOrder) { collection in
+                    collectionChip(for: collection, in: collectionOrder)
                 }
 
                 Button {
@@ -286,10 +254,99 @@ struct ClipboardSidePanelView: View {
                 .help(localized("label.new_pinboard"))
                 .accessibilityLabel(localized("label.new_pinboard"))
             }
+            .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
             .padding(.vertical, 1)
         }
         .scrollIndicators(.never, axes: .horizontal)
+        .scrollDisabled(collectionDragSession.isActive)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func collectionChip(
+        for collection: ClipboardCollectionID,
+        in collectionOrder: [ClipboardCollectionID]
+    ) -> some View {
+        let canMoveLeft = collectionOrder.first != collection
+        let canMoveRight = collectionOrder.last != collection
+
+        switch collection {
+        case .history:
+            reorderableSideChip(
+                collection: collection,
+                collectionOrder: collectionOrder,
+                title: localized("label.clipboard"),
+                systemImageName: "clock.arrow.circlepath",
+                color: store.isCapturePaused ? .orange : .blue,
+                isSelected: sideScope == .history,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight
+            ) { setSideScope(.history) }
+        case .pasteStack:
+            reorderableSideChip(
+                collection: collection,
+                collectionOrder: collectionOrder,
+                title: localized("action.paste_stack"),
+                systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
+                color: store.isPasteStackActive ? .green : .secondary,
+                isSelected: sideScope == .pasteStack,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight
+            ) { setSideScope(.pasteStack) }
+        case .smart(let category):
+            reorderableSideChip(
+                collection: collection,
+                collectionOrder: collectionOrder,
+                title: localized(category.displayName),
+                systemImageName: category.systemImageName,
+                color: Color(hex: category.colorHex) ?? .accentColor,
+                isSelected: isSmartCategorySelected(category),
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight
+            ) { selectSmartCategory(category) }
+        case .pinboard(let id):
+            if let pinboard = store.userPinboards.first(where: { $0.id == id }) {
+                reorderableSideChip(
+                    collection: collection,
+                    collectionOrder: collectionOrder,
+                    title: pinboard.name,
+                    systemImageName: "pin.fill",
+                    color: Color(hex: pinboard.colorHex) ?? .blue,
+                    isSelected: sideScope == .pinboard(pinboard.id),
+                    canMoveLeft: canMoveLeft,
+                    canMoveRight: canMoveRight
+                ) { setSideScope(.pinboard(pinboard.id)) }
+            }
+        }
+    }
+
+    private func reorderableSideChip(
+        collection: ClipboardCollectionID,
+        collectionOrder: [ClipboardCollectionID],
+        title: String,
+        systemImageName: String,
+        color: Color,
+        isSelected: Bool,
+        canMoveLeft: Bool,
+        canMoveRight: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        ClipboardSidePanelFilterChip(
+            collection: collection,
+            collectionOrder: collectionOrder,
+            dragSession: $collectionDragSession,
+            collectionFrames: $collectionFrames,
+            title: title,
+            systemImageName: systemImageName,
+            color: color,
+            isSelected: isSelected,
+            onReorder: reorderCollection,
+            canMoveLeft: canMoveLeft,
+            canMoveRight: canMoveRight,
+            onMoveLeft: { moveCollection(collection, by: -1) },
+            onMoveRight: { moveCollection(collection, by: 1) },
+            action: action
+        )
     }
 
     private func createNamedPinboard() {
@@ -560,6 +617,18 @@ struct ClipboardSidePanelView: View {
         setSideScope(.pinboard(pinboard.id))
     }
 
+    private func reorderCollection(
+        _ source: ClipboardCollectionID,
+        relativeTo target: ClipboardCollectionID,
+        afterTarget: Bool
+    ) -> Bool {
+        store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)
+    }
+
+    private func moveCollection(_ collection: ClipboardCollectionID, by offset: Int) {
+        _ = store.moveCollection(collection, by: offset)
+    }
+
     private func selectItem(_ item: ClipboardItem) {
         PasteBuddyMotion.performInstantSelection {
             interaction.select(item.id)
@@ -809,11 +878,22 @@ struct ClipboardSidePanelView: View {
 }
 
 private struct ClipboardSidePanelFilterChip: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let collection: ClipboardCollectionID
+    let collectionOrder: [ClipboardCollectionID]
+    @Binding var dragSession: ClipboardCollectionDragSession
+    @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
     let title: String
     let systemImageName: String
     let color: Color
     let isSelected: Bool
+    let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
     let action: () -> Void
+    @State private var isDropTargeted = false
 
     var body: some View {
         Button(action: action) {
@@ -836,7 +916,30 @@ private struct ClipboardSidePanelFilterChip: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .modifier(
+            ClipboardCollectionReorderModifier(
+                collection: collection,
+                collectionOrder: collectionOrder,
+                session: $dragSession,
+                collectionFrames: $collectionFrames,
+                isTargeted: $isDropTargeted,
+                animation: reduceMotion ? nil : .snappy(duration: 0.18),
+                onReorder: onReorder,
+                onDropPayloads: nil
+            )
+        )
         .help(title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(isSelected ? NSLocalizedString("state.selected", comment: "") : NSLocalizedString("label.not_selected", comment: ""))
+        .accessibilityActions {
+            if canMoveLeft {
+                Button(NSLocalizedString("action.move_left", comment: ""), action: onMoveLeft)
+            }
+            if canMoveRight {
+                Button(NSLocalizedString("action.move_right", comment: ""), action: onMoveRight)
+            }
+        }
     }
 }
 

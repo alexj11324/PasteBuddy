@@ -8,6 +8,46 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
+    func testCollectionDragSessionPreviewsAndCompletesCrossCategoryMove() {
+        let order: [ClipboardCollectionID] = [
+            .history,
+            .pasteStack,
+            .smart(.text),
+            .smart(.links)
+        ]
+        var session = ClipboardCollectionDragSession()
+
+        session.begin(source: .smart(.links), order: order, sourceOriginX: 180)
+        session.updateTranslation(-120)
+        XCTAssertTrue(session.previewMove(relativeTo: .pasteStack, afterTarget: false))
+        XCTAssertEqual(session.displayOrder(fallback: order), [
+            .history,
+            .smart(.links),
+            .pasteStack,
+            .smart(.text)
+        ])
+        XCTAssertEqual(session.visualOffset(currentSourceLayoutMinX: 60), 0)
+        XCTAssertEqual(
+            session.complete(),
+            ClipboardCollectionMove(
+                source: .smart(.links),
+                target: .pasteStack,
+                afterTarget: false
+            )
+        )
+        XCTAssertFalse(session.isActive)
+    }
+
+    func testCollectionDragSessionCancelsWithoutARealOrderChange() {
+        let order: [ClipboardCollectionID] = [.history, .pasteStack, .smart(.text)]
+        var session = ClipboardCollectionDragSession()
+
+        session.begin(source: .history, order: order, sourceOriginX: 0)
+        XCTAssertNil(session.complete())
+        XCTAssertEqual(session.displayOrder(fallback: order), order)
+        XCTAssertFalse(session.isActive)
+    }
+
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
         XCTAssertEqual(
             PasteBuddyApp.screenSharingType(
