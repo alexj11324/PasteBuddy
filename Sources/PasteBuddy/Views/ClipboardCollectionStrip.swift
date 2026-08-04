@@ -22,6 +22,16 @@ struct ClipboardCollectionReorderDestination: Equatable {
     let afterTarget: Bool
 }
 
+enum ClipboardCollectionNativeReorderingPolicy {
+    static let environmentVariable = "PASTEBUDDY_ENABLE_SWIFTUI_CATEGORY_REORDERING"
+
+    static func isEnabled(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        environment[environmentVariable] == "1"
+    }
+}
+
 enum ClipboardCollectionReorderResolver {
     static func destination(
         for source: ClipboardCollectionID,
@@ -90,7 +100,7 @@ struct ClipboardCollectionStrip: View {
 
     @ViewBuilder
     var body: some View {
-        if #available(macOS 27.0, *) {
+        if #available(macOS 27.0, *), ClipboardCollectionNativeReorderingPolicy.isEnabled() {
             SwiftUIClipboardCollectionStrip(
                 items: items,
                 style: style,

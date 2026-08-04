@@ -82,10 +82,19 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
-    func testCollectionStripsUseSwiftUINativeReorderingOnMacOS27() throws {
+    func testSwiftUINativeCollectionReorderingIsOptInWhileTheSystemPathIsUnstable() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
 
-        XCTAssertTrue(source.contains("if #available(macOS 27.0, *)"))
+        XCTAssertFalse(ClipboardCollectionNativeReorderingPolicy.isEnabled(environment: [:]))
+        XCTAssertTrue(ClipboardCollectionNativeReorderingPolicy.isEnabled(environment: [
+            ClipboardCollectionNativeReorderingPolicy.environmentVariable: "1"
+        ]))
+        XCTAssertFalse(ClipboardCollectionNativeReorderingPolicy.isEnabled(environment: [
+            ClipboardCollectionNativeReorderingPolicy.environmentVariable: "0"
+        ]))
+        XCTAssertTrue(source.contains(
+            "if #available(macOS 27.0, *), ClipboardCollectionNativeReorderingPolicy.isEnabled()"
+        ))
         XCTAssertTrue(source.contains("ForEach(items, id: \\.reorderID)"))
         XCTAssertTrue(source.contains(".reorderable()"))
         XCTAssertTrue(source.contains("for: ClipboardCollectionStripItem.self"))
