@@ -79,6 +79,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("scrollView.autohidesScrollers = true"))
         XCTAssertTrue(bridgeSource.contains("scrollView.hasHorizontalScroller = false"))
         XCTAssertTrue(bridgeSource.contains("scrollView.horizontalScroller = nil"))
+        XCTAssertTrue(bridgeSource.contains("NSClickGestureRecognizer("))
+        XCTAssertTrue(bridgeSource.contains("recognizer.delaysPrimaryMouseButtonEvents = false"))
+        XCTAssertTrue(bridgeSource.contains("ClipboardCollectionLabelHostingView"))
+        XCTAssertTrue(bridgeSource.contains("override func hitTest(_ point: NSPoint) -> NSView?"))
+        XCTAssertFalse(bridgeSource.contains("didSelectItemsAt indexPaths"))
+        XCTAssertFalse(bridgeSource.contains("collectionView.deselectItems(at:"))
         for source in [bridgeSource, shelfSource, sideSource] {
             XCTAssertFalse(source.contains("DragGesture("))
             XCTAssertFalse(source.contains("autoScrollDirection"))

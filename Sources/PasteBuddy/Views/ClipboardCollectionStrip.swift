@@ -427,15 +427,6 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
 
         func collectionView(
             _ collectionView: NSCollectionView,
-            didSelectItemsAt indexPaths: Set<IndexPath>
-        ) {
-            guard let indexPath = indexPaths.first, items.indices.contains(indexPath.item) else { return }
-            items[indexPath.item].action()
-            collectionView.deselectItems(at: indexPaths)
-        }
-
-        func collectionView(
-            _ collectionView: NSCollectionView,
             pasteboardWriterForItemAt indexPath: IndexPath
         ) -> NSPasteboardWriting? {
             guard items.indices.contains(indexPath.item) else { return nil }
@@ -589,7 +580,7 @@ private final class ClipboardCollectionViewItem: NSCollectionViewItem {
         if let hostingView {
             hostingView.rootView = rootView
         } else {
-            let hostingView = NSHostingView(rootView: rootView)
+            let hostingView = ClipboardCollectionLabelHostingView(rootView: rootView)
             hostingView.translatesAutoresizingMaskIntoConstraints = false
             hostingView.sizingOptions = []
             hostingView.wantsLayer = true
@@ -639,9 +630,43 @@ private final class ClipboardCollectionViewItem: NSCollectionViewItem {
 private final class ClipboardCollectionItemView: NSView {
     var activation: (() -> Void)?
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installClickRecognizer()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installClickRecognizer()
+    }
+
+    private func installClickRecognizer() {
+        let recognizer = NSClickGestureRecognizer(
+            target: self,
+            action: #selector(activateFromClick)
+        )
+        recognizer.delaysPrimaryMouseButtonEvents = false
+        addGestureRecognizer(recognizer)
+    }
+
+    @objc
+    private func activateFromClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        activation?()
+    }
+
     override func accessibilityPerformPress() -> Bool {
         guard let activation else { return false }
         activation()
         return true
+    }
+}
+
+@MainActor
+private final class ClipboardCollectionLabelHostingView:
+    NSHostingView<ClipboardCollectionChipLabel>
+{
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 }
