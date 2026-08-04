@@ -2104,7 +2104,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertTrue(source.contains("sideScope != .pasteStack") || source.contains("shelfScope != .pasteStack"))
         }
         XCTAssertTrue(shelfSource.contains("case loading"))
-        XCTAssertTrue(sideSource.contains("if paging.items.isEmpty, store.isHistoryQueryTransitioning"))
+        XCTAssertTrue(sideSource.contains("if renderedItems.isEmpty, store.isHistoryQueryTransitioning"))
     }
 
     func testSharedPanelHistoryAvailabilityFailsClosed() {
