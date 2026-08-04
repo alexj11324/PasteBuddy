@@ -957,7 +957,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             ("context actions", ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"], ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"]),
             ("paste/drag", ["onDoubleClick:", "directPasteItem", "PinboardItemDragPayload.itemProvider"], ["onDoubleClick:", "directPasteItem", "PinboardItemDragPayload.itemProvider"]),
             ("preview", ["ShelfExpandedPreview(", "ClipboardPreparedPreview.prepare("], ["ShelfExpandedPreview(", "ClipboardPreparedPreview.prepare("]),
-            ("paging/count", ["loadNextShelfPage()", "paging.totalCount"], ["loadNextSidePage()", "paging.totalCount"]),
+            ("paging", ["loadNextShelfPage()"], ["loadNextSidePage()", "paging.totalCount"]),
             ("loading/error", ["isHistoryQueryTransitioning", "historyQueryErrorMessage"], ["isHistoryQueryTransitioning", "historyQueryErrorMessage"]),
             ("pin/dismiss", ["setPinned(!effectivePinned)", "onDismissImmediately"], ["setPinned(!effectivePinned)", "onDismissImmediately"]),
             ("accessibility", [".accessibilityLabel(", "NSLocalizedString"], [".accessibilityLabel(", "NSLocalizedString"])
