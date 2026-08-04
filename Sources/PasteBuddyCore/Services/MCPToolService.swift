@@ -115,18 +115,22 @@ public enum MCPToolServiceError: LocalizedError, Equatable {
 public final class MCPToolService {
     private let store: PasteBuddyStore
     private let hydrateItem: @MainActor (ClipboardItem) async throws -> ClipboardItem
+    private let semanticEmbeddingProvider: (any SemanticEmbeddingProviding)?
 
     public init(store: PasteBuddyStore) {
         self.store = store
         hydrateItem = { try await store.hydratedItemForTransfer($0) }
+        semanticEmbeddingProvider = nil
     }
 
     init(
         store: PasteBuddyStore,
-        hydrateItem: @escaping @MainActor (ClipboardItem) async throws -> ClipboardItem
+        hydrateItem: @escaping @MainActor (ClipboardItem) async throws -> ClipboardItem,
+        semanticEmbeddingProvider: (any SemanticEmbeddingProviding)? = nil
     ) {
         self.store = store
         self.hydrateItem = hydrateItem
+        self.semanticEmbeddingProvider = semanticEmbeddingProvider
     }
 
     public func searchHistory(query: String, limit: Int = 5) throws -> MCPHistorySearchResponse {
@@ -231,10 +235,14 @@ public final class MCPToolService {
             try require(.semanticSearchHistory)
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw MCPToolServiceError.missingArgument("query") }
+            let requestedLimit = min(max(limit, 1), 25)
+            let visibleItemIDs = Set(store.snapshot.items.lazy.filter(isMCPVisible).map(\.id))
             let hits = try await store.semanticSearch(
                 query: trimmed,
-                limit: min(max(limit, 1), 25),
-                respectCurrentFilters: false
+                limit: requestedLimit,
+                respectCurrentFilters: false,
+                provider: semanticEmbeddingProvider,
+                allowedItemIDs: visibleItemIDs
             )
             let itemByID = Dictionary(uniqueKeysWithValues: store.snapshot.items.map { ($0.id, $0) })
             let items = hits.compactMap { itemByID[$0.itemID] }

@@ -36,7 +36,7 @@ const credentialSchema = z.object({
   entitlementTransactionJWS: z.array(z.string().min(32)).max(20)
 });
 const sourceSchema = z.object({
-  itemID: z.string().uuid(), contentHash: z.string().min(1), capturedAt: z.string(),
+  itemID: z.string().uuid(), contentHash: z.string().min(1), capturedAt: z.number().finite(),
   sourceApplicationName: z.string(), sourceBundleIdentifier: z.string().nullable().optional(),
   contentType: z.string(), text: z.string().max(65536),
   imageDataBase64: z.string().max(12_000_000).nullable().optional(),
@@ -78,7 +78,7 @@ app.post("/v1/auth/storekit/exchange", async (request, reply) => {
   const expiresAt = new Date(now + 10 * 60_000);
   const accessToken = await new SignJWT({ feature: "semantic_search", access: "cloud_subscription" })
     .setProtectedHeader({ alg: "HS256" }).setSubject(subject).setIssuedAt().setExpirationTime("10m").sign(secret);
-  return { accessToken, expiresAt: expiresAt.toISOString() };
+  return { accessToken, expiresAt: expiresAt.getTime() / 1000 };
 });
 
 app.addHook("preHandler", async (request, reply) => {
@@ -125,7 +125,7 @@ app.post("/v1/inference/semantic-document", async request => {
     response_format: { type: "json_object" }
   });
   const decoded = documentResultSchema.parse(JSON.parse(raw.choices[0].message.content));
-  return { document: { ...decoded, itemID: source.itemID, contentHash: source.contentHash, modelName: env.MULTIMODAL_MODEL, promptVersion: "semantic-index-v2", indexedAt: new Date().toISOString() } };
+  return { document: { ...decoded, itemID: source.itemID, contentHash: source.contentHash, modelName: env.MULTIMODAL_MODEL, promptVersion: "semantic-index-v2", indexedAt: Date.now() / 1000 } };
 });
 
 app.post("/v1/inference/embeddings/documents", async request => {
@@ -177,7 +177,7 @@ Each list must contain at most 20 short, deduplicated strings. Prefer [] or null
 
 function documentUserPrompt(source: z.infer<typeof sourceSchema>): string {
   const trustedMetadata = {
-    capturedAt: source.capturedAt,
+    capturedAt: new Date(source.capturedAt * 1000).toISOString(),
     contentType: source.contentType,
     sourceApplicationName: source.sourceApplicationName,
     sourceBundleIdentifier: source.sourceBundleIdentifier ?? null,

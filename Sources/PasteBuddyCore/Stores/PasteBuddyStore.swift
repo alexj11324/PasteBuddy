@@ -87,6 +87,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored public var onMCPServerConfigurationChanged: (@MainActor (Bool) -> Void)?
     @ObservationIgnored public var onMCPAccessRevoked: (@MainActor () -> Void)?
     @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
+    @ObservationIgnored var onSemanticIndexQueueDrainForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
     private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
@@ -294,8 +295,11 @@ public final class PasteBuddyStore {
                 let snapshotToSync = snapshot
                 let dataRevisionToSync = dataRevision
                 isRepositorySyncInFlight = true
-                try await repositorySyncActor.synchronize(with: snapshotToSync)
+                let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSync)
                 beforeRepositorySyncCommitForTesting?()
+                if syncSummary.enqueuedSemanticItemCount > 0 {
+                    drainSemanticIndexQueue()
+                }
                 guard dataRevision == dataRevisionToSync else {
                     isRepositorySyncInFlight = false
                     return
@@ -364,8 +368,11 @@ public final class PasteBuddyStore {
         }.value
         do {
             if let repositorySyncActor {
-                try await repositorySyncActor.synchronize(with: snapshotToSave)
+                let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSave)
                 beforeRepositorySyncCommitForTesting?()
+                if syncSummary.enqueuedSemanticItemCount > 0 {
+                    drainSemanticIndexQueue()
+                }
                 guard dataRevision == dataRevisionToSync else {
                     isRepositorySyncInFlight = false
                     return
@@ -432,11 +439,16 @@ public final class PasteBuddyStore {
             }.value
             guard !Task.isCancelled else { return }
             do {
+                var shouldDrainSemanticIndex = false
                 if let repositorySyncActor {
-                    try await repositorySyncActor.synchronize(with: snapshotToSave)
+                    let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSave)
+                    shouldDrainSemanticIndex = syncSummary.enqueuedSemanticItemCount > 0
                 }
                 try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
                 await MainActor.run {
+                    if shouldDrainSemanticIndex {
+                        self.drainSemanticIndexQueue()
+                    }
                     guard self.dataRevision == dataRevisionToSync else { return }
                     self.markClipboardRepositorySynced(to: dataRevisionToSync)
                     self.pendingSaveTask = nil
@@ -2187,7 +2199,11 @@ public final class PasteBuddyStore {
                 contentType: .text, text: "A harmless provider connection test."
             )
             _ = try await providers.document.generate(from: source)
-            let changed = snapshot.semanticIndex.byok != configuration
+            let shouldRebuild = Self.shouldRebuildSemanticIndexAfterSavingBYOK(
+                currentSource: snapshot.semanticIndex.inferenceSource,
+                currentConfiguration: snapshot.semanticIndex.byok,
+                savedConfiguration: configuration
+            )
             if !trimmedKey.isEmpty {
                 try aiCredentialStore.saveAPIKey(trimmedKey, for: configuration.preset)
             }
@@ -2195,7 +2211,7 @@ public final class PasteBuddyStore {
             snapshot.semanticIndex.inferenceSource = .byok
             aiProviderConnectionState = .succeeded
             save()
-            if changed, snapshot.semanticIndex.isEnabled { try rebuildSemanticIndex() }
+            if shouldRebuild, snapshot.semanticIndex.isEnabled { try rebuildSemanticIndex() }
             return true
         } catch {
             aiProviderConnectionState = .failed(error.localizedDescription)
@@ -2319,7 +2335,8 @@ public final class PasteBuddyStore {
         scope: PasteScope? = nil,
         limit: Int = 100,
         respectCurrentFilters: Bool = true,
-        provider: (any SemanticEmbeddingProviding)? = nil
+        provider: (any SemanticEmbeddingProviding)? = nil,
+        allowedItemIDs: Set<UUID>? = nil
     ) async throws -> [SemanticSearchHit] {
         guard snapshot.semanticIndex.isEnabled else { throw SemanticIndexError.disabled }
         guard canRunConfiguredAISource else { throw SemanticIndexError.entitlementRequired }
@@ -2338,6 +2355,7 @@ public final class PasteBuddyStore {
                 if respectCurrentFilters, case .pinboard(let id) = resolvedScope { return id }
                 return nil
             }(),
+            allowedItemIDs: allowedItemIDs,
             limit: limit
         )
         let effectiveProvider: any SemanticEmbeddingProviding
@@ -2360,9 +2378,20 @@ public final class PasteBuddyStore {
             queryEmbedding = try await effectiveProvider.embedQuery(boundedQuery)
             try semanticIndexRepository.cacheQueryEmbedding(queryEmbedding, queryHash: queryHash)
         }
-        var semantic = try semanticIndexRepository.semanticRankedItemIDs(request: request, queryEmbedding: queryEmbedding)
+        var semantic = try await Task.detached(priority: .userInitiated) {
+            try semanticIndexRepository.semanticRankedItemIDs(
+                request: request,
+                queryEmbedding: queryEmbedding
+            )
+        }.value
         var lexicalItems: [ClipboardItem]
-        if let clipboardRepository {
+        if let allowedItemIDs {
+            lexicalItems = snapshot.items.filter {
+                allowedItemIDs.contains($0.id)
+                    && $0.matches(boundedQuery)
+                    && (!respectCurrentFilters || matchesStructuredFilters($0, sourceAppName: request.sourceAppName))
+            }
+        } else if let clipboardRepository {
             lexicalItems = try clipboardRepository.fetchPage(ClipboardItemPageRequest(
                 searchQuery: boundedQuery,
                 contentType: request.contentType,
@@ -2438,6 +2467,7 @@ public final class PasteBuddyStore {
     }
 
     private func drainSemanticIndexQueue() {
+        onSemanticIndexQueueDrainForTesting?()
         Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled, await self.processSemanticIndexBatch(limit: 2) > 0 {}
@@ -2488,6 +2518,14 @@ public final class PasteBuddyStore {
             let provider = GeminiSemanticProvider(configuration: configuration, apiKey: apiKey)
             return (provider, provider)
         }
+    }
+
+    nonisolated static func shouldRebuildSemanticIndexAfterSavingBYOK(
+        currentSource: SemanticInferenceSource,
+        currentConfiguration: BYOKProviderConfiguration,
+        savedConfiguration: BYOKProviderConfiguration
+    ) -> Bool {
+        currentSource != .byok || currentConfiguration != savedConfiguration
     }
 
     public func setMCPServerEnabled(_ isEnabled: Bool) {
@@ -3408,8 +3446,11 @@ public final class PasteBuddyStore {
         guard let clipboardRepository else { return true }
         isRepositorySyncInFlight = true
         do {
-            try clipboardRepository.synchronize(with: snapshot)
+            let syncSummary = try clipboardRepository.synchronize(with: snapshot)
             markClipboardRepositorySynced(to: dataRevision)
+            if syncSummary.enqueuedSemanticItemCount > 0 {
+                drainSemanticIndexQueue()
+            }
             return true
         } catch {
             isRepositorySyncInFlight = false

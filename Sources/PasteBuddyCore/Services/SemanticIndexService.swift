@@ -100,6 +100,8 @@ public actor AppStoreSemanticGatewayTokenProvider: SemanticGatewayTokenProviding
 public enum SemanticIndexSourceNormalizer {
     private static let maximumTextBytes = 64 * 1024
     private static let maximumTextFileBytes = 256 * 1024
+    private static let maximumFileCount = 100
+    private static let maximumAggregateFileTextBytes = 512 * 1024
     private static let maximumImageBytes = 8 * 1024 * 1024
     private static let textFileExtensions: Set<String> = [
         "txt", "md", "markdown", "json", "jsonl", "xml", "csv", "tsv", "log",
@@ -135,7 +137,10 @@ public enum SemanticIndexSourceNormalizer {
             throw SemanticIndexError.sensitiveSource
         }
 
-        let files = item.payload.allFileURLStrings.compactMap(fileMetadata)
+        var remainingFileTextBytes = maximumAggregateFileTextBytes
+        let files = item.payload.allFileURLStrings.prefix(maximumFileCount).compactMap { value in
+            fileMetadata(value, remainingTextBytes: &remainingFileTextBytes)
+        }
         let imageData = item.payload.imageData.flatMap(sanitizedImageData)
         guard !text.isEmpty || imageData != nil || !files.isEmpty else {
             throw SemanticIndexError.emptySource
@@ -182,8 +187,10 @@ public enum SemanticIndexSourceNormalizer {
         #endif
     }
 
-    private static func fileMetadata(_ value: String) -> SemanticFileMetadata? {
+    private static func fileMetadata(_ value: String, remainingTextBytes: inout Int) -> SemanticFileMetadata? {
         guard let url = URL(string: value), url.isFileURL else { return nil }
+        let name = url.lastPathComponent
+        guard !SensitiveContentDetector.isLikelySensitive(name) else { return nil }
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         let ext = url.pathExtension.lowercased()
         let mayReadText = textFileExtensions.contains(ext)
@@ -192,11 +199,13 @@ public enum SemanticIndexSourceNormalizer {
             && (values?.fileSize ?? maximumTextFileBytes + 1) <= maximumTextFileBytes
         var textContent: String?
         if mayReadText,
+           remainingTextBytes > 0,
            let data = try? Data(contentsOf: url, options: .mappedIfSafe),
            data.count <= maximumTextFileBytes,
            let decoded = String(data: data, encoding: .utf8),
            !SensitiveContentDetector.isLikelySensitive(decoded) {
-            textContent = decoded
+            textContent = boundedUTF8(decoded, maximumBytes: remainingTextBytes)
+            remainingTextBytes -= textContent?.utf8.count ?? 0
         }
         #if canImport(UniformTypeIdentifiers)
         let contentType = UTType(filenameExtension: ext)?.identifier
@@ -204,7 +213,7 @@ public enum SemanticIndexSourceNormalizer {
         let contentType: String? = nil
         #endif
         return SemanticFileMetadata(
-            name: url.lastPathComponent,
+            name: name,
             contentType: contentType,
             byteCount: values?.fileSize,
             textContent: textContent
@@ -384,7 +393,12 @@ public actor SemanticIndexWorker {
                     continue
                 }
                 do {
-                    try semanticRepository.commit(document: document, embedding: embedding, jobID: job.id)
+                    try semanticRepository.commit(
+                        document: document,
+                        embedding: embedding,
+                        jobID: job.id,
+                        expectedGeneration: job.generation
+                    )
                 } catch {
                     try? semanticRepository.markFailed(job: job, errorCode: String(describing: type(of: error)))
                 }

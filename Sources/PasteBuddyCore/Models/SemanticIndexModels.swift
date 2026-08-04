@@ -261,6 +261,7 @@ public struct SemanticSearchRequest: Equatable, Sendable {
     public var deviceName: String?
     public var dateFilter: ClipboardDateFilter
     public var pinboardID: UUID?
+    public var allowedItemIDs: Set<UUID>?
     public var limit: Int
 
     public init(
@@ -270,6 +271,7 @@ public struct SemanticSearchRequest: Equatable, Sendable {
         deviceName: String? = nil,
         dateFilter: ClipboardDateFilter = .any,
         pinboardID: UUID? = nil,
+        allowedItemIDs: Set<UUID>? = nil,
         limit: Int = 100
     ) {
         self.query = query
@@ -278,6 +280,7 @@ public struct SemanticSearchRequest: Equatable, Sendable {
         self.deviceName = deviceName
         self.dateFilter = dateFilter
         self.pinboardID = pinboardID
+        self.allowedItemIDs = allowedItemIDs
         self.limit = min(max(limit, 1), 500)
     }
 }

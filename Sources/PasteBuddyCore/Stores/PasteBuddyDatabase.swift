@@ -52,19 +52,22 @@ public struct ClipboardRepositorySyncSummary: Equatable, Sendable {
     public var deletedItemCount: Int
     public var upsertedPinboardCount: Int
     public var deletedPinboardCount: Int
+    public var enqueuedSemanticItemCount: Int
 
     public init(
         upsertedItemCount: Int = 0,
         reorderedItemCount: Int = 0,
         deletedItemCount: Int = 0,
         upsertedPinboardCount: Int = 0,
-        deletedPinboardCount: Int = 0
+        deletedPinboardCount: Int = 0,
+        enqueuedSemanticItemCount: Int = 0
     ) {
         self.upsertedItemCount = upsertedItemCount
         self.reorderedItemCount = reorderedItemCount
         self.deletedItemCount = deletedItemCount
         self.upsertedPinboardCount = upsertedPinboardCount
         self.deletedPinboardCount = deletedPinboardCount
+        self.enqueuedSemanticItemCount = enqueuedSemanticItemCount
     }
 }
 
@@ -253,10 +256,14 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         migrator.registerMigration("add local semantic clipboard index") { db in
             try createSemanticIndexSchema(db: db)
         }
+        migrator.registerMigration("add semantic index generation") { db in
+            try createSemanticIndexControlSchema(db: db)
+        }
         return migrator
     }
 
     private static func createSemanticIndexSchema(db: Database) throws {
+        try createSemanticIndexControlSchema(db: db)
         try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS semantic_index_documents (
                 item_id TEXT PRIMARY KEY REFERENCES clipboard_items(id) ON DELETE CASCADE,
@@ -331,6 +338,19 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
             """)
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_semantic_documents_status ON semantic_index_documents(status, indexed_at DESC)")
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_semantic_outbox_due ON semantic_index_outbox(state, next_attempt_at, priority DESC)")
+    }
+
+    private static func createSemanticIndexControlSchema(db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS semantic_index_control (
+                key TEXT PRIMARY KEY,
+                integer_value INTEGER NOT NULL
+            )
+            """)
+        try db.execute(sql: """
+            INSERT OR IGNORE INTO semantic_index_control(key, integer_value)
+            VALUES ('generation', 0)
+            """)
     }
 
     private static func backfillEffectiveContentTypes(db: Database) throws {
@@ -612,7 +632,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             for (index, item) in snapshot.items.enumerated() {
                 try Self.upsert(item: item, snapshotOrder: index, db: db)
                 if snapshot.semanticIndex.isEnabled && !snapshot.semanticIndex.isPaused {
-                    try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db)
+                    _ = try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db)
                 }
             }
             for (index, pinboard) in snapshot.pinboards.enumerated() {
@@ -645,14 +665,18 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                     } else {
                         try Self.upsert(item: item, snapshotOrder: index, db: db)
                         if snapshot.semanticIndex.isEnabled && !snapshot.semanticIndex.isPaused {
-                            try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db)
+                            if try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db) {
+                                summary.enqueuedSemanticItemCount += 1
+                            }
                         }
                         summary.upsertedItemCount += 1
                     }
                 } else {
                     try Self.upsert(item: item, snapshotOrder: index, db: db)
                     if snapshot.semanticIndex.isEnabled && !snapshot.semanticIndex.isPaused {
-                        try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db)
+                        if try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db) {
+                            summary.enqueuedSemanticItemCount += 1
+                        }
                     }
                     summary.upsertedItemCount += 1
                 }
@@ -768,7 +792,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
-    private static func enqueueSemanticIndex(item: ClipboardItem, priority: Int, db: Database) throws {
+    private static func enqueueSemanticIndex(item: ClipboardItem, priority: Int, db: Database) throws -> Bool {
         let now = Date().timeIntervalSince1970
         let itemID = item.id.uuidString
         let contentHash = item.searchDocument.contentHash
@@ -810,6 +834,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                 itemID, itemID, contentHash,
                 SemanticIndexState.queued.rawValue
             ])
+        return db.changesCount > 0
     }
 
     public func fetchPage(_ request: ClipboardItemPageRequest = ClipboardItemPageRequest()) throws -> [ClipboardItem] {

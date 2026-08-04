@@ -9,6 +9,7 @@ public struct SemanticIndexJob: Equatable, Sendable {
     public var itemID: UUID
     public var contentHash: String
     public var attemptCount: Int
+    public var generation: Int
 }
 
 public final class SemanticIndexRepository: @unchecked Sendable {
@@ -95,6 +96,7 @@ public final class SemanticIndexRepository: @unchecked Sendable {
 
     public func nextJobs(limit: Int = 2, now: Date = Date()) throws -> [SemanticIndexJob] {
         try database.write { db in
+            let generation = try Self.currentGeneration(db)
             try db.execute(sql: """
                 UPDATE semantic_index_outbox
                 SET state = ?, next_attempt_at = ?, updated_at = ?
@@ -128,13 +130,24 @@ public final class SemanticIndexRepository: @unchecked Sendable {
                     sql: "UPDATE semantic_index_outbox SET state = ?, updated_at = ? WHERE id = ?",
                     arguments: [SemanticIndexState.indexing.rawValue, now.timeIntervalSince1970, idString]
                 )
-                jobs.append(SemanticIndexJob(id: idString, itemID: itemID, contentHash: contentHash, attemptCount: attemptCount))
+                jobs.append(SemanticIndexJob(
+                    id: idString,
+                    itemID: itemID,
+                    contentHash: contentHash,
+                    attemptCount: attemptCount,
+                    generation: generation
+                ))
             }
             return jobs
         }
     }
 
-    public func commit(document: SemanticIndexDocument, embedding: SemanticEmbedding, jobID: String) throws {
+    public func commit(
+        document: SemanticIndexDocument,
+        embedding: SemanticEmbedding,
+        jobID: String,
+        expectedGeneration: Int
+    ) throws {
         guard embedding.id == document.itemID,
               !embedding.values.isEmpty,
               embedding.values.count <= 8_192,
@@ -147,6 +160,15 @@ public final class SemanticIndexRepository: @unchecked Sendable {
             return Data(bytes: address, count: buffer.count * MemoryLayout<Float16>.stride)
         }
         try database.write { db in
+            if try Self.currentGeneration(db) != expectedGeneration
+                || !Self.isActiveJob(
+                    db,
+                    jobID: jobID,
+                    itemID: document.itemID,
+                    contentHash: document.contentHash
+                ) {
+                return
+            }
             guard let currentHash = try String.fetchOne(db, sql: "SELECT dedupe_hash FROM clipboard_items WHERE id = ?", arguments: [document.itemID.uuidString]),
                   currentHash == document.contentHash else {
                 try db.execute(sql: "DELETE FROM semantic_index_outbox WHERE id = ?", arguments: [jobID])
@@ -209,6 +231,8 @@ public final class SemanticIndexRepository: @unchecked Sendable {
     public func markFailed(job: SemanticIndexJob, errorCode: String, now: Date = Date()) throws {
         let nextAttempt = now.addingTimeInterval(min(pow(2, Double(job.attemptCount + 1)) * 30, 6 * 60 * 60))
         try database.write { db in
+            guard try Self.currentGeneration(db) == job.generation,
+                  try Self.isActiveJob(db, job: job) else { return }
             try db.execute(sql: """
                 INSERT INTO semantic_index_documents(
                     item_id, content_hash, modality, summary, keywords_json, aliases_json,
@@ -227,6 +251,8 @@ public final class SemanticIndexRepository: @unchecked Sendable {
 
     public func discard(job: SemanticIndexJob, errorCode: String) throws {
         try database.write { db in
+            guard try Self.currentGeneration(db) == job.generation,
+                  try Self.isActiveJob(db, job: job) else { return }
             try db.execute(sql: "DELETE FROM semantic_index_fts WHERE item_id = ?", arguments: [job.itemID.uuidString])
             try db.execute(sql: "DELETE FROM semantic_index_embeddings WHERE item_id = ?", arguments: [job.itemID.uuidString])
             try db.execute(sql: """
@@ -243,6 +269,7 @@ public final class SemanticIndexRepository: @unchecked Sendable {
 
     public func discardStale(job: SemanticIndexJob) throws {
         try database.write { db in
+            guard try Self.currentGeneration(db) == job.generation else { return }
             try db.execute(sql: "DELETE FROM semantic_index_outbox WHERE id = ?", arguments: [job.id])
         }
     }
@@ -273,6 +300,7 @@ public final class SemanticIndexRepository: @unchecked Sendable {
 
     public func deleteAll() throws {
         try database.write { db in
+            try Self.advanceGeneration(db)
             try db.execute(sql: "DELETE FROM semantic_index_fts")
             try db.execute(sql: "DELETE FROM semantic_index_embeddings")
             try db.execute(sql: "DELETE FROM semantic_index_documents")
@@ -284,6 +312,7 @@ public final class SemanticIndexRepository: @unchecked Sendable {
 
     public func resetForRebuild() throws {
         try database.write { db in
+            try Self.advanceGeneration(db)
             try db.execute(sql: "DELETE FROM semantic_index_fts")
             try db.execute(sql: "DELETE FROM semantic_index_embeddings")
             try db.execute(sql: "DELETE FROM semantic_index_documents")
@@ -294,6 +323,7 @@ public final class SemanticIndexRepository: @unchecked Sendable {
 
     public func semanticRankedItemIDs(request: SemanticSearchRequest, queryEmbedding: SemanticEmbedding) throws -> [(UUID, Double)] {
         guard !queryEmbedding.values.isEmpty else { return [] }
+        if request.allowedItemIDs?.isEmpty == true { return [] }
         return try database.read { db in
             var joins = ["JOIN semantic_index_embeddings sie ON sie.item_id = ci.id"]
             var predicates = ["sid.status = ?", "sie.model_name = ?"]
@@ -336,19 +366,68 @@ public final class SemanticIndexRepository: @unchecked Sendable {
                 let idString: String = row["id"]
                 let dimensions: Int = row["dimensions"]
                 let blob: Data = row["vector_blob"]
-                guard let id = UUID(uuidString: idString), dimensions == queryEmbedding.values.count else { return nil }
+                guard let id = UUID(uuidString: idString),
+                      request.allowedItemIDs?.contains(id) != false,
+                      dimensions == queryEmbedding.values.count else { return nil }
                 let vector = Self.floatVector(from: blob, dimensions: dimensions)
                 guard vector.count == dimensions, vector.allSatisfy({ $0.isFinite }) else { return nil }
                 return (id, Self.cosine(queryEmbedding.values, vector))
             }
             .sorted { $0.1 > $1.1 }
-            .prefix(100)
+            .prefix(request.limit)
             .map { $0 }
         }
     }
 
+    private static func currentGeneration(_ db: Database) throws -> Int {
+        try Int.fetchOne(
+            db,
+            sql: "SELECT integer_value FROM semantic_index_control WHERE key = 'generation'"
+        ) ?? 0
+    }
+
+    private static func advanceGeneration(_ db: Database) throws {
+        try db.execute(sql: """
+            UPDATE semantic_index_control
+            SET integer_value = integer_value + 1
+            WHERE key = 'generation'
+            """)
+    }
+
+    private static func isActiveJob(_ db: Database, job: SemanticIndexJob) throws -> Bool {
+        try isActiveJob(
+            db,
+            jobID: job.id,
+            itemID: job.itemID,
+            contentHash: job.contentHash
+        )
+    }
+
+    private static func isActiveJob(
+        _ db: Database,
+        jobID: String,
+        itemID: UUID,
+        contentHash: String
+    ) throws -> Bool {
+        try Bool.fetchOne(db, sql: """
+            SELECT EXISTS(
+                SELECT 1
+                FROM semantic_index_outbox sio
+                WHERE sio.id = ?
+                  AND sio.item_id = ?
+                  AND sio.content_hash = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM semantic_index_suppressions sis
+                      WHERE sis.item_id = sio.item_id
+                  )
+            )
+            """, arguments: [jobID, itemID.uuidString, contentHash]) == true
+    }
+
     public func semanticLexicalItemIDs(request: SemanticSearchRequest) throws -> [UUID] {
         guard let matchQuery = Self.ftsMatchQuery(request.query) else { return [] }
+        if request.allowedItemIDs?.isEmpty == true { return [] }
         return try database.read { db in
             var joins: [String] = []
             var predicates = ["sid.status = ?", "semantic_index_fts MATCH ?"]
@@ -380,7 +459,13 @@ public final class SemanticIndexRepository: @unchecked Sendable {
                 predicates.append("ci.created_at >= ?")
                 arguments += [Calendar.current.date(byAdding: .day, value: -7, to: Date())?.timeIntervalSince1970 ?? 0]
             }
-            arguments += [min(max(request.limit, 1), 500)]
+            let limitClause: String
+            if request.allowedItemIDs == nil {
+                arguments += [request.limit]
+                limitClause = "LIMIT ?"
+            } else {
+                limitClause = ""
+            }
             let rows = try Row.fetchAll(db, sql: """
                 SELECT ci.id
                 FROM semantic_index_fts
@@ -389,12 +474,14 @@ public final class SemanticIndexRepository: @unchecked Sendable {
                 \(joins.joined(separator: "\n"))
                 WHERE \(predicates.joined(separator: " AND "))
                 ORDER BY bm25(semantic_index_fts)
-                LIMIT ?
+                \(limitClause)
                 """, arguments: arguments)
-            return rows.compactMap { row in
+            return rows.compactMap { row -> UUID? in
                 let value: String = row["id"]
-                return UUID(uuidString: value)
-            }
+                guard let id = UUID(uuidString: value),
+                      request.allowedItemIDs?.contains(id) != false else { return nil }
+                return id
+            }.prefix(request.limit).map { $0 }
         }
     }
 

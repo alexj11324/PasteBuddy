@@ -2,6 +2,42 @@ import XCTest
 @testable import PasteBuddyCore
 
 final class SemanticIndexTests: XCTestCase {
+    func testCloudSemanticWireDatesUseUnixSeconds() throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_775_212_496.25)
+        let source = SemanticIndexSource(
+            itemID: UUID(),
+            contentHash: "wire-contract",
+            capturedAt: capturedAt,
+            sourceApplicationName: "Notes",
+            sourceBundleIdentifier: nil,
+            contentType: .text,
+            text: "contract"
+        )
+
+        let encoded = try JSONEncoder.pasteBuddy.encode(source)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(try XCTUnwrap(object["capturedAt"] as? Double), capturedAt.timeIntervalSince1970, accuracy: 0.001)
+
+        let documentJSON = """
+        {
+          "itemID": "\(source.itemID.uuidString)",
+          "contentHash": "wire-contract",
+          "modality": "text",
+          "summary": "contract",
+          "keywords": [],
+          "aliases": [],
+          "entities": [],
+          "visualTextHints": [],
+          "searchIntents": [],
+          "modelName": "test",
+          "promptVersion": "test",
+          "indexedAt": 1775212496.25
+        }
+        """
+        let document = try JSONDecoder.pasteBuddy.decode(SemanticIndexDocument.self, from: Data(documentJSON.utf8))
+        XCTAssertEqual(document.indexedAt.timeIntervalSince1970, capturedAt.timeIntervalSince1970, accuracy: 0.001)
+    }
+
     func testSemanticPromptSeparatesTrustedMetadataFromUntrustedClipboardContent() throws {
         let capturedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-03T12:34:56Z"))
         let injectedText = """
@@ -77,6 +113,21 @@ final class SemanticIndexTests: XCTestCase {
         XCTAssertFalse(store.canRunConfiguredAISource)
     }
 
+    func testSavingBYOKRebuildsWhenOnlyInferenceSourceChanges() {
+        let configuration = BYOKProviderConfiguration()
+
+        XCTAssertTrue(PasteBuddyStore.shouldRebuildSemanticIndexAfterSavingBYOK(
+            currentSource: .pasteBuddyCloud,
+            currentConfiguration: configuration,
+            savedConfiguration: configuration
+        ))
+        XCTAssertFalse(PasteBuddyStore.shouldRebuildSemanticIndexAfterSavingBYOK(
+            currentSource: .byok,
+            currentConfiguration: configuration,
+            savedConfiguration: configuration
+        ))
+    }
+
     func testImageSourceUsesMultimodalBytesWithoutSendingOCRText() throws {
         let item = ClipboardItem(
             sourceAppName: "Preview",
@@ -94,6 +145,229 @@ final class SemanticIndexTests: XCTestCase {
         XCTAssertNotNil(source.imageDataBase64)
         XCTAssertNil(source.existingOCRText)
         XCTAssertFalse(source.text.contains("optional local OCR"))
+    }
+
+    func testFileSourceBoundsCountAndAggregateTextBytes() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try FileManager.default.createDirectory(at: harness.directory, withIntermediateDirectories: true)
+        let largeText = String(repeating: "a", count: 220 * 1024)
+        var fileURLs: [String] = []
+        for index in 0..<105 {
+            let url = harness.directory.appendingPathComponent("semantic-\(index).txt")
+            try (index < 3 ? largeText : "small").write(to: url, atomically: true, encoding: .utf8)
+            fileURLs.append(url.absoluteString)
+        }
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "Many files",
+            payload: ClipboardPayload(fileURLStrings: fileURLs)
+        )
+
+        let source = try SemanticIndexSourceNormalizer.source(
+            from: item,
+            privacy: PrivacyConfiguration()
+        )
+
+        XCTAssertEqual(source.files.count, 100)
+        XCTAssertLessThanOrEqual(
+            source.files.compactMap(\.textContent).reduce(0) { $0 + $1.utf8.count },
+            512 * 1024
+        )
+    }
+
+    func testFileSourceRejectsSensitiveFileNamesBeforeUpload() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        try FileManager.default.createDirectory(at: harness.directory, withIntermediateDirectories: true)
+        let sensitiveURL = harness.directory.appendingPathComponent("api_key=abcdefghijklmnop.txt")
+        try "safe body, sensitive name".write(to: sensitiveURL, atomically: true, encoding: .utf8)
+        let item = ClipboardItem(
+            sourceAppName: "Finder",
+            deviceName: "Test Mac",
+            contentType: .file,
+            title: "File metadata",
+            payload: ClipboardPayload(fileURLStrings: [sensitiveURL.absoluteString])
+        )
+
+        XCTAssertThrowsError(try SemanticIndexSourceNormalizer.source(
+            from: item,
+            privacy: PrivacyConfiguration()
+        )) { error in
+            XCTAssertEqual(error as? SemanticIndexError, .sensitiveSource)
+        }
+    }
+
+    func testDeleteAndRebuildRejectCommitsFromAnOlderGeneration() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let clipboard = ClipboardItemRepository(database: database)
+        let semantic = SemanticIndexRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "In-flight item",
+            payload: ClipboardPayload(text: "must not return after index deletion")
+        )
+        var snapshot = PasteBuddySnapshot(items: [item])
+        snapshot.semanticIndex.isEnabled = true
+        try clipboard.synchronize(with: snapshot)
+        let staleJob = try XCTUnwrap(semantic.nextJobs(limit: 1).first)
+
+        try semantic.deleteAll()
+        try semantic.commit(
+            document: SemanticIndexDocument(
+                itemID: item.id,
+                contentHash: item.searchDocument.contentHash,
+                modality: .text,
+                summary: "stale result",
+                modelName: "test",
+                promptVersion: "test"
+            ),
+            embedding: SemanticEmbedding(id: item.id, modelName: "test", values: [1, 0]),
+            jobID: staleJob.id,
+            expectedGeneration: staleJob.generation
+        )
+        try semantic.markFailed(job: staleJob, errorCode: "stale_failure")
+
+        XCTAssertEqual(try semantic.statistics().ready, 0)
+        XCTAssertEqual(try semantic.statistics().failed, 0)
+        XCTAssertEqual(try semantic.statistics().queued, 0)
+    }
+
+    func testSuppressionRejectsResultsFromAnAlreadyRunningJob() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let clipboard = ClipboardItemRepository(database: database)
+        let semantic = SemanticIndexRepository(database: database)
+        let item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Suppressed in flight",
+            payload: ClipboardPayload(text: "must remain removed")
+        )
+        var snapshot = PasteBuddySnapshot(items: [item])
+        snapshot.semanticIndex.isEnabled = true
+        try clipboard.synchronize(with: snapshot)
+        let staleJob = try XCTUnwrap(semantic.nextJobs(limit: 1).first)
+
+        try semantic.suppress(itemID: item.id)
+        try semantic.commit(
+            document: SemanticIndexDocument(
+                itemID: item.id,
+                contentHash: item.searchDocument.contentHash,
+                modality: .text,
+                summary: "stale suppressed result",
+                modelName: "test",
+                promptVersion: "test"
+            ),
+            embedding: SemanticEmbedding(id: item.id, modelName: "test", values: [1, 0]),
+            jobID: staleJob.id,
+            expectedGeneration: staleJob.generation
+        )
+        try semantic.markFailed(job: staleJob, errorCode: "stale_failure")
+        try semantic.discard(job: staleJob, errorCode: "stale_exclusion")
+
+        XCTAssertTrue(try semantic.isSuppressed(itemID: item.id))
+        XCTAssertEqual(try semantic.statistics().ready, 0)
+        XCTAssertEqual(try semantic.statistics().failed, 0)
+        XCTAssertEqual(try semantic.statistics().queued, 0)
+    }
+
+    func testRepositorySyncReportsSemanticWorkForUpdatedItems() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let clipboard = ClipboardItemRepository(database: database)
+        var item = ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Initial",
+            payload: ClipboardPayload(text: "initial content")
+        )
+        var snapshot = PasteBuddySnapshot(items: [item])
+        snapshot.semanticIndex.isEnabled = true
+
+        XCTAssertEqual(try clipboard.synchronize(with: snapshot).enqueuedSemanticItemCount, 1)
+        item.payload.text = "updated content"
+        item.refreshSearchDocument()
+        snapshot.items = [item]
+
+        XCTAssertEqual(try clipboard.synchronize(with: snapshot).enqueuedSemanticItemCount, 1)
+    }
+
+    @MainActor
+    func testStoreDrainsSemanticQueueAfterRepositorySyncEnqueuesWork() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let clipboard = ClipboardItemRepository(database: database)
+        let semantic = SemanticIndexRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: clipboard,
+            semanticIndexRepository: semantic
+        )
+        store.snapshot.semanticIndex.isEnabled = true
+        var drainCount = 0
+        store.onSemanticIndexQueueDrainForTesting = { drainCount += 1 }
+
+        store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "New semantic work",
+            payload: ClipboardPayload(text: "updated repository content")
+        ))
+        await store.flushPendingSave()
+
+        XCTAssertEqual(drainCount, 1)
+    }
+
+    @MainActor
+    func testStaleRepositorySyncStillDrainsNewSemanticWork() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let clipboard = ClipboardItemRepository(database: database)
+        let semantic = SemanticIndexRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: clipboard,
+            semanticIndexRepository: semantic
+        )
+        store.snapshot.semanticIndex.isEnabled = true
+        store.snapshot.items = [ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First revision",
+            payload: ClipboardPayload(text: "semantic work from stale revision")
+        )]
+        var drainCount = 0
+        store.onSemanticIndexQueueDrainForTesting = { drainCount += 1 }
+        store.beforeRepositorySyncCommitForTesting = {
+            store.beforeRepositorySyncCommitForTesting = nil
+            store.snapshot.items.append(ClipboardItem(
+                sourceAppName: "Safari",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Newer revision",
+                payload: ClipboardPayload(text: "arrived during sync")
+            ))
+        }
+
+        await store.flushPendingSave()
+
+        XCTAssertEqual(drainCount, 1)
+        XCTAssertNotEqual(store.repositorySyncedDataRevision, store.dataRevision)
     }
 
     func testAutomaticQueueCommitSearchSuppressionAndReindexStayLocal() throws {
@@ -127,7 +401,8 @@ final class SemanticIndexTests: XCTestCase {
         try semantic.commit(
             document: document,
             embedding: SemanticEmbedding(id: item.id, modelName: "test-embedding", values: [1, 0]),
-            jobID: job.id
+            jobID: job.id,
+            expectedGeneration: job.generation
         )
 
         let request = SemanticSearchRequest(query: "architecture")
@@ -225,7 +500,8 @@ final class SemanticIndexTests: XCTestCase {
                 promptVersion: "test"
             ),
             embedding: SemanticEmbedding(id: item.id, modelName: "test", values: [1, 0]),
-            jobID: job.id
+            jobID: job.id,
+            expectedGeneration: job.generation
         )
 
         item.payload.text = "new content"
