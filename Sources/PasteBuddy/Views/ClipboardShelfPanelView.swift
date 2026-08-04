@@ -95,6 +95,7 @@ struct ClipboardCollectionDragSession {
     private var previewOrder: [ClipboardCollectionID]?
     private var pendingTarget: ClipboardCollectionID?
     private var pendingAfterTarget = false
+    private var targetFrames: [ClipboardCollectionID: CGRect] = [:]
     private var sourceOriginX: CGFloat = 0
     private(set) var translationX: CGFloat = 0
 
@@ -103,6 +104,7 @@ struct ClipboardCollectionDragSession {
     mutating func begin(
         source: ClipboardCollectionID,
         order: [ClipboardCollectionID],
+        frames: [ClipboardCollectionID: CGRect],
         sourceOriginX: CGFloat
     ) {
         guard order.contains(source) else {
@@ -114,6 +116,7 @@ struct ClipboardCollectionDragSession {
         previewOrder = order
         pendingTarget = nil
         pendingAfterTarget = false
+        targetFrames = frames
         self.sourceOriginX = sourceOriginX
         translationX = 0
     }
@@ -129,6 +132,30 @@ struct ClipboardCollectionDragSession {
     func visualOffset(currentSourceLayoutMinX: CGFloat) -> CGFloat {
         guard isActive else { return 0 }
         return translationX + sourceOriginX - currentSourceLayoutMinX
+    }
+
+    var pendingMove: ClipboardCollectionMove? {
+        guard let source,
+              let target = pendingTarget,
+              previewOrder != originalOrder else {
+            return nil
+        }
+        return ClipboardCollectionMove(
+            source: source,
+            target: target,
+            afterTarget: pendingAfterTarget
+        )
+    }
+
+    func dropTarget(at x: CGFloat) -> (collection: ClipboardCollectionID, afterTarget: Bool)? {
+        guard let source, let originalOrder else { return nil }
+        return originalOrder
+            .filter { $0 != source }
+            .compactMap { collection in
+                targetFrames[collection].map { (collection, $0, abs($0.midX - x)) }
+            }
+            .min { $0.2 < $1.2 }
+            .map { ($0.0, x >= $0.1.midX) }
     }
 
     @discardableResult
@@ -154,26 +181,13 @@ struct ClipboardCollectionDragSession {
         return true
     }
 
-    mutating func complete() -> ClipboardCollectionMove? {
-        defer { cancel() }
-        guard let source,
-              let target = pendingTarget,
-              previewOrder != originalOrder else {
-            return nil
-        }
-        return ClipboardCollectionMove(
-            source: source,
-            target: target,
-            afterTarget: pendingAfterTarget
-        )
-    }
-
     mutating func cancel() {
         source = nil
         originalOrder = nil
         previewOrder = nil
         pendingTarget = nil
         pendingAfterTarget = false
+        targetFrames = [:]
         sourceOriginX = 0
         translationX = 0
     }
@@ -1524,9 +1538,19 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
     let onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
 
     func body(content: Content) -> some View {
-        ZStack {
+        let currentSession = session
+        let isDraggedCollection = currentSession.source == collection
+        return ZStack {
             content
-                .offset(x: dragOffset)
+                .visualEffect { content, geometry in
+                    content.offset(x: isDraggedCollection
+                        ? currentSession.visualOffset(
+                            currentSourceLayoutMinX: geometry.frame(
+                                in: .named(ClipboardCollectionDragCoordinateSpace.name)
+                            ).minX
+                        )
+                        : 0)
+                }
                 .scaleEffect(session.source == collection ? 1.03 : 1)
         }
         .onGeometryChange(
@@ -1553,52 +1577,36 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
         )
     }
 
-    private var dragOffset: CGFloat {
-        guard session.source == collection,
-              let currentFrame = collectionFrames[collection] else {
-            return 0
-        }
-        return session.visualOffset(currentSourceLayoutMinX: currentFrame.minX)
-    }
-
     private func handleDragChanged(_ value: DragGesture.Value) {
         guard let sourceFrame = collectionFrames[collection] else { return }
         if !session.isActive {
             session.begin(
                 source: collection,
                 order: collectionOrder,
+                frames: collectionFrames,
                 sourceOriginX: sourceFrame.minX
             )
         }
         guard session.source == collection else { return }
         session.updateTranslation(value.translation.width)
-        guard let target = closestCollection(to: value.location.x),
-              let targetFrame = collectionFrames[target] else {
-            return
-        }
-        let afterTarget = value.location.x >= targetFrame.midX
+        guard let target = session.dropTarget(at: value.location.x) else { return }
         withAnimation(animation) {
-            _ = session.previewMove(relativeTo: target, afterTarget: afterTarget)
+            _ = session.previewMove(
+                relativeTo: target.collection,
+                afterTarget: target.afterTarget
+            )
         }
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
         guard session.source == collection else { return }
         session.updateTranslation(value.translation.width)
-        let move = withAnimation(animation) {
-            session.complete()
+        if let move = session.pendingMove {
+            _ = onReorder(move.source, move.target, move.afterTarget)
         }
-        guard let move else { return }
-        _ = onReorder(move.source, move.target, move.afterTarget)
-    }
-
-    private func closestCollection(to x: CGFloat) -> ClipboardCollectionID? {
-        collectionOrder
-            .compactMap { collection in
-                collectionFrames[collection].map { (collection, abs($0.midX - x)) }
-            }
-            .min { $0.1 < $1.1 }?
-            .0
+        withAnimation(animation) {
+            session.cancel()
+        }
     }
 }
 

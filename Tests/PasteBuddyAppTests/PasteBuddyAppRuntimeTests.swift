@@ -8,7 +8,7 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
-    func testCollectionDragSessionPreviewsAndCompletesCrossCategoryMove() {
+    func testCollectionDragSessionPreviewsAndExposesCrossCategoryMove() {
         let order: [ClipboardCollectionID] = [
             .history,
             .pasteStack,
@@ -17,7 +17,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         ]
         var session = ClipboardCollectionDragSession()
 
-        session.begin(source: .smart(.links), order: order, sourceOriginX: 180)
+        session.begin(source: .smart(.links), order: order, frames: [:], sourceOriginX: 180)
         session.updateTranslation(-120)
         XCTAssertTrue(session.previewMove(relativeTo: .pasteStack, afterTarget: false))
         XCTAssertEqual(session.displayOrder(fallback: order), [
@@ -28,13 +28,14 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         ])
         XCTAssertEqual(session.visualOffset(currentSourceLayoutMinX: 60), 0)
         XCTAssertEqual(
-            session.complete(),
+            session.pendingMove,
             ClipboardCollectionMove(
                 source: .smart(.links),
                 target: .pasteStack,
                 afterTarget: false
             )
         )
+        session.cancel()
         XCTAssertFalse(session.isActive)
     }
 
@@ -42,10 +43,48 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let order: [ClipboardCollectionID] = [.history, .pasteStack, .smart(.text)]
         var session = ClipboardCollectionDragSession()
 
-        session.begin(source: .history, order: order, sourceOriginX: 0)
-        XCTAssertNil(session.complete())
+        session.begin(source: .history, order: order, frames: [:], sourceOriginX: 0)
+        XCTAssertNil(session.pendingMove)
         XCTAssertEqual(session.displayOrder(fallback: order), order)
+        session.cancel()
         XCTAssertFalse(session.isActive)
+    }
+
+    func testCollectionDragTargetsStayPinnedToGestureStartFrames() throws {
+        let text = ClipboardCollectionID.smart(.text)
+        let links = ClipboardCollectionID.smart(.links)
+        let order: [ClipboardCollectionID] = [text, .history, links, .pasteStack]
+        var frames: [ClipboardCollectionID: CGRect] = [
+            text: CGRect(x: 0, y: 0, width: 60, height: 30),
+            .history: CGRect(x: 65, y: 0, width: 100, height: 30),
+            links: CGRect(x: 170, y: 0, width: 70, height: 30),
+            .pasteStack: CGRect(x: 245, y: 0, width: 116, height: 30),
+        ]
+        var session = ClipboardCollectionDragSession()
+        session.begin(source: .pasteStack, order: order, frames: frames, sourceOriginX: 245)
+
+        frames[links] = CGRect(x: 300, y: 0, width: 70, height: 30)
+
+        let target = try XCTUnwrap(session.dropTarget(at: 180))
+        XCTAssertEqual(target.collection, links)
+        XCTAssertFalse(target.afterTarget)
+    }
+
+    func testCollectionDragPersistsMoveBeforeClearingPreview() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let handlerStart = try XCTUnwrap(source.range(of: "private func handleDragEnded"))
+        let handlerEnd = try XCTUnwrap(
+            source.range(
+                of: "\n    }\n}\n\nstruct ClipboardCollectionCardDropModifier",
+                range: handlerStart.lowerBound..<source.endIndex
+            )
+        )
+        let handler = String(source[handlerStart.lowerBound..<handlerEnd.upperBound])
+        let reorder = try XCTUnwrap(handler.range(of: "onReorder(move.source, move.target, move.afterTarget)"))
+        let cancel = try XCTUnwrap(handler.range(of: "session.cancel()"))
+
+        XCTAssertLessThan(reorder.lowerBound, cancel.lowerBound)
+        XCTAssertFalse(handler.contains("session.complete()"))
     }
 
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
