@@ -407,17 +407,7 @@ struct ClipboardShelfPanelView: View {
         .onTapGesture {
             setSearchFocused(true)
         }
-        .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .strokeBorder(
-                    isSearchFocused ? Color.accentColor.opacity(0.70) : .primary.opacity(0.08),
-                    lineWidth: isSearchFocused ? 1.5 : 1
-                )
-                .allowsHitTesting(false)
-        }
-        .shadow(color: .black.opacity(isSearchFocused ? 0.11 : 0.06), radius: isSearchFocused ? 10 : 6, y: isSearchFocused ? 3 : 2)
+        .pasteBuddyNativeInteractiveGlass()
         .background {
             SourceAppSuggestionPanelPresenter(
                 isPresented: shouldShowSourceAppSuggestions,
@@ -3181,6 +3171,19 @@ private struct EmptyShelfCard: View {
 }
 
 extension View {
+    @ViewBuilder
+    func pasteBuddyNativeInteractiveGlass() -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular.interactive())
+        } else {
+            self.background(.regularMaterial, in: Capsule())
+        }
+        #else
+        self.background(.regularMaterial, in: Capsule())
+        #endif
+    }
+
     @ViewBuilder
     func pasteBuddyBottomSheetSurface(
         cornerRadius: CGFloat,
