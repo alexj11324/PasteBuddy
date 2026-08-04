@@ -207,7 +207,7 @@ struct ClipboardSidePanelView: View {
         .padding(.leading, 12)
         .padding(.trailing, hasSearchText ? 8 : 12)
         .frame(height: 36)
-        .pasteBuddyGlassSurface(cornerRadius: 18, interactive: true, showsStroke: true)
+        .pasteBuddyNativeGlass()
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture {
             setSearchFocused(true)
@@ -230,67 +230,65 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ClipboardSidePanelFilterChip(
+                    title: localized("label.clipboard"),
+                    systemImageName: "clock.arrow.circlepath",
+                    color: store.isCapturePaused ? .orange : .blue,
+                    isSelected: sideScope == .history
+                ) {
+                    setSideScope(.history)
+                }
+
+                ClipboardSidePanelFilterChip(
+                    title: localized("action.paste_stack"),
+                    systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
+                    color: store.isPasteStackActive ? .green : .secondary,
+                    isSelected: sideScope == .pasteStack
+                ) {
+                    setSideScope(.pasteStack)
+                }
+
+                ForEach(SmartPinboardCategory.allCases) { category in
                     ClipboardSidePanelFilterChip(
-                        title: localized("label.clipboard"),
-                        systemImageName: "clock.arrow.circlepath",
-                        color: store.isCapturePaused ? .orange : .blue,
-                        isSelected: sideScope == .history
+                        title: localized(category.displayName),
+                        systemImageName: category.systemImageName,
+                        color: Color(hex: category.colorHex) ?? .accentColor,
+                        isSelected: isSmartCategorySelected(category)
                     ) {
-                        setSideScope(.history)
-                    }
-
-                    ClipboardSidePanelFilterChip(
-                        title: localized("action.paste_stack"),
-                        systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                        color: store.isPasteStackActive ? .green : .secondary,
-                        isSelected: sideScope == .pasteStack
-                    ) {
-                        setSideScope(.pasteStack)
-                    }
-
-                    ForEach(SmartPinboardCategory.allCases) { category in
-                        ClipboardSidePanelFilterChip(
-                            title: localized(category.displayName),
-                            systemImageName: category.systemImageName,
-                            color: Color(hex: category.colorHex) ?? .accentColor,
-                            isSelected: isSmartCategorySelected(category)
-                        ) {
-                            selectSmartCategory(category)
-                        }
-                    }
-
-                    ForEach(store.userPinboards) { pinboard in
-                        ClipboardSidePanelFilterChip(
-                            title: pinboard.name,
-                            systemImageName: "pin.fill",
-                            color: Color(hex: pinboard.colorHex) ?? .blue,
-                            isSelected: sideScope == .pinboard(pinboard.id)
-                        ) {
-                            setSideScope(.pinboard(pinboard.id))
-                        }
+                        selectSmartCategory(category)
                     }
                 }
-                .padding(.vertical, 1)
-            }
-            .scrollIndicators(.never, axes: .horizontal)
 
-            Button {
-                createNamedPinboard()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .medium))
-                    .frame(width: 30, height: 30)
-                    .contentShape(Circle())
+                ForEach(store.userPinboards) { pinboard in
+                    ClipboardSidePanelFilterChip(
+                        title: pinboard.name,
+                        systemImageName: "pin.fill",
+                        color: Color(hex: pinboard.colorHex) ?? .blue,
+                        isSelected: sideScope == .pinboard(pinboard.id)
+                    ) {
+                        setSideScope(.pinboard(pinboard.id))
+                    }
+                }
+
+                Button {
+                    createNamedPinboard()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 30, height: 30)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .help(localized("label.new_pinboard"))
+                .accessibilityLabel(localized("label.new_pinboard"))
             }
-            .buttonStyle(.plain)
-            .labelStyle(.iconOnly)
-            .keyboardShortcut("n", modifiers: [.command, .shift])
-            .help(localized("label.new_pinboard"))
-            .accessibilityLabel(localized("label.new_pinboard"))
+            .padding(.vertical, 1)
         }
+        .scrollIndicators(.never, axes: .horizontal)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
