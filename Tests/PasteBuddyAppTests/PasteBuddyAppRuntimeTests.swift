@@ -8,6 +8,34 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
+    func testCollectionIndexMoveResolverFindsTheNativeAnimatedMove() {
+        let oldOrder: [ClipboardCollectionID] = [
+            .smart(.images),
+            .history,
+            .smart(.text),
+            .smart(.links),
+            .smart(.files),
+        ]
+        let newOrder: [ClipboardCollectionID] = [
+            .history,
+            .smart(.text),
+            .smart(.links),
+            .smart(.images),
+            .smart(.files),
+        ]
+
+        XCTAssertEqual(
+            ClipboardCollectionIndexMoveResolver.move(from: oldOrder, to: newOrder),
+            ClipboardCollectionIndexMove(source: 0, destination: 3)
+        )
+        XCTAssertNil(
+            ClipboardCollectionIndexMoveResolver.move(
+                from: oldOrder,
+                to: Array(newOrder.dropLast())
+            )
+        )
+    }
+
     func testCollectionReorderResolverMovesBeforeAVisibleTarget() {
         let order: [ClipboardCollectionID] = [
             .history,
@@ -83,6 +111,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("override var hasHorizontalScroller: Bool"))
         XCTAssertTrue(bridgeSource.contains("override var horizontalScroller: NSScroller?"))
         XCTAssertTrue(bridgeSource.contains("override func flashScrollers() {}"))
+        XCTAssertTrue(bridgeSource.contains("collectionView.performBatchUpdates"))
+        XCTAssertTrue(bridgeSource.contains("collectionView.moveItem("))
         XCTAssertTrue(bridgeSource.contains("NSClickGestureRecognizer("))
         XCTAssertTrue(bridgeSource.contains("recognizer.delaysPrimaryMouseButtonEvents = false"))
         XCTAssertTrue(bridgeSource.contains("ClipboardCollectionLabelHostingView"))

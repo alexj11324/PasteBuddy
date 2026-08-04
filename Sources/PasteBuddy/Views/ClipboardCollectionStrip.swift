@@ -22,6 +22,36 @@ struct ClipboardCollectionReorderDestination: Equatable {
     let afterTarget: Bool
 }
 
+struct ClipboardCollectionIndexMove: Equatable {
+    let source: Int
+    let destination: Int
+}
+
+enum ClipboardCollectionIndexMoveResolver {
+    static func move(
+        from oldOrder: [ClipboardCollectionID],
+        to newOrder: [ClipboardCollectionID]
+    ) -> ClipboardCollectionIndexMove? {
+        guard oldOrder.count == newOrder.count, oldOrder != newOrder else { return nil }
+
+        for source in oldOrder.indices {
+            var remaining = oldOrder
+            let moved = remaining.remove(at: source)
+            for destination in 0...remaining.count {
+                var candidate = remaining
+                candidate.insert(moved, at: destination)
+                if candidate == newOrder {
+                    return ClipboardCollectionIndexMove(
+                        source: source,
+                        destination: destination
+                    )
+                }
+            }
+        }
+        return nil
+    }
+}
+
 enum ClipboardCollectionNativeReorderingPolicy {
     static let environmentVariable = "PASTEBUDDY_ENABLE_SWIFTUI_CATEGORY_REORDERING"
 
@@ -358,12 +388,30 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
         ) {
             let oldSnapshot = self.items.map(ItemSnapshot.init)
             let newSnapshot = items.map(ItemSnapshot.init)
+            let indexMove = ClipboardCollectionIndexMoveResolver.move(
+                from: self.items.map(\.id),
+                to: items.map(\.id)
+            )
+            let isPureReorder = oldSnapshot.count == newSnapshot.count
+                && oldSnapshot.allSatisfy(newSnapshot.contains)
             self.items = items
             self.style = style
             self.onReorder = onReorder
             guard let collectionView else { return }
             guard oldSnapshot != newSnapshot else {
                 reconfigureVisibleItems(in: collectionView)
+                return
+            }
+            if isPureReorder, let indexMove {
+                collectionView.performBatchUpdates({
+                    collectionView.moveItem(
+                        at: IndexPath(item: indexMove.source, section: 0),
+                        to: IndexPath(item: indexMove.destination, section: 0)
+                    )
+                }, completionHandler: { [weak self, weak collectionView] _ in
+                    guard let self, let collectionView else { return }
+                    self.reconfigureVisibleItems(in: collectionView)
+                })
                 return
             }
             let scrollView = collectionView.enclosingScrollView
