@@ -591,8 +591,6 @@ struct ClipboardShelfPanelView: View {
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized("label.clipboard"),
-                systemImageName: "clock.arrow.circlepath",
-                color: store.isCapturePaused ? .orange : .blue,
                 isSelected: shelfScope == .history,
                 onDropPayloads: { dropItems($0, into: .history) },
                 canMoveLeft: canMoveLeft,
@@ -603,8 +601,6 @@ struct ClipboardShelfPanelView: View {
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized("action.paste_stack"),
-                systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                color: store.isPasteStackActive ? .green : .secondary,
                 isSelected: shelfScope == .pasteStack,
                 onDropPayloads: { dropItems($0, into: .pasteStack) },
                 canMoveLeft: canMoveLeft,
@@ -615,8 +611,6 @@ struct ClipboardShelfPanelView: View {
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized(category.displayName),
-                systemImageName: category.systemImageName,
-                color: Color(hex: category.colorHex) ?? .accentColor,
                 isSelected: isSmartCategorySelected(category),
                 onDropPayloads: { dropItems($0, into: .smartCategory(category)) },
                 canMoveLeft: canMoveLeft,
@@ -628,8 +622,6 @@ struct ClipboardShelfPanelView: View {
                     collection: collection,
                     collectionOrder: collectionOrder,
                     title: pinboard.name,
-                    systemImageName: "pin.fill",
-                    color: Color(hex: pinboard.colorHex) ?? .blue,
                     isSelected: shelfScope == .pinboard(pinboard.id),
                     onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) },
                     canMoveLeft: canMoveLeft,
@@ -643,8 +635,6 @@ struct ClipboardShelfPanelView: View {
         collection: ClipboardCollectionID,
         collectionOrder: [ClipboardCollectionID],
         title: String,
-        systemImageName: String,
-        color: Color,
         isSelected: Bool,
         onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?,
         canMoveLeft: Bool,
@@ -657,8 +647,6 @@ struct ClipboardShelfPanelView: View {
             dragSession: $collectionDragSession,
             collectionFrames: $collectionFrames,
             title: title,
-            systemImageName: systemImageName,
-            color: color,
             isSelected: isSelected,
             onDropPayloads: onDropPayloads,
             onReorder: reorderCollection,
@@ -1390,8 +1378,6 @@ private struct ShelfCollectionChip: View {
     @Binding var dragSession: ClipboardCollectionDragSession
     @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
     let title: String
-    let systemImageName: String
-    let color: Color
     let isSelected: Bool
     var onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
@@ -1409,8 +1395,6 @@ private struct ShelfCollectionChip: View {
         dragSession: Binding<ClipboardCollectionDragSession>,
         collectionFrames: Binding<[ClipboardCollectionID: CGRect]>,
         title: String,
-        systemImageName: String,
-        color: Color,
         isSelected: Bool,
         onDropPayloads: (([PinboardItemDragPayload]) -> Bool)? = nil,
         onReorder: @escaping (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool,
@@ -1425,8 +1409,6 @@ private struct ShelfCollectionChip: View {
         _dragSession = dragSession
         _collectionFrames = collectionFrames
         self.title = title
-        self.systemImageName = systemImageName
-        self.color = color
         self.isSelected = isSelected
         self.onDropPayloads = onDropPayloads
         self.onReorder = onReorder
@@ -1439,28 +1421,22 @@ private struct ShelfCollectionChip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: systemImageName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(iconForegroundStyle)
-
-                Text(title)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .frame(height: 38)
-            .background {
-                if isSelected || isHovered || isDropTargeted {
-                    Capsule()
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected || isDropTargeted ? 0.86 : 0.64))
-                        .background(.regularMaterial, in: Capsule())
+            Text(title)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .frame(height: 38)
+                .background {
+                    if isSelected || isHovered || isDropTargeted {
+                        Capsule()
+                            .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected || isDropTargeted ? 0.86 : 0.64))
+                            .background(.regularMaterial, in: Capsule())
+                    }
                 }
-            }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+                .clipShape(Capsule())
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .modifier(
@@ -1492,13 +1468,6 @@ private struct ShelfCollectionChip: View {
                 Button(NSLocalizedString("action.move_right", comment: ""), action: onMoveRight)
             }
         }
-    }
-
-    private var iconForegroundStyle: Color {
-        if isSelected {
-            return .primary
-        }
-        return color
     }
 
     private var helpText: String {

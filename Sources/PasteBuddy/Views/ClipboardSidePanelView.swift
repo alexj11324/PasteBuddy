@@ -276,8 +276,6 @@ struct ClipboardSidePanelView: View {
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized("label.clipboard"),
-                systemImageName: "clock.arrow.circlepath",
-                color: store.isCapturePaused ? .orange : .blue,
                 isSelected: sideScope == .history,
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
@@ -287,8 +285,6 @@ struct ClipboardSidePanelView: View {
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized("action.paste_stack"),
-                systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                color: store.isPasteStackActive ? .green : .secondary,
                 isSelected: sideScope == .pasteStack,
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
@@ -298,8 +294,6 @@ struct ClipboardSidePanelView: View {
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized(category.displayName),
-                systemImageName: category.systemImageName,
-                color: Color(hex: category.colorHex) ?? .accentColor,
                 isSelected: isSmartCategorySelected(category),
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
@@ -310,8 +304,6 @@ struct ClipboardSidePanelView: View {
                     collection: collection,
                     collectionOrder: collectionOrder,
                     title: pinboard.name,
-                    systemImageName: "pin.fill",
-                    color: Color(hex: pinboard.colorHex) ?? .blue,
                     isSelected: sideScope == .pinboard(pinboard.id),
                     canMoveLeft: canMoveLeft,
                     canMoveRight: canMoveRight
@@ -324,8 +316,6 @@ struct ClipboardSidePanelView: View {
         collection: ClipboardCollectionID,
         collectionOrder: [ClipboardCollectionID],
         title: String,
-        systemImageName: String,
-        color: Color,
         isSelected: Bool,
         canMoveLeft: Bool,
         canMoveRight: Bool,
@@ -337,8 +327,6 @@ struct ClipboardSidePanelView: View {
             dragSession: $collectionDragSession,
             collectionFrames: $collectionFrames,
             title: title,
-            systemImageName: systemImageName,
-            color: color,
             isSelected: isSelected,
             onReorder: reorderCollection,
             canMoveLeft: canMoveLeft,
@@ -884,8 +872,6 @@ private struct ClipboardSidePanelFilterChip: View {
     @Binding var dragSession: ClipboardCollectionDragSession
     @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
     let title: String
-    let systemImageName: String
-    let color: Color
     let isSelected: Bool
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
     let canMoveLeft: Bool
@@ -897,23 +883,18 @@ private struct ClipboardSidePanelFilterChip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImageName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background {
-                Capsule()
-                    .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
-            }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background {
+                    Capsule()
+                        .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
+                }
+                .clipShape(Capsule())
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .modifier(

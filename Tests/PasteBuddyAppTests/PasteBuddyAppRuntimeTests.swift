@@ -96,6 +96,32 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("footerHeight"))
     }
 
+    func testCollectionChipsRenderTextWithoutCategoryIcons() throws {
+        let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let sourceSlice: (String, String, String) throws -> String = { source, startMarker, endMarker in
+            let start = try XCTUnwrap(source.range(of: startMarker))
+            let end = try XCTUnwrap(source.range(of: endMarker, range: start.upperBound..<source.endIndex))
+            return String(source[start.lowerBound..<end.lowerBound])
+        }
+        let shelfChip = try sourceSlice(
+            shelf,
+            "private struct ShelfCollectionChip: View",
+            "struct ClipboardCollectionReorderModifier: ViewModifier"
+        )
+        let sideChip = try sourceSlice(
+            side,
+            "private struct ClipboardSidePanelFilterChip: View",
+            "private struct ClipboardSidePanelListRow: View"
+        )
+
+        for chip in [shelfChip, sideChip] {
+            XCTAssertTrue(chip.contains("Text(title)"))
+            XCTAssertFalse(chip.contains("Image(systemName:"))
+            XCTAssertFalse(chip.contains("systemImageName"))
+        }
+    }
+
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
         XCTAssertEqual(
             PasteBuddyApp.screenSharingType(
