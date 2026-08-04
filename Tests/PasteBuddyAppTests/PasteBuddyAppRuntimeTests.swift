@@ -122,6 +122,50 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
+    func testPasteStackIsOmittedFromPanelCategoryNavigation() throws {
+        let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelf, side] {
+            XCTAssertTrue(source.contains("store.collectionOrder.filter { $0 != .pasteStack }"))
+            XCTAssertTrue(source.contains("case .pasteStack:\n            EmptyView()"))
+        }
+        XCTAssertFalse(shelf.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
+    }
+
+    func testCollectionDragAutoScrollUsesVisibleContentEdgesAndNearestHiddenTarget() {
+        let text = ClipboardCollectionID.smart(.text)
+        let links = ClipboardCollectionID.smart(.links)
+        let images = ClipboardCollectionID.smart(.images)
+        let files = ClipboardCollectionID.smart(.files)
+        let order: [ClipboardCollectionID] = [text, links, images, files]
+        let frames: [ClipboardCollectionID: CGRect] = [
+            text: CGRect(x: 0, y: 0, width: 50, height: 30),
+            links: CGRect(x: 60, y: 0, width: 50, height: 30),
+            images: CGRect(x: 120, y: 0, width: 50, height: 30),
+            files: CGRect(x: 180, y: 0, width: 50, height: 30),
+        ]
+        let viewport = ClipboardCollectionScrollViewport(width: 100, contentMinX: -100)
+
+        XCTAssertEqual(viewport.visibleRange, 100...200)
+        XCTAssertEqual(viewport.autoScrollDirection(for: 110), .leading)
+        XCTAssertNil(viewport.autoScrollDirection(for: 150))
+        XCTAssertEqual(viewport.autoScrollDirection(for: 190), .trailing)
+        XCTAssertEqual(viewport.target(for: .leading, order: order, frames: frames), links)
+        XCTAssertEqual(viewport.target(for: .trailing, order: order, frames: frames), files)
+    }
+
+    func testBothCollectionStripsWireEdgeAutoScroll() throws {
+        let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelf, side] {
+            XCTAssertTrue(source.contains("ScrollViewReader { proxy in"))
+            XCTAssertTrue(source.contains("collectionScrollViewport.target("))
+            XCTAssertTrue(source.contains("onAutoScroll: onAutoScroll"))
+        }
+    }
+
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
         XCTAssertEqual(
             PasteBuddyApp.screenSharingType(
@@ -977,7 +1021,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         let parityMatrix: [(semantic: String, shelf: [String], side: [String])] = [
             ("search", ["$store.searchQuery", "action.clear_search"], ["$store.searchQuery", "action.clear_search"]),
-            ("scope/category", ["store.collectionOrder", "case .smart(let category)", "store.userPinboards", ".pasteStack"], ["store.collectionOrder", "case .smart(let category)", "store.userPinboards", ".pasteStack"]),
+            ("scope/category", ["store.collectionOrder", "case .smart(let category)", "store.userPinboards"], ["store.collectionOrder", "case .smart(let category)", "store.userPinboards"]),
             ("selection/keyboard", ["selectOffset(request.command.offset)", "handleShelfKeyPress"], ["selectOffset(request.command.offset)", "handleKeyPress"]),
             ("metadata", ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"], ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"]),
             ("context actions", ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"], ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"]),

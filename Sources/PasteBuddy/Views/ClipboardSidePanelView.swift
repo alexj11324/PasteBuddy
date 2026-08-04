@@ -41,6 +41,7 @@ struct ClipboardSidePanelView: View {
     @State private var timestampReference = Date()
     @State private var collectionDragSession = ClipboardCollectionDragSession()
     @State private var collectionFrames: [ClipboardCollectionID: CGRect] = [:]
+    @State private var collectionScrollViewport = ClipboardCollectionScrollViewport()
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -233,39 +234,71 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        let collectionOrder = collectionDragSession.displayOrder(fallback: store.collectionOrder)
-        return ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(collectionOrder) { collection in
-                    collectionChip(for: collection, in: collectionOrder)
-                }
+        let collectionOrder = collectionDragSession.displayOrder(
+            fallback: store.collectionOrder.filter { $0 != .pasteStack }
+        )
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(collectionOrder) { collection in
+                        collectionChip(
+                            for: collection,
+                            in: collectionOrder,
+                            onAutoScroll: { direction in
+                                guard let target = collectionScrollViewport.target(
+                                    for: direction,
+                                    order: collectionOrder,
+                                    frames: collectionFrames
+                                ) else { return }
+                                withAnimation(.linear(duration: 0.12)) {
+                                    proxy.scrollTo(
+                                        target,
+                                        anchor: direction == .leading ? .leading : .trailing
+                                    )
+                                }
+                            }
+                        )
+                    }
 
-                Button {
-                    createNamedPinboard()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
+                    Button {
+                        createNamedPinboard()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 30, height: 30)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .labelStyle(.iconOnly)
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .help(localized("label.new_pinboard"))
+                    .accessibilityLabel(localized("label.new_pinboard"))
                 }
-                .buttonStyle(.plain)
-                .labelStyle(.iconOnly)
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-                .help(localized("label.new_pinboard"))
-                .accessibilityLabel(localized("label.new_pinboard"))
+                .onGeometryChange(
+                    for: CGFloat.self,
+                    of: {
+                        $0.frame(
+                            in: .named(ClipboardCollectionViewportCoordinateSpace.sidePanel)
+                        ).minX
+                    }
+                ) { collectionScrollViewport.contentMinX = $0 }
+                .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
+                .padding(.vertical, 1)
             }
-            .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
-            .padding(.vertical, 1)
+            .coordinateSpace(name: ClipboardCollectionViewportCoordinateSpace.sidePanel)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) {
+                collectionScrollViewport.width = $0
+            }
+            .scrollIndicators(.never, axes: .horizontal)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .scrollIndicators(.never, axes: .horizontal)
-        .scrollDisabled(collectionDragSession.isActive)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private func collectionChip(
         for collection: ClipboardCollectionID,
-        in collectionOrder: [ClipboardCollectionID]
+        in collectionOrder: [ClipboardCollectionID],
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void
     ) -> some View {
         let canMoveLeft = collectionOrder.first != collection
         let canMoveRight = collectionOrder.last != collection
@@ -277,24 +310,19 @@ struct ClipboardSidePanelView: View {
                 collectionOrder: collectionOrder,
                 title: localized("label.clipboard"),
                 isSelected: sideScope == .history,
+                onAutoScroll: onAutoScroll,
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
             ) { setSideScope(.history) }
         case .pasteStack:
-            reorderableSideChip(
-                collection: collection,
-                collectionOrder: collectionOrder,
-                title: localized("action.paste_stack"),
-                isSelected: sideScope == .pasteStack,
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight
-            ) { setSideScope(.pasteStack) }
+            EmptyView()
         case .smart(let category):
             reorderableSideChip(
                 collection: collection,
                 collectionOrder: collectionOrder,
                 title: localized(category.displayName),
                 isSelected: isSmartCategorySelected(category),
+                onAutoScroll: onAutoScroll,
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
             ) { selectSmartCategory(category) }
@@ -305,6 +333,7 @@ struct ClipboardSidePanelView: View {
                     collectionOrder: collectionOrder,
                     title: pinboard.name,
                     isSelected: sideScope == .pinboard(pinboard.id),
+                    onAutoScroll: onAutoScroll,
                     canMoveLeft: canMoveLeft,
                     canMoveRight: canMoveRight
                 ) { setSideScope(.pinboard(pinboard.id)) }
@@ -317,6 +346,7 @@ struct ClipboardSidePanelView: View {
         collectionOrder: [ClipboardCollectionID],
         title: String,
         isSelected: Bool,
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void,
         canMoveLeft: Bool,
         canMoveRight: Bool,
         action: @escaping () -> Void
@@ -328,6 +358,8 @@ struct ClipboardSidePanelView: View {
             collectionFrames: $collectionFrames,
             title: title,
             isSelected: isSelected,
+            scrollViewport: collectionScrollViewport,
+            onAutoScroll: onAutoScroll,
             onReorder: reorderCollection,
             canMoveLeft: canMoveLeft,
             canMoveRight: canMoveRight,
@@ -873,6 +905,8 @@ private struct ClipboardSidePanelFilterChip: View {
     @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
     let title: String
     let isSelected: Bool
+    let scrollViewport: ClipboardCollectionScrollViewport
+    let onAutoScroll: (ClipboardCollectionAutoScrollDirection) -> Void
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
     let canMoveLeft: Bool
     let canMoveRight: Bool
@@ -904,7 +938,9 @@ private struct ClipboardSidePanelFilterChip: View {
                 session: $dragSession,
                 collectionFrames: $collectionFrames,
                 isTargeted: $isDropTargeted,
+                scrollViewport: scrollViewport,
                 animation: reduceMotion ? nil : .snappy(duration: 0.18),
+                onAutoScroll: onAutoScroll,
                 onReorder: onReorder,
                 onDropPayloads: nil
             )

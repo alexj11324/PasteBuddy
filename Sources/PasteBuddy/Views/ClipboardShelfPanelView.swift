@@ -187,6 +187,61 @@ enum ClipboardCollectionDragCoordinateSpace {
     static let name = "clipboard-collection-strip"
 }
 
+enum ClipboardCollectionViewportCoordinateSpace {
+    static let shelf = "clipboard-collection-shelf-viewport"
+    static let sidePanel = "clipboard-collection-side-viewport"
+}
+
+enum ClipboardCollectionAutoScrollDirection: Equatable {
+    case leading
+    case trailing
+}
+
+struct ClipboardCollectionScrollViewport: Equatable {
+    var width: CGFloat = 0
+    var contentMinX: CGFloat = 0
+
+    var visibleRange: ClosedRange<CGFloat>? {
+        guard width > 0 else { return nil }
+        let lowerBound = max(0, -contentMinX)
+        return lowerBound...(lowerBound + width)
+    }
+
+    func autoScrollDirection(
+        for contentX: CGFloat,
+        edgeInset: CGFloat = 36
+    ) -> ClipboardCollectionAutoScrollDirection? {
+        guard let visibleRange else { return nil }
+        if contentX <= visibleRange.lowerBound + edgeInset {
+            return .leading
+        }
+        if contentX >= visibleRange.upperBound - edgeInset {
+            return .trailing
+        }
+        return nil
+    }
+
+    func target(
+        for direction: ClipboardCollectionAutoScrollDirection,
+        order: [ClipboardCollectionID],
+        frames: [ClipboardCollectionID: CGRect]
+    ) -> ClipboardCollectionID? {
+        guard let visibleRange else { return nil }
+        switch direction {
+        case .leading:
+            return order.last { collection in
+                guard let frame = frames[collection] else { return false }
+                return frame.minX < visibleRange.lowerBound - 0.5
+            }
+        case .trailing:
+            return order.first { collection in
+                guard let frame = frames[collection] else { return false }
+                return frame.maxX > visibleRange.upperBound + 0.5
+            }
+        }
+    }
+}
+
 private enum ClipboardShelfDisplayItem: Identifiable {
     case launchAtLoginPrompt
     case loading
@@ -252,6 +307,7 @@ struct ClipboardShelfPanelView: View {
     @State private var pinnedState: Bool?
     @State private var collectionDragSession = ClipboardCollectionDragSession()
     @State private var collectionFrames: [ClipboardCollectionID: CGRect] = [:]
+    @State private var collectionScrollViewport = ClipboardCollectionScrollViewport()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -560,27 +616,59 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var collectionStrip: some View {
-        let collectionOrder = collectionDragSession.displayOrder(fallback: store.collectionOrder)
-        return ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(collectionOrder) { collection in
-                    collectionChip(for: collection, in: collectionOrder)
+        let collectionOrder = collectionDragSession.displayOrder(
+            fallback: store.collectionOrder.filter { $0 != .pasteStack }
+        )
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(collectionOrder) { collection in
+                        collectionChip(
+                            for: collection,
+                            in: collectionOrder,
+                            onAutoScroll: { direction in
+                                guard let target = collectionScrollViewport.target(
+                                    for: direction,
+                                    order: collectionOrder,
+                                    frames: collectionFrames
+                                ) else { return }
+                                withAnimation(reduceMotion ? nil : .linear(duration: 0.12)) {
+                                    proxy.scrollTo(
+                                        target,
+                                        anchor: direction == .leading ? .leading : .trailing
+                                    )
+                                }
+                            }
+                        )
+                    }
                 }
+                .onGeometryChange(
+                    for: CGFloat.self,
+                    of: {
+                        $0.frame(
+                            in: .named(ClipboardCollectionViewportCoordinateSpace.shelf)
+                        ).minX
+                    }
+                ) { collectionScrollViewport.contentMinX = $0 }
+                .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
+                .padding(.vertical, 1)
             }
-            .coordinateSpace(name: ClipboardCollectionDragCoordinateSpace.name)
-            .padding(.vertical, 1)
+            .coordinateSpace(name: ClipboardCollectionViewportCoordinateSpace.shelf)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) {
+                collectionScrollViewport.width = $0
+            }
+            .scrollIndicators(.never, axes: .horizontal)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(localized("label.clipboard_collections"))
         }
-        .scrollIndicators(.never, axes: .horizontal)
-        .scrollDisabled(collectionDragSession.isActive)
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(localized("label.clipboard_collections"))
     }
 
     @ViewBuilder
     private func collectionChip(
         for collection: ClipboardCollectionID,
-        in collectionOrder: [ClipboardCollectionID]
+        in collectionOrder: [ClipboardCollectionID],
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void
     ) -> some View {
         let canMoveLeft = collectionOrder.first != collection
         let canMoveRight = collectionOrder.last != collection
@@ -593,19 +681,12 @@ struct ClipboardShelfPanelView: View {
                 title: localized("label.clipboard"),
                 isSelected: shelfScope == .history,
                 onDropPayloads: { dropItems($0, into: .history) },
+                onAutoScroll: onAutoScroll,
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
             ) { setScope(.history) }
         case .pasteStack:
-            reorderableShelfChip(
-                collection: collection,
-                collectionOrder: collectionOrder,
-                title: localized("action.paste_stack"),
-                isSelected: shelfScope == .pasteStack,
-                onDropPayloads: { dropItems($0, into: .pasteStack) },
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight
-            ) { setScope(.pasteStack) }
+            EmptyView()
         case .smart(let category):
             reorderableShelfChip(
                 collection: collection,
@@ -613,6 +694,7 @@ struct ClipboardShelfPanelView: View {
                 title: localized(category.displayName),
                 isSelected: isSmartCategorySelected(category),
                 onDropPayloads: { dropItems($0, into: .smartCategory(category)) },
+                onAutoScroll: onAutoScroll,
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight
             ) { selectSmartCategory(category) }
@@ -624,6 +706,7 @@ struct ClipboardShelfPanelView: View {
                     title: pinboard.name,
                     isSelected: shelfScope == .pinboard(pinboard.id),
                     onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) },
+                    onAutoScroll: onAutoScroll,
                     canMoveLeft: canMoveLeft,
                     canMoveRight: canMoveRight
                 ) { setScope(.pinboard(pinboard.id)) }
@@ -637,6 +720,7 @@ struct ClipboardShelfPanelView: View {
         title: String,
         isSelected: Bool,
         onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?,
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void,
         canMoveLeft: Bool,
         canMoveRight: Bool,
         action: @escaping () -> Void
@@ -649,6 +733,8 @@ struct ClipboardShelfPanelView: View {
             title: title,
             isSelected: isSelected,
             onDropPayloads: onDropPayloads,
+            scrollViewport: collectionScrollViewport,
+            onAutoScroll: onAutoScroll,
             onReorder: reorderCollection,
             canMoveLeft: canMoveLeft,
             canMoveRight: canMoveRight,
@@ -1380,6 +1466,8 @@ private struct ShelfCollectionChip: View {
     let title: String
     let isSelected: Bool
     var onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
+    let scrollViewport: ClipboardCollectionScrollViewport
+    let onAutoScroll: (ClipboardCollectionAutoScrollDirection) -> Void
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
     let canMoveLeft: Bool
     let canMoveRight: Bool
@@ -1397,6 +1485,8 @@ private struct ShelfCollectionChip: View {
         title: String,
         isSelected: Bool,
         onDropPayloads: (([PinboardItemDragPayload]) -> Bool)? = nil,
+        scrollViewport: ClipboardCollectionScrollViewport,
+        onAutoScroll: @escaping (ClipboardCollectionAutoScrollDirection) -> Void,
         onReorder: @escaping (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool,
         canMoveLeft: Bool,
         canMoveRight: Bool,
@@ -1411,6 +1501,8 @@ private struct ShelfCollectionChip: View {
         self.title = title
         self.isSelected = isSelected
         self.onDropPayloads = onDropPayloads
+        self.scrollViewport = scrollViewport
+        self.onAutoScroll = onAutoScroll
         self.onReorder = onReorder
         self.canMoveLeft = canMoveLeft
         self.canMoveRight = canMoveRight
@@ -1446,7 +1538,9 @@ private struct ShelfCollectionChip: View {
                 session: $dragSession,
                 collectionFrames: $collectionFrames,
                 isTargeted: $isDropTargeted,
+                scrollViewport: scrollViewport,
                 animation: reduceMotion ? nil : .snappy(duration: 0.18),
+                onAutoScroll: onAutoScroll,
                 onReorder: onReorder,
                 onDropPayloads: onDropPayloads
             )
@@ -1481,7 +1575,9 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
     @Binding var session: ClipboardCollectionDragSession
     @Binding var collectionFrames: [ClipboardCollectionID: CGRect]
     @Binding var isTargeted: Bool
+    let scrollViewport: ClipboardCollectionScrollViewport
     let animation: Animation?
+    let onAutoScroll: (ClipboardCollectionAutoScrollDirection) -> Void
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
     let onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
 
@@ -1537,6 +1633,9 @@ struct ClipboardCollectionReorderModifier: ViewModifier {
         }
         guard session.source == collection else { return }
         session.updateTranslation(value.translation.width)
+        if let direction = scrollViewport.autoScrollDirection(for: value.location.x) {
+            onAutoScroll(direction)
+        }
         guard let target = session.dropTarget(at: value.location.x) else { return }
         withAnimation(animation) {
             _ = session.previewMove(
