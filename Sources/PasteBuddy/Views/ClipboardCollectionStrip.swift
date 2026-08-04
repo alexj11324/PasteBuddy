@@ -323,8 +323,9 @@ private final class ClipboardCollectionFrameProbeView: NSView {
     private func reportFrameIfNeeded() {
         guard let window,
               let screen = window.screen,
-              let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
-                as? CGDirectDisplayID else { return }
+              let displayNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+                as? NSNumber else { return }
+        let displayID = CGDirectDisplayID(displayNumber.uint32Value)
         let screenFrame = window.convertToScreen(convert(bounds, to: nil))
         guard screenFrame.width > 0,
               screenFrame.height > 0 else { return }
@@ -339,7 +340,7 @@ private final class ClipboardCollectionFrameProbeView: NSView {
         ).integral
         guard computerFrame != lastReportedFrame else { return }
         lastReportedFrame = computerFrame
-        Self.logger.debug(
+        Self.logger.notice(
             "id=\(self.collectionID.id, privacy: .public) frame=\(NSStringFromRect(computerFrame), privacy: .public)"
         )
     }
