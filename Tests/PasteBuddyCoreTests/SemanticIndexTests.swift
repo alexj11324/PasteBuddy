@@ -84,6 +84,22 @@ final class SemanticIndexTests: XCTestCase {
     }
 
     @MainActor
+    func testAnyConfiguredBYOKKeyFindsOrphanedScopedCredential() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let credentials = FakeAIProviderCredentialStore(scopedKeys: [
+            (.openRouter, .embedding, "https://old-endpoint.example/v1", "orphaned-key")
+        ])
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            aiCredentialStore: credentials
+        )
+
+        XCTAssertFalse(store.hasConfiguredBYOKKey)
+        XCTAssertTrue(store.hasAnyConfiguredBYOKKey)
+    }
+
+    @MainActor
     func testLegacyCredentialIsNotReusedAcrossDifferentEndpoints() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -924,6 +940,11 @@ private final class FakeAIProviderCredentialStore: AIProviderCredentialStoring, 
             (Scope(provider: $0.0, role: $0.1, baseURL: $0.2), $0.3)
         })
         legacyKeys = [:]
+    }
+
+    func hasAnyAPIKey() throws -> Bool {
+        scopedKeys.values.contains { !$0.isEmpty }
+            || legacyKeys.values.contains { !$0.isEmpty }
     }
 
     func apiKey(

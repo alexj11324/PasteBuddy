@@ -8,6 +8,7 @@ public enum AIProviderCredentialRole: String, CaseIterable, Sendable {
 }
 
 public protocol AIProviderCredentialStoring: Sendable {
+    func hasAnyAPIKey() throws -> Bool
     func apiKey(for provider: BYOKProviderPreset, role: AIProviderCredentialRole, baseURL: String) throws -> String?
     func legacyAPIKey(for provider: BYOKProviderPreset) throws -> String?
     func saveAPIKey(_ apiKey: String, for provider: BYOKProviderPreset, role: AIProviderCredentialRole, baseURL: String) throws
@@ -22,6 +23,41 @@ public final class KeychainAIProviderCredentialStore: AIProviderCredentialStorin
     public init(bundleIdentifier: String? = Bundle.main.bundleIdentifier) {
         service = "com.alexjiang.PasteBuddy.ai-byok"
         accountPrefix = bundleIdentifier ?? "com.alexjiang.PasteBuddy"
+    }
+
+    public func hasAnyAPIKey() throws -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return false }
+        guard status == errSecSuccess else {
+            throw EncryptionServiceError.keychainReadFailed(status)
+        }
+        let attributes: [[String: Any]]
+        if let values = result as? [[String: Any]] {
+            attributes = values
+        } else if let value = result as? [String: Any] {
+            attributes = [value]
+        } else {
+            throw EncryptionServiceError.keychainReadFailed(errSecDecode)
+        }
+        let scopedPrefixes = AIProviderCredentialRole.allCases.map {
+            "\(accountPrefix).\($0.rawValue)."
+        }
+        let legacyAccounts = Set(BYOKProviderPreset.allCases.map {
+            "\(accountPrefix).\($0.rawValue)"
+        })
+        return attributes.contains { attributes in
+            guard let account = attributes[kSecAttrAccount as String] as? String else { return false }
+            return legacyAccounts.contains(account)
+                || scopedPrefixes.contains(where: account.hasPrefix)
+        }
     }
 
     public func apiKey(

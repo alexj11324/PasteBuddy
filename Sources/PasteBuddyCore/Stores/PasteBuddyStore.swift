@@ -1002,9 +1002,7 @@ public final class PasteBuddyStore {
         ((try? byokAPIKey(role: role, configuration: configuration)) ?? nil)?.isEmpty == false
     }
     public var hasAnyConfiguredBYOKKey: Bool {
-        hasConfiguredBYOKKey || BYOKProviderPreset.allCases.contains {
-            ((try? aiCredentialStore.legacyAPIKey(for: $0)) ?? nil)?.isEmpty == false
-        }
+        (try? aiCredentialStore.hasAnyAPIKey()) == true
     }
     public var canRunConfiguredAISource: Bool {
         switch snapshot.semanticIndex.inferenceSource {
