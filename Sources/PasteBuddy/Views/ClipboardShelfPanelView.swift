@@ -23,8 +23,6 @@ enum ClipboardShelfMetrics {
     static let activeFilterHeight: CGFloat = 30
     static let toolbarSectionSpacing: CGFloat = 10
     static let shelfTopSpacing: CGFloat = 10
-    static let footerTopSpacing: CGFloat = 6
-    static let footerHeight: CGFloat = 20
 
     static func requiredPanelHeight(showsActiveFilters: Bool) -> CGFloat {
         outerVerticalInset * 2
@@ -32,14 +30,12 @@ enum ClipboardShelfMetrics {
             + (showsActiveFilters ? toolbarSectionSpacing + activeFilterHeight : 0)
             + shelfTopSpacing
             + shelfHeight
-            + footerTopSpacing
-            + footerHeight
     }
 
     static func verticalRegions(
         in bounds: CGRect,
         showsActiveFilters: Bool
-    ) -> (header: CGRect, shelf: CGRect, footer: CGRect)? {
+    ) -> (header: CGRect, shelf: CGRect)? {
         let requiredHeight = requiredPanelHeight(showsActiveFilters: showsActiveFilters)
         guard bounds.width >= 0, bounds.height >= requiredHeight else { return nil }
         let headerHeight = primaryToolbarHeight
@@ -56,13 +52,7 @@ enum ClipboardShelfMetrics {
             width: bounds.width,
             height: shelfHeight
         )
-        let footer = CGRect(
-            x: bounds.minX,
-            y: shelf.minY - footerTopSpacing - footerHeight,
-            width: bounds.width,
-            height: footerHeight
-        )
-        return (header, shelf, footer)
+        return (header, shelf)
     }
 }
 
@@ -270,8 +260,6 @@ struct ClipboardShelfPanelView: View {
             shelf
                 .zIndex(0)
                 .padding(.top, 10)
-            shelfFooter
-                .padding(.top, 6)
         }
         .padding(.vertical, ClipboardShelfMetrics.outerVerticalInset)
         .padding(.horizontal, 16)
@@ -361,15 +349,6 @@ struct ClipboardShelfPanelView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
-    }
-
-    private var shelfFooter: some View {
-        Text(localized("format.items", paging.totalCount))
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .frame(height: ClipboardShelfMetrics.footerHeight)
-            .accessibilityIdentifier("clipboard-shelf-result-count")
     }
 
     private var toolbar: some View {

@@ -87,6 +87,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(handler.contains("session.complete()"))
     }
 
+    func testShelfOmitsResultCountFooterAndItsReservedHeight() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+
+        XCTAssertFalse(source.contains("clipboard-shelf-result-count"))
+        XCTAssertFalse(source.contains("private var shelfFooter"))
+        XCTAssertFalse(source.contains("footerTopSpacing"))
+        XCTAssertFalse(source.contains("footerHeight"))
+    }
+
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
         XCTAssertEqual(
             PasteBuddyApp.screenSharingType(
@@ -865,9 +874,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
                 XCTAssertTrue(localBounds.contains(regions.header))
                 XCTAssertTrue(localBounds.contains(regions.shelf))
-                XCTAssertTrue(localBounds.contains(regions.footer))
                 XCTAssertLessThanOrEqual(regions.shelf.maxY, regions.header.minY)
-                XCTAssertLessThanOrEqual(regions.footer.maxY, regions.shelf.minY)
                 XCTAssertEqual(regions.shelf.height, ClipboardShelfMetrics.shelfHeight)
 
                 for scale in backingScales {
