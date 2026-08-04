@@ -232,13 +232,27 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(shelf.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
     }
 
-    func testShelfOmitsResultCountFooterAndItsReservedHeight() throws {
+    func testClipboardPanelsOmitResultCountFootersAndReservedHeight() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
         XCTAssertFalse(source.contains("clipboard-shelf-result-count"))
         XCTAssertFalse(source.contains("private var shelfFooter"))
         XCTAssertFalse(source.contains("footerTopSpacing"))
         XCTAssertFalse(source.contains("footerHeight"))
+        XCTAssertFalse(sideSource.contains("private var footer"))
+        XCTAssertFalse(sideSource.contains("localized(\"format.items\", paging.totalCount)"))
+    }
+
+    func testCollectionEdgeDragContinuouslyScrollsAndAdvancesPreviewOrder() throws {
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertTrue(shelfSource.contains(".task(id: autoScrollDirection)"))
+        XCTAssertTrue(shelfSource.contains("while !Task.isCancelled"))
+        XCTAssertTrue(shelfSource.contains("Task.sleep(for: .milliseconds(110))"))
+        XCTAssertTrue(shelfSource.contains("afterTarget: direction == .trailing"))
+        XCTAssertTrue(sideSource.contains("afterTarget: direction == .trailing"))
     }
 
     func testCollectionChipsRenderTextWithoutCategoryIcons() throws {
