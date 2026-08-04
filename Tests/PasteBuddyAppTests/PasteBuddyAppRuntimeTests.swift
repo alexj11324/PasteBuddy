@@ -86,8 +86,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
 
         XCTAssertTrue(source.contains("if #available(macOS 27.0, *)"))
+        XCTAssertTrue(source.contains("ForEach(items, id: \\.reorderID)"))
         XCTAssertTrue(source.contains(".reorderable()"))
-        XCTAssertTrue(source.contains(".reorderContainer(for: ClipboardCollectionStripItem.self)"))
+        XCTAssertTrue(source.contains("for: ClipboardCollectionStripItem.self"))
+        XCTAssertTrue(source.contains("itemID: \\.reorderID"))
+        XCTAssertFalse(source.contains("struct ClipboardCollectionStripItem: Identifiable"))
         XCTAssertTrue(source.contains(".buttonStyle(.glass)"))
         XCTAssertTrue(source.contains(".buttonStyle(.glassProminent)"))
         XCTAssertTrue(source.contains(".dropDestination(for: PinboardItemDragPayload.self)"))

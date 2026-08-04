@@ -3,7 +3,7 @@ import PasteBuddyCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ClipboardCollectionStripItem: Identifiable {
+struct ClipboardCollectionStripItem {
     let id: ClipboardCollectionID
     let title: String
     let isSelected: Bool
@@ -13,6 +13,8 @@ struct ClipboardCollectionStripItem: Identifiable {
     let onMoveLeft: () -> Void
     let onMoveRight: () -> Void
     let action: () -> Void
+
+    var reorderID: String { id.id }
 }
 
 struct ClipboardCollectionReorderDestination: Equatable {
@@ -119,12 +121,15 @@ private struct SwiftUIClipboardCollectionStrip: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(items) { item in
+                ForEach(items, id: \.reorderID) { item in
                     SwiftUIClipboardCollectionButton(item: item, style: style)
                 }
                 .reorderable()
             }
-            .reorderContainer(for: ClipboardCollectionStripItem.self) { difference in
+            .reorderContainer(
+                for: ClipboardCollectionStripItem.self,
+                itemID: \.reorderID
+            ) { difference in
                 apply(difference)
             }
         }
@@ -133,16 +138,17 @@ private struct SwiftUIClipboardCollectionStrip: View {
 
     private func apply(
         _ difference: ReorderDifference<
-            ClipboardCollectionID,
+            String,
             ReorderableSingleCollectionIdentifier
         >
     ) {
         guard difference.sources.count == 1,
-              let source = difference.sources.first else { return }
+              let sourceReorderID = difference.sources.first,
+              let source = items.first(where: { $0.reorderID == sourceReorderID })?.id else { return }
         let proposedIndex: Int
         switch difference.destination.position {
-        case .before(let target):
-            guard let targetIndex = items.firstIndex(where: { $0.id == target }) else { return }
+        case .before(let targetReorderID):
+            guard let targetIndex = items.firstIndex(where: { $0.reorderID == targetReorderID }) else { return }
             proposedIndex = targetIndex
         case .end:
             proposedIndex = items.endIndex
