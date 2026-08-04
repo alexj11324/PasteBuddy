@@ -336,7 +336,6 @@ struct ClipboardShelfPanelView: View {
             .frame(height: ClipboardShelfMetrics.primaryToolbarHeight)
             .controlSize(.large)
             .animation(pasteSearchAnimation, value: isSearchRailPresented)
-            .animation(pasteSearchAnimation, value: isSearchFocused)
             .animation(pasteSearchAnimation, value: store.sourceAppFilter)
             .animation(pasteSearchAnimation, value: selectedCount)
 
@@ -407,7 +406,7 @@ struct ClipboardShelfPanelView: View {
         .onTapGesture {
             setSearchFocused(true)
         }
-        .pasteBuddyNativeInteractiveGlass()
+        .pasteBuddyNativeGlass()
         .background {
             SourceAppSuggestionPanelPresenter(
                 isPresented: shouldShowSourceAppSuggestions,
@@ -425,7 +424,6 @@ struct ClipboardShelfPanelView: View {
         }
         .animation(pasteSearchAnimation, value: searchControlWidth)
         .animation(pasteSearchAnimation, value: isSearchRailPresented)
-        .animation(pasteSearchAnimation, value: isSearchFocused)
         .animation(pasteSearchAnimation, value: store.sourceAppFilter)
     }
 
@@ -3172,10 +3170,10 @@ private struct EmptyShelfCard: View {
 
 extension View {
     @ViewBuilder
-    func pasteBuddyNativeInteractiveGlass() -> some View {
+    func pasteBuddyNativeGlass() -> some View {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
-            self.glassEffect(.regular.interactive())
+            self.glassEffect(.regular)
         } else {
             self.background(.regularMaterial, in: Capsule())
         }
