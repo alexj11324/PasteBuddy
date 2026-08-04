@@ -36,6 +36,60 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testCollectionProvisionalReorderTracksDropTargetsDuringDrag() {
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 1,
+                proposedIndex: 4
+            ),
+            3
+        )
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 3,
+                proposedIndex: 1
+            ),
+            1
+        )
+        XCTAssertNil(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 2,
+                proposedIndex: 2
+            )
+        )
+        XCTAssertNil(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 2,
+                proposedIndex: 3
+            )
+        )
+
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.commitDestination(
+                source: .history,
+                in: [
+                    .smart(.images),
+                    .smart(.links),
+                    .history,
+                    .smart(.files),
+                ]
+            ),
+            ClipboardCollectionReorderDestination(target: .smart(.files), afterTarget: false)
+        )
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.commitDestination(
+                source: .smart(.images),
+                in: [
+                    .history,
+                    .smart(.links),
+                    .smart(.files),
+                    .smart(.images),
+                ]
+            ),
+            ClipboardCollectionReorderDestination(target: .smart(.files), afterTarget: true)
+        )
+    }
+
     func testCollectionReorderResolverMovesBeforeAVisibleTarget() {
         let order: [ClipboardCollectionID] = [
             .history,
@@ -113,6 +167,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("override func flashScrollers() {}"))
         XCTAssertTrue(bridgeSource.contains("collectionView.performBatchUpdates"))
         XCTAssertTrue(bridgeSource.contains("collectionView.moveItem("))
+        XCTAssertTrue(bridgeSource.contains("applyProvisionalReorder("))
+        XCTAssertTrue(bridgeSource.contains("commitDestination("))
+        XCTAssertTrue(bridgeSource.contains("beginReorderDragIfNeeded()"))
+        XCTAssertTrue(bridgeSource.contains("onDraggingEnded"))
         XCTAssertTrue(bridgeSource.contains("NSClickGestureRecognizer("))
         XCTAssertTrue(bridgeSource.contains("recognizer.delaysPrimaryMouseButtonEvents = false"))
         XCTAssertTrue(bridgeSource.contains("ClipboardCollectionLabelHostingView"))

@@ -80,6 +80,40 @@ enum ClipboardCollectionReorderResolver {
             afterTarget: false
         )
     }
+
+    /// Converts an NSCollectionView `.before` drop index into the final item index
+    /// after the dragged source is removed from its current slot.
+    static func provisionalDestination(
+        sourceIndex: Int,
+        proposedIndex: Int
+    ) -> Int? {
+        guard sourceIndex >= 0 else { return nil }
+        if proposedIndex == sourceIndex || proposedIndex == sourceIndex + 1 {
+            return nil
+        }
+        if proposedIndex > sourceIndex {
+            return proposedIndex - 1
+        }
+        return proposedIndex
+    }
+
+    static func commitDestination(
+        source: ClipboardCollectionID,
+        in newOrder: [ClipboardCollectionID]
+    ) -> ClipboardCollectionReorderDestination? {
+        guard let sourceIndex = newOrder.firstIndex(of: source) else { return nil }
+        if sourceIndex + 1 < newOrder.count {
+            return ClipboardCollectionReorderDestination(
+                target: newOrder[sourceIndex + 1],
+                afterTarget: false
+            )
+        }
+        guard sourceIndex > 0 else { return nil }
+        return ClipboardCollectionReorderDestination(
+            target: newOrder[sourceIndex - 1],
+            afterTarget: true
+        )
+    }
 }
 
 enum ClipboardCollectionStripStyle {
@@ -337,7 +371,10 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
         ])
         collectionView.setDraggingSourceOperationMask(.move, forLocal: true)
         collectionView.onDraggingExited = { [weak coordinator = context.coordinator] in
-            coordinator?.clearDropTarget()
+            coordinator?.handleDraggingExited()
+        }
+        collectionView.onDraggingEnded = { [weak coordinator = context.coordinator] in
+            coordinator?.handleDraggingEnded()
         }
         context.coordinator.collectionView = collectionView
 
@@ -367,9 +404,12 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
 
         weak var collectionView: NSCollectionView?
         private var items: [ClipboardCollectionStripItem]
+        private var committedItems: [ClipboardCollectionStripItem]
         private var style: ClipboardCollectionStripStyle
         private var onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
         private var dropTargetID: ClipboardCollectionID?
+        private var isReorderDragActive = false
+        private var didAcceptReorderDrag = false
 
         init(
             items: [ClipboardCollectionStripItem],
@@ -377,6 +417,7 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
             onReorder: @escaping (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
         ) {
             self.items = items
+            self.committedItems = items
             self.style = style
             self.onReorder = onReorder
         }
@@ -386,6 +427,20 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
             style: ClipboardCollectionStripStyle,
             onReorder: @escaping (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
         ) {
+            self.style = style
+            self.onReorder = onReorder
+
+            if isReorderDragActive {
+                // Keep the live provisional order owned by the drag session. Only refresh
+                // chip metadata and the committed baseline for a later revert/commit.
+                committedItems = replacingMetadata(in: committedItems, with: items)
+                self.items = replacingMetadata(in: self.items, with: items)
+                if let collectionView {
+                    reconfigureVisibleItems(in: collectionView)
+                }
+                return
+            }
+
             let oldSnapshot = self.items.map(ItemSnapshot.init)
             let newSnapshot = items.map(ItemSnapshot.init)
             let indexMove = ClipboardCollectionIndexMoveResolver.move(
@@ -394,33 +449,19 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
             )
             let isPureReorder = oldSnapshot.count == newSnapshot.count
                 && oldSnapshot.allSatisfy(newSnapshot.contains)
+            committedItems = items
             self.items = items
-            self.style = style
-            self.onReorder = onReorder
             guard let collectionView else { return }
             guard oldSnapshot != newSnapshot else {
                 reconfigureVisibleItems(in: collectionView)
                 return
             }
+            // Accessibility move left/right and other non-drag order changes still animate here.
             if isPureReorder, let indexMove {
-                collectionView.performBatchUpdates({
-                    collectionView.moveItem(
-                        at: IndexPath(item: indexMove.source, section: 0),
-                        to: IndexPath(item: indexMove.destination, section: 0)
-                    )
-                }, completionHandler: { [weak self, weak collectionView] _ in
-                    guard let self, let collectionView else { return }
-                    self.reconfigureVisibleItems(in: collectionView)
-                })
+                animateMove(indexMove, in: collectionView)
                 return
             }
-            let scrollView = collectionView.enclosingScrollView
-            let visibleOrigin = scrollView?.contentView.bounds.origin
-            collectionView.reloadData()
-            if let scrollView, let visibleOrigin {
-                scrollView.contentView.scroll(to: visibleOrigin)
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-            }
+            reloadPreservingScroll(in: collectionView)
         }
 
         private func reconfigureVisibleItems(in collectionView: NSCollectionView) {
@@ -489,12 +530,18 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
             proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
             dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
         ) -> NSDragOperation {
-            if sourceCollectionID(from: draggingInfo.draggingPasteboard) != nil {
+            if let source = sourceCollectionID(from: draggingInfo.draggingPasteboard) {
                 proposedDropOperation.pointee = .before
                 clearDropTarget()
+                beginReorderDragIfNeeded()
+                applyProvisionalReorder(
+                    source: source,
+                    proposedIndex: (proposedDropIndexPath.pointee as IndexPath).item
+                )
                 return .move
             }
 
+            revertProvisionalReorderIfNeeded()
             guard let target = externalDropTarget(
                 proposedDropIndexPath.pointee as IndexPath
             ), target.onDropPayloads != nil else {
@@ -514,14 +561,32 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
         ) -> Bool {
             defer { clearDropTarget() }
             if let source = sourceCollectionID(from: draggingInfo.draggingPasteboard) {
-                guard let destination = ClipboardCollectionReorderResolver.destination(
-                    for: source,
-                    in: items.map(\.id),
-                    proposedIndex: indexPath.item
+                // Live validateDrop already moved chips to the target slots. Commit that
+                // provisional order from the drag session instead of re-deriving from
+                // indexPath against the already-mutated array (which would no-op).
+                beginReorderDragIfNeeded()
+                if items.map(\.id) == committedItems.map(\.id) {
+                    applyProvisionalReorder(source: source, proposedIndex: indexPath.item)
+                }
+                if items.map(\.id) == committedItems.map(\.id) {
+                    didAcceptReorderDrag = true
+                    return true
+                }
+                guard let destination = ClipboardCollectionReorderResolver.commitDestination(
+                    source: source,
+                    in: items.map(\.id)
                 ) else {
+                    revertProvisionalReorderIfNeeded()
                     return false
                 }
-                return onReorder(source, destination.target, destination.afterTarget)
+                let succeeded = onReorder(source, destination.target, destination.afterTarget)
+                if succeeded {
+                    didAcceptReorderDrag = true
+                    committedItems = items
+                } else {
+                    revertProvisionalReorderIfNeeded()
+                }
+                return succeeded
             }
 
             guard dropOperation == .on,
@@ -539,8 +604,109 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
             return !payloads.isEmpty && onDropPayloads(payloads)
         }
 
+        func handleDraggingExited() {
+            clearDropTarget()
+        }
+
+        func handleDraggingEnded() {
+            clearDropTarget()
+            if isReorderDragActive, !didAcceptReorderDrag {
+                revertProvisionalReorderIfNeeded()
+            }
+            isReorderDragActive = false
+            didAcceptReorderDrag = false
+        }
+
         func clearDropTarget() {
             setDropTarget(nil)
+        }
+
+        private func beginReorderDragIfNeeded() {
+            guard !isReorderDragActive else { return }
+            isReorderDragActive = true
+            didAcceptReorderDrag = false
+            committedItems = items
+        }
+
+        private func applyProvisionalReorder(
+            source: ClipboardCollectionID,
+            proposedIndex: Int
+        ) {
+            guard let collectionView,
+                  let sourceIndex = items.firstIndex(where: { $0.id == source }),
+                  let destination = ClipboardCollectionReorderResolver.provisionalDestination(
+                    sourceIndex: sourceIndex,
+                    proposedIndex: proposedIndex
+                  ),
+                  items.indices.contains(destination) else { return }
+
+            var reordered = items
+            let moved = reordered.remove(at: sourceIndex)
+            reordered.insert(moved, at: destination)
+            guard let indexMove = ClipboardCollectionIndexMoveResolver.move(
+                from: items.map(\.id),
+                to: reordered.map(\.id)
+            ) else { return }
+
+            items = reordered
+            animateMove(indexMove, in: collectionView)
+        }
+
+        private func revertProvisionalReorderIfNeeded() {
+            guard isReorderDragActive, !didAcceptReorderDrag else { return }
+            guard items.map(\.id) != committedItems.map(\.id) else {
+                items = committedItems
+                return
+            }
+            let previousIDs = items.map(\.id)
+            let committedIDs = committedItems.map(\.id)
+            items = committedItems
+            guard let collectionView else { return }
+            if let indexMove = ClipboardCollectionIndexMoveResolver.move(
+                from: previousIDs,
+                to: committedIDs
+            ) {
+                animateMove(indexMove, in: collectionView)
+            } else {
+                reloadPreservingScroll(in: collectionView)
+            }
+        }
+
+        private func animateMove(
+            _ indexMove: ClipboardCollectionIndexMove,
+            in collectionView: NSCollectionView
+        ) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.allowsImplicitAnimation = true
+                collectionView.performBatchUpdates({
+                    collectionView.moveItem(
+                        at: IndexPath(item: indexMove.source, section: 0),
+                        to: IndexPath(item: indexMove.destination, section: 0)
+                    )
+                }, completionHandler: { [weak self, weak collectionView] _ in
+                    guard let self, let collectionView else { return }
+                    self.reconfigureVisibleItems(in: collectionView)
+                })
+            }
+        }
+
+        private func reloadPreservingScroll(in collectionView: NSCollectionView) {
+            let scrollView = collectionView.enclosingScrollView
+            let visibleOrigin = scrollView?.contentView.bounds.origin
+            collectionView.reloadData()
+            if let scrollView, let visibleOrigin {
+                scrollView.contentView.scroll(to: visibleOrigin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+
+        private func replacingMetadata(
+            in current: [ClipboardCollectionStripItem],
+            with incoming: [ClipboardCollectionStripItem]
+        ) -> [ClipboardCollectionStripItem] {
+            let incomingByID = Dictionary(uniqueKeysWithValues: incoming.map { ($0.id, $0) })
+            return current.compactMap { incomingByID[$0.id] }
         }
 
         private func setDropTarget(_ id: ClipboardCollectionID?) {
@@ -561,6 +727,7 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
                 return nil
             }
             return items.first(where: { $0.id.id == identifier })?.id
+                ?? committedItems.first(where: { $0.id.id == identifier })?.id
         }
 
         private func externalDropTarget(
@@ -604,6 +771,7 @@ private struct ItemSnapshot: Equatable {
 @MainActor
 private final class ClipboardCollectionView: NSCollectionView {
     var onDraggingExited: (() -> Void)?
+    var onDraggingEnded: (() -> Void)?
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         super.draggingExited(sender)
@@ -612,7 +780,7 @@ private final class ClipboardCollectionView: NSCollectionView {
 
     override func draggingEnded(_ sender: NSDraggingInfo) {
         super.draggingEnded(sender)
-        onDraggingExited?()
+        onDraggingEnded?()
     }
 }
 
