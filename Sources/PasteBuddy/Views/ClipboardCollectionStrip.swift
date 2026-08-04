@@ -1,4 +1,7 @@
 import AppKit
+#if DEBUG
+import OSLog
+#endif
 import PasteBuddyCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -190,6 +193,19 @@ private struct SwiftUIClipboardCollectionButton: View {
         let base = Button(item.title, action: item.action)
             .controlSize(style.controlSize)
             .lineLimit(1)
+
+#if DEBUG
+        let instrumentedBase = base
+            .accessibilityIdentifier("clipboard-collection-\(item.id.id)")
+            .background {
+                ClipboardCollectionFrameProbe(collectionID: item.id)
+                    .allowsHitTesting(false)
+            }
+#else
+        let instrumentedBase = base
+#endif
+
+        let accessibleBase = instrumentedBase
             .accessibilityValue(
                 item.isSelected
                     ? Text("state.selected")
@@ -197,15 +213,15 @@ private struct SwiftUIClipboardCollectionButton: View {
             )
 
         if item.canMoveLeft && item.canMoveRight {
-            base
+            accessibleBase
                 .accessibilityAction(named: Text("action.move_left"), item.onMoveLeft)
                 .accessibilityAction(named: Text("action.move_right"), item.onMoveRight)
         } else if item.canMoveLeft {
-            base.accessibilityAction(named: Text("action.move_left"), item.onMoveLeft)
+            accessibleBase.accessibilityAction(named: Text("action.move_left"), item.onMoveLeft)
         } else if item.canMoveRight {
-            base.accessibilityAction(named: Text("action.move_right"), item.onMoveRight)
+            accessibleBase.accessibilityAction(named: Text("action.move_right"), item.onMoveRight)
         } else {
-            base
+            accessibleBase
         }
     }
 
@@ -214,6 +230,121 @@ private struct SwiftUIClipboardCollectionButton: View {
         return onDropPayloads(payloads)
     }
 }
+
+#if DEBUG
+@available(macOS 27.0, *)
+private struct ClipboardCollectionFrameProbe: NSViewRepresentable {
+    let collectionID: ClipboardCollectionID
+
+    func makeNSView(context: Context) -> ClipboardCollectionFrameProbeView {
+        ClipboardCollectionFrameProbeView(collectionID: collectionID)
+    }
+
+    func updateNSView(_ view: ClipboardCollectionFrameProbeView, context: Context) {
+        view.collectionID = collectionID
+        view.scheduleFrameReport()
+    }
+}
+
+@available(macOS 27.0, *)
+@MainActor
+private final class ClipboardCollectionFrameProbeView: NSView {
+    private static let logger = Logger(
+        subsystem: "com.alexjiang.PasteBuddy.dev",
+        category: "ClipboardCollectionFrame"
+    )
+
+    var collectionID: ClipboardCollectionID
+    private var lastReportedFrame: CGRect?
+    private var reportTask: Task<Void, Never>?
+
+    init(collectionID: ClipboardCollectionID) {
+        self.collectionID = collectionID
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        scheduleFrameReport()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        guard let window else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(frameEnvironmentDidChange),
+            name: NSWindow.didMoveNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(frameEnvironmentDidChange),
+            name: NSWindow.didChangeScreenNotification,
+            object: window
+        )
+        if let clipView = enclosingScrollView?.contentView {
+            clipView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(frameEnvironmentDidChange),
+                name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+        }
+        scheduleFrameReport()
+    }
+
+    deinit {
+        let pendingReport = reportTask
+        pendingReport?.cancel()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func frameEnvironmentDidChange(_ notification: Notification) {
+        scheduleFrameReport()
+    }
+
+    func scheduleFrameReport() {
+        reportTask?.cancel()
+        reportTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            self?.reportFrameIfNeeded()
+        }
+    }
+
+    private func reportFrameIfNeeded() {
+        guard let window,
+              let screen = window.screen,
+              let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+                as? CGDirectDisplayID else { return }
+        let screenFrame = window.convertToScreen(convert(bounds, to: nil))
+        guard screenFrame.width > 0,
+              screenFrame.height > 0 else { return }
+        let displayBounds = CGDisplayBounds(displayID)
+        let localX = screenFrame.minX - screen.frame.minX
+        let localY = screenFrame.minY - screen.frame.minY
+        let computerFrame = CGRect(
+            x: displayBounds.minX + localX,
+            y: displayBounds.minY + screen.frame.height - localY - screenFrame.height,
+            width: screenFrame.width,
+            height: screenFrame.height
+        ).integral
+        guard computerFrame != lastReportedFrame else { return }
+        lastReportedFrame = computerFrame
+        Self.logger.debug(
+            "id=\(self.collectionID.id, privacy: .public) frame=\(NSStringFromRect(computerFrame), privacy: .public)"
+        )
+    }
+}
+#endif
 
 private struct ClipboardCollectionChipLabel: View {
     let title: String
