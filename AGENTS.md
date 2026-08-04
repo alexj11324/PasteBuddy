@@ -141,3 +141,7 @@
 ## 密钥管理（Secrets）
 - IMPORTANT: 凡是遇到密钥、Token、凭据、密码、证书等敏感信息，优先搜索和使用 `gsm`（Google Secrets Manager）流程/工具，不要先散落到本地文件或临时变量。
 - IMPORTANT: 所有密钥统一存放在 `general-secrets-store` 项目；禁止新增到其他仓库、脚本、环境变量文件（除非明确是临时调试且会立即清理）。
+
+## asc cli reference
+
+See `ASC.md` for the command catalog and workflows.

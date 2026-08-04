@@ -2,7 +2,6 @@ import AppKit
 import PasteBuddyCore
 import QuartzCore
 import SwiftUI
-import UniformTypeIdentifiers
 import VisionKit
 
 enum ClipboardShelfMetrics {
@@ -24,8 +23,6 @@ enum ClipboardShelfMetrics {
     static let activeFilterHeight: CGFloat = 30
     static let toolbarSectionSpacing: CGFloat = 10
     static let shelfTopSpacing: CGFloat = 10
-    static let footerTopSpacing: CGFloat = 6
-    static let footerHeight: CGFloat = 20
 
     static func requiredPanelHeight(showsActiveFilters: Bool) -> CGFloat {
         outerVerticalInset * 2
@@ -33,14 +30,12 @@ enum ClipboardShelfMetrics {
             + (showsActiveFilters ? toolbarSectionSpacing + activeFilterHeight : 0)
             + shelfTopSpacing
             + shelfHeight
-            + footerTopSpacing
-            + footerHeight
     }
 
     static func verticalRegions(
         in bounds: CGRect,
         showsActiveFilters: Bool
-    ) -> (header: CGRect, shelf: CGRect, footer: CGRect)? {
+    ) -> (header: CGRect, shelf: CGRect)? {
         let requiredHeight = requiredPanelHeight(showsActiveFilters: showsActiveFilters)
         guard bounds.width >= 0, bounds.height >= requiredHeight else { return nil }
         let headerHeight = primaryToolbarHeight
@@ -57,13 +52,7 @@ enum ClipboardShelfMetrics {
             width: bounds.width,
             height: shelfHeight
         )
-        let footer = CGRect(
-            x: bounds.minX,
-            y: shelf.minY - footerTopSpacing - footerHeight,
-            width: bounds.width,
-            height: footerHeight
-        )
-        return (header, shelf, footer)
+        return (header, shelf)
     }
 }
 
@@ -155,8 +144,6 @@ struct ClipboardShelfPanelView: View {
             shelf
                 .zIndex(0)
                 .padding(.top, 10)
-            shelfFooter
-                .padding(.top, 6)
         }
         .padding(.vertical, ClipboardShelfMetrics.outerVerticalInset)
         .padding(.horizontal, 16)
@@ -247,15 +234,6 @@ struct ClipboardShelfPanelView: View {
         .accessibilityLabel(localized("label.pastebuddy_clipboard_shelf"))
     }
 
-    private var shelfFooter: some View {
-        Text(localized("format.items", paging.totalCount))
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .frame(height: ClipboardShelfMetrics.footerHeight)
-            .accessibilityIdentifier("clipboard-shelf-result-count")
-    }
-
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
@@ -336,7 +314,6 @@ struct ClipboardShelfPanelView: View {
             .frame(height: ClipboardShelfMetrics.primaryToolbarHeight)
             .controlSize(.large)
             .animation(pasteSearchAnimation, value: isSearchRailPresented)
-            .animation(pasteSearchAnimation, value: isSearchFocused)
             .animation(pasteSearchAnimation, value: store.sourceAppFilter)
             .animation(pasteSearchAnimation, value: selectedCount)
 
@@ -407,17 +384,7 @@ struct ClipboardShelfPanelView: View {
         .onTapGesture {
             setSearchFocused(true)
         }
-        .pasteBuddyGlassSurface(cornerRadius: 19, interactive: true)
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .strokeBorder(
-                    isSearchFocused ? Color.accentColor.opacity(0.70) : .primary.opacity(0.08),
-                    lineWidth: isSearchFocused ? 1.5 : 1
-                )
-                .allowsHitTesting(false)
-        }
-        .shadow(color: .black.opacity(isSearchFocused ? 0.11 : 0.06), radius: isSearchFocused ? 10 : 6, y: isSearchFocused ? 3 : 2)
+        .pasteBuddyNativeGlass()
         .background {
             SourceAppSuggestionPanelPresenter(
                 isPresented: shouldShowSourceAppSuggestions,
@@ -435,7 +402,6 @@ struct ClipboardShelfPanelView: View {
         }
         .animation(pasteSearchAnimation, value: searchControlWidth)
         .animation(pasteSearchAnimation, value: isSearchRailPresented)
-        .animation(pasteSearchAnimation, value: isSearchFocused)
         .animation(pasteSearchAnimation, value: store.sourceAppFilter)
     }
 
@@ -477,58 +443,69 @@ struct ClipboardShelfPanelView: View {
     }
 
     private var collectionStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ShelfCollectionChip(
-                    title: localized("label.clipboard"),
-                    systemImageName: "clock.arrow.circlepath",
-                    color: store.isCapturePaused ? .orange : .blue,
-                    isSelected: shelfScope == .history,
-                    onDropPayloads: { dropItems($0, into: .history) }
-                ) {
-                    setScope(.history)
-                }
+        let collectionOrder = store.collectionOrder.filter { $0 != .pasteStack }
+        return ClipboardCollectionStrip(
+            items: collectionOrder.compactMap {
+                collectionStripItem(for: $0, in: collectionOrder)
+            },
+            style: .shelf,
+            accessibilityLabel: localized("label.clipboard_collections"),
+            onReorder: reorderCollection
+        )
+    }
 
-                ShelfCollectionChip(
-                    title: localized("action.paste_stack"),
-                    systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                    color: store.isPasteStackActive ? .green : .secondary,
-                    isSelected: shelfScope == .pasteStack,
-                    onDropPayloads: { dropItems($0, into: .pasteStack) }
-                ) {
-                    setScope(.pasteStack)
-                }
+    private func collectionStripItem(
+        for collection: ClipboardCollectionID,
+        in collectionOrder: [ClipboardCollectionID]
+    ) -> ClipboardCollectionStripItem? {
+        let canMoveLeft = collectionOrder.first != collection
+        let canMoveRight = collectionOrder.last != collection
+        let moveLeft = { moveCollection(collection, in: collectionOrder, by: -1) }
+        let moveRight = { moveCollection(collection, in: collectionOrder, by: 1) }
 
-                ForEach(SmartPinboardCategory.allCases) { category in
-                    ShelfCollectionChip(
-                        title: localized(category.displayName),
-                        systemImageName: category.systemImageName,
-                        color: Color(hex: category.colorHex) ?? .accentColor,
-                        isSelected: isSmartCategorySelected(category),
-                        onDropPayloads: { dropItems($0, into: .smartCategory(category)) }
-                    ) {
-                        selectSmartCategory(category)
-                    }
-                }
-
-                ForEach(store.userPinboards) { pinboard in
-                    ShelfCollectionChip(
-                        title: pinboard.name,
-                        systemImageName: "pin.fill",
-                        color: Color(hex: pinboard.colorHex) ?? .blue,
-                        isSelected: shelfScope == .pinboard(pinboard.id),
-                        onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }
-                    ) {
-                        setScope(.pinboard(pinboard.id))
-                    }
-                }
+        switch collection {
+        case .history:
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: localized("label.clipboard"),
+                isSelected: shelfScope == .history,
+                onDropPayloads: { dropItems($0, into: .history) },
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { setScope(.history) }
+            )
+        case .pasteStack:
+            return nil
+        case .smart(let category):
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: localized(category.displayName),
+                isSelected: isSmartCategorySelected(category),
+                onDropPayloads: { dropItems($0, into: .smartCategory(category)) },
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { selectSmartCategory(category) }
+            )
+        case .pinboard(let id):
+            guard let pinboard = store.userPinboards.first(where: { $0.id == id }) else {
+                return nil
             }
-            .padding(.vertical, 1)
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: pinboard.name,
+                isSelected: shelfScope == .pinboard(pinboard.id),
+                onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) },
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { setScope(.pinboard(pinboard.id)) }
+            )
         }
-        .scrollIndicators(.never, axes: .horizontal)
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(localized("label.clipboard_collections"))
     }
 
     private func createNamedPinboard() {
@@ -842,6 +819,29 @@ struct ClipboardShelfPanelView: View {
         if let firstPinboardID = pinboards.first?.id {
             setScope(.pinboard(firstPinboardID))
         }
+    }
+
+    private func reorderCollection(
+        _ source: ClipboardCollectionID,
+        relativeTo target: ClipboardCollectionID,
+        afterTarget: Bool
+    ) -> Bool {
+        store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)
+    }
+
+    private func moveCollection(
+        _ collection: ClipboardCollectionID,
+        in visibleOrder: [ClipboardCollectionID],
+        by offset: Int
+    ) {
+        guard let sourceIndex = visibleOrder.firstIndex(of: collection) else { return }
+        let destinationIndex = sourceIndex + offset
+        guard visibleOrder.indices.contains(destinationIndex) else { return }
+        _ = store.moveCollection(
+            collection,
+            relativeTo: visibleOrder[destinationIndex],
+            afterTarget: offset > 0
+        )
     }
 
     private func dropItems(_ payloads: [PinboardItemDragPayload], into target: ShelfCollectionDropTarget) -> Bool {
@@ -1227,185 +1227,6 @@ private struct LaunchAtLoginShelfCard: View {
             return "Unavailable"
         }
         return store.snapshot.general.launchAtLoginEnabled ? "Enabled" : "Enable"
-    }
-}
-
-private struct ShelfCollectionChip: View {
-    private static let hoverAnimation = Animation.smooth(duration: 0.18, extraBounce: 0.04)
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let title: String
-    let systemImageName: String
-    let color: Color
-    let isSelected: Bool
-    var onDropPayloads: (([PinboardItemDragPayload]) -> Bool)?
-    let action: () -> Void
-    @State private var isHovered = false
-    @State private var isDropTargeted = false
-
-    init(
-        title: String,
-        systemImageName: String,
-        color: Color,
-        isSelected: Bool,
-        onDropPayloads: (([PinboardItemDragPayload]) -> Bool)? = nil,
-        action: @escaping () -> Void
-    ) {
-        self.title = title
-        self.systemImageName = systemImageName
-        self.color = color
-        self.isSelected = isSelected
-        self.onDropPayloads = onDropPayloads
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: systemImageName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(iconForegroundStyle)
-
-                Text(title)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .frame(height: 38)
-            .background {
-                if isSelected || isHovered || isDropTargeted {
-                    Capsule()
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected || isDropTargeted ? 0.86 : 0.64))
-                        .background(.regularMaterial, in: Capsule())
-                }
-            }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .overlay {
-            if let onDropPayloads {
-                ShelfCollectionChipDropTarget(
-                    isTargeted: $isDropTargeted,
-                    onDropPayloads: onDropPayloads
-                )
-                .clipShape(Capsule())
-            }
-        }
-        .onHover { isHovered in
-            withAnimation(reduceMotion ? nil : Self.hoverAnimation) {
-                self.isHovered = isHovered
-            }
-        }
-        .help(helpText)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(isSelected ? NSLocalizedString("state.selected", comment: "") : NSLocalizedString("label.not_selected", comment: ""))
-    }
-
-    private var iconForegroundStyle: Color {
-        if isSelected {
-            return .primary
-        }
-        return color
-    }
-
-    private var helpText: String {
-        title
-    }
-}
-
-private struct ShelfCollectionChipDropTarget: NSViewRepresentable {
-    @Binding var isTargeted: Bool
-    let onDropPayloads: ([PinboardItemDragPayload]) -> Bool
-
-    func makeNSView(context: Context) -> DropView {
-        let view = DropView()
-        view.onTargeted = { isTargeted in
-            self.isTargeted = isTargeted
-        }
-        view.onDropPayloads = onDropPayloads
-        return view
-    }
-
-    func updateNSView(_ nsView: DropView, context: Context) {
-        nsView.onTargeted = { isTargeted in
-            self.isTargeted = isTargeted
-        }
-        nsView.onDropPayloads = onDropPayloads
-    }
-
-    final class DropView: NSView {
-        var onTargeted: (Bool) -> Void = { _ in }
-        var onDropPayloads: ([PinboardItemDragPayload]) -> Bool = { _ in false }
-
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-            registerForDraggedTypes([Self.payloadPasteboardType])
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) {
-            nil
-        }
-
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            guard let event = window?.currentEvent ?? NSApp.currentEvent,
-                  event.type == .leftMouseDragged else {
-                return nil
-            }
-            return super.hitTest(point)
-        }
-
-        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            guard canAccept(sender) else { return [] }
-            onTargeted(true)
-            return .copy
-        }
-
-        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-            canAccept(sender) ? .copy : []
-        }
-
-        override func draggingExited(_ sender: NSDraggingInfo?) {
-            onTargeted(false)
-        }
-
-        override func draggingEnded(_ sender: NSDraggingInfo) {
-            onTargeted(false)
-        }
-
-        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            let payloads = payloads(from: sender.draggingPasteboard)
-            guard !payloads.isEmpty else { return false }
-            onTargeted(false)
-            return onDropPayloads(payloads)
-        }
-
-        private func canAccept(_ sender: NSDraggingInfo) -> Bool {
-            !payloads(from: sender.draggingPasteboard).isEmpty
-        }
-
-        private func payloads(from pasteboard: NSPasteboard) -> [PinboardItemDragPayload] {
-            var payloads: [PinboardItemDragPayload] = []
-            for item in pasteboard.pasteboardItems ?? [] {
-                guard let data = item.data(forType: Self.payloadPasteboardType),
-                      let payload = try? JSONDecoder().decode(PinboardItemDragPayload.self, from: data) else {
-                    continue
-                }
-                payloads.append(payload)
-            }
-            if payloads.isEmpty,
-               let data = pasteboard.data(forType: Self.payloadPasteboardType),
-               let payload = try? JSONDecoder().decode(PinboardItemDragPayload.self, from: data) {
-                payloads.append(payload)
-            }
-            return payloads
-        }
-
-        private static let payloadPasteboardType = NSPasteboard.PasteboardType(UTType.pasteBuddyPinboardItemIDs.identifier)
     }
 }
 
@@ -3181,6 +3002,19 @@ private struct EmptyShelfCard: View {
 }
 
 extension View {
+    @ViewBuilder
+    func pasteBuddyNativeGlass() -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular)
+        } else {
+            self.background(.regularMaterial, in: Capsule())
+        }
+        #else
+        self.background(.regularMaterial, in: Capsule())
+        #endif
+    }
+
     @ViewBuilder
     func pasteBuddyBottomSheetSurface(
         cornerRadius: CGFloat,

@@ -8,6 +8,230 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
+    func testCollectionIndexMoveResolverFindsTheNativeAnimatedMove() {
+        let oldOrder: [ClipboardCollectionID] = [
+            .smart(.images),
+            .history,
+            .smart(.text),
+            .smart(.links),
+            .smart(.files),
+        ]
+        let newOrder: [ClipboardCollectionID] = [
+            .history,
+            .smart(.text),
+            .smart(.links),
+            .smart(.images),
+            .smart(.files),
+        ]
+
+        XCTAssertEqual(
+            ClipboardCollectionIndexMoveResolver.move(from: oldOrder, to: newOrder),
+            ClipboardCollectionIndexMove(source: 0, destination: 3)
+        )
+        XCTAssertNil(
+            ClipboardCollectionIndexMoveResolver.move(
+                from: oldOrder,
+                to: Array(newOrder.dropLast())
+            )
+        )
+    }
+
+    func testCollectionProvisionalReorderTracksDropTargetsDuringDrag() {
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 1,
+                proposedIndex: 4
+            ),
+            3
+        )
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 3,
+                proposedIndex: 1
+            ),
+            1
+        )
+        XCTAssertNil(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 2,
+                proposedIndex: 2
+            )
+        )
+        XCTAssertNil(
+            ClipboardCollectionReorderResolver.provisionalDestination(
+                sourceIndex: 2,
+                proposedIndex: 3
+            )
+        )
+
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.commitDestination(
+                source: .history,
+                in: [
+                    .smart(.images),
+                    .smart(.links),
+                    .history,
+                    .smart(.files),
+                ]
+            ),
+            ClipboardCollectionReorderDestination(target: .smart(.files), afterTarget: false)
+        )
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.commitDestination(
+                source: .smart(.images),
+                in: [
+                    .history,
+                    .smart(.links),
+                    .smart(.files),
+                    .smart(.images),
+                ]
+            ),
+            ClipboardCollectionReorderDestination(target: .smart(.files), afterTarget: true)
+        )
+    }
+
+    func testCollectionReorderResolverMovesBeforeAVisibleTarget() {
+        let order: [ClipboardCollectionID] = [
+            .history,
+            .smart(.text),
+            .smart(.links)
+        ]
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.destination(
+                for: .smart(.links),
+                in: order,
+                proposedIndex: 1
+            ),
+            ClipboardCollectionReorderDestination(
+                target: .smart(.text),
+                afterTarget: false
+            )
+        )
+    }
+
+    func testCollectionReorderResolverMovesToTheEndAndRejectsNoOps() {
+        let order: [ClipboardCollectionID] = [.history, .smart(.text), .smart(.links)]
+
+        XCTAssertEqual(
+            ClipboardCollectionReorderResolver.destination(
+                for: .history,
+                in: order,
+                proposedIndex: order.endIndex
+            ),
+            ClipboardCollectionReorderDestination(
+                target: .smart(.links),
+                afterTarget: true
+            )
+        )
+        XCTAssertNil(ClipboardCollectionReorderResolver.destination(
+            for: .smart(.text),
+            in: order,
+            proposedIndex: 1
+        ))
+        XCTAssertNil(ClipboardCollectionReorderResolver.destination(
+            for: .pasteStack,
+            in: order,
+            proposedIndex: 0
+        ))
+    }
+
+    func testClipboardPanelsOmitResultCountFootersAndReservedHeight() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertFalse(source.contains("clipboard-shelf-result-count"))
+        XCTAssertFalse(source.contains("private var shelfFooter"))
+        XCTAssertFalse(source.contains("footerTopSpacing"))
+        XCTAssertFalse(source.contains("footerHeight"))
+        XCTAssertFalse(sideSource.contains("private var footer"))
+        XCTAssertFalse(sideSource.contains("localized(\"format.items\", paging.totalCount)"))
+    }
+
+    func testCollectionStripsUseAppKitNativeReorderingWithoutCustomDragGestures() throws {
+        let bridgeSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        XCTAssertTrue(bridgeSource.contains("NSCollectionView"))
+        XCTAssertTrue(bridgeSource.contains("NSCollectionViewDelegateFlowLayout"))
+        XCTAssertTrue(bridgeSource.contains("pasteboardWriterForItemAt"))
+        XCTAssertTrue(bridgeSource.contains("validateDrop"))
+        XCTAssertTrue(bridgeSource.contains("acceptDrop"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.scrollerStyle = .overlay"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.autohidesScrollers = true"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.hasHorizontalScroller = false"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.horizontalScroller = nil"))
+        XCTAssertTrue(bridgeSource.contains("private final class ClipboardCollectionScrollView: NSScrollView"))
+        XCTAssertTrue(bridgeSource.contains("override var hasHorizontalScroller: Bool"))
+        XCTAssertTrue(bridgeSource.contains("override var horizontalScroller: NSScroller?"))
+        XCTAssertTrue(bridgeSource.contains("override func flashScrollers() {}"))
+        XCTAssertTrue(bridgeSource.contains("collectionView.performBatchUpdates"))
+        XCTAssertTrue(bridgeSource.contains("collectionView.moveItem("))
+        XCTAssertTrue(bridgeSource.contains("applyProvisionalReorder("))
+        XCTAssertTrue(bridgeSource.contains("commitDestination("))
+        XCTAssertTrue(bridgeSource.contains("beginReorderDragIfNeeded()"))
+        XCTAssertTrue(bridgeSource.contains("onDraggingEnded"))
+        XCTAssertTrue(bridgeSource.contains("NSClickGestureRecognizer("))
+        XCTAssertTrue(bridgeSource.contains("recognizer.delaysPrimaryMouseButtonEvents = false"))
+        XCTAssertTrue(bridgeSource.contains("ClipboardCollectionLabelHostingView"))
+        XCTAssertTrue(bridgeSource.contains("override func hitTest(_ point: NSPoint) -> NSView?"))
+        XCTAssertFalse(bridgeSource.contains("didSelectItemsAt indexPaths"))
+        XCTAssertFalse(bridgeSource.contains("collectionView.deselectItems(at:"))
+        for source in [bridgeSource, shelfSource, sideSource] {
+            XCTAssertFalse(source.contains("DragGesture("))
+            XCTAssertFalse(source.contains("autoScrollDirection"))
+            XCTAssertFalse(source.contains("Task.sleep(for: .milliseconds(110))"))
+        }
+    }
+
+    func testSwiftUINativeCollectionReorderingIsOptInWhileTheSystemPathIsUnstable() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+
+        XCTAssertFalse(ClipboardCollectionNativeReorderingPolicy.isEnabled(environment: [:]))
+        XCTAssertTrue(ClipboardCollectionNativeReorderingPolicy.isEnabled(environment: [
+            ClipboardCollectionNativeReorderingPolicy.environmentVariable: "1"
+        ]))
+        XCTAssertFalse(ClipboardCollectionNativeReorderingPolicy.isEnabled(environment: [
+            ClipboardCollectionNativeReorderingPolicy.environmentVariable: "0"
+        ]))
+        XCTAssertTrue(source.contains(
+            "if #available(macOS 27.0, *), ClipboardCollectionNativeReorderingPolicy.isEnabled()"
+        ))
+        XCTAssertTrue(source.contains("ForEach(items, id: \\.reorderID)"))
+        XCTAssertTrue(source.contains(".reorderable()"))
+        XCTAssertTrue(source.contains("for: ClipboardCollectionStripItem.self"))
+        XCTAssertTrue(source.contains("itemID: \\.reorderID"))
+        XCTAssertFalse(source.contains("struct ClipboardCollectionStripItem: Identifiable"))
+        XCTAssertTrue(source.contains(".buttonStyle(.glass)"))
+        XCTAssertTrue(source.contains(".buttonStyle(.glassProminent)"))
+        XCTAssertTrue(source.contains(".dropDestination(for: PinboardItemDragPayload.self)"))
+    }
+
+    func testCollectionChipsRenderTextWithoutCategoryIcons() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let start = try XCTUnwrap(source.range(of: "private struct ClipboardCollectionChipLabel: View"))
+        let end = try XCTUnwrap(source.range(
+            of: "private struct AppKitClipboardCollectionStrip: NSViewRepresentable",
+            range: start.upperBound..<source.endIndex
+        ))
+        let chip = String(source[start.lowerBound..<end.lowerBound])
+
+        XCTAssertTrue(chip.contains("Text(title)"))
+        XCTAssertFalse(chip.contains("Image(systemName:"))
+        XCTAssertFalse(chip.contains("systemImageName"))
+    }
+
+    func testPasteStackIsOmittedFromPanelCategoryNavigation() throws {
+        let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+
+        for source in [shelf, side] {
+            XCTAssertTrue(source.contains("store.collectionOrder.filter { $0 != .pasteStack }"))
+            XCTAssertTrue(source.contains("case .pasteStack:\n            return nil"))
+        }
+        XCTAssertFalse(shelf.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
+    }
+
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
         XCTAssertEqual(
             PasteBuddyApp.screenSharingType(
@@ -786,9 +1010,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
                 XCTAssertTrue(localBounds.contains(regions.header))
                 XCTAssertTrue(localBounds.contains(regions.shelf))
-                XCTAssertTrue(localBounds.contains(regions.footer))
                 XCTAssertLessThanOrEqual(regions.shelf.maxY, regions.header.minY)
-                XCTAssertLessThanOrEqual(regions.footer.maxY, regions.shelf.minY)
                 XCTAssertEqual(regions.shelf.height, ClipboardShelfMetrics.shelfHeight)
 
                 for scale in backingScales {
@@ -865,13 +1087,13 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         let parityMatrix: [(semantic: String, shelf: [String], side: [String])] = [
             ("search", ["$store.searchQuery", "action.clear_search"], ["$store.searchQuery", "action.clear_search"]),
-            ("scope/category", ["SmartPinboardCategory.allCases", "store.userPinboards", ".pasteStack"], ["SmartPinboardCategory.allCases", "store.userPinboards", ".pasteStack"]),
+            ("scope/category", ["store.collectionOrder", "case .smart(let category)", "store.userPinboards"], ["store.collectionOrder", "case .smart(let category)", "store.userPinboards"]),
             ("selection/keyboard", ["selectOffset(request.command.offset)", "handleShelfKeyPress"], ["selectOffset(request.command.offset)", "handleKeyPress"]),
             ("metadata", ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"], ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"]),
             ("context actions", ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"], ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"]),
             ("paste/drag", ["onDoubleClick:", "directPasteItem", "PinboardItemDragPayload.itemProvider"], ["onDoubleClick:", "directPasteItem", "PinboardItemDragPayload.itemProvider"]),
             ("preview", ["ShelfExpandedPreview(", "ClipboardPreparedPreview.prepare("], ["ShelfExpandedPreview(", "ClipboardPreparedPreview.prepare("]),
-            ("paging/count", ["loadNextShelfPage()", "paging.totalCount"], ["loadNextSidePage()", "paging.totalCount"]),
+            ("paging", ["loadNextShelfPage()"], ["loadNextSidePage()"]),
             ("loading/error", ["isHistoryQueryTransitioning", "historyQueryErrorMessage"], ["isHistoryQueryTransitioning", "historyQueryErrorMessage"]),
             ("pin/dismiss", ["setPinned(!effectivePinned)", "onDismissImmediately"], ["setPinned(!effectivePinned)", "onDismissImmediately"]),
             ("accessibility", [".accessibilityLabel(", "NSLocalizedString"], [".accessibilityLabel(", "NSLocalizedString"])
@@ -1632,47 +1854,41 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     }
 
     func testShelfCollectionChipsDoNotRenderItemCounts() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
-        let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
-        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
-        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
-        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
-        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let chipStart = try XCTUnwrap(source.range(of: "private struct ClipboardCollectionChipLabel"))
+        let chipEnd = try XCTUnwrap(source.range(of: "private struct AppKitClipboardCollectionStrip"))
+        let chipSource = String(source[chipStart.lowerBound..<chipEnd.lowerBound])
 
-        XCTAssertFalse(stripSource.contains("count:"))
         XCTAssertFalse(chipSource.contains("let count"))
         XCTAssertFalse(chipSource.contains("Text(\"\\(count)\")"))
-        XCTAssertTrue(chipSource.contains("private var helpText: String"))
+        XCTAssertTrue(chipSource.contains("Text(title)"))
     }
 
     func testShelfCollectionChipsAcceptDraggedClipboardItems() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let bridgeSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
         let stripStart = try XCTUnwrap(source.range(of: "private var collectionStrip"))
         let stripEnd = try XCTUnwrap(source.range(of: "private var selectedCount"))
-        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
-        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
         let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
-        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
 
         XCTAssertTrue(source.contains("private enum ShelfCollectionDropTarget"))
-        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
+        XCTAssertFalse(stripSource.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
-        XCTAssertTrue(chipSource.contains("ShelfCollectionChipDropTarget("))
-        XCTAssertTrue(source.contains("private struct ShelfCollectionChipDropTarget: NSViewRepresentable"))
-        XCTAssertTrue(source.contains("registerForDraggedTypes([Self.payloadPasteboardType])"))
-        XCTAssertTrue(source.contains("override func performDragOperation(_ sender: NSDraggingInfo) -> Bool"))
+        XCTAssertTrue(bridgeSource.contains("UTType.pasteBuddyPinboardItemIDs.identifier"))
+        XCTAssertTrue(bridgeSource.contains("registerForDraggedTypes(["))
+        XCTAssertTrue(bridgeSource.contains("acceptDrop draggingInfo: NSDraggingInfo"))
+        XCTAssertTrue(bridgeSource.contains("JSONDecoder().decode(PinboardItemDragPayload.self"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
         XCTAssertTrue(source.contains("store.addItemsToPasteStack(ids)"))
         XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
     }
 
     func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
-        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
-        let chipStart = try XCTUnwrap(source.range(of: "private struct ShelfCollectionChip"))
-        let selectedCountStart = try XCTUnwrap(source.range(of: "private struct ShelfSelectedCountChip"))
-        let chipSource = String(source[chipStart.lowerBound..<selectedCountStart.lowerBound])
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+        let chipStart = try XCTUnwrap(source.range(of: "private struct ClipboardCollectionChipLabel"))
+        let chipEnd = try XCTUnwrap(source.range(of: "private struct AppKitClipboardCollectionStrip"))
+        let chipSource = String(source[chipStart.lowerBound..<chipEnd.lowerBound])
 
         XCTAssertTrue(chipSource.contains(".clipShape(Capsule())"))
         XCTAssertFalse(chipSource.contains(".shadow("))
@@ -1934,7 +2150,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
             XCTAssertTrue(source.contains("sideScope != .pasteStack") || source.contains("shelfScope != .pasteStack"))
         }
         XCTAssertTrue(shelfSource.contains("case loading"))
-        XCTAssertTrue(sideSource.contains("if paging.items.isEmpty, store.isHistoryQueryTransitioning"))
+        XCTAssertTrue(sideSource.contains("if renderedItems.isEmpty, store.isHistoryQueryTransitioning"))
     }
 
     func testSharedPanelHistoryAvailabilityFailsClosed() {
@@ -2620,9 +2836,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))
         XCTAssertTrue(source.contains("localized(\"label.clipboard\")"))
-        XCTAssertTrue(source.contains("localized(\"action.paste_stack\")"))
-        XCTAssertTrue(source.contains("ForEach(SmartPinboardCategory.allCases)"))
-        XCTAssertTrue(source.contains("ForEach(store.userPinboards)"))
+        XCTAssertFalse(source.contains("localized(\"action.paste_stack\")"))
+        XCTAssertTrue(source.contains("case .smart(let category):"))
+        XCTAssertTrue(source.contains("case .pinboard(let id):"))
         XCTAssertTrue(source.contains("store.syncSmartPinboard(for: category)"))
         XCTAssertTrue(source.contains("setSideScope(.pinboard(pinboard.id))"))
         XCTAssertTrue(source.contains("NewPinboardNamePrompt.run()"))
@@ -2667,10 +2883,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let quickFilterStart = try XCTUnwrap(source.range(of: "private var quickFilterStrip"))
         let itemListStart = try XCTUnwrap(source.range(of: "private var itemList"))
         let quickFilterSource = String(source[quickFilterStart.lowerBound..<itemListStart.lowerBound])
-        let scrollEnd = try XCTUnwrap(quickFilterSource.range(of: ".scrollIndicators(.never, axes: .horizontal)"))
+        let stripStart = try XCTUnwrap(quickFilterSource.range(of: "ClipboardCollectionStrip("))
         let addButtonStart = try XCTUnwrap(quickFilterSource.range(of: "Button {\n                createNamedPinboard()"))
 
-        XCTAssertLessThan(scrollEnd.upperBound, addButtonStart.lowerBound)
+        XCTAssertLessThan(stripStart.upperBound, addButtonStart.lowerBound)
 
         let promptSource = try sourceFileContents("Sources/PasteBuddy/Views/NewPinboardNamePrompt.swift")
         XCTAssertTrue(promptSource.contains("NSAlert()"))
@@ -2704,9 +2920,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testShelfAndSidePanelAuxiliaryScrollViewsSuppressVisibleScrollers() throws {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let bridgeSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
 
-        XCTAssertEqual(shelfSource.components(separatedBy: ".scrollIndicators(.never, axes: .horizontal)").count - 1, 2)
-        XCTAssertTrue(sideSource.contains(".scrollIndicators(.never, axes: .horizontal)"))
+        XCTAssertEqual(shelfSource.components(separatedBy: ".scrollIndicators(.never, axes: .horizontal)").count - 1, 1)
+        XCTAssertFalse(sideSource.contains(".scrollIndicators(.never, axes: .horizontal)"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.hasHorizontalScroller = false"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.hasVerticalScroller = false"))
         XCTAssertFalse(shelfSource.contains(".scrollIndicators(.hidden)"))
         XCTAssertFalse(sideSource.contains(".scrollIndicators(.hidden)"))
     }

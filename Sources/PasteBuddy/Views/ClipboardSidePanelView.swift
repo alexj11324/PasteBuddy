@@ -44,7 +44,6 @@ struct ClipboardSidePanelView: View {
             toolbar
             Divider().opacity(0.32)
             itemList
-            footer
         }
         .padding(.top, 14)
         .padding(.horizontal, 14)
@@ -207,7 +206,7 @@ struct ClipboardSidePanelView: View {
         .padding(.leading, 12)
         .padding(.trailing, hasSearchText ? 8 : 12)
         .frame(height: 36)
-        .pasteBuddyGlassSurface(cornerRadius: 18, interactive: true, showsStroke: true)
+        .pasteBuddyNativeGlass()
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture {
             setSearchFocused(true)
@@ -230,52 +229,16 @@ struct ClipboardSidePanelView: View {
     }
 
     private var quickFilterStrip: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ClipboardSidePanelFilterChip(
-                        title: localized("label.clipboard"),
-                        systemImageName: "clock.arrow.circlepath",
-                        color: store.isCapturePaused ? .orange : .blue,
-                        isSelected: sideScope == .history
-                    ) {
-                        setSideScope(.history)
-                    }
-
-                    ClipboardSidePanelFilterChip(
-                        title: localized("action.paste_stack"),
-                        systemImageName: store.isPasteStackActive ? "tray.full.fill" : "tray",
-                        color: store.isPasteStackActive ? .green : .secondary,
-                        isSelected: sideScope == .pasteStack
-                    ) {
-                        setSideScope(.pasteStack)
-                    }
-
-                    ForEach(SmartPinboardCategory.allCases) { category in
-                        ClipboardSidePanelFilterChip(
-                            title: localized(category.displayName),
-                            systemImageName: category.systemImageName,
-                            color: Color(hex: category.colorHex) ?? .accentColor,
-                            isSelected: isSmartCategorySelected(category)
-                        ) {
-                            selectSmartCategory(category)
-                        }
-                    }
-
-                    ForEach(store.userPinboards) { pinboard in
-                        ClipboardSidePanelFilterChip(
-                            title: pinboard.name,
-                            systemImageName: "pin.fill",
-                            color: Color(hex: pinboard.colorHex) ?? .blue,
-                            isSelected: sideScope == .pinboard(pinboard.id)
-                        ) {
-                            setSideScope(.pinboard(pinboard.id))
-                        }
-                    }
-                }
-                .padding(.vertical, 1)
-            }
-            .scrollIndicators(.never, axes: .horizontal)
+        let collectionOrder = store.collectionOrder.filter { $0 != .pasteStack }
+        return HStack(spacing: 8) {
+            ClipboardCollectionStrip(
+                items: collectionOrder.compactMap {
+                    collectionStripItem(for: $0, in: collectionOrder)
+                },
+                style: .sidePanel,
+                accessibilityLabel: localized("label.clipboard_collections"),
+                onReorder: reorderCollection
+            )
 
             Button {
                 createNamedPinboard()
@@ -291,7 +254,60 @@ struct ClipboardSidePanelView: View {
             .help(localized("label.new_pinboard"))
             .accessibilityLabel(localized("label.new_pinboard"))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func collectionStripItem(
+        for collection: ClipboardCollectionID,
+        in collectionOrder: [ClipboardCollectionID]
+    ) -> ClipboardCollectionStripItem? {
+        let canMoveLeft = collectionOrder.first != collection
+        let canMoveRight = collectionOrder.last != collection
+        let moveLeft = { moveCollection(collection, in: collectionOrder, by: -1) }
+        let moveRight = { moveCollection(collection, in: collectionOrder, by: 1) }
+
+        switch collection {
+        case .history:
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: localized("label.clipboard"),
+                isSelected: sideScope == .history,
+                onDropPayloads: nil,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { setSideScope(.history) }
+            )
+        case .pasteStack:
+            return nil
+        case .smart(let category):
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: localized(category.displayName),
+                isSelected: isSmartCategorySelected(category),
+                onDropPayloads: nil,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { selectSmartCategory(category) }
+            )
+        case .pinboard(let id):
+            guard let pinboard = store.userPinboards.first(where: { $0.id == id }) else {
+                return nil
+            }
+            return ClipboardCollectionStripItem(
+                id: collection,
+                title: pinboard.name,
+                isSelected: sideScope == .pinboard(pinboard.id),
+                onDropPayloads: nil,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: moveLeft,
+                onMoveRight: moveRight,
+                action: { setSideScope(.pinboard(pinboard.id)) }
+            )
+        }
     }
 
     private func createNamedPinboard() {
@@ -401,24 +417,6 @@ struct ClipboardSidePanelView: View {
 
         }
         .padding(.vertical, 10)
-    }
-
-    private var footer: some View {
-        Group {
-            if paging.items.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel(localized("label.clipboard"))
-                    .accessibilityValue(localized("state.connecting"))
-            } else {
-                Text(localized("format.items", paging.totalCount))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 32)
-        .padding(.horizontal, 4)
     }
 
     private var queryState: ClipboardSidePanelQueryState {
@@ -560,6 +558,29 @@ struct ClipboardSidePanelView: View {
     private func selectSmartCategory(_ category: SmartPinboardCategory) {
         let pinboard = store.syncSmartPinboard(for: category)
         setSideScope(.pinboard(pinboard.id))
+    }
+
+    private func reorderCollection(
+        _ source: ClipboardCollectionID,
+        relativeTo target: ClipboardCollectionID,
+        afterTarget: Bool
+    ) -> Bool {
+        store.moveCollection(source, relativeTo: target, afterTarget: afterTarget)
+    }
+
+    private func moveCollection(
+        _ collection: ClipboardCollectionID,
+        in visibleOrder: [ClipboardCollectionID],
+        by offset: Int
+    ) {
+        guard let sourceIndex = visibleOrder.firstIndex(of: collection) else { return }
+        let destinationIndex = sourceIndex + offset
+        guard visibleOrder.indices.contains(destinationIndex) else { return }
+        _ = store.moveCollection(
+            collection,
+            relativeTo: visibleOrder[destinationIndex],
+            afterTarget: offset > 0
+        )
     }
 
     private func selectItem(_ item: ClipboardItem) {
@@ -808,38 +829,6 @@ struct ClipboardSidePanelView: View {
         )
     }
 
-}
-
-private struct ClipboardSidePanelFilterChip: View {
-    let title: String
-    let systemImageName: String
-    let color: Color
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImageName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background {
-                Capsule()
-                    .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color.clear)
-            }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .help(title)
-    }
 }
 
 private struct ClipboardSidePanelListRow: View {
