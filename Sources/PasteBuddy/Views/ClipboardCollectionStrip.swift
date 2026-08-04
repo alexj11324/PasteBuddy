@@ -314,7 +314,10 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
         scrollView.hasHorizontalScroller = false
+        scrollView.horizontalScroller = nil
         scrollView.hasVerticalScroller = false
         scrollView.horizontalScrollElasticity = .automatic
         scrollView.verticalScrollElasticity = .none

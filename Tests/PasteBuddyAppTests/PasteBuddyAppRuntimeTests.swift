@@ -75,6 +75,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("pasteboardWriterForItemAt"))
         XCTAssertTrue(bridgeSource.contains("validateDrop"))
         XCTAssertTrue(bridgeSource.contains("acceptDrop"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.scrollerStyle = .overlay"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.autohidesScrollers = true"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.hasHorizontalScroller = false"))
+        XCTAssertTrue(bridgeSource.contains("scrollView.horizontalScroller = nil"))
         for source in [bridgeSource, shelfSource, sideSource] {
             XCTAssertFalse(source.contains("DragGesture("))
             XCTAssertFalse(source.contains("autoScrollDirection"))
