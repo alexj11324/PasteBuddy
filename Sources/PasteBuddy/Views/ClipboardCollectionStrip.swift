@@ -256,6 +256,7 @@ private final class ClipboardCollectionFrameProbeView: NSView {
 
     var collectionID: ClipboardCollectionID
     private var lastReportedFrame: CGRect?
+    private var lastReportedViewportFrame: CGRect?
     private var reportTask: Task<Void, Never>?
 
     init(collectionID: ClipboardCollectionID) {
@@ -326,23 +327,44 @@ private final class ClipboardCollectionFrameProbeView: NSView {
               let displayNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
                 as? NSNumber else { return }
         let displayID = CGDirectDisplayID(displayNumber.uint32Value)
-        let screenFrame = window.convertToScreen(convert(bounds, to: nil))
-        guard screenFrame.width > 0,
-              screenFrame.height > 0 else { return }
         let displayBounds = CGDisplayBounds(displayID)
+        guard let itemFrame = computerFrame(
+            for: self,
+            window: window,
+            screen: screen,
+            displayBounds: displayBounds
+        ),
+        let clipView = enclosingScrollView?.contentView,
+        let viewportFrame = computerFrame(
+            for: clipView,
+            window: window,
+            screen: screen,
+            displayBounds: displayBounds
+        ),
+        itemFrame != lastReportedFrame || viewportFrame != lastReportedViewportFrame else { return }
+        lastReportedFrame = itemFrame
+        lastReportedViewportFrame = viewportFrame
+        Self.logger.notice(
+            "id=\(self.collectionID.id, privacy: .public) frame=\(NSStringFromRect(itemFrame), privacy: .public) viewport=\(NSStringFromRect(viewportFrame), privacy: .public)"
+        )
+    }
+
+    private func computerFrame(
+        for view: NSView,
+        window: NSWindow,
+        screen: NSScreen,
+        displayBounds: CGRect
+    ) -> CGRect? {
+        let screenFrame = window.convertToScreen(view.convert(view.bounds, to: nil))
+        guard screenFrame.width > 0, screenFrame.height > 0 else { return nil }
         let localX = screenFrame.minX - screen.frame.minX
         let localY = screenFrame.minY - screen.frame.minY
-        let computerFrame = CGRect(
+        return CGRect(
             x: displayBounds.minX + localX,
             y: displayBounds.minY + screen.frame.height - localY - screenFrame.height,
             width: screenFrame.width,
             height: screenFrame.height
         ).integral
-        guard computerFrame != lastReportedFrame else { return }
-        lastReportedFrame = computerFrame
-        Self.logger.notice(
-            "id=\(self.collectionID.id, privacy: .public) frame=\(NSStringFromRect(computerFrame), privacy: .public)"
-        )
     }
 }
 #endif
