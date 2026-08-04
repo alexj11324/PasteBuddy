@@ -311,7 +311,7 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
         }
         context.coordinator.collectionView = collectionView
 
-        let scrollView = NSScrollView()
+        let scrollView = ClipboardCollectionScrollView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.scrollerStyle = .overlay
@@ -522,6 +522,21 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
             return items[min(indexPath.item, items.index(before: items.endIndex))]
         }
     }
+}
+
+@MainActor
+private final class ClipboardCollectionScrollView: NSScrollView {
+    override var hasHorizontalScroller: Bool {
+        get { false }
+        set {}
+    }
+
+    override var horizontalScroller: NSScroller? {
+        get { nil }
+        set {}
+    }
+
+    override func flashScrollers() {}
 }
 
 private struct ItemSnapshot: Equatable {
