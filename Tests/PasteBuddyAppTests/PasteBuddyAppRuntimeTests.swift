@@ -232,6 +232,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(shelf.contains("onDropPayloads: { dropItems($0, into: .pasteStack) }"))
     }
 
+    func testShelfOmitsResultCountFooterAndItsReservedHeight() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+
+        XCTAssertFalse(source.contains("clipboard-shelf-result-count"))
+        XCTAssertFalse(source.contains("private var shelfFooter"))
+        XCTAssertFalse(source.contains("footerTopSpacing"))
+        XCTAssertFalse(source.contains("footerHeight"))
+    }
+
     func testScreenSharingPrivacyKeepsSettingsCapturableWhileHidingContentPanels() {
         XCTAssertEqual(
             PasteBuddyApp.screenSharingType(
