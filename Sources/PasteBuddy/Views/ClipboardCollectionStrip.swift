@@ -58,6 +58,13 @@ enum ClipboardCollectionStripStyle {
         }
     }
 
+    var controlSize: ControlSize {
+        switch self {
+        case .shelf: .regular
+        case .sidePanel: .small
+        }
+    }
+
     var font: NSFont {
         switch self {
         case .shelf:
@@ -79,15 +86,132 @@ struct ClipboardCollectionStrip: View {
     let accessibilityLabel: String
     let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
 
+    @ViewBuilder
     var body: some View {
-        AppKitClipboardCollectionStrip(
-            items: items,
-            style: style,
-            onReorder: onReorder
-        )
-        .frame(maxWidth: .infinity, minHeight: style.height, maxHeight: style.height)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(accessibilityLabel)
+        if #available(macOS 27.0, *) {
+            SwiftUIClipboardCollectionStrip(
+                items: items,
+                style: style,
+                onReorder: onReorder
+            )
+            .frame(maxWidth: .infinity, minHeight: style.height, maxHeight: style.height)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(accessibilityLabel)
+        } else {
+            AppKitClipboardCollectionStrip(
+                items: items,
+                style: style,
+                onReorder: onReorder
+            )
+            .frame(maxWidth: .infinity, minHeight: style.height, maxHeight: style.height)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(accessibilityLabel)
+        }
+    }
+}
+
+@available(macOS 27.0, *)
+private struct SwiftUIClipboardCollectionStrip: View {
+    let items: [ClipboardCollectionStripItem]
+    let style: ClipboardCollectionStripStyle
+    let onReorder: (ClipboardCollectionID, ClipboardCollectionID, Bool) -> Bool
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(items) { item in
+                    SwiftUIClipboardCollectionButton(item: item, style: style)
+                }
+                .reorderable()
+            }
+            .reorderContainer(for: ClipboardCollectionStripItem.self) { difference in
+                apply(difference)
+            }
+        }
+        .scrollIndicators(.never, axes: .horizontal)
+    }
+
+    private func apply(
+        _ difference: ReorderDifference<
+            ClipboardCollectionID,
+            ReorderableSingleCollectionIdentifier
+        >
+    ) {
+        guard difference.sources.count == 1,
+              let source = difference.sources.first else { return }
+        let proposedIndex: Int
+        switch difference.destination.position {
+        case .before(let target):
+            guard let targetIndex = items.firstIndex(where: { $0.id == target }) else { return }
+            proposedIndex = targetIndex
+        case .end:
+            proposedIndex = items.endIndex
+        }
+        guard let destination = ClipboardCollectionReorderResolver.destination(
+            for: source,
+            in: items.map(\.id),
+            proposedIndex: proposedIndex
+        ) else { return }
+        _ = onReorder(source, destination.target, destination.afterTarget)
+    }
+}
+
+@available(macOS 27.0, *)
+private struct SwiftUIClipboardCollectionButton: View {
+    let item: ClipboardCollectionStripItem
+    let style: ClipboardCollectionStripStyle
+    @State private var isDropTargeted = false
+
+    @ViewBuilder
+    var body: some View {
+        if item.onDropPayloads != nil {
+            styledButton
+                .dropDestination(for: PinboardItemDragPayload.self) { payloads, _ in
+                    acceptDrop(payloads)
+                } isTargeted: { isDropTargeted = $0 }
+        } else {
+            styledButton
+        }
+    }
+
+    @ViewBuilder
+    private var styledButton: some View {
+        if item.isSelected || isDropTargeted {
+            button
+                .buttonStyle(.glassProminent)
+        } else {
+            button
+                .buttonStyle(.glass)
+        }
+    }
+
+    @ViewBuilder
+    private var button: some View {
+        let base = Button(item.title, action: item.action)
+            .controlSize(style.controlSize)
+            .lineLimit(1)
+            .accessibilityValue(
+                item.isSelected
+                    ? Text("state.selected")
+                    : Text("label.not_selected")
+            )
+
+        if item.canMoveLeft && item.canMoveRight {
+            base
+                .accessibilityAction(named: Text("action.move_left"), item.onMoveLeft)
+                .accessibilityAction(named: Text("action.move_right"), item.onMoveRight)
+        } else if item.canMoveLeft {
+            base.accessibilityAction(named: Text("action.move_left"), item.onMoveLeft)
+        } else if item.canMoveRight {
+            base.accessibilityAction(named: Text("action.move_right"), item.onMoveRight)
+        } else {
+            base
+        }
+    }
+
+    private func acceptDrop(_ payloads: [PinboardItemDragPayload]) -> Bool {
+        guard let onDropPayloads = item.onDropPayloads else { return false }
+        return onDropPayloads(payloads)
     }
 }
 

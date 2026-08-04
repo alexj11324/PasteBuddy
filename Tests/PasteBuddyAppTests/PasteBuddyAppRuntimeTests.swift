@@ -82,6 +82,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         }
     }
 
+    func testCollectionStripsUseSwiftUINativeReorderingOnMacOS27() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
+
+        XCTAssertTrue(source.contains("if #available(macOS 27.0, *)"))
+        XCTAssertTrue(source.contains(".reorderable()"))
+        XCTAssertTrue(source.contains(".reorderContainer(for: ClipboardCollectionStripItem.self)"))
+        XCTAssertTrue(source.contains(".buttonStyle(.glass)"))
+        XCTAssertTrue(source.contains(".buttonStyle(.glassProminent)"))
+        XCTAssertTrue(source.contains(".dropDestination(for: PinboardItemDragPayload.self)"))
+    }
+
     func testCollectionChipsRenderTextWithoutCategoryIcons() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
         let start = try XCTUnwrap(source.range(of: "private struct ClipboardCollectionChipLabel: View"))
