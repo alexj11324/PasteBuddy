@@ -905,7 +905,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         let parityMatrix: [(semantic: String, shelf: [String], side: [String])] = [
             ("search", ["$store.searchQuery", "action.clear_search"], ["$store.searchQuery", "action.clear_search"]),
-            ("scope/category", ["SmartPinboardCategory.allCases", "store.userPinboards", ".pasteStack"], ["SmartPinboardCategory.allCases", "store.userPinboards", ".pasteStack"]),
+            ("scope/category", ["store.collectionOrder", "case .smart(let category)", "store.userPinboards", ".pasteStack"], ["store.collectionOrder", "case .smart(let category)", "store.userPinboards", ".pasteStack"]),
             ("selection/keyboard", ["selectOffset(request.command.offset)", "handleShelfKeyPress"], ["selectOffset(request.command.offset)", "handleKeyPress"]),
             ("metadata", ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"], ["SourceApplicationIconBadge", "HistoryCardTimestampAdapter.presentation"]),
             ("context actions", ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"], ["action.paste", "action.copy", "action.pin_to_screen", "action.delete"]),
