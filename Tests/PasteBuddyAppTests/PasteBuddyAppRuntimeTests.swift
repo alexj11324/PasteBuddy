@@ -90,6 +90,34 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testCollectionDropPayloadDecoderFallsBackToPasteboardLevelData() throws {
+        let id = UUID()
+        let data = try JSONEncoder().encode(PinboardItemDragPayload(ids: [id]))
+
+        XCTAssertEqual(
+            ClipboardCollectionDropPayloadDecoder.payloads(
+                itemRepresentations: [],
+                pasteboardRepresentation: data
+            ).flatMap(\.ids),
+            [id]
+        )
+    }
+
+    func testCollectionDropPayloadDecoderPrefersItemRepresentations() throws {
+        let itemID = UUID()
+        let fallbackID = UUID()
+        let itemData = try JSONEncoder().encode(PinboardItemDragPayload(ids: [itemID]))
+        let fallbackData = try JSONEncoder().encode(PinboardItemDragPayload(ids: [fallbackID]))
+
+        XCTAssertEqual(
+            ClipboardCollectionDropPayloadDecoder.payloads(
+                itemRepresentations: [itemData],
+                pasteboardRepresentation: fallbackData
+            ).flatMap(\.ids),
+            [itemID]
+        )
+    }
+
     func testCollectionReorderResolverMovesBeforeAVisibleTarget() {
         let order: [ClipboardCollectionID] = [
             .history,
@@ -1881,6 +1909,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("JSONDecoder().decode(PinboardItemDragPayload.self"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
         XCTAssertTrue(source.contains("store.addItemsToPasteStack(ids)"))
+        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+    }
+
+    func testSidePanelCollectionChipsAcceptDraggedClipboardItems() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let stripStart = try XCTUnwrap(source.range(of: "private func collectionStripItem"))
+        let stripEnd = try XCTUnwrap(source.range(of: "private func createNamedPinboard"))
+        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
+
+        XCTAssertTrue(source.contains("private enum SidePanelCollectionDropTarget"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .history) }"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
+        XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
         XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
     }
 

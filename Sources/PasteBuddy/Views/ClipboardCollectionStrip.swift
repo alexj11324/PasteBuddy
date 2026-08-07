@@ -52,6 +52,43 @@ enum ClipboardCollectionIndexMoveResolver {
     }
 }
 
+@MainActor
+enum ClipboardCollectionDropPayloadDecoder {
+    static let pasteboardType = NSPasteboard.PasteboardType(
+        UTType.pasteBuddyPinboardItemIDs.identifier
+    )
+
+    static func payloads(from pasteboard: NSPasteboard) -> [PinboardItemDragPayload] {
+        let itemRepresentations = pasteboard.pasteboardItems?.compactMap {
+            $0.data(forType: pasteboardType)
+        } ?? []
+        return payloads(
+            itemRepresentations: itemRepresentations,
+            pasteboardRepresentation: pasteboard.data(forType: pasteboardType)
+        )
+    }
+
+    static func payloads(
+        itemRepresentations: [Data],
+        pasteboardRepresentation: Data?
+    ) -> [PinboardItemDragPayload] {
+        let itemPayloads = itemRepresentations.compactMap {
+            try? JSONDecoder().decode(PinboardItemDragPayload.self, from: $0)
+        }
+        if !itemPayloads.isEmpty {
+            return itemPayloads
+        }
+        guard let pasteboardRepresentation,
+              let payload = try? JSONDecoder().decode(
+                PinboardItemDragPayload.self,
+                from: pasteboardRepresentation
+              ) else {
+            return []
+        }
+        return [payload]
+    }
+}
+
 enum ClipboardCollectionNativeReorderingPolicy {
     static let environmentVariable = "PASTEBUDDY_ENABLE_SWIFTUI_CATEGORY_REORDERING"
 
@@ -367,7 +404,7 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
         )
         collectionView.registerForDraggedTypes([
             Coordinator.reorderPasteboardType,
-            NSPasteboard.PasteboardType(UTType.pasteBuddyPinboardItemIDs.identifier),
+            ClipboardCollectionDropPayloadDecoder.pasteboardType,
         ])
         collectionView.setDraggingSourceOperationMask(.move, forLocal: true)
         collectionView.onDraggingExited = { [weak coordinator = context.coordinator] in
@@ -594,13 +631,9 @@ private struct AppKitClipboardCollectionStrip: NSViewRepresentable {
                   let onDropPayloads = target.onDropPayloads else {
                 return false
             }
-            let payloads = draggingInfo.draggingPasteboard.pasteboardItems?.compactMap { item in
-                item.data(
-                    forType: NSPasteboard.PasteboardType(
-                        UTType.pasteBuddyPinboardItemIDs.identifier
-                    )
-                ).flatMap { try? JSONDecoder().decode(PinboardItemDragPayload.self, from: $0) }
-            } ?? []
+            let payloads = ClipboardCollectionDropPayloadDecoder.payloads(
+                from: draggingInfo.draggingPasteboard
+            )
             return !payloads.isEmpty && onDropPayloads(payloads)
         }
 
