@@ -318,6 +318,21 @@ public final class PasteBuddyStore {
         scheduleSave(delayNanoseconds: 0)
     }
 
+    private func savePinboardMembershipsImmediately(
+        _ pinboards: [Pinboard],
+        repositorySupportsTargetedUpdate: Bool
+    ) {
+        guard let saveDebounceNanoseconds else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(
+            delayNanoseconds: 0,
+            pinboardsToUpsert: repositorySupportsTargetedUpdate ? pinboards : nil,
+            persistenceDelayNanoseconds: saveDebounceNanoseconds
+        )
+    }
+
     public func flushPendingSave() async {
         guard defaultPersistenceInitializationErrorMessage == nil,
               let persistenceActor else {
@@ -375,7 +390,11 @@ public final class PasteBuddyStore {
         }
     }
 
-    private func scheduleSave(delayNanoseconds: UInt64) {
+    private func scheduleSave(
+        delayNanoseconds: UInt64,
+        pinboardsToUpsert: [Pinboard]? = nil,
+        persistenceDelayNanoseconds: UInt64 = 0
+    ) {
         guard defaultPersistenceInitializationErrorMessage == nil,
               let persistenceActor else {
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
@@ -396,34 +415,52 @@ public final class PasteBuddyStore {
                 }
             }
             guard !Task.isCancelled else { return }
+            do {
+                if let repositorySyncActor {
+                    if let pinboardsToUpsert {
+                        try await repositorySyncActor.upsertPinboardMemberships(pinboardsToUpsert)
+                    } else {
+                        try await repositorySyncActor.synchronize(with: snapshotToSave)
+                    }
+                    self.beforeRepositorySyncCommitForTesting?()
+                    guard !Task.isCancelled else { return }
+                    guard self.dataRevision == dataRevisionToSync else { return }
+                    self.markClipboardRepositorySynced(to: dataRevisionToSync)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.isRepositorySyncInFlight = false
+                self.repositorySyncedDataRevision = nil
+                self.historyQueryErrorMessage = error.localizedDescription
+                self.pendingSaveTask = nil
+                self.lastErrorMessage = error.localizedDescription
+                return
+            }
+            if persistenceDelayNanoseconds > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: persistenceDelayNanoseconds)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
             // Externalizing large payloads (asset hashing + search-document refresh)
-            // is deliberately deferred past the debounce window and off the main
-            // actor so rapid save() bursts never pay for work that gets cancelled.
+            // stays off the immediate repository-update path. The persistence delay
+            // lets rapid pin operations coalesce before this detached work begins.
             let snapshotToPersist = await Task.detached(priority: .utility) {
                 Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
             }.value
             guard !Task.isCancelled else { return }
             do {
-                if let repositorySyncActor {
-                    try await repositorySyncActor.synchronize(with: snapshotToSave)
-                }
                 try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
-                await MainActor.run {
-                    guard self.dataRevision == dataRevisionToSync else { return }
-                    self.markClipboardRepositorySynced(to: dataRevisionToSync)
-                    self.pendingSaveTask = nil
-                    self.diskStore?.storageMode = snapshotToSave.security.storageMode
-                    self.lastErrorMessage = nil
-                }
+                guard self.dataRevision == dataRevisionToSync else { return }
+                self.pendingSaveTask = nil
+                self.diskStore?.storageMode = snapshotToSave.security.storageMode
+                self.lastErrorMessage = nil
             } catch {
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    self.isRepositorySyncInFlight = false
-                    self.repositorySyncedDataRevision = nil
-                    self.historyQueryErrorMessage = error.localizedDescription
-                    self.pendingSaveTask = nil
-                    self.lastErrorMessage = error.localizedDescription
-                }
+                guard !Task.isCancelled else { return }
+                self.pendingSaveTask = nil
+                self.lastErrorMessage = error.localizedDescription
             }
         }
     }
@@ -1370,6 +1407,8 @@ public final class PasteBuddyStore {
             save()
             return
         }
+        let repositorySupportsTargetedUpdate = repositorySyncedDataRevision == dataRevision
+            && !isRepositorySyncInFlight
         let storedItemIDs = Set(snapshot.items.map(\.id))
         var seenItemIDs = Set<UUID>()
         var pinnedItemIDs: [UUID] = []
@@ -1383,7 +1422,10 @@ public final class PasteBuddyStore {
         snapshot.pinboards[pinboardIndex].itemIDs.removeAll { seenItemIDs.contains($0) }
         snapshot.pinboards[pinboardIndex].itemIDs.insert(contentsOf: pinnedItemIDs, at: 0)
         snapshot.pinboards[pinboardIndex].updatedAt = Date()
-        save()
+        savePinboardMembershipsImmediately(
+            [snapshot.pinboards[pinboardIndex]],
+            repositorySupportsTargetedUpdate: repositorySupportsTargetedUpdate
+        )
     }
 
     public func removeItem(_ itemID: UUID, fromPinboard pinboardID: UUID) {
