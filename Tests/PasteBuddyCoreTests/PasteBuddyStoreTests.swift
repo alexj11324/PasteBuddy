@@ -1044,6 +1044,141 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.pinboards[0].itemIDs, [newer.id, older.id, existing.id])
     }
 
+    func testPinningRefreshesRepositoryBackedPanelQueriesWithoutDebounce() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pin immediately",
+            payload: ClipboardPayload(text: "pin immediately")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        await store.flushPendingSave()
+        let queryRevisionBeforePin = store.queryRevision
+
+        store.pinItem(item.id, to: pinboardID)
+
+        try await waitUntil {
+            store.filteredItemsPage(for: .pinboard(pinboardID), offset: 0).map(\.id) == [item.id]
+                && store.repositorySyncedDataRevision == store.dataRevision
+                && store.queryRevision > queryRevisionBeforePin
+        }
+
+        XCTAssertEqual(
+            store.filteredItemsPage(for: .pinboard(pinboardID), offset: 0).map(\.id),
+            [item.id]
+        )
+        XCTAssertEqual(store.filteredItemCount(for: .pinboard(pinboardID)), 1)
+    }
+
+    func testPinningNewCaptureRefreshesRepositoryBackedPanelQueriesWithoutPreflush() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 60_000_000_000
+        )
+        let item = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Pin before repository flush",
+            payload: ClipboardPayload(text: "pin before repository flush")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        let queryRevisionBeforePin = store.queryRevision
+
+        store.pinItem(item.id, to: pinboardID)
+
+        try await waitUntil {
+            store.filteredItemsPage(for: .pinboard(pinboardID), offset: 0).map(\.id) == [item.id]
+                && store.repositorySyncedDataRevision == store.dataRevision
+                && store.queryRevision > queryRevisionBeforePin
+        }
+        XCTAssertEqual(store.filteredItemCount(for: .pinboard(pinboardID)), 1)
+        XCTAssertEqual(repository.incrementalSyncInvocationCount, 1)
+    }
+
+    func testRapidPinsSerializeRepositoryUpdatesAndPersistLatestMemberships() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(
+            fileURL: harness.directory.appendingPathComponent("clipboard.sqlite")
+        )
+        let repository = ClipboardItemRepository(database: database)
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository,
+            saveDebounceNanoseconds: 100_000_000
+        )
+        let first = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "First rapid pin",
+            payload: ClipboardPayload(text: "first rapid pin")
+        ))
+        let second = store.addCapturedItem(ClipboardItem(
+            sourceAppName: "Notes",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "Second rapid pin",
+            payload: ClipboardPayload(text: "second rapid pin")
+        ))
+        let pinboardID = store.snapshot.pinboards[0].id
+        await store.flushPendingSave()
+        var issuedSecondPinAfterFirstRepositoryWrite = false
+        store.beforeRepositorySyncCommitForTesting = {
+            guard !issuedSecondPinAfterFirstRepositoryWrite else { return }
+            issuedSecondPinAfterFirstRepositoryWrite = true
+            store.beforeRepositorySyncCommitForTesting = nil
+            store.pinItem(second.id, to: pinboardID)
+        }
+
+        store.pinItem(first.id, to: pinboardID)
+
+        try await waitUntil {
+            store.filteredItemsPage(for: .pinboard(pinboardID), offset: 0).map(\.id) == [second.id, first.id]
+        }
+        XCTAssertTrue(issuedSecondPinAfterFirstRepositoryWrite)
+        XCTAssertGreaterThanOrEqual(repository.incrementalSyncInvocationCount, 2)
+
+        try await waitUntil {
+            let persisted = PasteBuddyStore(diskStore: harness.snapshotStore)
+            persisted.load()
+            return persisted.snapshot.pinboards
+                .first(where: { $0.id == pinboardID })?.itemIDs == [second.id, first.id]
+        }
+        let reloaded = PasteBuddyStore(
+            diskStore: harness.snapshotStore
+        )
+        reloaded.load()
+
+        XCTAssertEqual(
+            reloaded.snapshot.pinboards.first(where: { $0.id == pinboardID })?.itemIDs,
+            [second.id, first.id]
+        )
+    }
+
     func testRetentionPrunesOldUnpinnedItemsButKeepsPinnedItems() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -5698,6 +5833,19 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertEqual(shortcuts.quickPasteModifiers, [.control, .command])
         XCTAssertEqual(shortcuts.plainTextQuickPasteModifiers, [.control, .shift])
         XCTAssertEqual(shortcuts.activatePasteStack.key, "c")
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 2,
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        if !condition() {
+            XCTFail("Timed out waiting for asynchronous store state")
+        }
     }
 }
 
