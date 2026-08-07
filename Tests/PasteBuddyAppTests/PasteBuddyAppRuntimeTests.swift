@@ -2608,6 +2608,69 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testPanelHotKeysToggleTheirPanelInsteadOfOnlyShowingIt() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let toggleStart = try XCTUnwrap(source.range(of: "private func toggleClipboardPanel("))
+        let toggleEnd = try XCTUnwrap(
+            source.range(of: "private func startRuntimeIfNeeded()", range: toggleStart.upperBound..<source.endIndex)
+        )
+        let toggleSource = String(source[toggleStart.lowerBound..<toggleEnd.lowerBound])
+        let controllerStart = try XCTUnwrap(
+            source.range(of: "panelHotKeyController = PasteBuddyPanelHotKeyController(")
+        )
+        let controllerEnd = try XCTUnwrap(
+            source.range(of: "panelHotKeyController?.updateShortcuts", range: controllerStart.upperBound..<source.endIndex)
+        )
+        let controllerSource = String(source[controllerStart.lowerBound..<controllerEnd.lowerBound])
+
+        XCTAssertTrue(controllerSource.contains("toggleClipboardPanel(.sidePanel)"))
+        XCTAssertTrue(controllerSource.contains("toggleClipboardPanel(.shelf)"))
+        XCTAssertFalse(controllerSource.contains("await showClipboardPanel(.sidePanel)"))
+        XCTAssertFalse(controllerSource.contains("await showClipboardPanel(.shelf)"))
+        XCTAssertTrue(toggleSource.contains("ClipboardPanelHotKeyToggleDecision.resolve("))
+        XCTAssertTrue(toggleSource.contains("case .hide:\n            shelfPanelController.hide()"))
+        XCTAssertTrue(toggleSource.contains("case .show(let requestedMode):"))
+        XCTAssertTrue(toggleSource.contains("panelDisplayMode = requestedMode"))
+        XCTAssertTrue(toggleSource.contains("shelfPanelController.show()"))
+
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: false,
+                isDismissing: false,
+                currentMode: .sidePanel,
+                requestedMode: .sidePanel
+            ),
+            .show(.sidePanel)
+        )
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: true,
+                isDismissing: false,
+                currentMode: .sidePanel,
+                requestedMode: .sidePanel
+            ),
+            .hide
+        )
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: true,
+                isDismissing: false,
+                currentMode: .shelf,
+                requestedMode: .sidePanel
+            ),
+            .show(.sidePanel)
+        )
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: true,
+                isDismissing: true,
+                currentMode: .sidePanel,
+                requestedMode: .sidePanel
+            ),
+            .show(.sidePanel)
+        )
+    }
+
     func testPinboardCycleHotKeysAndLocalScopeWrapping() throws {
         let shortcuts = ShortcutConfiguration()
         XCTAssertEqual(

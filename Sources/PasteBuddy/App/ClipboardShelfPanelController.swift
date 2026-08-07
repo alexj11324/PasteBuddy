@@ -179,6 +179,23 @@ enum ClipboardPanelDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum ClipboardPanelHotKeyToggleDecision: Equatable {
+    case hide
+    case show(ClipboardPanelDisplayMode)
+
+    static func resolve(
+        isVisible: Bool,
+        isDismissing: Bool,
+        currentMode: ClipboardPanelDisplayMode,
+        requestedMode: ClipboardPanelDisplayMode
+    ) -> Self {
+        if isVisible, !isDismissing, currentMode == requestedMode {
+            return .hide
+        }
+        return .show(requestedMode)
+    }
+}
+
 @MainActor
 final class ClipboardShelfPanelController: NSObject {
     private static let shelfEntranceDuration: CFTimeInterval = 0.18
@@ -238,6 +255,10 @@ final class ClipboardShelfPanelController: NSObject {
 
     var isVisible: Bool {
         panel?.isVisible == true
+    }
+
+    var isDismissing: Bool {
+        isAnimatingPanelOut
     }
 
     func routeQuickPasteToVisiblePanel(oneBasedIndex: Int, format: PasteFormat) -> Bool {
