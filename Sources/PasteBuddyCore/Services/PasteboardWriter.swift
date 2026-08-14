@@ -526,6 +526,7 @@ public enum PasteboardWriter {
     ) -> NSItemProvider? {
         guard item.payload.hasImageAsset else { return nil }
         let provider = NSItemProvider()
+        provider.suggestedName = suggestedImageFileName(for: item)
         registerImageRepresentation(for: item, on: provider, hydrate: hydrate)
         return provider
     }
@@ -535,32 +536,169 @@ public enum PasteboardWriter {
         on provider: NSItemProvider,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) {
-        if let data = item.payload.imageData {
-            registerStaticPNGRepresentation(data, on: provider)
+        if let data = item.payload.imageData, let png = pngData(from: data) {
+            registerReadyImageRepresentations(png, on: provider)
         } else if item.payload.imageAssetID != nil {
-            registerHydratedDataRepresentation(
-                UTType.png,
-                for: item,
-                on: provider,
-                hydrate: hydrate
-            ) { hydratedItem in
-                hydratedItem.payload.imageData.flatMap(pngData(from:))
-            }
+            registerHydratedImageRepresentations(for: item, on: provider, hydrate: hydrate)
         }
     }
 
-    private static func registerStaticPNGRepresentation(_ data: Data, on provider: NSItemProvider) {
+    private static func registerReadyImageRepresentations(_ png: Data, on provider: NSItemProvider) {
+        registerStaticImageDataRepresentation(png, type: .png, on: provider)
         provider.registerDataRepresentation(
-            forTypeIdentifier: UTType.png.identifier,
+            forTypeIdentifier: UTType.tiff.identifier,
             visibility: .all
         ) { completion in
-            if let png = pngData(from: data) {
-                completion(png, nil)
+            if let tiff = lazyTIFFData(from: png) {
+                completion(tiff, nil)
             } else {
                 completion(nil, CocoaError(.fileReadCorruptFile))
             }
             return nil
         }
+        registerImageObjectRepresentation(png, on: provider)
+        registerPNGFileRepresentation(png, on: provider)
+    }
+
+    private static func registerHydratedImageRepresentations(
+        for item: ClipboardItem,
+        on provider: NSItemProvider,
+        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+    ) {
+        registerHydratedDataRepresentation(
+            UTType.png,
+            for: item,
+            on: provider,
+            hydrate: hydrate
+        ) { hydratedItem in
+            hydratedItem.payload.imageData.flatMap(pngData(from:))
+        }
+        registerHydratedDataRepresentation(
+            UTType.tiff,
+            for: item,
+            on: provider,
+            hydrate: hydrate
+        ) { hydratedItem in
+            hydratedItem.payload.imageData.flatMap { pngData(from: $0).flatMap(lazyTIFFData(from:)) }
+        }
+        provider.registerObject(ofClass: NSImage.self, visibility: .all) { completion in
+            let progress = Progress(totalUnitCount: 1)
+            Task { @MainActor in
+                let png = await hydrate(item).payload.imageData.flatMap(pngData(from:))
+                if let png, let image = NSImage(data: png) {
+                    completion(image, nil)
+                } else {
+                    completion(nil, CocoaError(.fileReadNoSuchFile))
+                }
+                progress.completedUnitCount = 1
+            }
+            return progress
+        }
+        provider.registerFileRepresentation(
+            forTypeIdentifier: UTType.png.identifier,
+            fileOptions: [],
+            visibility: .all
+        ) { completion in
+            let progress = Progress(totalUnitCount: 1)
+            Task { @MainActor in
+                if let png = await hydrate(item).payload.imageData.flatMap(pngData(from:)) {
+                    do {
+                        completion(try writeTemporaryPNG(png), false, nil)
+                    } catch {
+                        completion(nil, false, error)
+                    }
+                } else {
+                    completion(nil, false, CocoaError(.fileReadNoSuchFile))
+                }
+                progress.completedUnitCount = 1
+            }
+            return progress
+        }
+    }
+
+    private static func registerStaticImageDataRepresentation(
+        _ data: Data?,
+        type: UTType,
+        on provider: NSItemProvider
+    ) {
+        provider.registerDataRepresentation(
+            forTypeIdentifier: type.identifier,
+            visibility: .all
+        ) { completion in
+            if let data, !data.isEmpty {
+                completion(data, nil)
+            } else {
+                completion(nil, CocoaError(.fileReadCorruptFile))
+            }
+            return nil
+        }
+    }
+
+    private static func registerImageObjectRepresentation(_ png: Data, on provider: NSItemProvider) {
+        provider.registerObject(ofClass: NSImage.self, visibility: .all) { completion in
+            if let image = NSImage(data: png) {
+                completion(image, nil)
+            } else {
+                completion(nil, CocoaError(.fileReadCorruptFile))
+            }
+            return nil
+        }
+    }
+
+    private static func registerPNGFileRepresentation(_ png: Data, on provider: NSItemProvider) {
+        provider.registerFileRepresentation(
+            forTypeIdentifier: UTType.png.identifier,
+            fileOptions: [],
+            visibility: .all
+        ) { completion in
+            do {
+                completion(try writeTemporaryPNG(png), false, nil)
+            } catch {
+                completion(nil, false, error)
+            }
+            return nil
+        }
+    }
+
+    private static func suggestedImageFileName(for item: ClipboardItem) -> String {
+        let base = item.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let name = base.isEmpty ? "image" : String(base.prefix(64))
+        return name.lowercased().hasSuffix(".png") ? name : "\(name).png"
+    }
+
+    private static func writeTemporaryPNG(_ data: Data) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PasteBuddyImageDrag", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        pruneTemporaryPNGFiles(in: directory)
+        let url = directory.appendingPathComponent("\(UUID().uuidString).png")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    private static func pruneTemporaryPNGFiles(in directory: URL) {
+        let fileManager = FileManager.default
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else {
+            return
+        }
+        let cutoff = Date().addingTimeInterval(-3600)
+        for url in urls {
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            if let modified, modified < cutoff {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+    }
+
+    nonisolated private static func lazyTIFFData(from png: Data) -> Data? {
+        NSImage(data: png)?.tiffRepresentation
     }
 
     @discardableResult

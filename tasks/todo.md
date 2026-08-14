@@ -1,3 +1,22 @@
+# Fix image drag-to-paste after PNG-only provider
+
+## Background
+- After `06654f8`, dragging an image from Shelf/Side Panel no longer pastes.
+- Last change removed OCR `public.utf8-plain-text` (correct) and replaced `NSItemProvider(object: NSImage)` with PNG-only `registerDataRepresentation`.
+- Many destinations reject PNG-only providers: AppKit wants TIFF/NSImage; Finder, Electron, and chat composers want a file.
+
+## Plan
+- [x] Red: image provider must load NSImage, TIFF, and a PNG file; still omit OCR text (inline + hydrated)
+- [x] Green: register TIFF + NSImage + `registerFileRepresentation` without utf8-plain-text
+- [x] Tests green (`testImageItemProviderPublishesPNGWithoutOCRPlainText`, `testHydratedImageItemProviderPublishesDroppableImageWithoutOCRPlainText`, `testImageCardDragProviderPublishesImageWithoutOCRPlainText`)
+- [ ] Official `script/build_and_run.sh --verify` and runtime drag check
+- [x] Update `tasks/lessons.md`
+
+## Review
+- Pending final review before handoff.
+
+---
+
 # 性能优化 + 功能缺陷修复（分支 optimize/perf-and-defects）
 
 ## 背景
@@ -29,7 +48,7 @@
 4. **性能·搜索每 item 重复 normalize 同一 query**（ClipboardModels + Store）
    - 新增 `matchesNormalizedSearchQuery` 快路径；`filtered`/`makeFilteredItemCount` 循环外 normalize 一次。maxHistoryItems 上限 10,000 时每键省 1 万次 folding。
 5. **性能·每次捕获跑 2 遍 smart pinboard 全量分类 + 无效 dedupe 全量重建**（PasteBuddyStore.swift）
-   - addCapturedItem 删除冗余 `refreshExistingSmartPinboards()`（pruneHistory 内部刚跑过）；pruneHistory 仅在实际移除条目时 `rebuildDedupeIndex()`（增量索引维护重新生效）；OCR/enrich 三处 rebuild 删除（`deduplicationHash` 输入不含 ocrText/title/预览图，佐证：markOCRFailed 原本就无 rebuild）。约束注释落在 deduplicationHash 源头。
+   - addCapturedItem 删除冗余 `refreshExistingSmartPinboards()`（pruneHistory 内部刚跑过）；pruneHistory 仅在实际移除条目时 `rebuildDedupeIndex()`（增量索引维护重新生效）；OCR/enrich 三处 rebuild 删除（`deduplicationHash` 输入不含 ocrText/title/预览图，证：markOCRFailed 原本就无 rebuild）。约束注释落在 deduplicationHash 源头。
    - 死代码清理：lastFingerprint 双格式混写导致的恒真守卫、cheapFingerprint、同步版 makeItem 的 90 行重复逻辑（复用 snapshot 版，PasteboardWriterTests 30 个合同测试守护）。
 
 ### 验证

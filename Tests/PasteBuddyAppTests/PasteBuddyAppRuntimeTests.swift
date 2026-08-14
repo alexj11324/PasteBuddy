@@ -1514,16 +1514,27 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let identifiers = provider.registeredTypeIdentifiers
 
         XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.png.identifier))
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.tiff.identifier))
+        XCTAssertTrue(
+            provider.hasRepresentationConforming(
+                toTypeIdentifier: UTType.png.identifier,
+                fileOptions: []
+            )
+        )
         XCTAssertTrue(identifiers.contains(UTType.png.identifier))
         XCTAssertFalse(identifiers.contains(UTType.utf8PlainText.identifier))
         XCTAssertFalse(identifiers.contains(UTType.plainText.identifier))
+        XCTAssertTrue(provider.canLoadObject(ofClass: NSImage.self))
         XCTAssertFalse(provider.canLoadObject(ofClass: NSString.self))
+        XCTAssertEqual(provider.suggestedName?.hasSuffix(".png"), true)
 
         let loadedPNG = try await loadData(
             from: provider,
             typeIdentifier: UTType.png.identifier
         )
         XCTAssertEqual(loadedPNG, pngData)
+        let filePNG = try await loadPNGFile(from: provider)
+        XCTAssertEqual(filePNG, pngData)
         XCTAssertNil(
             identifiers.firstIndex(of: UTType.utf8PlainText.identifier),
             "Image drags must not advertise OCR or title as text/plain; text fields would paste OCR instead of the image."
@@ -3536,6 +3547,26 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                     continuation.resume(returning: data)
                 } else {
                     continuation.resume(throwing: CocoaError(.fileReadUnknown))
+                }
+            }
+        }
+    }
+
+    private func loadPNGFile(from provider: NSItemProvider) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadFileRepresentation(forTypeIdentifier: UTType.png.identifier) { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let url else {
+                    continuation.resume(throwing: CocoaError(.fileReadNoSuchFile))
+                    return
+                }
+                do {
+                    continuation.resume(returning: try Data(contentsOf: url))
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
         }

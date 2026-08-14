@@ -4,6 +4,8 @@
 - OCR text is search metadata, not a paste representation. Advertising `public.utf8-plain-text` on an image `NSItemProvider` makes text fields (Cursor, Electron, NSTextView) take OCR instead of the image. Type identifier order does not win; the destination picks the type it prefers.
 - `NSImage.writeObjects` / `tiffRepresentation` turns stored PNG into a huge uncompressed TIFF. Write stored PNG/TIFF bytes through. Convert only when the bytes are neither.
 - Do not use `NSItemProvider(object: NSImage)` on the drag/copy path; it decodes eagerly and vends TIFF.
+- PNG-only `registerDataRepresentation` is not enough for macOS drag. AppKit destinations want TIFF/`NSImage`; Finder, Electron, and chat composers want `registerFileRepresentation` (a real PNG file). Keep OCR text off, and register PNG + lazy TIFF + `NSImage` + file together. Set `suggestedName`.
+- X MCP was unavailable; Exa `site:x.com` returned no extra NSItemProvider drag hits. Apple docs: `registerFileRepresentation` load handler completion is `(url, coordinated, error)` — pass `coordinated=false` for a temp file we wrote.
 
 ## macOS 26 minimum
 - SwiftPM: `.macOS("26.0")`. Info.plist / linker: `LSMinimumSystemVersion` and `-platform_version macos 26.0`.
