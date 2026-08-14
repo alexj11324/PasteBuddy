@@ -259,6 +259,44 @@ final class PasteboardWriterTests: XCTestCase {
 
         XCTAssertEqual(pasteboard.string(forType: .string), "Copy this OCR text")
         XCTAssertFalse(pasteboard.types?.contains(.tiff) ?? false)
+        XCTAssertFalse(pasteboard.types?.contains(.png) ?? false)
+    }
+
+    func testCopyImageWritesPNGBytesAndOmitsOCRText() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyImageCopy-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let pngData = try XCTUnwrap(Self.testImage().pasteBuddyPNGData())
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: pngData, ocrText: "Invoice total 42 dollars")
+        )
+
+        XCTAssertTrue(PasteboardWriter.copy(item, to: pasteboard))
+
+        XCTAssertEqual(pasteboard.data(forType: .png), pngData)
+        XCTAssertNil(pasteboard.string(forType: .string))
+        XCTAssertTrue(PasteboardWriter.containsInternalCopyMarker(pasteboard))
+    }
+
+    func testImageItemProviderPublishesPNGWithoutOCRPlainText() async throws {
+        let pngData = try XCTUnwrap(Self.testImage().pasteBuddyPNGData())
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: pngData, ocrText: "Invoice total 42 dollars")
+        )
+        let provider = try XCTUnwrap(PasteboardWriter.itemProviders(for: [item]) { $0 }.first)
+
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.png.identifier))
+        XCTAssertFalse(provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier))
+        XCTAssertFalse(provider.canLoadObject(ofClass: NSString.self))
+        let loadedPNG = try await loadData(from: provider, type: .png)
+        XCTAssertEqual(loadedPNG, pngData)
     }
 
     func testCopyReportsPasteboardWriteSuccess() throws {
@@ -498,7 +536,7 @@ final class PasteboardWriterTests: XCTestCase {
             PasteboardWriter.itemProviders(for: [lightweightItem]) { _ in hydratedItem }.first
         )
 
-        let data = try await loadData(from: provider, type: .tiff)
+        let data = try await loadData(from: provider, type: .png)
 
         XCTAssertFalse(try XCTUnwrap(data).isEmpty)
     }
@@ -539,7 +577,7 @@ final class PasteboardWriterTests: XCTestCase {
         )
 
         do {
-            _ = try await loadData(from: provider, type: .tiff)
+            _ = try await loadData(from: provider, type: .png)
             XCTFail("Expected missing hydrated asset to fail")
         } catch {
             let underlyingError = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError

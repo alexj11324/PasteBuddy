@@ -1,0 +1,15 @@
+# Lessons
+
+## Image drag/paste
+- OCR text is search metadata, not a paste representation. Advertising `public.utf8-plain-text` on an image `NSItemProvider` makes text fields (Cursor, Electron, NSTextView) take OCR instead of the image. Type identifier order does not win; the destination picks the type it prefers.
+- `NSImage.writeObjects` / `tiffRepresentation` turns stored PNG into a huge uncompressed TIFF. Write stored PNG/TIFF bytes through. Convert only when the bytes are neither.
+- Do not use `NSItemProvider(object: NSImage)` on the drag/copy path; it decodes eagerly and vends TIFF.
+
+## macOS 26 minimum
+- SwiftPM: `.macOS("26.0")`. Info.plist / linker: `LSMinimumSystemVersion` and `-platform_version macos 26.0`.
+- Raising the deployment target makes `#available(macOS 26.0, *)` unnecessary; unwrap it or the compiler warns and fallbacks become dead code.
+- Official SPM docs expose `SupportedPlatform.MacOSVersion.v26` (PackageDescription 6.2+). String `"26.0"` works with tools 6.0.
+- X MCP was unavailable; Exa `site:x.com` returned no extra deployment-target reports beyond Apple/SPM docs.
+
+## Test builds on Desktop
+- Desktop iCloud File Provider copies `com.apple.FinderInfo` / `com.apple.fileprovider.fpfs#P` onto `.xctest` bundles and ad-hoc `codesign` fails with “resource fork, Finder information, or similar detritus”. Use `~/Library/Developer/Xcode/DerivedData` as the SwiftPM scratch path.
