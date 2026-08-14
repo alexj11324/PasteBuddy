@@ -40,8 +40,8 @@ the existing settings, permission, and StoreKit owners above.
 | Continue / close | `arrow.right` / `xmark` | Localized accessibility labels and normal keyboard focus |
 
 All symbols above are present in the installed SF Symbols metadata at release year
-2023 or earlier (`name_availability.plist`). PasteBuddy's minimum macOS 14.5
-corresponds to the 2023 symbol generation. Implementation must additionally keep a
+2023 or earlier (`name_availability.plist`). PasteBuddy's minimum macOS 26
+still accepts that 2023 symbol generation. Implementation must additionally keep a
 runtime `NSImage(systemSymbolName:) != nil` test for every mapped name and must not
 use a symbol as the only accessible name or state cue.
 

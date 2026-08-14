@@ -48,9 +48,6 @@ struct NativeTranslationService: Sendable {
         guard !sourceText.isEmpty else {
             throw NativeTranslationServiceError.emptyText
         }
-        guard #available(macOS 26.0, *) else {
-            throw NativeTranslationServiceError.unavailable
-        }
         #if canImport(Translation)
         guard let detectedSource = sourceLanguageIdentifier
             ?? detectedLanguageIdentifier(for: sourceText) else {

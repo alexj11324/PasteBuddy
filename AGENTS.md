@@ -84,7 +84,7 @@
 
 ## PasteBuddy Onboarding、权限与 Paywall 图标（IMPORTANT）
 - IMPORTANT: onboarding、权限设置、OCR/翻译 how-to、paywall 以及相关状态/动作只能使用 Apple SF Symbols 与现有原生 SwiftUI/AppKit 控件；禁止自绘图标、emoji 图标、PNG/JPG/WebP 位图符号、自制 SVG symbol 或新图标资产包。
-- IMPORTANT: 每个 SF Symbol 必须有本地化文字与独立辅助功能标签，状态不得只靠图标或颜色表达；新增 symbol 必须验证 `NSImage(systemSymbolName:)` 非空并确认其 SF Symbols 首发版本不晚于最低支持的 macOS 14.5（2023）。
+- IMPORTANT: 每个 SF Symbol 必须有本地化文字与独立辅助功能标签，状态不得只靠图标或颜色表达；新增 symbol 必须验证 `NSImage(systemSymbolName:)` 非空并确认其 SF Symbols 首发版本不晚于最低支持的 macOS 26（2026）。
 - IMPORTANT: onboarding/permission UI 必须复用现有 Accessibility、Vision OCR、Translation 与 Settings 状态 owner；禁止新增截图或 Screen Recording 权限 UI。paywall 必须复用 `AppleStoreKitEntitlementProvider`、`purchasePersonalPlan`、`restorePurchases` 和已验证 transaction update，禁止新建 entitlement/store 或继续把本地模拟激活冒充真实购买。
 - IMPORTANT: 实施顺序与固定 symbol mapping 以 `docs/ONBOARDING_PAYWALL_SF_SYMBOL_PLAN.md` 为准；在该计划之外新增或替换图标前先更新审计与最低系统可用性证据。
 

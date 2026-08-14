@@ -108,17 +108,13 @@ public enum PasteboardWriter {
                 succeeded = pasteboard.writeObjects(urls.map { $0 as NSURL })
             }
         case .image:
-            if let data = item.payload.imageData, let image = NSImage(data: data) {
-                succeeded = pasteboard.writeObjects([image])
-            }
+            succeeded = writeImageData(item.payload.imageData, to: pasteboard)
         case .mixed:
             let urls = item.payload.allFileURLStrings.compactMap(URL.init(string:))
             if !urls.isEmpty {
                 succeeded = pasteboard.writeObjects(urls.map { $0 as NSURL }) || succeeded
             }
-            if let data = item.payload.imageData, let image = NSImage(data: data) {
-                succeeded = pasteboard.writeObjects([image]) || succeeded
-            }
+            succeeded = writeImageData(item.payload.imageData, to: pasteboard) || succeeded
             succeeded = pasteboard.setString(plainText(for: item), forType: .string) || succeeded
             if let html = item.payload.htmlString {
                 succeeded = pasteboard.setString(html, forType: .html) || succeeded
@@ -528,10 +524,7 @@ public enum PasteboardWriter {
         for item: ClipboardItem,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) -> NSItemProvider? {
-        if let data = item.payload.imageData, let image = NSImage(data: data) {
-            return NSItemProvider(object: image)
-        }
-        guard item.payload.imageAssetID != nil else { return nil }
+        guard item.payload.hasImageAsset else { return nil }
         let provider = NSItemProvider()
         registerImageRepresentation(for: item, on: provider, hydrate: hydrate)
         return provider
@@ -542,25 +535,52 @@ public enum PasteboardWriter {
         on provider: NSItemProvider,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) {
-        if let data = item.payload.imageData,
-           let tiffData = NSImage(data: data)?.tiffRepresentation {
-            provider.registerDataRepresentation(
-                forTypeIdentifier: UTType.tiff.identifier,
-                visibility: .all
-            ) { completion in
-                completion(tiffData, nil)
-                return nil
-            }
+        if let data = item.payload.imageData {
+            registerStaticPNGRepresentation(data, on: provider)
         } else if item.payload.imageAssetID != nil {
             registerHydratedDataRepresentation(
-                UTType.tiff,
+                UTType.png,
                 for: item,
                 on: provider,
                 hydrate: hydrate
             ) { hydratedItem in
-                hydratedItem.payload.imageData.flatMap { NSImage(data: $0)?.tiffRepresentation }
+                hydratedItem.payload.imageData.flatMap(pngData(from:))
             }
         }
+    }
+
+    private static func registerStaticPNGRepresentation(_ data: Data, on provider: NSItemProvider) {
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.png.identifier,
+            visibility: .all
+        ) { completion in
+            if let png = pngData(from: data) {
+                completion(png, nil)
+            } else {
+                completion(nil, CocoaError(.fileReadCorruptFile))
+            }
+            return nil
+        }
+    }
+
+    @discardableResult
+    private static func writeImageData(_ imageData: Data?, to pasteboard: NSPasteboard) -> Bool {
+        guard let imageData, !imageData.isEmpty else { return false }
+        if imageData.pasteBuddyIsPNG {
+            return pasteboard.setData(imageData, forType: .png)
+        }
+        if imageData.pasteBuddyIsTIFF {
+            return pasteboard.setData(imageData, forType: .tiff)
+        }
+        guard let png = pngData(from: imageData) else { return false }
+        return pasteboard.setData(png, forType: .png)
+    }
+
+    nonisolated private static func pngData(from imageData: Data) -> Data? {
+        if imageData.pasteBuddyIsPNG {
+            return imageData
+        }
+        return NSImage(data: imageData)?.pasteBuddyPNGData()
     }
 
     private static func registerHydratedDataRepresentation(
