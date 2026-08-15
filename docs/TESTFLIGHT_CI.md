@@ -1,6 +1,9 @@
 # TestFlight CI
 
-Pushing to `main` runs `.github/workflows/testflight.yml`.
+`.github/workflows/testflight.yml` is manual-only. It has no `pull_request` or
+push trigger, so PR updates and ordinary pushes never start an App Store build.
+`script/push_testflight.sh` performs the local verification, pushes the
+approved `main` commit, and explicitly dispatches the workflow for release.
 
 The workflow runs on GitHub's `macos-26` image so archives are built with Xcode 26 and the iOS 26 SDK required by App Store Connect.
 
