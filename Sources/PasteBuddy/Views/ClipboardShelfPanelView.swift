@@ -136,6 +136,7 @@ struct ClipboardShelfPanelView: View {
     @State private var timestampReference = Date()
     @State private var shelfScope: PasteScope = .history
     @State private var pinnedState: Bool?
+    @State private var showingAISetup = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -151,6 +152,9 @@ struct ClipboardShelfPanelView: View {
         .clipped()
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
+        .sheet(isPresented: $showingAISetup) {
+            AISearchSetupSheet(store: store)
+        }
         .onAppear {
             shelfScope = store.selectedScope
             refreshShelfItems()
@@ -168,6 +172,12 @@ struct ClipboardShelfPanelView: View {
             refreshShelfItems()
         }
         .onChange(of: visibleActiveFilterSummaries.count) {
+            Task { @MainActor in
+                await Task.yield()
+                onLayoutChange()
+            }
+        }
+        .onChange(of: semanticToolbarStatusCount) {
             Task { @MainActor in
                 await Task.yield()
                 onLayoutChange()
@@ -317,13 +327,13 @@ struct ClipboardShelfPanelView: View {
             .animation(pasteSearchAnimation, value: store.sourceAppFilter)
             .animation(pasteSearchAnimation, value: selectedCount)
 
-            if !visibleActiveFilterSummaries.isEmpty {
+            if activeToolbarStatusCount > 0 {
                 activeFilterStrip
                     .frame(height: ClipboardShelfMetrics.activeFilterHeight)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(pasteSearchAnimation, value: visibleActiveFilterSummaries.count)
+        .animation(pasteSearchAnimation, value: activeToolbarStatusCount)
     }
 
     private var searchControl: some View {
@@ -375,6 +385,31 @@ struct ClipboardShelfPanelView: View {
                 .accessibilityLabel(localized("action.clear_search"))
                 .transition(.scale(scale: 0.86).combined(with: .opacity))
             }
+
+            Button {
+                if store.snapshot.semanticIndex.isEnabled && store.canRunConfiguredAISource {
+                    Task { @MainActor in
+                        await store.runSemanticSearch(scope: shelfScope)
+                        refreshShelfItems()
+                    }
+                } else {
+                    showingAISetup = true
+                }
+            } label: {
+                if store.semanticSearchState == .loading {
+                    ProgressView().controlSize(.small)
+                } else if case .failed = store.semanticSearchState {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                } else {
+                    Image(systemName: "sparkles")
+                }
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .disabled(!hasSearchText)
+            .help(localized("action.ai_search"))
+            .accessibilityLabel(localized("action.ai_search"))
         }
         .padding(.leading, 12)
         .padding(.trailing, hasSearchText ? 8 : 12)
@@ -439,6 +474,19 @@ struct ClipboardShelfPanelView: View {
     private var visibleActiveFilterSummaries: [ClipboardFilterDescriptor] {
         store.activeFilterSummaries.filter { descriptor in
             !(descriptor.kind == .sourceApp && store.sourceAppFilter != nil)
+        }
+    }
+
+    private var activeToolbarStatusCount: Int {
+        visibleActiveFilterSummaries.count + semanticToolbarStatusCount
+    }
+
+    private var semanticToolbarStatusCount: Int {
+        switch store.semanticSearchState {
+        case .applied(_) where store.semanticSearchScope == shelfScope: return 1
+        case .failed: return 1
+        case .applied(_): return 0
+        case .idle, .loading: return 0
         }
     }
 
@@ -599,6 +647,43 @@ struct ClipboardShelfPanelView: View {
                     .background(.quaternary, in: Capsule())
                     .help(localized("action.remove_clipboard_filter"))
                 }
+
+                if case .applied = store.semanticSearchState,
+                   store.semanticSearchScope == shelfScope {
+                    Button {
+                        store.invalidateSemanticSearch()
+                        refreshShelfItems()
+                    } label: {
+                        Label("label.ai_results_applied", systemImage: "sparkles")
+                            .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+                    .help(localized("action.return_to_standard_search"))
+                }
+
+                if case .failed(let message) = store.semanticSearchState {
+                    Button {
+                        if store.canRunConfiguredAISource {
+                            Task { @MainActor in
+                                await store.runSemanticSearch(scope: shelfScope)
+                                refreshShelfItems()
+                            }
+                        } else {
+                            showingAISetup = true
+                        }
+                    } label: {
+                        Label("label.ai_search_failed", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+                    .help(message)
+                }
             }
             .padding(.horizontal, 2)
         }
@@ -725,6 +810,11 @@ struct ClipboardShelfPanelView: View {
                                 await store.hydratedItem(for: item)
                             )
                         }
+                    },
+                    isExcludedFromAISearch: store.isExcludedFromSemanticIndex(item.id),
+                    onToggleAISearchIndex: {
+                        store.toggleSemanticIndexExclusion(for: item)
+                        refreshShelfItems()
                     },
                     onDelete: {
                         store.removeItem(item.id)
@@ -1262,6 +1352,8 @@ private struct ClipboardShelfCard: View {
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
     let onScreenPin: () -> Void
+    let isExcludedFromAISearch: Bool
+    let onToggleAISearchIndex: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -1325,6 +1417,9 @@ private struct ClipboardShelfCard: View {
                         onPin(pinboard.id)
                     }
                 }
+            }
+            Button(localized(isExcludedFromAISearch ? "action.add_to_ai_search" : "action.remove_from_ai_search")) {
+                onToggleAISearchIndex()
             }
             Button("action.delete", role: .destructive) {
                 onDelete()

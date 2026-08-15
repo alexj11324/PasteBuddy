@@ -39,6 +39,7 @@ struct ClipboardSidePanelView: View {
     @State private var previewRequestID: UUID?
     @State private var pinnedState: Bool?
     @State private var timestampReference = Date()
+    @State private var showingAISetup = false
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -51,6 +52,9 @@ struct ClipboardSidePanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .pasteBuddyBottomSheetSurface(cornerRadius: 28, showsStroke: false)
         .background(Color.clear)
+        .sheet(isPresented: $showingAISetup) {
+            AISearchSetupSheet(store: store)
+        }
         .onAppear {
             sideScope = store.selectedScope
             refreshSideItems()
@@ -202,6 +206,30 @@ struct ClipboardSidePanelView: View {
                 .buttonStyle(.plain)
                 .help(localized("action.clear_search"))
             }
+
+            Button {
+                if store.snapshot.semanticIndex.isEnabled && store.canRunConfiguredAISource {
+                    Task { @MainActor in
+                        await store.runSemanticSearch(scope: sideScope)
+                        refreshSideItems()
+                    }
+                } else {
+                    showingAISetup = true
+                }
+            } label: {
+                if store.semanticSearchState == .loading {
+                    ProgressView().controlSize(.small)
+                } else if case .failed = store.semanticSearchState {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                } else {
+                    Image(systemName: "sparkles")
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasSearchText)
+            .help(localized("action.ai_search"))
+            .accessibilityLabel(localized("action.ai_search"))
         }
         .padding(.leading, 12)
         .padding(.trailing, hasSearchText ? 8 : 12)
@@ -239,6 +267,39 @@ struct ClipboardSidePanelView: View {
                 accessibilityLabel: localized("label.clipboard_collections"),
                 onReorder: reorderCollection
             )
+
+            if case .applied = store.semanticSearchState,
+               store.semanticSearchScope == sideScope {
+                Button {
+                    store.invalidateSemanticSearch()
+                    refreshSideItems()
+                } label: {
+                    Label("label.ai_results_applied", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .help(localized("action.return_to_standard_search"))
+            }
+
+            if case .failed(let message) = store.semanticSearchState {
+                Button {
+                    if store.canRunConfiguredAISource {
+                        Task { @MainActor in
+                            await store.runSemanticSearch(scope: sideScope)
+                            refreshSideItems()
+                        }
+                    } else {
+                        showingAISetup = true
+                    }
+                } label: {
+                    Label("label.ai_search_failed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .help(message)
+            }
 
             Button {
                 createNamedPinboard()
@@ -370,6 +431,11 @@ struct ClipboardSidePanelView: View {
                                         await store.hydratedItem(for: item)
                                     )
                                 }
+                            },
+                            isExcludedFromAISearch: store.isExcludedFromSemanticIndex(item.id),
+                            onToggleAISearchIndex: {
+                                store.toggleSemanticIndexExclusion(for: item)
+                                refreshSideItems()
                             },
                             onDelete: {
                                 store.removeItem(item.id)
@@ -842,6 +908,8 @@ private struct ClipboardSidePanelListRow: View {
     let onCopy: (PasteFormat) -> Void
     let onPin: (UUID) -> Void
     let onScreenPin: () -> Void
+    let isExcludedFromAISearch: Bool
+    let onToggleAISearchIndex: () -> Void
     let onDelete: () -> Void
     let pinboards: [Pinboard]
 
@@ -916,6 +984,13 @@ private struct ClipboardSidePanelListRow: View {
                         onPin(pinboard.id)
                     }
                 }
+            }
+            Button(
+                isExcludedFromAISearch
+                    ? LocalizedStringKey("action.add_to_ai_search")
+                    : LocalizedStringKey("action.remove_from_ai_search")
+            ) {
+                onToggleAISearchIndex()
             }
             Button("action.delete", role: .destructive) {
                 onDelete()

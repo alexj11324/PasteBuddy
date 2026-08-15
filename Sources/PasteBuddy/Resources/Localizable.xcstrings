@@ -1,6 +1,261 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "action.choose_ai_plan": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Choose AI Plan" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择 AI 套餐" } } } },
+    "action.configure_ai_search": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Configure AI Search" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "配置 AI 搜索" } } } },
+    "action.current_plan": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Current Plan" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "当前套餐" } } } },
+    "action.delete_api_key": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Delete API Key" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除 API 密钥" } } } },
+    "action.enable_ai_search": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Enable AI Search" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "启用 AI 搜索" } } } },
+    "action.manage_ai_plan": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Manage AI Plan" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "管理 AI 套餐" } } } },
+    "action.manage_app_store_subscription": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Manage App Store Subscription" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "管理 App Store 订阅" } } } },
+    "action.reindex_and_continue": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Reindex and Continue" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "重新索引并继续" } } } },
+    "action.return_to_standard_search": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Return to Standard Search" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "返回普通搜索" } } } },
+    "action.subscribe": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Subscribe" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅" } } } },
+    "action.test_and_save": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Test and Save" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "测试并保存" } } } },
+    "label.advanced_settings": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Advanced Settings" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "高级设置" } } } },
+    "label.ai_access": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI Access" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 使用权限" } } } },
+    "label.ai_index_progress": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI index progress" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 索引进度" } } } },
+    "label.ai_inference_source": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI Provider" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 服务来源" } } } },
+    "label.ai_plans": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI Search Plans" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索套餐" } } } },
+    "label.ai_provider": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Provider" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "服务商" } } } },
+    "label.ai_results_applied": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI Results" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 结果" } } } },
+    "label.ai_search_failed": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI Search Failed" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索失败" } } } },
+    "label.api_key": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "API Key" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "API 密钥" } } } },
+    "label.base_url": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Base URL" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "基础 URL" } } } },
+    "label.bring_your_own_key": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Bring Your Own Key" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "使用自己的密钥" } } } },
+    "label.choose_ai_plan": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Choose an AI Plan" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择 AI 套餐" } } } },
+    "label.confirm_ai_reindex": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Rebuild the Local AI Index?" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "重建本地 AI 索引？" } } } },
+    "label.configure_byok": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Configure Your API" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "配置你的 API" } } } },
+    "label.embedding_model": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Embedding Model" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "向量模型" } } } },
+    "label.multimodal_model": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Multimodal Model" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "多模态模型" } } } },
+    "label.organization_id": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Organization ID" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "组织 ID" } } } },
+    "label.pastebuddy_cloud": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "PasteBuddy Cloud" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "PasteBuddy 云端" } } } },
+    "label.plan_byok_annual": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "BYOK Annual" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "BYOK 年付" } } } },
+    "label.plan_cloud_annual": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Cloud Annual" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "云端年付" } } } },
+    "label.plan_cloud_monthly": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Cloud Monthly" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "云端月付" } } } },
+    "label.plan_free": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Free" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "免费" } } } },
+    "label.plan_free_trial": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Free Trial" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "免费试用" } } } },
+    "label.plan_team": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Team" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "团队" } } } },
+    "label.project_id": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Project ID" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "项目 ID" } } } },
+    "label.provider_gemini": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Gemini" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "Gemini 服务" } } } },
+    "label.provider_openai": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "OpenAI" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "OpenAI 服务" } } } },
+    "label.provider_openai_compatible": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "OpenAI-compatible" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "OpenAI 兼容服务" } } } },
+    "message.ai_byok_configuration_invalid": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "The BYOK configuration is incomplete." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "BYOK 配置不完整。" } } } },
+    "message.ai_byok_connection_failed": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "The custom AI provider request failed." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "自定义 AI 服务请求失败。" } } } },
+    "message.ai_byok_privacy_boundary": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Your API key stays in this device's Keychain. Clipboard content goes directly to the provider you configure. Memories and embeddings remain local." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "API 密钥仅保存在本机钥匙串中。剪贴板内容会直接发送给你配置的服务商；记忆和向量仍保存在本地。" } } } },
+    "message.ai_byok_source_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Use your own OpenAI, Gemini, or OpenAI-compatible API. The key is stored only in this device's Keychain." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "使用你自己的 OpenAI、Gemini 或 OpenAI 兼容 API；密钥只保存在本机钥匙串中。" } } } },
+    "message.ai_cloud_source_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "PasteBuddy sends only the item being indexed or the current query for stateless processing. The server does not store memories." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "PasteBuddy 只为无状态处理发送当前索引项目或查询；服务器不保存记忆。" } } } },
+    "message.ai_connection_succeeded": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Connection succeeded. The API key was saved to this device's Keychain." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "连接成功，API 密钥已保存到本机钥匙串。" } } } },
+    "message.ai_plan_comparison": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "BYOK Annual unlocks your own providers. Cloud Monthly and Cloud Annual include both PasteBuddy Cloud and BYOK. Every plan is a recurring subscription." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "BYOK 年付可使用自有服务商；云端月付和年付同时包含 PasteBuddy 云端与 BYOK。所有套餐均为自动续订订阅。" } } } },
+    "message.ai_provider_configuration_required": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Choose an available AI provider and finish its configuration first." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "请先选择可用的 AI 服务并完成配置。" } } } },
+    "message.ai_products_unavailable": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI subscription products are not available from the App Store right now. Try again later or restore purchases." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "当前无法从 App Store 获取 AI 订阅产品。请稍后重试或恢复购买。" } } } },
+    "message.ai_reindex_required": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Changing the provider or models requires rebuilding the derived local index. Your original clipboard history is not changed." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "更换服务商或模型需要重建本地派生索引，不会修改原始剪贴板历史。" } } } },
+    "message.ai_setup_summary": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Find what you remember across your clipboard history. The searchable index always stays on this Mac." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按你记得的内容查找剪贴板历史；可搜索索引始终保存在这台 Mac 上。" } } } },
+    "message.ai_subscription_expiry_boundary": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI Search locks as soon as the subscription or verified introductory trial expires. Your local index remains available for deletion." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅或经 App Store 验证的优惠试用一到期，AI 搜索会立即锁定；本地索引仍可删除。" } } } },
+    "message.byok_annual_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Annual BYOK access; provider usage is billed by your provider." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按年解锁 BYOK；模型调用费用由服务商另行收取。" } } } },
+    "message.byok_annual_option_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Annual subscription for AI Search using your own provider keys." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按年订阅 AI 搜索并使用你自己的服务商密钥。" } } } },
+    "message.byok_annual_unlock": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Unlocks BYOK while the subscription remains active." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅有效期间解锁 BYOK。" } } } },
+    "message.ai_trial_canceled_outcome": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Canceled trials stop granting AI access; users can still activate a BYOK or Cloud subscription later." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "取消试用后将停止提供 AI 权限；之后仍可订阅 BYOK 或云端套餐。" } } } },
+    "message.ai_trial_end_outcome": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "When the trial ends, PasteBuddy keeps local data and locks AI inference unless an active BYOK or Cloud subscription is available." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "试用结束后，PasteBuddy 会保留本地数据并锁定 AI 推理，除非存在有效的 BYOK 或云端订阅。" } } } },
+    "message.cloud_annual_option_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Annual subscription with PasteBuddy Cloud inference and BYOK." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按年订阅 PasteBuddy 云端推理并包含 BYOK。" } } } },
+    "message.cloud_annual_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Annual PasteBuddy Cloud access, including BYOK." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按年使用 PasteBuddy 云端，同时包含 BYOK。" } } } },
+    "message.cloud_monthly_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Monthly PasteBuddy Cloud access, including BYOK." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按月使用 PasteBuddy 云端，同时包含 BYOK。" } } } },
+    "message.cloud_monthly_option_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Monthly subscription with PasteBuddy Cloud inference and BYOK." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按月订阅 PasteBuddy 云端推理并包含 BYOK。" } } } },
+    "message.cloud_subscription_unlock": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Unlocks Cloud and BYOK while the subscription remains active." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅有效期间解锁云端和 BYOK。" } } } },
+    "message.team_purchase_positioning": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Team is a business plan distinct from personal BYOK and Cloud subscriptions, with seat billing and admin-visible license state." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "团队版是独立于个人 BYOK 和云端订阅的商业套餐，提供席位计费和管理员可见的授权状态。" } } } },
+    "state.testing_connection": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Testing connection…" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在测试连接…" } } } },
+    "mcp.semantic_search_history": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Semantic Search History" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "语义搜索历史" } }
+      }
+    },
+    "message.ai_gateway_http_error": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AI gateway returned HTTP %d." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 网关返回了 HTTP %d。" } }
+      }
+    },
+    "message.ai_gateway_url_invalid": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The configured AI gateway URL is invalid." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "配置的 AI 网关 URL 无效。" } }
+      }
+    },
+    "action.add_to_ai_search": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add to AI Search" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "添加到 AI 搜索" } }
+      }
+    },
+    "action.ai_search": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AI Search" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索" } }
+      }
+    },
+    "action.delete_ai_index": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete AI Index" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除 AI 索引" } }
+      }
+    },
+    "action.rebuild_ai_index": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Rebuild AI Index" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重建 AI 索引" } }
+      }
+    },
+    "action.remove_from_ai_search": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove from AI Search" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "从 AI 搜索中移除" } }
+      }
+    },
+    "action.retry_ai_index": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Retry Failed Items" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重试失败项目" } }
+      }
+    },
+    "dialog.delete_ai_index": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete AI Index?" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除 AI 索引？" } }
+      }
+    },
+    "dialog.rebuild_ai_index": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Rebuild AI Index?" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重建 AI 索引？" } }
+      }
+    },
+    "message.ai_empty_source": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This item has no supported content to index." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此项目没有可供索引的受支持内容。" } }
+      }
+    },
+    "message.ai_entitlement_required": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "An active trial or purchase is required for AI Search." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索需要有效试用或已购买权益。" } }
+      }
+    },
+    "message.ai_index_not_found": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The AI index entry could not be found." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "找不到此 AI 索引条目。" } }
+      }
+    },
+    "message.ai_index_paused": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AI indexing is paused." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 索引已暂停。" } }
+      }
+    },
+    "message.ai_provider_response": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The AI service returned an invalid response." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 服务返回了无效响应。" } }
+      }
+    },
+    "message.ai_search_disabled": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AI Search is disabled." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索已关闭。" } }
+      }
+    },
+    "message.ai_sensitive_source": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "PasteBuddy will not send sensitive content for AI indexing." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "PasteBuddy 不会发送敏感内容用于 AI 索引。" } }
+      }
+    },
+    "label.ai_index_excluded": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Excluded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已排除" } }
+      }
+    },
+    "label.ai_index_failed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "失败" } }
+      }
+    },
+    "label.ai_index_queued": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Queued" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "排队中" } }
+      }
+    },
+    "label.ai_index_ready": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已就绪" } }
+      }
+    },
+    "label.ai_index_status": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local Index Status" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地索引状态" } }
+      }
+    },
+    "label.ai_search": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AI Search" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索" } }
+      }
+    },
+    "label.ai_search_controls": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AI Search" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AI 搜索" } }
+      }
+    },
+    "label.enable_ai_search": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Enable AI Search" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "启用 AI 搜索" } }
+      }
+    },
+    "label.pause_ai_indexing": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Pause Indexing" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "暂停索引" } }
+      }
+    },
+    "message.ai_search_processing_consent": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Send eligible clipboard content to the stateless AI service and keep the resulting search index on this device." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "将符合条件的剪贴板内容发送到无状态 AI 服务，并将生成的搜索索引保存在此设备上。" } }
+      }
+    },
+    "message.ai_search_local_storage_boundary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The server does not store clipboard history or index results. Images are analyzed directly by a multimodal model; OCR is not required." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "服务器不保存剪贴板历史或索引结果。图片由多模态模型直接分析，不依赖 OCR。" } }
+      }
+    },
+    "message.delete_ai_index_confirmation": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This permanently deletes all local AI search documents, embeddings, and queued work, then turns AI Search off. Clipboard history is not deleted." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "这会永久删除所有本地 AI 搜索文档、向量和排队任务，并关闭 AI 搜索。剪贴板历史不会被删除。" } }
+      }
+    },
+    "message.pause_ai_indexing_detail": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Keep existing AI search results available but stop sending new items for indexing." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "保留现有 AI 搜索结果，但停止发送新项目进行索引。" } }
+      }
+    },
+    "message.rebuild_ai_index_confirmation": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This deletes the current local AI index and queues all eligible clipboard items for indexing again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "这会删除当前本地 AI 索引，并重新排队所有符合条件的剪贴板项目。" } }
+      }
+    },
     "%@ Settings": {
       "localizations": {
         "en": {

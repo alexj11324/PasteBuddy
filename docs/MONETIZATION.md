@@ -1,68 +1,36 @@
-# Monetization And Team Plans
+# Monetization and App Store Entitlements
 
-PasteBuddy now has a local entitlement model for personal and team packaging.
-The model is stored with the local snapshot. When encrypted local storage is
-enabled, entitlement metadata is covered by the same AES-GCM envelope as the
-rest of the clipboard configuration.
+PasteBuddy uses verified App Store subscriptions without a separate PasteBuddy account system. Entitlement state is stored in the local snapshot; payment details and signed transaction payloads are not persisted by the app.
 
-## Implemented Locally
+## Product catalog
 
-- Free trial lifecycle: start date, end date, cancel state, and access
-  evaluation.
-- Personal plans: monthly, annual, lifetime, and family entitlement concepts.
-- Restore purchases state: not started, in progress, restored, and failed.
-- Cross-device entitlement flag for the same account.
-- StoreKit product configuration for monthly, annual, lifetime, and family
-  product IDs.
-- StoreKit 2 adapter for product lookup, purchase, transaction verification,
-  restore/sync, and verified entitlement mapping.
-- StoreKit transaction update observer for renewals, refunds, revocations, and
-  family-sharing entitlement changes.
-- Personal entitlement overview for Settings and tests. It turns raw
-  entitlement state into user-facing trial reminders, trial end behavior,
-  cross-device unlock copy, restore guidance for reinstall/device-change cases,
-  and purchase option summaries for monthly, annual, lifetime, and family.
-- Team plan metadata: team name, admin email, total seats, assigned seats,
-  per-seat price, currency, single invoice, managed distribution, and monthly
-  invoice calculation.
-- Team plan overview: purchase positioning distinct from personal plans,
-  admin-visible seat/license state, billing/distribution summaries, and shared
-  pinboard value propositions around ideas, links, files, images, snippets,
-  and staying in sync.
-- Settings UI for plan status, trial actions, trial end outcome, personal plan
-  options, same-account Mac/iPhone/iPad unlock behavior, restore state, restore
-  retry guidance, encrypted billing-safety copy, team seat metadata, team
-  onboarding copy, and admin-visible team plan summaries.
+- `com.pastebuddy.ai.byok.annual`: recurring annual subscription; unlocks BYOK only.
+- `com.pastebuddy.ai.cloud.monthly`: recurring monthly subscription; unlocks PasteBuddy Cloud and BYOK.
+- `com.pastebuddy.ai.cloud.annual`: recurring annual subscription; unlocks PasteBuddy Cloud and BYOK.
+- A verified introductory trial on a Cloud product unlocks Cloud and BYOK until its StoreKit transaction expires.
 
-## Security Boundary
+There is no lifetime, one-time, or locally simulated trial product. Personal subscription capabilities fail closed when the verified transaction is revoked, lacks an expiration date, or reaches its expiration date. Local clipboard history, semantic records, embeddings, and API keys are not treated as proof of entitlement.
 
-PasteBuddy does not store payment card data, App Store receipts, billing
-provider tokens, App Store signed transaction payloads, or invoice credentials.
-Only the verified entitlement state needed by the app is stored, and it is
-encrypted at rest when encrypted local storage is enabled.
+## Implemented flow
 
-The entitlement overview intentionally does not persist or display payment card
-data, App Store receipts, signed transaction payloads, billing tokens, or
-invoice credentials. Restore and purchase flows fail closed until StoreKit
-returns a verified active entitlement.
+- StoreKit 2 product lookup, purchase, restore/sync, verified transaction mapping, and transaction-update observation.
+- Contextual plan/setup sheet from Settings, Shelf, and Side Panel.
+- Current-plan state, plan switching, restore, and the system App Store subscription-management link.
+- Capability gates separated into BYOK access and Cloud access.
+- App Store signed app/entitlement transaction exchange for a short-lived Cloud gateway token.
+- No local activation helpers: production and tests apply verified entitlement objects through the StoreKit-facing store methods.
 
-## External Configuration Still Required
+## Security boundary
 
-- App Store Connect products for monthly, annual, lifetime, and family plans.
-- Signed App Store/TestFlight build wiring with the production product IDs and
-  purchase/restore UI.
-- App lifecycle wiring that starts `StoreTransactionUpdateObserver` at launch and
-  applies updates through `PasteBuddyStore.applyStoreEntitlementUpdate`.
-- Server-side receipt validation or App Store Server API handling if the product
-  needs account-level entitlement reconciliation across Mac, iPhone, and iPad.
-- Team billing backend for seat assignment, managed distribution, single
-  invoice issuance, tax/VAT handling, and admin identity.
-- Policies that map specific paid tiers to feature gates.
+PasteBuddy does not store payment card data, App Store receipts, signed transaction payloads, billing-provider tokens, or invoice credentials. The Cloud gateway verifies signed transactions for every short-lived token and accepts only the two Cloud product identifiers. BYOK Annual cannot authorize the gateway.
 
-## Integration Point
+API keys are separate from entitlement state and remain in the device-only Keychain. Losing subscription access does not silently delete local data or credentials; users retain explicit deletion controls, while all AI inference and semantic search remain locked.
 
-Use `AppleStoreKitEntitlementProvider` with `PasteBuddyStore.purchasePersonalPlan`
-and `PasteBuddyStore.restorePurchases` in the signed app target. Start
-`StoreTransactionUpdateObserver` with the same provider at app launch and apply
-each update through `PasteBuddyStore.applyStoreEntitlementUpdate`. Tests use
-fakes so the app can verify entitlement behavior without hitting the App Store.
+## External configuration still required
+
+- Create the three matching auto-renewable subscriptions in App Store Connect and place them in the intended subscription group.
+- Configure introductory offers only on Cloud products when the trial must unlock both capabilities.
+- Complete localized App Store product names, prices, review metadata, and purchase sandbox verification.
+- Deploy the stateless gateway at `ai.nebula-spaces.com`, sourcing runtime secrets from Google Secret Manager project `general-secrets-store`.
+
+The legacy Team metadata remains separate from this personal AI subscription catalog and is not an App Store Cloud-gateway entitlement.

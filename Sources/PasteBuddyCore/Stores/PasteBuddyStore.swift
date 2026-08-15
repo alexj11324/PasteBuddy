@@ -50,6 +50,11 @@ public final class PasteBuddyStore {
     public private(set) var dataRevision: Int
     public private(set) var queryRevision: Int
     public private(set) var repositorySyncedDataRevision: Int?
+    public private(set) var semanticIndexStatistics: SemanticIndexStatistics
+    public private(set) var semanticSearchState: SemanticSearchState
+    public private(set) var semanticSearchHits: [SemanticSearchHit]
+    public private(set) var semanticSearchScope: PasteScope?
+    public private(set) var aiProviderConnectionState: AIProviderConnectionState
     public var isHistoryQueryTransitioning: Bool {
         clipboardRepository != nil
             && isRepositorySyncInFlight
@@ -60,6 +65,8 @@ public final class PasteBuddyStore {
     private let historyUnlockAuthenticator: any HistoryUnlockAuthenticating
     @ObservationIgnored private let persistenceActor: SnapshotPersistenceActor?
     @ObservationIgnored private let clipboardRepository: ClipboardItemRepository?
+    @ObservationIgnored private let semanticIndexRepository: SemanticIndexRepository?
+    @ObservationIgnored private let aiCredentialStore: any AIProviderCredentialStoring
     @ObservationIgnored private let repositorySyncActor: ClipboardRepositorySyncActor?
     @ObservationIgnored private let defaultPersistenceInitializationErrorMessage: String?
     @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
@@ -69,6 +76,9 @@ public final class PasteBuddyStore {
     @ObservationIgnored private var dedupeIndex: [PasteBuddyDedupeKey: UUID] = [:]
     @ObservationIgnored private var linkPreviewMetadataRequests: Set<UUID> = []
     @ObservationIgnored private var completedLinkPreviewMetadataRequests: Set<UUID> = []
+    @ObservationIgnored private var semanticSearchGeneration = 0
+    @ObservationIgnored private var semanticTokenProvider: AppStoreSemanticGatewayTokenProvider?
+    @ObservationIgnored private var semanticTokenProviderBaseURL: URL?
     /// Fired after link-preview enrichment persists richer metadata, so hosts
     /// can forward the upgraded item to peers that cannot fetch it themselves.
     @ObservationIgnored public var onLinkPreviewMetadataEnriched: (@MainActor (ClipboardItem) -> Void)?
@@ -77,6 +87,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored public var onMCPServerConfigurationChanged: (@MainActor (Bool) -> Void)?
     @ObservationIgnored public var onMCPAccessRevoked: (@MainActor () -> Void)?
     @ObservationIgnored var beforeRepositorySyncCommitForTesting: (() -> Void)?
+    @ObservationIgnored var onSemanticIndexQueueDrainForTesting: (() -> Void)?
 
     private static let defaultHistoryPageLimit = 100
     private static let defaultSaveDebounceNanoseconds: UInt64 = 350_000_000
@@ -99,6 +110,10 @@ public final class PasteBuddyStore {
     }
 
     private func bumpQueryRevision() {
+        semanticSearchGeneration &+= 1
+        semanticSearchState = .idle
+        semanticSearchHits = []
+        semanticSearchScope = nil
         queryRevision &+= 1
         historyQueryErrorMessage = nil
         bumpPresentationRevision()
@@ -107,6 +122,8 @@ public final class PasteBuddyStore {
     public init(
         diskStore: EncryptedSnapshotStore? = nil,
         clipboardRepository: ClipboardItemRepository? = nil,
+        semanticIndexRepository: SemanticIndexRepository? = nil,
+        aiCredentialStore: any AIProviderCredentialStoring = KeychainAIProviderCredentialStore(),
         saveDebounceNanoseconds: UInt64? = nil,
         historyUnlockAuthenticator: any HistoryUnlockAuthenticating = SystemHistoryUnlockAuthenticator()
     ) {
@@ -144,6 +161,9 @@ public final class PasteBuddyStore {
         self.historyUnlockAuthenticator = historyUnlockAuthenticator
         self.persistenceActor = resolvedDiskStore.map(SnapshotPersistenceActor.init(diskStore:))
         self.clipboardRepository = resolvedClipboardRepository
+        self.semanticIndexRepository = semanticIndexRepository
+            ?? resolvedClipboardRepository.map { SemanticIndexRepository(database: $0.underlyingDatabase) }
+        self.aiCredentialStore = aiCredentialStore
         self.repositorySyncActor = resolvedClipboardRepository.map(ClipboardRepositorySyncActor.init(repository:))
         self.defaultPersistenceInitializationErrorMessage = defaultPersistenceInitializationErrorMessage
         self.saveDebounceNanoseconds = saveDebounceNanoseconds ?? (usesDefaultDiskStore ? Self.defaultSaveDebounceNanoseconds : nil)
@@ -169,6 +189,13 @@ public final class PasteBuddyStore {
         self.dataRevision = 0
         self.queryRevision = 0
         self.repositorySyncedDataRevision = nil
+        self.semanticIndexStatistics = SemanticIndexStatistics()
+        self.semanticSearchState = .idle
+        self.semanticSearchHits = []
+        self.semanticSearchScope = nil
+        self.aiProviderConnectionState = .idle
+        self.semanticTokenProvider = nil
+        self.semanticTokenProviderBaseURL = nil
     }
 
     public func load() {
@@ -211,6 +238,7 @@ public final class PasteBuddyStore {
             syncClipboardRepositoryFromSnapshot()
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            refreshSemanticIndexStatistics()
             if repairedShortcutConfiguration {
                 save()
             }
@@ -267,8 +295,11 @@ public final class PasteBuddyStore {
                 let snapshotToSync = snapshot
                 let dataRevisionToSync = dataRevision
                 isRepositorySyncInFlight = true
-                try await repositorySyncActor.synchronize(with: snapshotToSync)
+                let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSync)
                 beforeRepositorySyncCommitForTesting?()
+                if syncSummary.enqueuedSemanticItemCount > 0 {
+                    drainSemanticIndexQueue()
+                }
                 guard dataRevision == dataRevisionToSync else {
                     isRepositorySyncInFlight = false
                     return
@@ -277,6 +308,7 @@ public final class PasteBuddyStore {
             }
             selectedItemID = filteredItems.first?.id
             selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            refreshSemanticIndexStatistics()
             if repairedShortcutConfiguration {
                 save()
             }
@@ -336,8 +368,11 @@ public final class PasteBuddyStore {
         }.value
         do {
             if let repositorySyncActor {
-                try await repositorySyncActor.synchronize(with: snapshotToSave)
+                let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSave)
                 beforeRepositorySyncCommitForTesting?()
+                if syncSummary.enqueuedSemanticItemCount > 0 {
+                    drainSemanticIndexQueue()
+                }
                 guard dataRevision == dataRevisionToSync else {
                     isRepositorySyncInFlight = false
                     return
@@ -404,11 +439,16 @@ public final class PasteBuddyStore {
             }.value
             guard !Task.isCancelled else { return }
             do {
+                var shouldDrainSemanticIndex = false
                 if let repositorySyncActor {
-                    try await repositorySyncActor.synchronize(with: snapshotToSave)
+                    let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSave)
+                    shouldDrainSemanticIndex = syncSummary.enqueuedSemanticItemCount > 0
                 }
                 try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
                 await MainActor.run {
+                    if shouldDrainSemanticIndex {
+                        self.drainSemanticIndexQueue()
+                    }
                     guard self.dataRevision == dataRevisionToSync else { return }
                     self.markClipboardRepositorySynced(to: dataRevisionToSync)
                     self.pendingSaveTask = nil
@@ -459,6 +499,10 @@ public final class PasteBuddyStore {
         guard !isHistoryAccessLocked else { return [] }
         let offset = max(offset, 0)
         let limit = max(limit, 1)
+        if case .applied = semanticSearchState, scope == semanticSearchScope {
+            let itemByID = cachedItemByID()
+            return Array(semanticSearchHits.dropFirst(offset).prefix(limit)).compactMap { itemByID[$0.itemID] }
+        }
 
         switch scope {
         case .history:
@@ -494,7 +538,11 @@ public final class PasteBuddyStore {
     }
 
     public func filteredItemCount(for scope: PasteScope) -> Int {
-        makeFilteredItemCount(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
+        guard !isHistoryAccessLocked else { return 0 }
+        if case .applied = semanticSearchState, scope == semanticSearchScope {
+            return semanticSearchHits.count
+        }
+        return makeFilteredItemCount(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
     }
 
     public var mainListItemsSnapshot: [ClipboardItem] {
@@ -511,6 +559,10 @@ public final class PasteBuddyStore {
 
     private func makeFilteredItems(scope: PasteScope, isHistoryAccessLocked: Bool) -> [ClipboardItem] {
         guard !isHistoryAccessLocked else { return [] }
+        if case .applied = semanticSearchState, scope == semanticSearchScope {
+            let itemByID = cachedItemByID()
+            return semanticSearchHits.compactMap { itemByID[$0.itemID] }
+        }
         let scopedItems: [ClipboardItem]
         switch scope {
         case .history:
@@ -924,6 +976,24 @@ public final class PasteBuddyStore {
 
     public var hasFullProductAccess: Bool {
         snapshot.entitlement.hasFullAccess()
+    }
+
+    public var hasBYOKAccess: Bool { snapshot.entitlement.hasBYOKAccess() }
+    public var hasCloudAIAccess: Bool { snapshot.entitlement.hasCloudAccess() }
+    public var hasConfiguredBYOKKey: Bool {
+        hasBYOKAPIKey(for: snapshot.semanticIndex.byok.preset)
+    }
+    public func hasBYOKAPIKey(for provider: BYOKProviderPreset) -> Bool {
+        ((try? aiCredentialStore.apiKey(for: provider)) ?? nil)?.isEmpty == false
+    }
+    public var hasAnyConfiguredBYOKKey: Bool {
+        BYOKProviderPreset.allCases.contains { hasBYOKAPIKey(for: $0) }
+    }
+    public var canRunConfiguredAISource: Bool {
+        switch snapshot.semanticIndex.inferenceSource {
+        case .pasteBuddyCloud: hasCloudAIAccess
+        case .byok: hasBYOKAccess && hasConfiguredBYOKKey
+        }
     }
 
     public var isHistoryAccessLocked: Bool {
@@ -1786,53 +1856,6 @@ public final class PasteBuddyStore {
         save()
     }
 
-    public func startFreeTrial(days: Int = 14, now: Date = Date()) {
-        let trialLength = max(days, 1)
-        snapshot.entitlement = EntitlementConfiguration(
-            plan: .trial,
-            status: .trialing,
-            trialStartedAt: now,
-            trialEndsAt: Calendar.current.date(byAdding: .day, value: trialLength, to: now) ?? now.addingTimeInterval(TimeInterval(trialLength * 24 * 60 * 60)),
-            unlocksAllDevicesForAccount: true,
-            restoreState: snapshot.entitlement.restoreState
-        )
-        save()
-    }
-
-    public func cancelFreeTrial(now: Date = Date()) {
-        guard snapshot.entitlement.plan == .trial else { return }
-        snapshot.entitlement.status = .canceled
-        snapshot.entitlement.trialCanceledAt = now
-        save()
-    }
-
-    public func activatePersonalPlan(
-        _ plan: ProductAccessPlan,
-        purchasedAt: Date = Date(),
-        currentPeriodEndsAt: Date? = nil,
-        expiresAt: Date? = nil,
-        familySharingEnabled: Bool = false
-    ) {
-        guard plan.isPersonalPaidPlan else {
-            lastErrorMessage = "Personal purchases require monthly, annual, lifetime, or family plan."
-            return
-        }
-
-        let resolvedFamilySharing = familySharingEnabled || plan == .family
-        snapshot.entitlement = EntitlementConfiguration(
-            plan: plan,
-            status: .active,
-            purchasedAt: purchasedAt,
-            currentPeriodEndsAt: currentPeriodEndsAt,
-            expiresAt: expiresAt ?? currentPeriodEndsAt,
-            isFamilySharingEnabled: resolvedFamilySharing,
-            unlocksAllDevicesForAccount: true,
-            restoreState: snapshot.entitlement.restoreState
-        )
-        lastErrorMessage = nil
-        save()
-    }
-
     public func markEntitlementExpired(at date: Date = Date()) {
         snapshot.entitlement.status = .expired
         snapshot.entitlement.expiresAt = date
@@ -1873,6 +1896,7 @@ public final class PasteBuddyStore {
             case .purchased(let entitlement):
                 snapshot.entitlement = entitlement
                 lastErrorMessage = nil
+                handleAIEntitlementChange()
                 save()
             case .pending:
                 lastErrorMessage = "Purchase is pending App Store approval."
@@ -1906,6 +1930,7 @@ public final class PasteBuddyStore {
             snapshot.entitlement = entitlement
             snapshot.entitlement.restoreState = .restored(date)
             lastErrorMessage = nil
+            handleAIEntitlementChange()
             save()
             return snapshot.entitlement
         } catch {
@@ -1933,6 +1958,7 @@ public final class PasteBuddyStore {
         case .inactive, .trialing, .canceled:
             lastErrorMessage = nil
         }
+        handleAIEntitlementChange()
         save()
     }
 
@@ -1944,7 +1970,23 @@ public final class PasteBuddyStore {
                 restoreState: snapshot.entitlement.restoreState
             )
             lastErrorMessage = nil
+            handleAIEntitlementChange()
             save()
+        }
+    }
+
+    private func handleAIEntitlementChange() {
+        if hasBYOKAccess,
+           !hasCloudAIAccess,
+           snapshot.semanticIndex.inferenceSource == .pasteBuddyCloud {
+            setSemanticInferenceSource(.byok)
+        }
+        guard canRunConfiguredAISource else {
+            invalidateSemanticSearch()
+            return
+        }
+        if snapshot.semanticIndex.isEnabled {
+            drainSemanticIndexQueue()
         }
     }
 
@@ -2074,6 +2116,416 @@ public final class PasteBuddyStore {
         snapshot.shortcuts = ShortcutConfiguration()
         onShortcutConfigurationChanged?(snapshot.shortcuts)
         save()
+    }
+
+    public func setSemanticIndexEnabled(_ isEnabled: Bool) {
+        guard !isEnabled || canRunConfiguredAISource else {
+            lastErrorMessage = hasBYOKAccess
+                ? SemanticIndexError.providerConfigurationRequired.localizedDescription
+                : SemanticIndexError.entitlementRequired.localizedDescription
+            return
+        }
+        snapshot.semanticIndex.isEnabled = isEnabled
+        snapshot.semanticIndex.isPaused = false
+        if isEnabled {
+            do {
+                try semanticIndexRepository?.enqueueBackfill()
+                refreshSemanticIndexStatistics()
+                drainSemanticIndexQueue()
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+        } else {
+            invalidateSemanticSearch()
+        }
+        save()
+    }
+
+    public func setSemanticIndexPaused(_ isPaused: Bool) {
+        snapshot.semanticIndex.isPaused = isPaused && snapshot.semanticIndex.isEnabled
+        if !snapshot.semanticIndex.isPaused {
+            do {
+                try semanticIndexRepository?.enqueueBackfill()
+                refreshSemanticIndexStatistics()
+                drainSemanticIndexQueue()
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+        }
+        save()
+    }
+
+    public func setSemanticInferenceSource(_ source: SemanticInferenceSource) {
+        guard source == .byok ? hasBYOKAccess : hasCloudAIAccess else {
+            lastErrorMessage = SemanticIndexError.entitlementRequired.localizedDescription
+            return
+        }
+        guard snapshot.semanticIndex.inferenceSource != source else { return }
+        snapshot.semanticIndex.inferenceSource = source
+        invalidateSemanticSearch()
+        if snapshot.semanticIndex.isEnabled {
+            do {
+                try rebuildSemanticIndex()
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+        }
+        save()
+    }
+
+    public func testAndSaveBYOKConfiguration(
+        _ configuration: BYOKProviderConfiguration,
+        apiKey: String
+    ) async -> Bool {
+        aiProviderConnectionState = .testing
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveKey = !trimmedKey.isEmpty
+            ? trimmedKey
+            : ((try? aiCredentialStore.apiKey(for: configuration.preset)) ?? nil)
+        guard hasBYOKAccess else {
+            aiProviderConnectionState = .failed(SemanticIndexError.entitlementRequired.localizedDescription)
+            return false
+        }
+        guard let effectiveKey, !effectiveKey.isEmpty else {
+            aiProviderConnectionState = .failed(SemanticIndexError.providerConfigurationRequired.localizedDescription)
+            return false
+        }
+        do {
+            let providers = try Self.makeBYOKProviders(configuration: configuration, apiKey: effectiveKey)
+            _ = try await providers.embedding.embedQuery("PasteBuddy connection test")
+            let source = SemanticIndexSource(
+                itemID: UUID(), contentHash: "connection-test", capturedAt: Date(),
+                sourceApplicationName: "PasteBuddy", sourceBundleIdentifier: Bundle.main.bundleIdentifier,
+                contentType: .text, text: "A harmless provider connection test."
+            )
+            _ = try await providers.document.generate(from: source)
+            let shouldRebuild = Self.shouldRebuildSemanticIndexAfterSavingBYOK(
+                currentSource: snapshot.semanticIndex.inferenceSource,
+                currentConfiguration: snapshot.semanticIndex.byok,
+                savedConfiguration: configuration
+            )
+            if !trimmedKey.isEmpty {
+                try aiCredentialStore.saveAPIKey(trimmedKey, for: configuration.preset)
+            }
+            snapshot.semanticIndex.byok = configuration
+            snapshot.semanticIndex.inferenceSource = .byok
+            aiProviderConnectionState = .succeeded
+            save()
+            if shouldRebuild, snapshot.semanticIndex.isEnabled { try rebuildSemanticIndex() }
+            return true
+        } catch {
+            aiProviderConnectionState = .failed(error.localizedDescription)
+            lastErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    public func deleteBYOKAPIKey(for provider: BYOKProviderPreset? = nil) {
+        do {
+            let resolvedProvider = provider ?? snapshot.semanticIndex.byok.preset
+            try aiCredentialStore.deleteAPIKey(for: resolvedProvider)
+            aiProviderConnectionState = .idle
+            if resolvedProvider == snapshot.semanticIndex.byok.preset {
+                invalidateSemanticSearch()
+            }
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func refreshSemanticIndexStatistics() {
+        do {
+            semanticIndexStatistics = try semanticIndexRepository?.statistics() ?? SemanticIndexStatistics()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func isExcludedFromSemanticIndex(_ itemID: UUID) -> Bool {
+        (try? semanticIndexRepository?.isSuppressed(itemID: itemID)) ?? false
+    }
+
+    public func toggleSemanticIndexExclusion(for item: ClipboardItem) {
+        guard let semanticIndexRepository else { return }
+        do {
+            if try semanticIndexRepository.isSuppressed(itemID: item.id) {
+                try semanticIndexRepository.reindex(itemID: item.id, contentHash: item.searchDocument.contentHash)
+            } else {
+                try semanticIndexRepository.suppress(itemID: item.id)
+            }
+            refreshSemanticIndexStatistics()
+            invalidateSemanticSearch()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func retrySemanticIndexFailures() {
+        do {
+            try semanticIndexRepository?.retryFailures()
+            refreshSemanticIndexStatistics()
+            drainSemanticIndexQueue()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func rebuildSemanticIndex() throws {
+        guard let semanticIndexRepository else { return }
+        try semanticIndexRepository.resetForRebuild()
+        try semanticIndexRepository.enqueueBackfill()
+        refreshSemanticIndexStatistics()
+        invalidateSemanticSearch()
+        drainSemanticIndexQueue()
+    }
+
+    public func deleteAllSemanticIndexData() throws {
+        try semanticIndexRepository?.deleteAll()
+        snapshot.semanticIndex.isEnabled = false
+        snapshot.semanticIndex.isPaused = false
+        refreshSemanticIndexStatistics()
+        invalidateSemanticSearch()
+        save()
+    }
+
+    public func invalidateSemanticSearch() {
+        semanticSearchGeneration &+= 1
+        semanticSearchState = .idle
+        semanticSearchHits = []
+        semanticSearchScope = nil
+        presentationCache = PasteBuddyPresentationCache()
+        bumpPresentationRevision()
+    }
+
+    public func runSemanticSearch(
+        scope: PasteScope? = nil,
+        provider: (any SemanticEmbeddingProviding)? = nil
+    ) async {
+        let resolvedScope = scope ?? selectedScope
+        let query = resolvedSearchFilters().textQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        semanticSearchGeneration &+= 1
+        let generation = semanticSearchGeneration
+        semanticSearchState = .loading
+        semanticSearchHits = []
+        presentationCache = PasteBuddyPresentationCache()
+        bumpPresentationRevision()
+        do {
+            let hits = try await semanticSearch(query: query, scope: resolvedScope, limit: 100, provider: provider)
+            guard generation == semanticSearchGeneration,
+                  query == resolvedSearchFilters().textQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            semanticSearchHits = hits
+            semanticSearchScope = resolvedScope
+            semanticSearchState = .applied(query: query)
+            presentationCache = PasteBuddyPresentationCache()
+            bumpPresentationRevision()
+        } catch {
+            guard generation == semanticSearchGeneration else { return }
+            semanticSearchState = .failed(error.localizedDescription)
+            semanticSearchHits = []
+            semanticSearchScope = nil
+            presentationCache = PasteBuddyPresentationCache()
+            lastErrorMessage = error.localizedDescription
+            bumpPresentationRevision()
+        }
+    }
+
+    public func semanticSearch(
+        query: String,
+        scope: PasteScope? = nil,
+        limit: Int = 100,
+        respectCurrentFilters: Bool = true,
+        provider: (any SemanticEmbeddingProviding)? = nil,
+        allowedItemIDs: Set<UUID>? = nil
+    ) async throws -> [SemanticSearchHit] {
+        guard snapshot.semanticIndex.isEnabled else { throw SemanticIndexError.disabled }
+        guard canRunConfiguredAISource else { throw SemanticIndexError.entitlementRequired }
+        guard let semanticIndexRepository else { return [] }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let boundedQuery = String(trimmed.prefix(4_096))
+        let resolvedScope = scope ?? (respectCurrentFilters ? selectedScope : .history)
+        let request = SemanticSearchRequest(
+            query: boundedQuery,
+            contentType: respectCurrentFilters ? contentTypeFilter : nil,
+            sourceAppName: respectCurrentFilters ? resolvedSearchFilters().sourceAppName : nil,
+            deviceName: respectCurrentFilters ? deviceFilter : nil,
+            dateFilter: respectCurrentFilters ? dateFilter : .any,
+            pinboardID: {
+                if respectCurrentFilters, case .pinboard(let id) = resolvedScope { return id }
+                return nil
+            }(),
+            allowedItemIDs: allowedItemIDs,
+            limit: limit
+        )
+        let effectiveProvider: any SemanticEmbeddingProviding
+        if let provider {
+            effectiveProvider = provider
+        } else {
+            effectiveProvider = try semanticProviders().embedding
+        }
+        let providerIdentity: String = switch snapshot.semanticIndex.inferenceSource {
+        case .pasteBuddyCloud:
+            "cloud"
+        case .byok:
+            "byok:\(snapshot.semanticIndex.byok.preset.rawValue):\(snapshot.semanticIndex.byok.embeddingModel)"
+        }
+        let queryHash = Self.sha256Hex(Data("\(providerIdentity)\u{1f}\(boundedQuery.lowercased())".utf8))
+        let queryEmbedding: SemanticEmbedding
+        if let cached = try semanticIndexRepository.cachedQueryEmbedding(queryHash: queryHash) {
+            queryEmbedding = cached
+        } else {
+            queryEmbedding = try await effectiveProvider.embedQuery(boundedQuery)
+            try semanticIndexRepository.cacheQueryEmbedding(queryEmbedding, queryHash: queryHash)
+        }
+        var semantic = try await Task.detached(priority: .userInitiated) {
+            try semanticIndexRepository.semanticRankedItemIDs(
+                request: request,
+                queryEmbedding: queryEmbedding
+            )
+        }.value
+        var lexicalItems: [ClipboardItem]
+        if let allowedItemIDs {
+            lexicalItems = snapshot.items.filter {
+                allowedItemIDs.contains($0.id)
+                    && $0.matches(boundedQuery)
+                    && (!respectCurrentFilters || matchesStructuredFilters($0, sourceAppName: request.sourceAppName))
+            }
+        } else if let clipboardRepository {
+            lexicalItems = try clipboardRepository.fetchPage(ClipboardItemPageRequest(
+                searchQuery: boundedQuery,
+                contentType: request.contentType,
+                sourceAppName: request.sourceAppName,
+                deviceName: request.deviceName,
+                dateFilter: request.dateFilter,
+                pinboardID: request.pinboardID,
+                limit: min(max(limit, 1), 500)
+            ))
+        } else {
+            lexicalItems = snapshot.items.filter {
+                $0.matches(boundedQuery)
+                    && (!respectCurrentFilters || matchesStructuredFilters($0, sourceAppName: request.sourceAppName))
+            }
+        }
+        if respectCurrentFilters, resolvedScope == .pasteStack {
+            let allowed = Set(pasteStackItems.map(\.id))
+            lexicalItems.removeAll { !allowed.contains($0.id) }
+            semantic.removeAll { !allowed.contains($0.0) }
+        }
+        var lexicalIDs = lexicalItems.map(\.id)
+        var semanticLexicalIDs = try semanticIndexRepository.semanticLexicalItemIDs(request: request)
+        if respectCurrentFilters, resolvedScope == .pasteStack {
+            let allowed = Set(pasteStackItems.map(\.id))
+            semanticLexicalIDs.removeAll { !allowed.contains($0) }
+        }
+        var seenLexicalIDs = Set(lexicalIDs)
+        lexicalIDs.append(contentsOf: semanticLexicalIDs.filter { seenLexicalIDs.insert($0).inserted })
+        return Self.reciprocalRankFusion(lexicalIDs: lexicalIDs, semantic: semantic, limit: limit)
+    }
+
+    nonisolated private static func reciprocalRankFusion(
+        lexicalIDs: [UUID],
+        semantic: [(UUID, Double)],
+        limit: Int
+    ) -> [SemanticSearchHit] {
+        var values: [UUID: SemanticSearchHit] = [:]
+        for (offset, id) in lexicalIDs.enumerated() {
+            let score = 1.0 / Double(60 + offset + 1)
+            values[id] = SemanticSearchHit(itemID: id, fusedScore: score, lexicalRank: offset + 1)
+        }
+        for (offset, value) in semantic.enumerated() {
+            let score = 1.0 / Double(60 + offset + 1)
+            var hit = values[value.0] ?? SemanticSearchHit(itemID: value.0, fusedScore: 0)
+            hit.fusedScore += score
+            hit.semanticScore = value.1
+            values[value.0] = hit
+        }
+        return values.values.sorted {
+            if $0.fusedScore != $1.fusedScore { return $0.fusedScore > $1.fusedScore }
+            return ($0.semanticScore ?? -1) > ($1.semanticScore ?? -1)
+        }.prefix(min(max(limit, 1), 500)).map { $0 }
+    }
+
+    @discardableResult
+    public func processSemanticIndexBatch(limit: Int = 2) async -> Int {
+        guard snapshot.semanticIndex.isEnabled,
+              !snapshot.semanticIndex.isPaused,
+              canRunConfiguredAISource,
+              let semanticIndexRepository,
+              let clipboardRepository else { return 0 }
+        await flushPendingSave()
+        guard let providers = try? semanticProviders() else { return 0 }
+        let worker = SemanticIndexWorker(
+            semanticRepository: semanticIndexRepository,
+            clipboardRepository: clipboardRepository,
+            documentProvider: providers.document,
+            embeddingProvider: providers.embedding
+        )
+        let count = await worker.processNextBatch(privacy: snapshot.privacy, limit: limit)
+        refreshSemanticIndexStatistics()
+        return count
+    }
+
+    private func drainSemanticIndexQueue() {
+        onSemanticIndexQueueDrainForTesting?()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, await self.processSemanticIndexBatch(limit: 2) > 0 {}
+        }
+    }
+
+    private func semanticGatewayTokenProvider(for baseURL: URL) -> AppStoreSemanticGatewayTokenProvider {
+        if let semanticTokenProvider, semanticTokenProviderBaseURL == baseURL {
+            return semanticTokenProvider
+        }
+        let provider = AppStoreSemanticGatewayTokenProvider(baseURL: baseURL)
+        semanticTokenProvider = provider
+        semanticTokenProviderBaseURL = baseURL
+        return provider
+    }
+
+    private func semanticProviders() throws -> (
+        document: any SemanticDocumentGenerating,
+        embedding: any SemanticEmbeddingProviding
+    ) {
+        switch snapshot.semanticIndex.inferenceSource {
+        case .pasteBuddyCloud:
+            guard hasCloudAIAccess, let baseURL = URL(string: snapshot.semanticIndex.gatewayBaseURL) else {
+                throw SemanticIndexError.entitlementRequired
+            }
+            let provider = CloudSemanticIndexProvider(
+                baseURL: baseURL,
+                tokenProvider: semanticGatewayTokenProvider(for: baseURL)
+            )
+            return (provider, provider)
+        case .byok:
+            guard hasBYOKAccess,
+                  let key = try aiCredentialStore.apiKey(for: snapshot.semanticIndex.byok.preset),
+                  !key.isEmpty else { throw SemanticIndexError.entitlementRequired }
+            return try Self.makeBYOKProviders(configuration: snapshot.semanticIndex.byok, apiKey: key)
+        }
+    }
+
+    private nonisolated static func makeBYOKProviders(
+        configuration: BYOKProviderConfiguration,
+        apiKey: String
+    ) throws -> (document: any SemanticDocumentGenerating, embedding: any SemanticEmbeddingProviding) {
+        switch configuration.preset {
+        case .openAI, .openAICompatible:
+            let provider = OpenAICompatibleSemanticProvider(configuration: configuration, apiKey: apiKey)
+            return (provider, provider)
+        case .gemini:
+            let provider = GeminiSemanticProvider(configuration: configuration, apiKey: apiKey)
+            return (provider, provider)
+        }
+    }
+
+    nonisolated static func shouldRebuildSemanticIndexAfterSavingBYOK(
+        currentSource: SemanticInferenceSource,
+        currentConfiguration: BYOKProviderConfiguration,
+        savedConfiguration: BYOKProviderConfiguration
+    ) -> Bool {
+        currentSource != .byok || currentConfiguration != savedConfiguration
     }
 
     public func setMCPServerEnabled(_ isEnabled: Bool) {
@@ -2994,8 +3446,11 @@ public final class PasteBuddyStore {
         guard let clipboardRepository else { return true }
         isRepositorySyncInFlight = true
         do {
-            try clipboardRepository.synchronize(with: snapshot)
+            let syncSummary = try clipboardRepository.synchronize(with: snapshot)
             markClipboardRepositorySynced(to: dataRevision)
+            if syncSummary.enqueuedSemanticItemCount > 0 {
+                drainSemanticIndexQueue()
+            }
             return true
         } catch {
             isRepositorySyncInFlight = false
