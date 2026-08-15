@@ -274,55 +274,54 @@ struct ClipboardSidePanelView: View {
                 onReorder: reorderCollection
             )
 
-                if case .applied = store.semanticSearchState,
-                   store.semanticSearchScope == sideScope {
-                    Button {
-                        store.invalidateSemanticSearch()
-                        refreshSideItems()
-                    } label: {
-                        Label("label.ai_results_applied", systemImage: "sparkles")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .help(localized("action.return_to_standard_search"))
-                }
-
-                if case .failed(let message) = store.semanticSearchState {
-                    Button {
-                        if store.canRunConfiguredAISource {
-                            Task { @MainActor in
-                                await store.runSemanticSearch(scope: sideScope)
-                                refreshSideItems()
-                            }
-                        } else {
-                            showingAISetup = true
-                        }
-                    } label: {
-                        Label("label.ai_search_failed", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .help(message)
-                }
-
+            if case .applied = store.semanticSearchState,
+               store.semanticSearchScope == sideScope {
                 Button {
-                    createNamedPinboard()
+                    store.invalidateSemanticSearch()
+                    refreshSideItems()
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
+                    Label("label.ai_results_applied", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
                 }
-                .buttonStyle(.plain)
-                .labelStyle(.iconOnly)
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-                .help(localized("label.new_pinboard"))
-                .accessibilityLabel(localized("label.new_pinboard"))
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .help(localized("action.return_to_standard_search"))
             }
-            .padding(.vertical, 1)
+
+            if case .failed(let message) = store.semanticSearchState {
+                Button {
+                    if store.canRunConfiguredAISource {
+                        Task { @MainActor in
+                            await store.runSemanticSearch(scope: sideScope)
+                            refreshSideItems()
+                        }
+                    } else {
+                        showingAISetup = true
+                    }
+                } label: {
+                    Label("label.ai_search_failed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .help(message)
+            }
+
+            Button {
+                createNamedPinboard()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .help(localized("label.new_pinboard"))
+            .accessibilityLabel(localized("label.new_pinboard"))
         }
+        .padding(.vertical, 1)
     }
 
     private func collectionStripItem(
