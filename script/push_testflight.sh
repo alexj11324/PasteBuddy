@@ -25,9 +25,9 @@ usage() {
   cat <<USAGE
 Usage: script/push_testflight.sh [options]
 
-Runs local verification, pushes the current main HEAD, and waits for the
-GitHub Actions TestFlight upload workflow that submits the build to App Store
-Connect.
+Runs local verification, pushes the current main HEAD, manually dispatches the
+GitHub Actions TestFlight upload workflow, and waits for the upload that
+submits the build to App Store Connect.
 
 Options:
   --allow-dirty       Allow unrelated uncommitted files to remain in the worktree.
@@ -173,9 +173,11 @@ if [[ "${ahead:-0}" -gt 0 ]]; then
   log "Pushing $head_sha to $REMOTE/$BRANCH"
   git push "$REMOTE" "HEAD:$BRANCH"
 else
-  log "No unpushed commits; dispatching TestFlight workflow for $head_sha"
-  gh workflow run "$WORKFLOW" --ref "$BRANCH"
+  log "No unpushed commits; reusing $head_sha"
 fi
+
+log "Dispatching TestFlight workflow for $head_sha"
+gh workflow run "$WORKFLOW" --ref "$BRANCH"
 
 if [[ "$NO_WAIT" -eq 1 ]]; then
   log "Not waiting for TestFlight upload workflow"
