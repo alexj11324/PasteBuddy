@@ -20,7 +20,7 @@ case "$SIGNING_CHANNEL" in
 esac
 APP_NAME="${PASTEBUDDY_APP_NAME:-$DEFAULT_APP_NAME}"
 BUNDLE_ID="${PASTEBUDDY_BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
-MIN_SYSTEM_VERSION="14.5"
+MIN_SYSTEM_VERSION="26.0"
 MACOS_SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
 MACOS_SDK_VERSION="$(/usr/bin/xcrun --sdk macosx --show-sdk-version)"
 [[ -d "$MACOS_SDK_PATH" ]] || {

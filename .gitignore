@@ -3,6 +3,9 @@
 dist/
 tmp/
 .DS_Store
+.env
+.env.*
+!.env.example
 *.xcuserdata/
 *.xcuserstate
 *.ipa

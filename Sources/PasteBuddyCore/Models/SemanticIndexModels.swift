@@ -1,5 +1,82 @@
 import Foundation
 
+enum SemanticIndexContract {
+    static let promptVersion = "semantic-index-v2"
+    private static let boundaryWhitespaceScalars = CharacterSet(charactersIn: " \t\n\r\u{000B}\u{000C}\u{0085}\u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{200B}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+    private static let grandfatheredLanguageTags: Set<String> = [
+        "en-gb-oed", "i-ami", "i-bnn", "i-default", "i-enochian", "i-hak", "i-klingon", "i-lux",
+        "i-mingo", "i-navajo", "i-pwn", "i-tao", "i-tay", "i-tsu", "sgn-be-fr", "sgn-be-nl",
+        "sgn-ch-de", "art-lojban", "cel-gaulish", "no-bok", "no-nyn", "zh-guoyu", "zh-hakka",
+        "zh-min", "zh-min-nan", "zh-xiang"
+    ]
+    private static let languageTagPattern = #"^(?:(?:en-GB-oed|i-ami|i-bnn|i-default|i-enochian|i-hak|i-klingon|i-lux|i-mingo|i-navajo|i-pwn|i-tao|i-tay|i-tsu|sgn-BE-FR|sgn-BE-NL|sgn-CH-DE|art-lojban|cel-gaulish|no-bok|no-nyn|zh-guoyu|zh-hakka|zh-min|zh-min-nan|zh-xiang)|(?:x(?:-[A-Za-z0-9]{1,8})+)|(?:(?:[A-Za-z]{2,3}(?:-[A-Za-z]{3}){0,3}|[A-Za-z]{4}|[A-Za-z]{5,8})(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?(?:-(?:[A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*(?:-[0-9A-WY-Za-wy-z](?:-[A-Za-z0-9]{2,8})+)*(?:-x(?:-[A-Za-z0-9]{1,8})+)?))$"#
+
+    static func isValid(
+        summary: String,
+        keywords: [String],
+        aliases: [String],
+        entities: [String],
+        visualTextHints: [String],
+        searchIntents: [String],
+        language: String?
+    ) -> Bool {
+        guard hasValidBoundaries(summary),
+              summary == summary.precomposedStringWithCanonicalMapping,
+              summary.utf16.count <= 2_000,
+              [keywords, aliases, entities, visualTextHints].allSatisfy({ validList($0, maximumLength: 160) }),
+              validList(searchIntents, maximumLength: 240) else {
+            return false
+        }
+        guard let language else { return true }
+        return language.utf16.count <= 255
+            && language.range(of: languageTagPattern, options: [.regularExpression, .caseInsensitive]) != nil
+            && !hasRepeatedVariantOrExtensionSingleton(language)
+    }
+
+    private static func validList(_ values: [String], maximumLength: Int) -> Bool {
+        guard values.count <= 20,
+              values.allSatisfy({ value in
+                  return hasValidBoundaries(value)
+                      && value == value.precomposedStringWithCanonicalMapping
+                      && value.utf16.count <= maximumLength
+              }) else {
+            return false
+        }
+        return Set(values.map(asciiCaseFold)).count == values.count
+    }
+
+    private static func hasValidBoundaries(_ value: String) -> Bool {
+        guard let first = value.unicodeScalars.first, let last = value.unicodeScalars.last else { return false }
+        return !boundaryWhitespaceScalars.contains(first) && !boundaryWhitespaceScalars.contains(last)
+    }
+
+    private static func asciiCaseFold(_ value: String) -> String {
+        String(String.UnicodeScalarView(value.unicodeScalars.map { scalar in
+            guard scalar.value >= 65, scalar.value <= 90 else { return scalar }
+            return UnicodeScalar(scalar.value + 32)!
+        }))
+    }
+
+    private static func hasRepeatedVariantOrExtensionSingleton(_ language: String) -> Bool {
+        let subtags = language.lowercased().split(separator: "-").map(String.init)
+        guard subtags.first != "x", !grandfatheredLanguageTags.contains(language.lowercased()) else { return false }
+        var variants = Set<String>()
+        var singletons = Set<String>()
+        var insideExtension = false
+        for subtag in subtags.dropFirst() {
+            if subtag.count == 1 {
+                insideExtension = true
+                if !singletons.insert(subtag).inserted { return true }
+            } else if !insideExtension,
+                      subtag.range(of: #"^(?:[A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3})$"#, options: .regularExpression) != nil,
+                      !variants.insert(subtag).inserted {
+                return true
+            }
+        }
+        return false
+    }
+}
+
 public enum SemanticInferenceSource: String, CaseIterable, Codable, Identifiable, Sendable {
     case pasteBuddyCloud = "pastebuddy_cloud"
     case byok
@@ -10,6 +87,8 @@ public enum BYOKProviderPreset: String, CaseIterable, Codable, Identifiable, Sen
     case openAI = "openai"
     case gemini
     case openAICompatible = "openai_compatible"
+    case sub2API = "sub2api"
+    case openRouter = "openrouter"
     public var id: String { rawValue }
 }
 
@@ -17,6 +96,8 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
     public var preset: BYOKProviderPreset
     public var baseURL: String
     public var documentModel: String
+    public var embeddingPreset: BYOKProviderPreset
+    public var embeddingBaseURL: String
     public var embeddingModel: String
     public var organizationID: String
     public var projectID: String
@@ -25,6 +106,8 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
         preset: BYOKProviderPreset = .openAI,
         baseURL: String = "https://api.openai.com/v1",
         documentModel: String = "gpt-4.1-mini",
+        embeddingPreset: BYOKProviderPreset? = nil,
+        embeddingBaseURL: String? = nil,
         embeddingModel: String = "text-embedding-3-small",
         organizationID: String = "",
         projectID: String = ""
@@ -32,6 +115,8 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
         self.preset = preset
         self.baseURL = baseURL
         self.documentModel = documentModel
+        self.embeddingPreset = embeddingPreset ?? preset
+        self.embeddingBaseURL = embeddingBaseURL ?? baseURL
         self.embeddingModel = embeddingModel
         self.organizationID = organizationID
         self.projectID = projectID
@@ -50,7 +135,38 @@ public struct BYOKProviderConfiguration: Codable, Equatable, Sendable {
             )
         case .openAICompatible:
             Self(preset: .openAICompatible, baseURL: "", documentModel: "", embeddingModel: "")
+        case .sub2API:
+            Self(
+                preset: .sub2API,
+                baseURL: "https://sub2.nebula-spaces.com/v1",
+                documentModel: "gpt-5.6-luna",
+                embeddingModel: ""
+            )
+        case .openRouter:
+            Self(
+                preset: .openRouter,
+                baseURL: "https://openrouter.ai/api/v1",
+                documentModel: "",
+                embeddingModel: "qwen/qwen3-embedding-8b"
+            )
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case preset, baseURL, documentModel, embeddingPreset, embeddingBaseURL, embeddingModel
+        case organizationID, projectID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        preset = try container.decodeIfPresent(BYOKProviderPreset.self, forKey: .preset) ?? .openAI
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? "https://api.openai.com/v1"
+        documentModel = try container.decodeIfPresent(String.self, forKey: .documentModel) ?? "gpt-4.1-mini"
+        embeddingPreset = try container.decodeIfPresent(BYOKProviderPreset.self, forKey: .embeddingPreset) ?? preset
+        embeddingBaseURL = try container.decodeIfPresent(String.self, forKey: .embeddingBaseURL) ?? baseURL
+        embeddingModel = try container.decodeIfPresent(String.self, forKey: .embeddingModel) ?? "text-embedding-3-small"
+        organizationID = try container.decodeIfPresent(String.self, forKey: .organizationID) ?? ""
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID) ?? ""
     }
 }
 

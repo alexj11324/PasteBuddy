@@ -10,7 +10,8 @@ struct AISearchSetupSheet: View {
     @State private var isLoadingProducts = false
     @State private var purchasingPlan: ProductAccessPlan?
     @State private var configuration: BYOKProviderConfiguration
-    @State private var apiKey = ""
+    @State private var documentAPIKey = ""
+    @State private var embeddingAPIKey = ""
     @State private var showsAdvancedSettings = false
     @State private var productError: String?
     @State private var pendingSource: SemanticInferenceSource?
@@ -197,21 +198,37 @@ struct AISearchSetupSheet: View {
     private var byokSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("label.configure_byok", systemImage: "key.fill").font(.headline)
-            Picker("label.ai_provider", selection: $configuration.preset) {
-                Text("label.provider_openai").tag(BYOKProviderPreset.openAI)
-                Text("label.provider_gemini").tag(BYOKProviderPreset.gemini)
-                Text("label.provider_openai_compatible").tag(BYOKProviderPreset.openAICompatible)
+            Picker("label.document_provider", selection: $configuration.preset) {
+                providerChoices
             }
             .onChange(of: configuration.preset) { _, preset in
-                configuration = .defaults(for: preset)
-                apiKey = ""
+                let defaults = BYOKProviderConfiguration.defaults(for: preset)
+                configuration.baseURL = defaults.baseURL
+                configuration.documentModel = defaults.documentModel
+                configuration.organizationID = defaults.organizationID
+                configuration.projectID = defaults.projectID
+                documentAPIKey = ""
             }
-            SecureField("label.api_key", text: $apiKey)
+            SecureField("label.document_api_key", text: $documentAPIKey)
                 .textFieldStyle(.roundedBorder)
+            Picker("label.embedding_provider", selection: $configuration.embeddingPreset) {
+                providerChoices
+            }
+            .onChange(of: configuration.embeddingPreset) { _, preset in
+                let defaults = BYOKProviderConfiguration.defaults(for: preset)
+                configuration.embeddingBaseURL = defaults.embeddingBaseURL
+                configuration.embeddingModel = defaults.embeddingModel
+                embeddingAPIKey = ""
+            }
+            if !rolesShareEndpoint {
+                SecureField("label.embedding_api_key", text: $embeddingAPIKey)
+                    .textFieldStyle(.roundedBorder)
+            }
             DisclosureGroup("label.advanced_settings", isExpanded: $showsAdvancedSettings) {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                    settingsRow("label.base_url", text: $configuration.baseURL)
+                    settingsRow("label.document_base_url", text: $configuration.baseURL)
                     settingsRow("label.multimodal_model", text: $configuration.documentModel)
+                    settingsRow("label.embedding_base_url", text: $configuration.embeddingBaseURL)
                     settingsRow("label.embedding_model", text: $configuration.embeddingModel)
                     if configuration.preset != .gemini {
                         settingsRow("label.organization_id", text: $configuration.organizationID)
@@ -231,18 +248,66 @@ struct AISearchSetupSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(
-                    (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        && !store.hasBYOKAPIKey(for: configuration.preset))
+                    !hasDocumentCredential
+                        || !hasEmbeddingCredential
                         || store.aiProviderConnectionState == .testing
                         || !store.hasBYOKAccess
                 )
-                if store.hasBYOKAPIKey(for: configuration.preset) {
-                    Button("action.delete_api_key", role: .destructive) {
-                        store.deleteBYOKAPIKey(for: configuration.preset)
+                if store.hasBYOKAPIKey(role: .document, configuration: configuration) {
+                    Button(role: .destructive) {
+                        store.deleteBYOKAPIKey(
+                            role: .document,
+                            configuration: configuration
+                        )
+                    } label: {
+                        if rolesShareEndpoint {
+                            Text("action.delete_api_key")
+                        } else {
+                            Text("action.delete_document_api_key")
+                        }
+                    }
+                }
+                if !rolesShareEndpoint,
+                   store.hasBYOKAPIKey(role: .embedding, configuration: configuration) {
+                    Button("action.delete_embedding_api_key", role: .destructive) {
+                        store.deleteBYOKAPIKey(
+                            role: .embedding,
+                            configuration: configuration
+                        )
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var providerChoices: some View {
+        Text("label.provider_openai").tag(BYOKProviderPreset.openAI)
+        Text("label.provider_gemini").tag(BYOKProviderPreset.gemini)
+        Text("label.provider_openai_compatible").tag(BYOKProviderPreset.openAICompatible)
+        Text("label.provider_sub2api").tag(BYOKProviderPreset.sub2API)
+        Text("label.provider_openrouter").tag(BYOKProviderPreset.openRouter)
+    }
+
+    private var hasDocumentCredential: Bool {
+        !documentAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || store.hasBYOKAPIKey(role: .document, configuration: configuration)
+    }
+
+    private var hasEmbeddingCredential: Bool {
+        if rolesShareEndpoint { return hasDocumentCredential }
+        return !embeddingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || store.hasBYOKAPIKey(role: .embedding, configuration: configuration)
+    }
+
+    private var rolesShareEndpoint: Bool {
+        configuration.preset == configuration.embeddingPreset
+            && normalizedBaseURL(configuration.baseURL) == normalizedBaseURL(configuration.embeddingBaseURL)
+    }
+
+    private func normalizedBaseURL(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     private var privacySection: some View {
@@ -307,7 +372,16 @@ struct AISearchSetupSheet: View {
     }
 
     private func saveBYOKConfiguration() {
-        Task { _ = await store.testAndSaveBYOKConfiguration(configuration, apiKey: apiKey) }
+        Task {
+            if await store.testAndSaveBYOKConfiguration(
+                configuration,
+                documentAPIKey: documentAPIKey,
+                embeddingAPIKey: embeddingAPIKey
+            ) {
+                documentAPIKey = ""
+                embeddingAPIKey = ""
+            }
+        }
     }
 
     private func normalizeInferenceSource() {

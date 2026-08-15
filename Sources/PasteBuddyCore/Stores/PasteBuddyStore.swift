@@ -207,10 +207,15 @@ public final class PasteBuddyStore {
         guard let diskStore else { return }
         do {
             let repositoryHasStoredSnapshot = try clipboardRepository?.hasStoredSnapshot() == true
-            var loadedSnapshot = if repositoryHasStoredSnapshot, let clipboardRepository {
-                try clipboardRepository.exportSnapshot(hydrateAssets: false)
+            var loadedSnapshot: PasteBuddySnapshot
+            if repositoryHasStoredSnapshot, let clipboardRepository {
+                var repositorySnapshot = try clipboardRepository.exportSnapshot(hydrateAssets: false)
+                if try !clipboardRepository.hasStoredSettingsBehaviorMetadata() {
+                    repositorySnapshot.settingsBehavior = try diskStore.load().settingsBehavior
+                }
+                loadedSnapshot = repositorySnapshot
             } else {
-                try diskStore.load()
+                loadedSnapshot = try diskStore.load()
             }
             if !repositoryHasStoredSnapshot,
                Self.needsExternalAssetHydration(loadedSnapshot),
@@ -221,6 +226,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            migrateLegacyBYOKCredentialIfNeeded()
             let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = diskStore.lastLoadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
@@ -259,7 +265,10 @@ public final class PasteBuddyStore {
             let repositoryHasStoredSnapshot = try await repositorySyncActor?.hasStoredSnapshot() == true
             let result: SnapshotPersistenceLoadResult
             if repositoryHasStoredSnapshot, let repositorySyncActor {
-                let repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+                var repositorySnapshot = try await repositorySyncActor.exportSnapshot(hydrateAssets: false)
+                if try await !repositorySyncActor.hasStoredSettingsBehaviorMetadata() {
+                    repositorySnapshot.settingsBehavior = try await persistenceActor.load().snapshot.settingsBehavior
+                }
                 result = SnapshotPersistenceLoadResult(
                     snapshot: repositorySnapshot,
                     loadedStorageMode: repositorySnapshot.security.storageMode
@@ -277,6 +286,7 @@ public final class PasteBuddyStore {
                 }
             }
             snapshot = loadedSnapshot
+            migrateLegacyBYOKCredentialIfNeeded()
             let repairedShortcutConfiguration = repairLoadedShortcutConfigurationIfNeeded()
             if let loadedStorageMode = result.loadedStorageMode {
                 snapshot.security.storageMode = loadedStorageMode
@@ -350,6 +360,21 @@ public final class PasteBuddyStore {
         scheduleSave(delayNanoseconds: 0)
     }
 
+    private func savePinboardMembershipsImmediately(
+        _ pinboards: [Pinboard],
+        repositorySupportsTargetedUpdate: Bool
+    ) {
+        guard let saveDebounceNanoseconds else {
+            saveImmediately()
+            return
+        }
+        scheduleSave(
+            delayNanoseconds: 0,
+            pinboardsToUpsert: repositorySupportsTargetedUpdate ? pinboards : nil,
+            persistenceDelayNanoseconds: saveDebounceNanoseconds
+        )
+    }
+
     public func flushPendingSave() async {
         guard defaultPersistenceInitializationErrorMessage == nil,
               let persistenceActor else {
@@ -410,7 +435,11 @@ public final class PasteBuddyStore {
         }
     }
 
-    private func scheduleSave(delayNanoseconds: UInt64) {
+    private func scheduleSave(
+        delayNanoseconds: UInt64,
+        pinboardsToUpsert: [Pinboard]? = nil,
+        persistenceDelayNanoseconds: UInt64 = 0
+    ) {
         guard defaultPersistenceInitializationErrorMessage == nil,
               let persistenceActor else {
             lastErrorMessage = defaultPersistenceInitializationErrorMessage
@@ -431,39 +460,57 @@ public final class PasteBuddyStore {
                 }
             }
             guard !Task.isCancelled else { return }
+            do {
+                if let repositorySyncActor {
+                    var shouldDrainSemanticIndex = false
+                    if let pinboardsToUpsert {
+                        try await repositorySyncActor.upsertPinboardMemberships(pinboardsToUpsert)
+                    } else {
+                        let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSave)
+                        shouldDrainSemanticIndex = syncSummary.enqueuedSemanticItemCount > 0
+                    }
+                    self.beforeRepositorySyncCommitForTesting?()
+                    guard !Task.isCancelled else { return }
+                    guard self.dataRevision == dataRevisionToSync else { return }
+                    if shouldDrainSemanticIndex {
+                        self.drainSemanticIndexQueue()
+                    }
+                    self.markClipboardRepositorySynced(to: dataRevisionToSync)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.isRepositorySyncInFlight = false
+                self.repositorySyncedDataRevision = nil
+                self.historyQueryErrorMessage = error.localizedDescription
+                self.pendingSaveTask = nil
+                self.lastErrorMessage = error.localizedDescription
+                return
+            }
+            if persistenceDelayNanoseconds > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: persistenceDelayNanoseconds)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
             // Externalizing large payloads (asset hashing + search-document refresh)
-            // is deliberately deferred past the debounce window and off the main
-            // actor so rapid save() bursts never pay for work that gets cancelled.
+            // stays off the immediate repository-update path. The persistence delay
+            // lets rapid pin operations coalesce before this detached work begins.
             let snapshotToPersist = await Task.detached(priority: .utility) {
                 Self.externalizedSnapshotForDiskPersistence(snapshotToSave, hasRepository: hasRepository)
             }.value
             guard !Task.isCancelled else { return }
             do {
-                var shouldDrainSemanticIndex = false
-                if let repositorySyncActor {
-                    let syncSummary = try await repositorySyncActor.synchronize(with: snapshotToSave)
-                    shouldDrainSemanticIndex = syncSummary.enqueuedSemanticItemCount > 0
-                }
                 try await persistenceActor.save(snapshotToPersist, storageMode: snapshotToSave.security.storageMode)
-                await MainActor.run {
-                    if shouldDrainSemanticIndex {
-                        self.drainSemanticIndexQueue()
-                    }
-                    guard self.dataRevision == dataRevisionToSync else { return }
-                    self.markClipboardRepositorySynced(to: dataRevisionToSync)
-                    self.pendingSaveTask = nil
-                    self.diskStore?.storageMode = snapshotToSave.security.storageMode
-                    self.lastErrorMessage = nil
-                }
+                guard self.dataRevision == dataRevisionToSync else { return }
+                self.pendingSaveTask = nil
+                self.diskStore?.storageMode = snapshotToSave.security.storageMode
+                self.lastErrorMessage = nil
             } catch {
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    self.isRepositorySyncInFlight = false
-                    self.repositorySyncedDataRevision = nil
-                    self.historyQueryErrorMessage = error.localizedDescription
-                    self.pendingSaveTask = nil
-                    self.lastErrorMessage = error.localizedDescription
-                }
+                guard !Task.isCancelled else { return }
+                self.pendingSaveTask = nil
+                self.lastErrorMessage = error.localizedDescription
             }
         }
     }
@@ -981,13 +1028,18 @@ public final class PasteBuddyStore {
     public var hasBYOKAccess: Bool { snapshot.entitlement.hasBYOKAccess() }
     public var hasCloudAIAccess: Bool { snapshot.entitlement.hasCloudAccess() }
     public var hasConfiguredBYOKKey: Bool {
-        hasBYOKAPIKey(for: snapshot.semanticIndex.byok.preset)
+        let configuration = snapshot.semanticIndex.byok
+        return hasBYOKAPIKey(role: .document, configuration: configuration)
+            && hasBYOKAPIKey(role: .embedding, configuration: configuration)
     }
-    public func hasBYOKAPIKey(for provider: BYOKProviderPreset) -> Bool {
-        ((try? aiCredentialStore.apiKey(for: provider)) ?? nil)?.isEmpty == false
+    public func hasBYOKAPIKey(
+        role: AIProviderCredentialRole,
+        configuration: BYOKProviderConfiguration
+    ) -> Bool {
+        ((try? byokAPIKey(role: role, configuration: configuration)) ?? nil)?.isEmpty == false
     }
     public var hasAnyConfiguredBYOKKey: Bool {
-        BYOKProviderPreset.allCases.contains { hasBYOKAPIKey(for: $0) }
+        (try? aiCredentialStore.hasAnyAPIKey()) == true
     }
     public var canRunConfiguredAISource: Bool {
         switch snapshot.semanticIndex.inferenceSource {
@@ -1440,6 +1492,8 @@ public final class PasteBuddyStore {
             save()
             return
         }
+        let repositorySupportsTargetedUpdate = repositorySyncedDataRevision == dataRevision
+            && !isRepositorySyncInFlight
         let storedItemIDs = Set(snapshot.items.map(\.id))
         var seenItemIDs = Set<UUID>()
         var pinnedItemIDs: [UUID] = []
@@ -1453,7 +1507,10 @@ public final class PasteBuddyStore {
         snapshot.pinboards[pinboardIndex].itemIDs.removeAll { seenItemIDs.contains($0) }
         snapshot.pinboards[pinboardIndex].itemIDs.insert(contentsOf: pinnedItemIDs, at: 0)
         snapshot.pinboards[pinboardIndex].updatedAt = Date()
-        save()
+        savePinboardMembershipsImmediately(
+            [snapshot.pinboards[pinboardIndex]],
+            repositorySupportsTargetedUpdate: repositorySupportsTargetedUpdate
+        )
     }
 
     public func removeItem(_ itemID: UUID, fromPinboard pinboardID: UUID) {
@@ -2175,23 +2232,39 @@ public final class PasteBuddyStore {
 
     public func testAndSaveBYOKConfiguration(
         _ configuration: BYOKProviderConfiguration,
-        apiKey: String
+        documentAPIKey: String,
+        embeddingAPIKey: String
     ) async -> Bool {
         aiProviderConnectionState = .testing
-        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let effectiveKey = !trimmedKey.isEmpty
-            ? trimmedKey
-            : ((try? aiCredentialStore.apiKey(for: configuration.preset)) ?? nil)
+        let trimmedDocumentKey = documentAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmbeddingKey = embeddingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard hasBYOKAccess else {
             aiProviderConnectionState = .failed(SemanticIndexError.entitlementRequired.localizedDescription)
             return false
         }
-        guard let effectiveKey, !effectiveKey.isEmpty else {
+        let sharesEndpoint = Self.byokRolesShareEndpoint(configuration)
+        let storedDocumentKey = (try? byokAPIKey(role: .document, configuration: configuration)) ?? nil
+        let storedEmbeddingKey = (try? byokAPIKey(role: .embedding, configuration: configuration)) ?? nil
+        let effectiveKeys = Self.resolveBYOKAPIKeys(
+            sharesEndpoint: sharesEndpoint,
+            documentAPIKey: trimmedDocumentKey,
+            embeddingAPIKey: trimmedEmbeddingKey,
+            storedDocumentKey: storedDocumentKey,
+            storedEmbeddingKey: storedEmbeddingKey
+        )
+        let effectiveDocumentKey = effectiveKeys.document
+        let effectiveEmbeddingKey = effectiveKeys.embedding
+        guard let effectiveDocumentKey, !effectiveDocumentKey.isEmpty,
+              let effectiveEmbeddingKey, !effectiveEmbeddingKey.isEmpty else {
             aiProviderConnectionState = .failed(SemanticIndexError.providerConfigurationRequired.localizedDescription)
             return false
         }
         do {
-            let providers = try Self.makeBYOKProviders(configuration: configuration, apiKey: effectiveKey)
+            let providers = try Self.makeBYOKProviders(
+                configuration: configuration,
+                documentAPIKey: effectiveDocumentKey,
+                embeddingAPIKey: effectiveEmbeddingKey
+            )
             _ = try await providers.embedding.embedQuery("PasteBuddy connection test")
             let source = SemanticIndexSource(
                 itemID: UUID(), contentHash: "connection-test", capturedAt: Date(),
@@ -2204,8 +2277,21 @@ public final class PasteBuddyStore {
                 currentConfiguration: snapshot.semanticIndex.byok,
                 savedConfiguration: configuration
             )
-            if !trimmedKey.isEmpty {
-                try aiCredentialStore.saveAPIKey(trimmedKey, for: configuration.preset)
+            try aiCredentialStore.saveAPIKey(
+                effectiveDocumentKey,
+                for: configuration.preset,
+                role: .document,
+                baseURL: configuration.baseURL
+            )
+            try aiCredentialStore.saveAPIKey(
+                effectiveEmbeddingKey,
+                for: configuration.embeddingPreset,
+                role: .embedding,
+                baseURL: configuration.embeddingBaseURL
+            )
+            try aiCredentialStore.deleteLegacyAPIKey(for: configuration.preset)
+            if configuration.embeddingPreset != configuration.preset {
+                try aiCredentialStore.deleteLegacyAPIKey(for: configuration.embeddingPreset)
             }
             snapshot.semanticIndex.byok = configuration
             snapshot.semanticIndex.inferenceSource = .byok
@@ -2220,16 +2306,38 @@ public final class PasteBuddyStore {
         }
     }
 
-    public func deleteBYOKAPIKey(for provider: BYOKProviderPreset? = nil) {
+    public func deleteBYOKAPIKey(
+        role: AIProviderCredentialRole,
+        configuration: BYOKProviderConfiguration
+    ) {
+        let provider = role == .document ? configuration.preset : configuration.embeddingPreset
+        let baseURL = role == .document ? configuration.baseURL : configuration.embeddingBaseURL
+        let activeConfiguration = snapshot.semanticIndex.byok
+        let isActiveCredential = switch role {
+        case .document:
+            provider == activeConfiguration.preset
+                && Self.normalizedBYOKBaseURL(baseURL) == Self.normalizedBYOKBaseURL(activeConfiguration.baseURL)
+        case .embedding:
+            provider == activeConfiguration.embeddingPreset
+                && Self.normalizedBYOKBaseURL(baseURL) == Self.normalizedBYOKBaseURL(activeConfiguration.embeddingBaseURL)
+        }
         do {
-            let resolvedProvider = provider ?? snapshot.semanticIndex.byok.preset
-            try aiCredentialStore.deleteAPIKey(for: resolvedProvider)
-            aiProviderConnectionState = .idle
-            if resolvedProvider == snapshot.semanticIndex.byok.preset {
-                invalidateSemanticSearch()
+            try aiCredentialStore.deleteAPIKey(for: provider, role: role, baseURL: baseURL)
+            if Self.byokRolesShareEndpoint(configuration) {
+                let otherRole: AIProviderCredentialRole = role == .document ? .embedding : .document
+                try aiCredentialStore.deleteAPIKey(
+                    for: provider,
+                    role: otherRole,
+                    baseURL: baseURL
+                )
+                try aiCredentialStore.deleteLegacyAPIKey(for: provider)
             }
         } catch {
             lastErrorMessage = error.localizedDescription
+        }
+        aiProviderConnectionState = .idle
+        if isActiveCredential {
+            invalidateSemanticSearch()
         }
     }
 
@@ -2454,16 +2562,22 @@ public final class PasteBuddyStore {
               let semanticIndexRepository,
               let clipboardRepository else { return 0 }
         await flushPendingSave()
-        guard let providers = try? semanticProviders() else { return 0 }
-        let worker = SemanticIndexWorker(
-            semanticRepository: semanticIndexRepository,
-            clipboardRepository: clipboardRepository,
-            documentProvider: providers.document,
-            embeddingProvider: providers.embedding
-        )
-        let count = await worker.processNextBatch(privacy: snapshot.privacy, limit: limit)
-        refreshSemanticIndexStatistics()
-        return count
+        do {
+            let providers = try semanticProviders()
+            let worker = SemanticIndexWorker(
+                semanticRepository: semanticIndexRepository,
+                clipboardRepository: clipboardRepository,
+                documentProvider: providers.document,
+                embeddingProvider: providers.embedding
+            )
+            let count = try await worker.processNextBatch(privacy: snapshot.privacy, limit: limit)
+            refreshSemanticIndexStatistics()
+            return count
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            refreshSemanticIndexStatistics()
+            return 0
+        }
     }
 
     private func drainSemanticIndexQueue() {
@@ -2499,25 +2613,127 @@ public final class PasteBuddyStore {
             )
             return (provider, provider)
         case .byok:
+            let configuration = snapshot.semanticIndex.byok
             guard hasBYOKAccess,
-                  let key = try aiCredentialStore.apiKey(for: snapshot.semanticIndex.byok.preset),
-                  !key.isEmpty else { throw SemanticIndexError.entitlementRequired }
-            return try Self.makeBYOKProviders(configuration: snapshot.semanticIndex.byok, apiKey: key)
+                  let documentKey = try byokAPIKey(role: .document, configuration: configuration),
+                  !documentKey.isEmpty,
+                  let embeddingKey = try byokAPIKey(role: .embedding, configuration: configuration),
+                  !embeddingKey.isEmpty else { throw SemanticIndexError.entitlementRequired }
+            return try Self.makeBYOKProviders(
+                configuration: configuration,
+                documentAPIKey: documentKey,
+                embeddingAPIKey: embeddingKey
+            )
         }
     }
 
     private nonisolated static func makeBYOKProviders(
         configuration: BYOKProviderConfiguration,
-        apiKey: String
+        documentAPIKey: String,
+        embeddingAPIKey: String
     ) throws -> (document: any SemanticDocumentGenerating, embedding: any SemanticEmbeddingProviding) {
+        let embeddingConfiguration = BYOKProviderConfiguration(
+            preset: configuration.embeddingPreset,
+            baseURL: configuration.embeddingBaseURL,
+            documentModel: configuration.documentModel,
+            embeddingPreset: configuration.embeddingPreset,
+            embeddingBaseURL: configuration.embeddingBaseURL,
+            embeddingModel: configuration.embeddingModel,
+            organizationID: byokRolesShareEndpoint(configuration) ? configuration.organizationID : "",
+            projectID: byokRolesShareEndpoint(configuration) ? configuration.projectID : ""
+        )
+
+        let document: any SemanticDocumentGenerating
         switch configuration.preset {
-        case .openAI, .openAICompatible:
-            let provider = OpenAICompatibleSemanticProvider(configuration: configuration, apiKey: apiKey)
-            return (provider, provider)
         case .gemini:
-            let provider = GeminiSemanticProvider(configuration: configuration, apiKey: apiKey)
-            return (provider, provider)
+            document = GeminiSemanticProvider(configuration: configuration, apiKey: documentAPIKey)
+        case .openAI, .openAICompatible, .sub2API, .openRouter:
+            document = OpenAICompatibleSemanticProvider(configuration: configuration, apiKey: documentAPIKey)
         }
+
+        let embedding: any SemanticEmbeddingProviding
+        switch configuration.embeddingPreset {
+        case .gemini:
+            embedding = GeminiSemanticProvider(configuration: embeddingConfiguration, apiKey: embeddingAPIKey)
+        case .openAI, .openAICompatible, .sub2API, .openRouter:
+            embedding = OpenAICompatibleSemanticProvider(configuration: embeddingConfiguration, apiKey: embeddingAPIKey)
+        }
+        return (document, embedding)
+    }
+
+    private func byokAPIKey(
+        role: AIProviderCredentialRole,
+        configuration: BYOKProviderConfiguration
+    ) throws -> String? {
+        let provider = role == .document ? configuration.preset : configuration.embeddingPreset
+        let baseURL = role == .document ? configuration.baseURL : configuration.embeddingBaseURL
+        if let key = try aiCredentialStore.apiKey(for: provider, role: role, baseURL: baseURL),
+           !key.isEmpty {
+            return key
+        }
+        return nil
+    }
+
+    private func migrateLegacyBYOKCredentialIfNeeded() {
+        let configuration = snapshot.semanticIndex.byok
+        guard Self.byokRolesShareEndpoint(configuration) else { return }
+        do {
+            guard let legacyKey = try aiCredentialStore.legacyAPIKey(for: configuration.preset),
+                  !legacyKey.isEmpty else { return }
+            if try aiCredentialStore.apiKey(
+                for: configuration.preset,
+                role: .document,
+                baseURL: configuration.baseURL
+            )?.isEmpty != false {
+                try aiCredentialStore.saveAPIKey(
+                    legacyKey,
+                    for: configuration.preset,
+                    role: .document,
+                    baseURL: configuration.baseURL
+                )
+            }
+            if try aiCredentialStore.apiKey(
+                for: configuration.embeddingPreset,
+                role: .embedding,
+                baseURL: configuration.embeddingBaseURL
+            )?.isEmpty != false {
+                try aiCredentialStore.saveAPIKey(
+                    legacyKey,
+                    for: configuration.embeddingPreset,
+                    role: .embedding,
+                    baseURL: configuration.embeddingBaseURL
+                )
+            }
+            try aiCredentialStore.deleteLegacyAPIKey(for: configuration.preset)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private nonisolated static func byokRolesShareEndpoint(_ configuration: BYOKProviderConfiguration) -> Bool {
+        configuration.preset == configuration.embeddingPreset
+            && normalizedBYOKBaseURL(configuration.baseURL) == normalizedBYOKBaseURL(configuration.embeddingBaseURL)
+    }
+
+    nonisolated static func resolveBYOKAPIKeys(
+        sharesEndpoint: Bool,
+        documentAPIKey: String,
+        embeddingAPIKey: String,
+        storedDocumentKey: String?,
+        storedEmbeddingKey: String?
+    ) -> (document: String?, embedding: String?) {
+        let document = !documentAPIKey.isEmpty
+            ? documentAPIKey
+            : ((!embeddingAPIKey.isEmpty && sharesEndpoint) ? embeddingAPIKey : storedDocumentKey)
+        let embedding = sharesEndpoint
+            ? document
+            : (!embeddingAPIKey.isEmpty ? embeddingAPIKey : storedEmbeddingKey)
+        return (document, embedding)
+    }
+
+    private nonisolated static func normalizedBYOKBaseURL(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     nonisolated static func shouldRebuildSemanticIndexAfterSavingBYOK(

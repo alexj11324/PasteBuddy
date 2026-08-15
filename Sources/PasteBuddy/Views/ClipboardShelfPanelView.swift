@@ -3100,11 +3100,7 @@ extension View {
     @ViewBuilder
     func pasteBuddyNativeGlass() -> some View {
         #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            self.glassEffect(.regular)
-        } else {
-            self.background(.regularMaterial, in: Capsule())
-        }
+        self.glassEffect(.regular)
         #else
         self.background(.regularMaterial, in: Capsule())
         #endif
@@ -3119,49 +3115,33 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let tintOpacity = min(max(glassTintOpacity, 0), 1)
         #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            ZStack {
-                // Add a stronger system blur before glass sampling so background text collapses into color.
-                shape
-                    .fill(.thickMaterial)
-                    .allowsHitTesting(false)
-                shape
-                    .fill(Color(nsColor: .windowBackgroundColor).opacity(ClipboardShelfGlass.detailSuppressionOpacity))
-                    .allowsHitTesting(false)
-                self
-            }
-                .glassEffect(.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)), in: shape)
-                .clipShape(shape)
-                .overlay {
-                    shape.strokeBorder(.white.opacity(showsStroke ? 0.20 : 0.14), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-                .overlay(alignment: .top) {
-                    if showsStroke {
-                        Rectangle()
-                            .fill(.white.opacity(0.42))
-                            .frame(height: 1)
-                    } else {
-                        Rectangle()
-                            .fill(.white.opacity(0.10))
-                            .frame(height: 1)
-                    }
-                }
-        } else {
+        ZStack {
+            // Add a stronger system blur before glass sampling so background text collapses into color.
+            shape
+                .fill(.thickMaterial)
+                .allowsHitTesting(false)
+            shape
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(ClipboardShelfGlass.detailSuppressionOpacity))
+                .allowsHitTesting(false)
             self
-                .background(.thinMaterial, in: shape)
-                .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.86))
-                }
-                .clipShape(shape)
-                .overlay(alignment: .top) {
-                    if showsStroke {
-                        Rectangle()
-                            .fill(.white.opacity(0.42))
-                            .frame(height: 1)
-                    }
-                }
         }
+            .glassEffect(.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)), in: shape)
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(.white.opacity(showsStroke ? 0.20 : 0.14), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .top) {
+                if showsStroke {
+                    Rectangle()
+                        .fill(.white.opacity(0.42))
+                        .frame(height: 1)
+                } else {
+                    Rectangle()
+                        .fill(.white.opacity(0.10))
+                        .frame(height: 1)
+                }
+            }
         #else
         self
             .background(.thinMaterial, in: shape)
@@ -3189,35 +3169,21 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let tintOpacity = min(max(glassTintOpacity, 0), 1)
         #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            self
-                .glassEffect(
-                    (
-                        interactive
-                        ? Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)).interactive()
-                        : Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity))
-                    ),
-                    in: shape
-                )
-                .overlay {
-                    if showsStroke {
-                        shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
-                            .allowsHitTesting(false)
-                    }
+        self
+            .glassEffect(
+                (
+                    interactive
+                    ? Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity)).interactive()
+                    : Glass.regular.tint(Color(nsColor: .windowBackgroundColor).opacity(tintOpacity))
+                ),
+                in: shape
+            )
+            .overlay {
+                if showsStroke {
+                    shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
+                        .allowsHitTesting(false)
                 }
-        } else {
-            self
-                .background(.thinMaterial, in: shape)
-                .background {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(interactive ? 0.66 : 0.58))
-                }
-                .overlay {
-                    if showsStroke {
-                        shape.strokeBorder(.white.opacity(0.40), lineWidth: 1)
-                            .allowsHitTesting(false)
-                    }
-                }
-        }
+            }
         #else
         self
             .background(.thinMaterial, in: shape)
@@ -3236,11 +3202,7 @@ extension View {
     @ViewBuilder
     func pasteBuddyGlassButton() -> some View {
         #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            self.buttonStyle(.glass)
-        } else {
-            self.buttonStyle(.borderless)
-        }
+        self.buttonStyle(.glass)
         #else
         self.buttonStyle(.borderless)
         #endif

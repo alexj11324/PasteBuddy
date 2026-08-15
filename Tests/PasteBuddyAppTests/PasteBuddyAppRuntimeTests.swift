@@ -90,6 +90,34 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testCollectionDropPayloadDecoderFallsBackToPasteboardLevelData() throws {
+        let id = UUID()
+        let data = try JSONEncoder().encode(PinboardItemDragPayload(ids: [id]))
+
+        XCTAssertEqual(
+            ClipboardCollectionDropPayloadDecoder.payloads(
+                itemRepresentations: [],
+                pasteboardRepresentation: data
+            ).flatMap(\.ids),
+            [id]
+        )
+    }
+
+    func testCollectionDropPayloadDecoderPrefersItemRepresentations() throws {
+        let itemID = UUID()
+        let fallbackID = UUID()
+        let itemData = try JSONEncoder().encode(PinboardItemDragPayload(ids: [itemID]))
+        let fallbackData = try JSONEncoder().encode(PinboardItemDragPayload(ids: [fallbackID]))
+
+        XCTAssertEqual(
+            ClipboardCollectionDropPayloadDecoder.payloads(
+                itemRepresentations: [itemData],
+                pasteboardRepresentation: fallbackData
+            ).flatMap(\.ids),
+            [itemID]
+        )
+    }
+
     func testCollectionReorderResolverMovesBeforeAVisibleTarget() {
         let order: [ClipboardCollectionID] = [
             .history,
@@ -1367,40 +1395,57 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(dragSource.contains("import CoreTransferable"))
         XCTAssertTrue(dragSource.contains("CodableRepresentation(contentType: .pasteBuddyPinboardItemIDs)"))
         XCTAssertTrue(dragSource.contains("PasteboardWriter.itemProviders(for: [item], hydrate: hydrate)"))
+        XCTAssertTrue(dragSource.contains("item.contentType != .image"))
         XCTAssertTrue(dragSource.contains("provider.registerDataRepresentation("))
         XCTAssertFalse(dragSource.contains("ProxyRepresentation"))
         XCTAssertFalse(dragSource.contains("ClipboardItemDragProvider"))
     }
 
-    func testImageCardDragProviderPublishesNativeImageBeforePlainTextFallback() async throws {
+    func testImageCardDragProviderPublishesImageWithoutOCRPlainText() async throws {
         let image = makeTestImage(width: 2, height: 2) { _, _ in
             (red: 0, green: 122, blue: 255, alpha: 255)
         }
+        let pngData = try XCTUnwrap(
+            NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?
+                .representation(using: .png, properties: [:])
+        )
+        let ocrText = "Invoice total 42 dollars from screenshot"
         let item = ClipboardItem(
             sourceAppName: "Preview",
             deviceName: "Test Mac",
             contentType: .image,
             title: "Copied image",
-            payload: ClipboardPayload(imageData: try XCTUnwrap(image.tiffRepresentation))
+            payload: ClipboardPayload(imageData: pngData, ocrText: ocrText)
         )
         let provider = try XCTUnwrap(PinboardItemDragPayload.itemProvider(for: item) { $0 })
         let identifiers = provider.registeredTypeIdentifiers
 
-        let imageIndex = try XCTUnwrap(identifiers.firstIndex(of: UTType.tiff.identifier))
-        let internalIndex = try XCTUnwrap(
-            identifiers.firstIndex(of: UTType.pasteBuddyPinboardItemIDs.identifier)
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.png.identifier))
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.tiff.identifier))
+        XCTAssertTrue(
+            provider.hasRepresentationConforming(
+                toTypeIdentifier: UTType.png.identifier,
+                fileOptions: []
+            )
         )
-        let textIndex = try XCTUnwrap(
-            identifiers.firstIndex(of: UTType.utf8PlainText.identifier)
-        )
-        XCTAssertLessThan(imageIndex, internalIndex)
-        XCTAssertLessThan(internalIndex, textIndex)
+        XCTAssertTrue(identifiers.contains(UTType.png.identifier))
+        XCTAssertFalse(identifiers.contains(UTType.utf8PlainText.identifier))
         XCTAssertFalse(identifiers.contains(UTType.plainText.identifier))
-        let fallbackData = try await loadData(
+        XCTAssertTrue(provider.canLoadObject(ofClass: NSImage.self))
+        XCTAssertFalse(provider.canLoadObject(ofClass: NSString.self))
+        XCTAssertEqual(provider.suggestedName?.hasSuffix(".png"), true)
+
+        let loadedPNG = try await loadData(
             from: provider,
-            typeIdentifier: UTType.utf8PlainText.identifier
+            typeIdentifier: UTType.png.identifier
         )
-        XCTAssertEqual(String(decoding: fallbackData, as: UTF8.self), "Copied image")
+        XCTAssertEqual(loadedPNG, pngData)
+        let filePNG = try await loadPNGFile(from: provider)
+        XCTAssertEqual(filePNG, pngData)
+        XCTAssertNil(
+            identifiers.firstIndex(of: UTType.utf8PlainText.identifier),
+            "Image drags must not advertise OCR or title as text/plain; text fields would paste OCR instead of the image."
+        )
 
         let payloadData = try await loadData(
             from: provider,
@@ -1885,6 +1930,20 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
     }
 
+    func testSidePanelCollectionChipsAcceptDraggedClipboardItems() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let stripStart = try XCTUnwrap(source.range(of: "private func collectionStripItem"))
+        let stripEnd = try XCTUnwrap(source.range(of: "private func createNamedPinboard"))
+        let stripSource = String(source[stripStart.lowerBound..<stripEnd.lowerBound])
+
+        XCTAssertTrue(source.contains("private enum SidePanelCollectionDropTarget"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .history) }"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
+        XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
+        XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
+        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+    }
+
     func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardCollectionStrip.swift")
         let chipStart = try XCTUnwrap(source.range(of: "private struct ClipboardCollectionChipLabel"))
@@ -2076,6 +2135,16 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains(#"git fetch "$REMOTE" "$BRANCH" --tags"#))
     }
 
+    func testMacOSDeploymentTargetIs26() throws {
+        let package = try sourceFileContents("Package.swift")
+        let buildScript = try sourceFileContents("script/build_and_run.sh")
+
+        XCTAssertTrue(package.contains(".macOS(\"26.0\")"))
+        XCTAssertFalse(package.contains(".macOS(\"14.5\")"))
+        XCTAssertTrue(buildScript.contains("MIN_SYSTEM_VERSION=\"26.0\""))
+        XCTAssertFalse(buildScript.contains("MIN_SYSTEM_VERSION=\"14.5\""))
+    }
+
     func testBuildAndRunRestrictsSigningLookupToConfiguredKeychain() throws {
         let source = try sourceFileContents("script/build_and_run.sh")
 
@@ -2203,12 +2272,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let generalStart = try XCTUnwrap(source.range(of: "private var generalSettings"))
         let privacyStart = try XCTUnwrap(source.range(of: "private var privacySettings"))
         let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutSettings"))
+        let mcpIconStart = try XCTUnwrap(source.range(of: "private struct MCPBrandIcon"))
+        let settingsToggleLabelStart = try XCTUnwrap(
+            source.range(of: "private struct SettingsToggleLabel", range: mcpIconStart.upperBound..<source.endIndex)
+        )
         let generalSource = String(source[generalStart.lowerBound..<privacyStart.lowerBound])
         let privacySource = String(source[privacyStart.lowerBound..<shortcutsStart.lowerBound])
+        let mcpIconSource = String(source[mcpIconStart.lowerBound..<settingsToggleLabelStart.lowerBound])
 
         XCTAssertTrue(source.contains("NavigationSplitView"))
         XCTAssertTrue(source.contains(".toolbarBackgroundVisibility(.visible, for: .windowToolbar)"))
-        XCTAssertTrue(source.contains(".toolbarBackground(.visible, for: .windowToolbar)"))
+        XCTAssertFalse(source.contains(".toolbarBackground(.visible, for: .windowToolbar)"))
         XCTAssertFalse(source.contains(".toolbarBackgroundVisibility(.hidden, for: .windowToolbar)"))
         XCTAssertFalse(source.contains(".toolbarBackground(.hidden, for: .windowToolbar)"))
         XCTAssertTrue(source.contains("List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection)"))
@@ -2231,12 +2305,13 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertLessThan(sidebarToggleRemoval.lowerBound, generalStart.lowerBound)
         XCTAssertTrue(source.contains("SliderTick(0)"))
         XCTAssertTrue(source.contains("SliderTick(4)"))
-        XCTAssertTrue(source.contains("label: {\n                        EmptyView()"))
-        XCTAssertTrue(source.contains("onEditingChanged: retentionSliderEditingChanged\n                )\n                .labelsHidden()"))
+        XCTAssertTrue(source.contains("label: {\n                    EmptyView()"))
+        XCTAssertTrue(source.contains("onEditingChanged: retentionSliderEditingChanged\n            )\n            .labelsHidden()"))
         XCTAssertTrue(source.contains("if retentionSliderIsEditing"))
-        XCTAssertTrue(source.contains("Text(retentionOption.localizedTitle)\n                        .frame(maxWidth: .infinity, alignment: .center)"))
-        XCTAssertTrue(source.contains(".frame(height: 22)\n                        .accessibilityHidden(true)"))
-        XCTAssertTrue(source.contains("retentionLabelPosition(in width: CGFloat)"))
+        XCTAssertTrue(source.contains("Text(retentionOption.localizedTitle)\n                    .frame(maxWidth: .infinity, alignment: .center)"))
+        XCTAssertTrue(source.contains(".frame(height: 22)\n                    .accessibilityHidden(true)"))
+        XCTAssertFalse(source.contains("retentionLabelPosition(in width: CGFloat)"))
+        XCTAssertFalse(source.contains("if #available(macOS 26.0, *)"))
         XCTAssertTrue(source.contains("case privacy"))
         XCTAssertTrue(source.contains("case .privacy:"))
         XCTAssertTrue(source.contains("self = .privacy"))
@@ -2245,7 +2320,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("Image(\"mcp-brand-base\", bundle: .module)"))
         XCTAssertTrue(source.contains("Image(\"mcp-brand-inset\", bundle: .module)"))
         XCTAssertTrue(source.contains(".renderingMode(.template)"))
-        XCTAssertTrue(source.contains(".foregroundStyle(isSelected ? Color.white : Color.accentColor)"))
+        XCTAssertTrue(source.contains("MCPBrandIcon()"))
+        XCTAssertFalse(mcpIconSource.contains(".foregroundStyle"))
+        XCTAssertFalse(mcpIconSource.contains(".foregroundColor"))
         XCTAssertFalse(source.contains("\"paperclip\""))
         XCTAssertTrue(generalSource.contains("label.launch_at_login"))
         XCTAssertTrue(generalSource.contains("label.panel_style"))
@@ -2610,6 +2687,69 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testPanelHotKeysToggleTheirPanelInsteadOfOnlyShowingIt() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+        let toggleStart = try XCTUnwrap(source.range(of: "private func toggleClipboardPanel("))
+        let toggleEnd = try XCTUnwrap(
+            source.range(of: "private func startRuntimeIfNeeded()", range: toggleStart.upperBound..<source.endIndex)
+        )
+        let toggleSource = String(source[toggleStart.lowerBound..<toggleEnd.lowerBound])
+        let controllerStart = try XCTUnwrap(
+            source.range(of: "panelHotKeyController = PasteBuddyPanelHotKeyController(")
+        )
+        let controllerEnd = try XCTUnwrap(
+            source.range(of: "panelHotKeyController?.updateShortcuts", range: controllerStart.upperBound..<source.endIndex)
+        )
+        let controllerSource = String(source[controllerStart.lowerBound..<controllerEnd.lowerBound])
+
+        XCTAssertTrue(controllerSource.contains("toggleClipboardPanel(.sidePanel)"))
+        XCTAssertTrue(controllerSource.contains("toggleClipboardPanel(.shelf)"))
+        XCTAssertFalse(controllerSource.contains("await showClipboardPanel(.sidePanel)"))
+        XCTAssertFalse(controllerSource.contains("await showClipboardPanel(.shelf)"))
+        XCTAssertTrue(toggleSource.contains("ClipboardPanelHotKeyToggleDecision.resolve("))
+        XCTAssertTrue(toggleSource.contains("case .hide:\n            shelfPanelController.hide()"))
+        XCTAssertTrue(toggleSource.contains("case .show(let requestedMode):"))
+        XCTAssertTrue(toggleSource.contains("panelDisplayMode = requestedMode"))
+        XCTAssertTrue(toggleSource.contains("shelfPanelController.show()"))
+
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: false,
+                isDismissing: false,
+                currentMode: .sidePanel,
+                requestedMode: .sidePanel
+            ),
+            .show(.sidePanel)
+        )
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: true,
+                isDismissing: false,
+                currentMode: .sidePanel,
+                requestedMode: .sidePanel
+            ),
+            .hide
+        )
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: true,
+                isDismissing: false,
+                currentMode: .shelf,
+                requestedMode: .sidePanel
+            ),
+            .show(.sidePanel)
+        )
+        XCTAssertEqual(
+            ClipboardPanelHotKeyToggleDecision.resolve(
+                isVisible: true,
+                isDismissing: true,
+                currentMode: .sidePanel,
+                requestedMode: .sidePanel
+            ),
+            .show(.sidePanel)
+        )
+    }
+
     func testPinboardCycleHotKeysAndLocalScopeWrapping() throws {
         let shortcuts = ShortcutConfiguration()
         XCTAssertEqual(
@@ -2771,12 +2911,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let bottomSheetStart = try XCTUnwrap(source.range(of: "func pasteBuddyBottomSheetSurface"))
         let glassSurfaceStart = try XCTUnwrap(source.range(of: "func pasteBuddyGlassSurface"))
         let bottomSheetSurface = String(source[bottomSheetStart.lowerBound..<glassSurfaceStart.lowerBound])
-        let nativeGlassStart = try XCTUnwrap(bottomSheetSurface.range(of: "if #available(macOS 26.0, *)"))
-        let fallbackStart = try XCTUnwrap(bottomSheetSurface.range(of: "} else {"))
-        let nativeGlassBranch = String(bottomSheetSurface[nativeGlassStart.lowerBound..<fallbackStart.lowerBound])
         let glassSurface = String(source[glassSurfaceStart.lowerBound...])
-        let smallNativeStart = try XCTUnwrap(glassSurface.range(of: "if #available(macOS 26.0, *)"))
-        let smallFallbackStart = try XCTUnwrap(glassSurface.range(of: "} else {"))
+        let bottomNativeStart = try XCTUnwrap(bottomSheetSurface.range(of: "#if compiler(>=6.2)"))
+        let bottomFallbackStart = try XCTUnwrap(bottomSheetSurface.range(of: "#else"))
+        let nativeGlassBranch = String(bottomSheetSurface[bottomNativeStart.lowerBound..<bottomFallbackStart.lowerBound])
+        let smallNativeStart = try XCTUnwrap(glassSurface.range(of: "#if compiler(>=6.2)"))
+        let smallFallbackStart = try XCTUnwrap(glassSurface.range(of: "#else"))
         let smallNativeGlassBranch = String(glassSurface[smallNativeStart.lowerBound..<smallFallbackStart.lowerBound])
 
         XCTAssertFalse(source.contains("PasteBuddyGlassContainer"))
@@ -2784,6 +2924,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("ShelfGlassOpacityControl"))
         XCTAssertFalse(source.contains("Slider(value: $opacity"))
         XCTAssertFalse(source.contains("glassTintOpacity: glassTintOpacity"))
+        XCTAssertFalse(source.contains("if #available(macOS 26.0, *)"))
         XCTAssertTrue(source.contains("static let defaultTintOpacity = 0.30"))
         XCTAssertTrue(source.contains("static let detailSuppressionOpacity = 0.28"))
         XCTAssertTrue(source.contains("glassTintOpacity: Double = ClipboardShelfGlass.defaultTintOpacity"))
@@ -3313,6 +3454,26 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                     continuation.resume(returning: data)
                 } else {
                     continuation.resume(throwing: CocoaError(.fileReadUnknown))
+                }
+            }
+        }
+    }
+
+    private func loadPNGFile(from provider: NSItemProvider) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadFileRepresentation(forTypeIdentifier: UTType.png.identifier) { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let url else {
+                    continuation.resume(throwing: CocoaError(.fileReadNoSuchFile))
+                    return
+                }
+                do {
+                    continuation.resume(returning: try Data(contentsOf: url))
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
         }

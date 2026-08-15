@@ -107,6 +107,7 @@ struct ClipboardNativeCopyFeedbackReceipt {
             UTType.plainText.identifier,
             UTType.fileURL.identifier,
             UTType.url.identifier,
+            UTType.png.identifier,
             UTType.tiff.identifier,
         ]
         return preferred.first(where: identifiers.contains) ?? identifiers.first

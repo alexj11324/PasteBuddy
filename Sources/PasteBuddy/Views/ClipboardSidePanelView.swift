@@ -21,6 +21,12 @@ private struct ClipboardSidePanelQueryState: Equatable {
     let pasteStackRevision: Int
 }
 
+private enum SidePanelCollectionDropTarget {
+    case history
+    case smartCategory(SmartPinboardCategory)
+    case pinboard(UUID)
+}
+
 struct ClipboardSidePanelView: View {
     @Environment(\.openSettings) private var openSettings
     @Bindable var store: PasteBuddyStore
@@ -315,6 +321,7 @@ struct ClipboardSidePanelView: View {
             .help(localized("label.new_pinboard"))
             .accessibilityLabel(localized("label.new_pinboard"))
         }
+        .padding(.vertical, 1)
     }
 
     private func collectionStripItem(
@@ -332,7 +339,7 @@ struct ClipboardSidePanelView: View {
                 id: collection,
                 title: localized("label.clipboard"),
                 isSelected: sideScope == .history,
-                onDropPayloads: nil,
+                onDropPayloads: { dropItems($0, into: .history) },
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight,
                 onMoveLeft: moveLeft,
@@ -346,7 +353,7 @@ struct ClipboardSidePanelView: View {
                 id: collection,
                 title: localized(category.displayName),
                 isSelected: isSmartCategorySelected(category),
-                onDropPayloads: nil,
+                onDropPayloads: { dropItems($0, into: .smartCategory(category)) },
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight,
                 onMoveLeft: moveLeft,
@@ -361,7 +368,7 @@ struct ClipboardSidePanelView: View {
                 id: collection,
                 title: pinboard.name,
                 isSelected: sideScope == .pinboard(pinboard.id),
-                onDropPayloads: nil,
+                onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) },
                 canMoveLeft: canMoveLeft,
                 canMoveRight: canMoveRight,
                 onMoveLeft: moveLeft,
@@ -647,6 +654,37 @@ struct ClipboardSidePanelView: View {
             relativeTo: visibleOrder[destinationIndex],
             afterTarget: offset > 0
         )
+    }
+
+    private func dropItems(
+        _ payloads: [PinboardItemDragPayload],
+        into target: SidePanelCollectionDropTarget
+    ) -> Bool {
+        let ids = droppedItemIDs(from: payloads)
+        guard !ids.isEmpty else { return false }
+
+        switch target {
+        case .history:
+            setSideScope(.history)
+            return true
+        case .smartCategory(let category):
+            guard ids.contains(where: { id in
+                store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true
+            }) else {
+                return false
+            }
+            selectSmartCategory(category)
+            return true
+        case .pinboard(let pinboardID):
+            store.pinItems(ids, to: pinboardID)
+            setSideScope(.pinboard(pinboardID))
+            return true
+        }
+    }
+
+    private func droppedItemIDs(from payloads: [PinboardItemDragPayload]) -> [UUID] {
+        var seen = Set<UUID>()
+        return payloads.flatMap(\.ids).filter { seen.insert($0).inserted }
     }
 
     private func selectItem(_ item: ClipboardItem) {

@@ -448,6 +448,23 @@ struct PasteBuddyApp: App {
         shelfPanelController?.show()
     }
 
+    private func toggleClipboardPanel(_ displayMode: ClipboardPanelDisplayMode) {
+        PasteBuddyDiagnostics.record(.hotKey, "panelModeToggleRequested", detail: "mode=\(displayMode.rawValue)")
+        guard let shelfPanelController else { return }
+        switch ClipboardPanelHotKeyToggleDecision.resolve(
+            isVisible: shelfPanelController.isVisible,
+            isDismissing: shelfPanelController.isDismissing,
+            currentMode: panelDisplayMode,
+            requestedMode: displayMode
+        ) {
+        case .hide:
+            shelfPanelController.hide()
+        case .show(let requestedMode):
+            panelDisplayMode = requestedMode
+            shelfPanelController.show()
+        }
+    }
+
     private func startRuntimeIfNeeded() async {
         frontmostApplicationTracker.start()
         appDelegate.flushPendingSave = { [store] in
@@ -562,17 +579,13 @@ struct PasteBuddyApp: App {
             panelHotKeyController = PasteBuddyPanelHotKeyController(
                 sidePanelShortcut: store.snapshot.shortcuts.showHidePanel,
                 onSidePanel: {
-                    Task { @MainActor in
-                        await showClipboardPanel(.sidePanel)
-                    }
+                    toggleClipboardPanel(.sidePanel)
                 },
                 onPasteStack: {
                     store.togglePasteStack()
                 },
                 onShelf: {
-                    Task { @MainActor in
-                        await showClipboardPanel(.shelf)
-                    }
+                    toggleClipboardPanel(.shelf)
                 },
                 onPinClipboard: {
                     ScreenPinController.shared.pinClipboard()

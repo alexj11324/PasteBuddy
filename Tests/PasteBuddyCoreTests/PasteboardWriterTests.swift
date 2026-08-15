@@ -259,6 +259,64 @@ final class PasteboardWriterTests: XCTestCase {
 
         XCTAssertEqual(pasteboard.string(forType: .string), "Copy this OCR text")
         XCTAssertFalse(pasteboard.types?.contains(.tiff) ?? false)
+        XCTAssertFalse(pasteboard.types?.contains(.png) ?? false)
+    }
+
+    func testCopyImageWritesPNGBytesAndOmitsOCRText() throws {
+        let pasteboard = try XCTUnwrap(NSPasteboard(name: NSPasteboard.Name("PasteBuddyImageCopy-\(UUID().uuidString)")))
+        defer { pasteboard.releaseGlobally() }
+        let pngData = try XCTUnwrap(Self.testImage().pasteBuddyPNGData())
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: pngData, ocrText: "Invoice total 42 dollars")
+        )
+
+        XCTAssertTrue(PasteboardWriter.copy(item, to: pasteboard))
+
+        XCTAssertEqual(pasteboard.data(forType: .png), pngData)
+        XCTAssertNil(pasteboard.string(forType: .string))
+        XCTAssertTrue(PasteboardWriter.containsInternalCopyMarker(pasteboard))
+    }
+
+    func testImageItemProviderPublishesPNGWithoutOCRPlainText() async throws {
+        let pngData = try XCTUnwrap(Self.testImage().pasteBuddyPNGData())
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageData: pngData, ocrText: "Invoice total 42 dollars")
+        )
+        let provider = try XCTUnwrap(PasteboardWriter.itemProviders(for: [item]) { $0 }.first)
+
+        try await assertImageProviderIsDroppable(provider, expectedPNG: pngData)
+    }
+
+    func testHydratedImageItemProviderPublishesDroppableImageWithoutOCRPlainText() async throws {
+        let pngData = try XCTUnwrap(Self.testImage().pasteBuddyPNGData())
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(
+                imageAssetID: "hydrated-screenshot",
+                imageByteCount: pngData.count,
+                ocrText: "Invoice total 42 dollars"
+            )
+        )
+        let provider = try XCTUnwrap(
+            PasteboardWriter.itemProviders(for: [item]) { original in
+                var hydrated = original
+                hydrated.payload.imageData = pngData
+                return hydrated
+            }.first
+        )
+
+        try await assertImageProviderIsDroppable(provider, expectedPNG: pngData)
     }
 
     func testCopyReportsPasteboardWriteSuccess() throws {
@@ -498,7 +556,7 @@ final class PasteboardWriterTests: XCTestCase {
             PasteboardWriter.itemProviders(for: [lightweightItem]) { _ in hydratedItem }.first
         )
 
-        let data = try await loadData(from: provider, type: .tiff)
+        let data = try await loadData(from: provider, type: .png)
 
         XCTAssertFalse(try XCTUnwrap(data).isEmpty)
     }
@@ -539,7 +597,7 @@ final class PasteboardWriterTests: XCTestCase {
         )
 
         do {
-            _ = try await loadData(from: provider, type: .tiff)
+            _ = try await loadData(from: provider, type: .png)
             XCTFail("Expected missing hydrated asset to fail")
         } catch {
             let underlyingError = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError
@@ -1211,6 +1269,38 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "existing")
     }
 
+    private func assertImageProviderIsDroppable(
+        _ provider: NSItemProvider,
+        expectedPNG: Data
+    ) async throws {
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.png.identifier))
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.tiff.identifier))
+        XCTAssertTrue(
+            provider.hasRepresentationConforming(
+                toTypeIdentifier: UTType.png.identifier,
+                fileOptions: []
+            )
+        )
+        XCTAssertTrue(provider.canLoadObject(ofClass: NSImage.self))
+        XCTAssertFalse(provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier))
+        XCTAssertFalse(provider.canLoadObject(ofClass: NSString.self))
+        XCTAssertEqual(provider.suggestedName?.hasSuffix(".png"), true)
+
+        let loadedPNG = try await loadData(from: provider, type: .png)
+        XCTAssertEqual(loadedPNG, expectedPNG)
+
+        let loadedTIFF = try await loadData(from: provider, type: .tiff)
+        XCTAssertNotNil(loadedTIFF)
+        XCTAssertFalse(loadedTIFF?.isEmpty ?? true)
+        XCTAssertNotNil(loadedTIFF.flatMap(NSImage.init(data:)))
+
+        let loadedImage = try await loadImage(from: provider)
+        XCTAssertGreaterThan(loadedImage.size.width, 0)
+
+        let filePNG = try await loadPNGFile(from: provider)
+        XCTAssertEqual(filePNG, expectedPNG)
+    }
+
     private func loadData(from provider: NSItemProvider, type: UTType) async throws -> Data? {
         try await withCheckedThrowingContinuation { continuation in
             provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
@@ -1218,6 +1308,41 @@ final class PasteboardWriterTests: XCTestCase {
                     continuation.resume(throwing: error)
                 } else {
                     continuation.resume(returning: data)
+                }
+            }
+        }
+    }
+
+    private func loadImage(from provider: NSItemProvider) async throws -> NSImage {
+        try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadObject(ofClass: NSImage.self) { object, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let image = object as? NSImage {
+                    continuation.resume(returning: image)
+                } else {
+                    continuation.resume(throwing: CocoaError(.fileReadCorruptFile))
+                }
+            }
+        }
+    }
+
+    private func loadPNGFile(from provider: NSItemProvider) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadFileRepresentation(forTypeIdentifier: UTType.png.identifier) { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let url else {
+                    continuation.resume(throwing: CocoaError(.fileReadNoSuchFile))
+                    return
+                }
+                do {
+                    let data = try Data(contentsOf: url)
+                    continuation.resume(returning: data)
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
         }

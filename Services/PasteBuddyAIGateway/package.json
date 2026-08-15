@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/semantic-contract.test.js"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.0.0",

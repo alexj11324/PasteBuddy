@@ -86,22 +86,14 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var settingsSplitView: some View {
-        if #available(macOS 15.0, *) {
-            settingsSplitViewContent
-                .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-        } else {
-            settingsSplitViewContent
-                .toolbarBackground(.visible, for: .windowToolbar)
-        }
+        settingsSplitViewContent
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
     }
 
     private var settingsSplitViewContent: some View {
         NavigationSplitView {
             List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
-                SettingsSidebarLabel(
-                    section: section,
-                    isSelected: selectedSettingsSection == section
-                )
+                SettingsSidebarLabel(section: section)
                 .tag(section)
             }
             .listStyle(.sidebar)
@@ -215,63 +207,36 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var retentionSlider: some View {
-        if #available(macOS 26.0, *) {
-            VStack(spacing: 6) {
-                Slider(
-                    value: retentionSliderBinding,
-                    in: 0...4,
-                    label: {
-                        EmptyView()
-                    },
-                    ticks: {
-                        SliderTick(0)
-                        SliderTick(1)
-                        SliderTick(2)
-                        SliderTick(3)
-                        SliderTick(4)
-                    },
-                    onEditingChanged: retentionSliderEditingChanged
-                )
-                .labelsHidden()
+        VStack(spacing: 6) {
+            Slider(
+                value: retentionSliderBinding,
+                in: 0...4,
+                label: {
+                    EmptyView()
+                },
+                ticks: {
+                    SliderTick(0)
+                    SliderTick(1)
+                    SliderTick(2)
+                    SliderTick(3)
+                    SliderTick(4)
+                },
+                onEditingChanged: retentionSliderEditingChanged
+            )
+            .labelsHidden()
 
-                if retentionSliderIsEditing {
-                    Text(retentionOption.localizedTitle)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .frame(height: 22)
-                        .accessibilityHidden(true)
-                } else {
-                    retentionAnchorLabels
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityLabel(Text("label.keep_history"))
-            .accessibilityValue(Text(retentionOption.localizedTitle))
-        } else {
-            VStack(spacing: 6) {
-                Slider(
-                    value: retentionSliderBinding,
-                    in: 0...4,
-                    onEditingChanged: retentionSliderEditingChanged
-                )
-                .labelsHidden()
-                if retentionSliderIsEditing {
-                    GeometryReader { geometry in
-                        Text(retentionOption.localizedTitle)
-                            .fixedSize()
-                            .position(
-                                x: retentionLabelPosition(in: geometry.size.width),
-                                y: geometry.size.height / 2
-                            )
-                    }
+            if retentionSliderIsEditing {
+                Text(retentionOption.localizedTitle)
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .frame(height: 22)
-                } else {
-                    retentionAnchorLabels
-                }
+                    .accessibilityHidden(true)
+            } else {
+                retentionAnchorLabels
             }
-            .frame(maxWidth: .infinity)
-            .accessibilityLabel(Text("label.keep_history"))
-            .accessibilityValue(Text(retentionOption.localizedTitle))
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(Text("label.keep_history"))
+        .accessibilityValue(Text(retentionOption.localizedTitle))
     }
 
     private var retentionAnchorLabels: some View {
@@ -693,15 +658,6 @@ struct SettingsView: View {
         }
     }
 
-    private func retentionLabelPosition(in width: CGFloat) -> CGFloat {
-        let trackInset: CGFloat = 10
-        let trackWidth = max(0, width - trackInset * 2)
-        return min(
-            max(trackInset + trackWidth * retentionOption.position / 4, 36),
-            width - 36
-        )
-    }
-
     private var pasteDestinationBinding: Binding<PasteDestination> {
         Binding(
             get: { store.snapshot.settingsBehavior.pasteDestination },
@@ -1015,13 +971,12 @@ private struct MCPAdvancedSettingsSheet: View {
 
 private struct SettingsSidebarLabel: View {
     let section: SettingsSidebarSection
-    let isSelected: Bool
 
     var body: some View {
         Group {
             if section == .integrations {
                 HStack(spacing: 8) {
-                    MCPBrandIcon(isSelected: isSelected)
+                    MCPBrandIcon()
                     Text(section.titleKey)
                 }
             } else if let systemImageName = section.systemImageName {
@@ -1040,8 +995,6 @@ private struct SettingsSidebarLabel: View {
 }
 
 private struct MCPBrandIcon: View {
-    let isSelected: Bool
-
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -1062,7 +1015,6 @@ private struct MCPBrandIcon: View {
             }
         }
         .frame(width: 16, height: 16)
-        .foregroundStyle(isSelected ? Color.white : Color.accentColor)
         .accessibilityHidden(true)
     }
 }

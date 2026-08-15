@@ -10,7 +10,7 @@ let package = Package(
     name: "PasteBuddy",
     defaultLocalization: "en",
     platforms: [
-        .macOS("14.5"),
+        .macOS("26.0"),
         .iOS("17.5")
     ],
     products: [
