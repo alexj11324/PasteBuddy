@@ -75,6 +75,17 @@ normalization; Supabase stores the resulting entitlement truth for cloud
 authorization. No WP0 statement claims an SDK callback, queue delivery
 guarantee, or provider policy has been verified.
 
+V1 server actions are Deno/TypeScript Supabase Edge Functions. PasteBuddy does
+not add a standalone Rust backend, rewrite PowerSync, or deploy a Rust service
+for webhook, entitlement, deletion, quota, Storage, or hosted-AI orchestration.
+Those paths are I/O-bound and already owned by managed services, SQL, and Edge
+Functions. Rust may be evaluated only as a small Rust-to-Wasm module after
+profiling identifies a pure-compute bottleneck and a benchmark proves the
+TypeScript implementation misses a frozen latency or cost Gate. That
+evaluation is a new approved task; it cannot be introduced inside an existing
+WP1-WP7 work package. See the official
+[Supabase Wasm guidance](https://supabase.com/docs/guides/functions/wasm).
+
 V1 does not adopt Supabase `gte-small`: its English-first behavior and
 long-text truncation do not match the Chinese retrieval target. Qwen3 Embedding
 at 1024 dimensions remains the default candidate pending the fixed bake-off;
@@ -169,9 +180,11 @@ promise of cloud availability before that gate.
 PasteBuddy will not own a generic push/pull protocol, revision or cursor
 scheme, client counters or reset fences, an application-specific mutation DSL,
 HMAC receipts, device proof/ECDH, server-recoverable AES-GCM envelopes, or a
-generic deletion phase machine. These names may occur in historical documents
-only as rejected designs. The service and SDK must be exercised before any
-replacement behavior is stated as correct.
+generic deletion phase machine. V1 also rejects an independent Rust backend or
+a custom Rust PowerSync replacement without the profiling and approval Gate
+above. These names may occur in historical documents only as rejected designs.
+The service and SDK must be exercised before any replacement behavior is
+stated as correct.
 
 ## Work packages and governance
 

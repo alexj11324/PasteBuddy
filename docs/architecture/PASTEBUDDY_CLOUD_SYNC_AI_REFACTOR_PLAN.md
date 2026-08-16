@@ -42,6 +42,10 @@ must not be silently replaced by this plan:
   Queues, and Cron provide the cloud boundary. RevenueCat is the purchase
   identity/reconciliation boundary. OpenRouter ZDR is the hosted AI policy;
   existing Sentry remains the diagnostics boundary.
+- V1 server actions use Deno/TypeScript Edge Functions. There is no standalone
+  Rust backend. A Rust-to-Wasm evaluation requires a separately approved task,
+  profiling evidence for a pure-compute bottleneck, and a benchmark showing
+  that TypeScript misses a frozen latency or cost Gate.
 - Sensitive and user-excluded content has zero network path. Cloud content is
   service-readable under Auth/RLS and is not E2EE.
 - Cloud quotas are 5,000 clipboard items and 250,000,000 attachment bytes.
@@ -111,6 +115,14 @@ kill, reconnect, duplicate, corruption, deadlock, SQLITE_BUSY, or privacy
 evidence is missing or fails, the Coordinator stops and records the failure;
 later work cannot paper over it.
 
+WP1 execution is decomposed by the Trellis parent task
+[PowerSync PoC implementation refinement](../../.trellis/tasks/08-16-powersync-poc-refinement/implement.md).
+Its 17 leaf tasks are the only WP1 implementation units. Dependency-ready,
+file-disjoint leaves may use at most two isolated native Codex worktree lanes;
+the Coordinator still commits and integrates them serially into the single
+WP1 stack layer. The WP1 row above remains the milestone boundary; it must not
+be dispatched as one agent task.
+
 ## Hosted legacy boundary
 
 The current PasteBuddy Dev hosted Supabase legacy migrations are recorded as
@@ -176,8 +188,16 @@ Luna Max is the default implementation worker. The Coordinator owns Gate
 review and the focused commit checkpoint. There is one writer per
 responsibility boundary. One Sol agent may perform one concentrated,
 independent review. The same boundary is escalated to Sol only after two
-evidenced Luna failures; no parallel writers or hidden replacement protocol
-are allowed.
+evidenced Luna failures. Parallel writers are forbidden within one worktree or
+responsibility owner, but at most two dependency-ready, file-disjoint leaves
+may run in isolated worktrees. Orca and hidden replacement protocols are not
+part of this execution plan.
+
+Each Trellis leaf task has one responsibility, no more than three acceptance
+criteria, and an intended source/test change set of no more than five files.
+One leaf equals one Luna turn, one Coordinator Gate, and one focused commit.
+The next wave cannot begin until every dependency is committed and the prior
+wave's combined Gate passes.
 
 gh stack commands are non-interactive and must use explicit branch/stack
 arguments. If gh stack exits 9, stop and report that the workflow is
