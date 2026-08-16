@@ -52,7 +52,7 @@ Only these eight business tables are frozen by WP0.
 | entitlements | id; user_id; revenuecat_app_user_id; entitlement_key; product_id; status; expires_at; verified_at; updated_at. Normalized RevenueCat facts, never a raw receipt authority. |
 | clipboard_items | id; user_id; client_mutation_id; content_kind; service-readable cloud content or metadata; source metadata; cloud_epoch; created_at; updated_at; deleted_at. Sensitive/excluded rows never enter this table. |
 | assets | id; user_id; item_id; private_storage_path; content_type; byte_count; content_hash; cloud_epoch; created_at; updated_at; deleted_at. Bytes live only in private Storage. |
-| semantic_documents | id; user_id; item_id; redacted_document; semantic_fts; embedding = pgvector halfvec(1024); embedding_identity; embedding_dimensions = 1024; index_state; created_at; updated_at; deleted_at. Service-visible derived data, never raw sensitive content. |
+| semantic_documents | id; user_id; item_id; redacted_document; semantic_fts; embedding = pgvector halfvec(1024); embedding_identity; embedding_dimensions = 1024; index_state; created_at; updated_at; deleted_at. Service-visible derived data, never raw sensitive content. The identity must match the tenant's active multimodal model for text, image, joint, and query vectors. |
 | ai_profiles | user_id; provider = OpenRouter; policy_version; active_embedding_identity; embedding_model; embedding_dimensions = 1024; byok_fingerprint; byok_status; server-only opaque_vault_credential_ref; updated_at. No raw BYOK key; the reference is never synced to or returned to a client. |
 | deletion_requests | id; user_id; scope; target_id; client_mutation_id; status; requested_at; completed_at; verification_summary; error_code. Fixed deletion intent and observable result. |
 | usage_counters | user_id; period_start; period_end; cloud_items_used; attachment_bytes_used; ai_requests_used; updated_at. Quota and usage accounting. |
@@ -146,10 +146,15 @@ authorization shortcut.
 
 OpenRouter is the only V1 provider route. Platform and BYOK requests require
 verified provider zero-data-retention policy: provider.zdr=true and
-data_collection=deny. A failed policy probe fails closed. Qwen3 Embedding is
-the default candidate at 1024 dimensions. Each tenant has one active
-embedding_identity; an identity change makes old derived rows stale and
-requires a resumable rebuild.
+data_collection=deny. A failed policy probe fails closed. WP5 uses one active
+multimodal embedding identity per tenant at exactly 1024 dimensions for text,
+image, joint, and query vectors. `voyageai/voyage-multimodal-3.5` is a concrete
+bake-off candidate from the official OpenRouter model page; Gemini Embedding 2
+and Qwen3-VL-Embedding remain conditional until routing, exact 1024 output,
+cross-modal behavior, and ZDR evidence are proven. An identity change makes all
+old derived rows stale and requires a resumable rebuild. Direct image vectors,
+local OCR/lexical retrieval, and optional (not mandatory) generative summaries
+remain separate concerns.
 
 The raw user OpenRouter key is stored only in Supabase Vault. The server keeps
 an opaque Vault credential reference/mapping and ai_profiles stores a
@@ -239,4 +244,4 @@ References: [PowerSync](https://docs.powersync.com/),
 [Supabase Edge Functions](https://supabase.com/docs/guides/functions),
 [Supabase Queues](https://supabase.com/docs/guides/queues),
 [RevenueCat](https://www.revenuecat.com/docs/), and
-[OpenRouter ZDR](https://openrouter.ai/docs/features/zdr).
+[OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr).

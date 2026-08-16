@@ -170,7 +170,7 @@ RevenueCat; no runtime cloud gate is passed by this document.
 | WP2 | Minimum Supabase domain, RLS, Storage, Vault, Edge, Queues/Cron | Not run |
 | WP3 | Auth, login-before-purchase, RevenueCat CustomerInfo reconciliation | Not run |
 | WP4 | Production PowerSync adapter and single main-app owner | Not run |
-| WP5 | Cloud AI, BYOK, ZDR, Qwen3 1024, RRF, MCP, bake-off | Not run |
+| WP5 | Cloud AI, BYOK, ZDR, one active multimodal 1024-dimensional identity across text/image/joint/query vectors, direct image vectors with local OCR exact retrieval, RRF, MCP, and four-slice bake-off | Not run |
 | WP6 | Settings, account switch, CloudKit migration, deletion, visual proof | Not run |
 | WP7 | Release artifact, environment isolation, rollout, Sentry evidence | Not run |
 

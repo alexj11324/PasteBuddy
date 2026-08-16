@@ -66,7 +66,7 @@ complete while making the cloud boundary observable and replaceable.
 | Server actions | Supabase Edge Functions | [Supabase Edge Functions](https://supabase.com/docs/guides/functions) |
 | Durable server work | Supabase Queues and Cron for fixed jobs | [Supabase Queues](https://supabase.com/docs/guides/queues), [Supabase Cron](https://supabase.com/docs/guides/cron) |
 | Purchases | RevenueCat customer and entitlement service | [RevenueCat docs](https://www.revenuecat.com/docs/) |
-| Hosted AI | OpenRouter route with verified ZDR policy | [OpenRouter ZDR](https://openrouter.ai/docs/features/zdr) |
+| Hosted AI | OpenRouter route with verified ZDR policy | [OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr) |
 | Diagnostics | Existing Sentry integration; no new telemetry vendor | [Sentry Apple SDK](https://docs.sentry.io/platforms/apple/) |
 
 PowerSync owns replication mechanics. Supabase owns Auth, Postgres policy,
@@ -86,10 +86,22 @@ evaluation is a new approved task; it cannot be introduced inside an existing
 WP1-WP7 work package. See the official
 [Supabase Wasm guidance](https://supabase.com/docs/guides/functions/wasm).
 
-V1 does not adopt Supabase `gte-small`: its English-first behavior and
-long-text truncation do not match the Chinese retrieval target. Qwen3 Embedding
-at 1024 dimensions remains the default candidate pending the fixed bake-off;
-this is a model choice, not a new model protocol.
+V1 does not adopt Supabase `gte-small` or a Qwen3 text-only embedding: their
+text-only boundary cannot provide one shared image/text space for this target.
+WP5 evaluates multimodal candidates through the OpenRouter embeddings route.
+The current concrete candidate is `voyageai/voyage-multimodal-3.5`, whose
+official OpenRouter page describes text/image/video input and lists 1024
+dimensions. Gemini Embedding 2 and Qwen3-VL-Embedding remain conditional until
+the live route proves text+image support, exact 1024 output, actual routing, and
+`provider.zdr=true` plus `data_collection=deny`. This is a candidate Gate, not
+a model selection or implementation claim.
+
+The active tenant identity binds exact model, routed provider, policy version,
+and `dimensions=1024`; text items, image items, joint inputs, and text queries
+must use that identity. Images may receive direct/joint vectors while local OCR
+and lexical retrieval preserve exact text. Vector, server semantic FTS, and
+local lexical ranks remain independent RRF inputs. A GPT/VLM description is an
+optional measured enhancement, never a per-image indexing prerequisite.
 
 ### Privacy and content policy
 

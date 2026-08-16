@@ -76,14 +76,20 @@ OpenRouter is the only V1 provider route. Platform and BYOK requests require
 verified provider.zdr=true and data_collection=deny. If the zero-retention
 policy cannot be proved, the request fails closed. BYOK cannot bypass that
 policy or choose a custom host. The policy reference is the official
-[OpenRouter ZDR documentation](https://openrouter.ai/docs/features/zdr).
+[OpenRouter ZDR documentation](https://openrouter.ai/docs/guides/features/zdr).
 
-Qwen3 Embedding is the default 1024-dimensional candidate; one active
-embedding identity exists per tenant. Semantic derivatives are service
-readable, never sensitive originals. The remote UI path starts only from an
-explicit sparkle click; offline lexical search remains local. MCP is an
-explicit tool action and revalidates session, entitlement, tool permission,
-and item visibility immediately before and after every remote await.
+One active multimodal embedding identity exists per tenant at exactly 1024
+dimensions for text, image, joint, and text-query vectors. The concrete
+`voyageai/voyage-multimodal-3.5` candidate is subject to the fixed bake-off;
+Gemini Embedding 2 and Qwen3-VL-Embedding remain conditional until the actual
+OpenRouter route proves cross-modal support, 1024 output, and the ZDR boundary.
+Semantic derivatives are service-readable, never sensitive originals. An image
+may be embedded directly while local OCR/lexical paths preserve exact text; a
+GPT/VLM description is optional and not a per-image indexing prerequisite. The
+remote UI path starts only from an explicit sparkle click; offline lexical
+search remains local. MCP is an explicit tool action and revalidates session,
+entitlement, tool permission, and item visibility immediately before and after
+every remote await.
 
 ## Fixed deletion and verification
 
@@ -115,7 +121,8 @@ session. No cleanup path retrieves a secret.
 WP1 must prove tenant A/B isolation, zero-network sensitive content,
 encrypted App Group handoff, Keychain fail-closed behavior, quotas, process
 kill/reconnect, and the single PowerSync owner. WP5/WP6 must prove ZDR
-failure, BYOK Vault redaction, MCP revalidation, deletion verification,
-CloudKit freeze ordering, and real macOS/iOS UI behavior. Evidence must bind
-runtime environment, source commit, entitlement/privacy state, screenshots,
+failure, BYOK Vault redaction, one active multimodal identity at 1024 dimensions,
+the four retrieval slices, MCP revalidation, deletion verification, CloudKit
+freeze ordering, and real macOS/iOS UI behavior. Evidence must bind runtime
+environment, source commit, entitlement/privacy state, screenshots,
 Accessibility trees, and relevant frames without storing sensitive payloads.

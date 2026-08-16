@@ -105,7 +105,7 @@ acceptance matrix.
 | WP2 | Supabase domain | Prove the minimum eight-table domain, Auth tenant identity, RLS, private Storage, Vault boundary, Edge actions, Queues/Cron ownership, usage/quota accounting, fixed deletion verification, and forward-only legacy teardown in hosted Supabase Dev. Docker is optional for quick SQL checks, never final evidence. |
 | WP3 | Auth and RevenueCat | Support Apple, Google, and Email Magic Link through Resend SMTP. Require login before purchase; bind the Supabase UUID to the RevenueCat App User ID; preserve existing App Store product IDs/capabilities; use verified signed webhooks only as wakeups, refetch canonical CustomerInfo completely, retry fetch failure without granting, and make Supabase entitlements the cloud/RLS/AI truth. Prove A/B switching and local-only behavior. |
 | WP4 | Production PowerSync client | Move the PoC adapter into the real macOS/iOS apps with one main-app owner, encrypted extension handoff, SQLite-only UI/offline reads, privacy gating, attachment flow, queue settlement, quota continuation, and process/reconnect recovery. |
-| WP5 | Cloud AI | Implement and prove the OpenRouter ZDR fail-closed policy, OpenRouter/Vault BYOK, Qwen3 1024 candidate and embedding identity, independent RRF lists, sparkle-only remote search, offline lexical search, MCP before/after revalidation, and the fixed bake-off. |
+| WP5 | Cloud AI | Implement and prove the OpenRouter ZDR fail-closed policy, OpenRouter/Vault BYOK, one active multimodal identity at 1024 dimensions for text/image/joint/query vectors, direct image vectors with local OCR exact retrieval, independent RRF lists, sparkle-only remote search, offline lexical search, MCP before/after revalidation, and the fixed four-slice bake-off. `voyageai/voyage-multimodal-3.5` is a concrete candidate; Gemini/Qwen3-VL remain conditional until routing/1024/ZDR proof. |
 | WP6 | UI, migration, deletion | Implement account-switch confirmation showing count/attachment size, account/sync/backfill/quota/cloud-stat/AI/BYOK/migration/deletion Settings, single-item and all-cloud delete, disable cloud processing, one-time CloudKit import and 90-day read-only recovery, Iroh-off state, and real macOS/iOS visual/runtime acceptance. Freeze the visual matrix before implementation; require screenshots, Accessibility trees, runtime frames, visible-vs-hit geometry review, and before/after diffs. |
 | WP7 | Release | Start from clean codex/integrated-delivery; run script/build_and_run.sh --verify and prove bundle/signature/source commit, stable permission identity, one process, exact artifact provenance, real iOS Simulator first, independent Dev/Alpha and Prod Supabase/PowerSync/RevenueCat environments, Sentry metrics, and staged internal -> 20 -> 100 -> 1000 rollout with stop criteria. Open Edition is source-available, not an OSI full-stack open-source claim. Revisit Cloud versus Open Edition at 100 users; Supabase Pro is required before paid launch. Deployment secrets are temporary general-secrets-store injection only. |
 
@@ -152,9 +152,11 @@ attached to the exact source commit and artifact:
    the Supabase UUID, canonical CustomerInfo is reconciled, and Supabase
    entitlements—not local flags—authorize cloud capabilities.
 5. AI behavior: ZDR failure closes safely; BYOK is OpenRouter/Vault-only;
-   Qwen3 1024 and one embedding identity are enforced; RRF keeps three lists
-   independent; sparkle, offline lexical, MCP revalidation, and bake-off
-   thresholds pass.
+   one active multimodal identity and exact 1024 dimensions are enforced across
+   text/image/joint/query vectors; direct image vectors and local OCR exact
+   retrieval remain available; RRF keeps three lists independent; sparkle,
+   offline lexical, MCP revalidation, and the four-slice bake-off thresholds
+   pass.
 6. Migration, UI, and release: CloudKit freezes before upload and stays
    read-only for 90 days; deletion/account-switch UI is observable; visual
    evidence covers the required matrix; stable macOS and iOS artifacts,

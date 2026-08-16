@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/cloud-ai-search-contracts.md", "reason": "Executable seven-section WP5 contract for identity, provider policy, DTOs, lifecycle, and RRF."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index that exposes the active WP5 contract."}
+{"file": "docs/AI_SEMANTIC_SEARCH.md", "reason": "Frozen product/privacy decisions and four-slice bake-off requirements."}
+{"file": "docs/architecture/ADR-002-powersync-supabase-convergence.md", "reason": "Authoritative architecture ownership and conditional multimodal candidate boundary."}
+{"file": "docs/architecture/SUPABASE_SCHEMA_API_CONTRACT.md", "reason": "Semantic document/ai profile fields and active identity data boundary."}
+{"file": "docs/architecture/SUPABASE_ACCEPTANCE_MATRIX.md", "reason": "Falsifiable WP5 Cloud AI/search/authorization gate and Not run status."}
+{"file": "docs/architecture/PASTEBUDDY_CLOUD_SYNC_AI_REFACTOR_PLAN.md", "reason": "WP5 scope/order and unified success standard."}
+{"file": "docs/SECURITY.md", "reason": "Zero-network, ZDR, Vault, and runtime evidence boundary."}
+{"file": "docs/IMPLEMENTATION_STATUS.md", "reason": "Current WP5 status map, which remains Not run."}
