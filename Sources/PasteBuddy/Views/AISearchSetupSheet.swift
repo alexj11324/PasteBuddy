@@ -209,7 +209,7 @@ struct AISearchSetupSheet: View {
                 configuration.projectID = defaults.projectID
                 documentAPIKey = ""
             }
-            SecureField("label.document_api_key", text: $documentAPIKey)
+            TextField("label.document_api_key", text: $documentAPIKey)
                 .textFieldStyle(.roundedBorder)
             Picker("label.embedding_provider", selection: $configuration.embeddingPreset) {
                 providerChoices
@@ -221,7 +221,7 @@ struct AISearchSetupSheet: View {
                 embeddingAPIKey = ""
             }
             if !rolesShareEndpoint {
-                SecureField("label.embedding_api_key", text: $embeddingAPIKey)
+                TextField("label.embedding_api_key", text: $embeddingAPIKey)
                     .textFieldStyle(.roundedBorder)
             }
             DisclosureGroup("label.advanced_settings", isExpanded: $showsAdvancedSettings) {
