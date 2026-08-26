@@ -1,0 +1,86 @@
+name: Local CI
+run-name: CI / approve ${{ inputs.commit_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full 40-character commit SHA to execute on the local runner
+        required: true
+        type: string
+      confirmation:
+        description: Type RUN to approve this exact SHA
+        required: true
+        type: string
+
+concurrency:
+  group: local-ci-${{ inputs.commit_sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify:
+    name: Execute owner-approved SHA
+    if: github.actor == github.repository_owner && inputs.confirmation == 'RUN'
+    runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]
+    timeout-minutes: 90
+    env:
+      TARGET_SHA: ${{ inputs.commit_sha }}
+
+    steps:
+      - name: Validate approved commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA" --silent
+
+      - name: Create required check on approved SHA
+        id: required_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          details_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          check_id="$(gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
+            -f name='CI / verify' \
+            -f head_sha="$TARGET_SHA" \
+            -f status='in_progress' \
+            -f details_url="$details_url" \
+            --jq .id)"
+          echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
+
+      - name: Check out approved commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact source
+        run: test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Run canonical CI
+        run: script/ci.sh
+
+      - name: Complete required check
+        if: always() && steps.required_check.outputs.check_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          CHECK_ID: ${{ steps.required_check.outputs.check_id }}
+        run: |
+          case "$JOB_STATUS" in
+            success) conclusion=success ;;
+            cancelled) conclusion=cancelled ;;
+            *) conclusion=failure ;;
+          esac
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CHECK_ID" \
+            -f status=completed \
+            -f conclusion="$conclusion" \
+            -f completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

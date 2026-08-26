@@ -3,6 +3,7 @@ set -euo pipefail
 
 MODE="${1:-run}"
 EXECUTABLE_NAME="PasteBuddy"
+EXPECTED_TEAM_ID="72UN4PF4BL"
 SIGNING_CHANNEL="${PASTEBUDDY_SIGNING_CHANNEL:-development}"
 case "$SIGNING_CHANNEL" in
   development)
@@ -20,6 +21,11 @@ case "$SIGNING_CHANNEL" in
 esac
 APP_NAME="${PASTEBUDDY_APP_NAME:-$DEFAULT_APP_NAME}"
 BUNDLE_ID="${PASTEBUDDY_BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
+APP_VERSION="${PASTEBUDDY_VERSION:-0.0.0-dev}"
+[[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || {
+  echo "Invalid PASTEBUDDY_VERSION='$APP_VERSION'." >&2
+  exit 1
+}
 MIN_SYSTEM_VERSION="26.0"
 MACOS_SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
 MACOS_SDK_VERSION="$(/usr/bin/xcrun --sdk macosx --show-sdk-version)"
@@ -30,11 +36,16 @@ MACOS_SDK_VERSION="$(/usr/bin/xcrun --sdk macosx --show-sdk-version)"
 export SDKROOT="$MACOS_SDK_PATH"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_BUILD_NUMBER="${PASTEBUDDY_BUILD_NUMBER:-$(/usr/bin/git -C "$ROOT_DIR" rev-list --count HEAD)}"
+[[ "$APP_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+  echo "Invalid PASTEBUDDY_BUILD_NUMBER='$APP_BUILD_NUMBER'." >&2
+  exit 1
+}
 INTEGRATION_BRANCH="codex/integrated-delivery"
 STABLE_DEVELOPMENT_BUNDLE="/Applications/PasteBuddy Dev.app"
 SOURCE_BRANCH="$(/usr/bin/git -C "$ROOT_DIR" symbolic-ref --short -q HEAD || true)"
 SOURCE_COMMIT="$(/usr/bin/git -C "$ROOT_DIR" rev-parse HEAD)"
-DIST_DIR="$ROOT_DIR/dist"
+DIST_DIR="${PASTEBUDDY_DIST_DIR:-$ROOT_DIR/dist}"
 DEFAULT_STAGE_ROOT="/private/tmp/pastebuddy-build-$SOURCE_COMMIT-$$"
 STAGE_ROOT="${PASTEBUDDY_STAGE_ROOT:-$DEFAULT_STAGE_ROOT}"
 APP_BUNDLE="$STAGE_ROOT/$APP_NAME.app"
@@ -47,7 +58,7 @@ APP_ICON_SOURCE="$ROOT_DIR/Support/AppIcon.icns"
 APP_ICON_NAME="AppIcon.icns"
 INSTALL_BUNDLE_RAW="${PASTEBUDDY_INSTALL_PATH:-/Applications/$APP_NAME.app}"
 INSTALL_BUNDLE="$(cd "$(dirname "$INSTALL_BUNDLE_RAW")" && pwd -P)/$(basename "$INSTALL_BUNDLE_RAW")"
-PACKAGE_ZIP="$DIST_DIR/$APP_NAME-installable.zip"
+PACKAGE_ZIP="$DIST_DIR/${APP_NAME// /-}-${SIGNING_CHANNEL}-${SOURCE_COMMIT:0:12}.zip"
 CLOUDKIT_PROVISIONING_PROFILE="${PASTEBUDDY_PROVISIONING_PROFILE:-}"
 CLOUDKIT_CAPABILITY_CONFIGURED=false
 CLOUDKIT_PROFILE_TEAM_ID=""
@@ -185,6 +196,35 @@ resolve_code_sign_keychain() {
   printf '%s\n' "$keychain"
 }
 
+mode_installs_app() {
+  case "$MODE" in
+    run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--install|install|--install-package|install-package)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+mode_packages_app() {
+  case "$MODE" in
+    --package|package|--install-package|install-package)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+assert_committed_package_source() {
+  mode_packages_app || return 0
+  [[ -z "$(/usr/bin/git -C "$ROOT_DIR" status --porcelain --untracked-files=normal)" ]] \
+    || die "Refusing to package an uncommitted source state; commit the exact source before producing a signed artifact."
+}
+
+assert_committed_package_source
+if [[ "$SIGNING_CHANNEL" == "release" ]] && mode_installs_app; then
+  die "Developer ID builds are distribution artifacts, not local install/verify builds. Use script/release_macos.sh from an approved release workflow."
+fi
+
 CODESIGN_KEYCHAIN="$(resolve_code_sign_keychain)"
 
 code_signing_identities() {
@@ -227,19 +267,30 @@ identity_record_for() {
   return 1
 }
 
-find_identity_with_prefix() {
+find_unique_identity_with_prefix() {
   local prefix="$1"
   local parsed hash label
+  local candidates=()
   while IFS= read -r parsed; do
     [[ -n "$parsed" ]] || continue
     hash="${parsed%%$'\t'*}"
     label="${parsed#*$'\t'}"
     if [[ "$label" == "$prefix"* ]]; then
-      printf '%s\n' "$hash"
-      return 0
+      candidates+=("$hash")
     fi
   done < <(code_signing_identities | while IFS= read -r line; do parse_identity_line "$line"; done)
-  return 1
+  case "${#candidates[@]}" in
+    0)
+      return 1
+      ;;
+    1)
+      printf '%s\n' "${candidates[0]}"
+      ;;
+    *)
+      echo "Multiple '$prefix' identities are valid in the configured keychain. Set PASTEBUDDY_CODESIGN_IDENTITY to the intended certificate SHA-1 hash." >&2
+      return 2
+      ;;
+  esac
 }
 
 validate_identity_matches_channel() {
@@ -257,7 +308,7 @@ validate_identity_matches_channel() {
 }
 
 resolve_code_sign_identity() {
-  local required_prefix requested record identity label
+  local required_prefix requested record identity label identity_status
   required_prefix="$(required_identity_prefix)"
 
   if [[ -n "${PASTEBUDDY_CODESIGN_IDENTITY:-}" ]]; then
@@ -265,8 +316,8 @@ resolve_code_sign_identity() {
     if is_adhoc_sign_identity "$requested"; then
       die "PasteBuddy refuses ad-hoc signing. Use Apple Development for daily builds or Developer ID Application for release/install verification."
     fi
-    record="$(identity_record_for "$requested" || true)"
-    [[ -n "$record" ]] || die "Could not find requested signing identity '$requested' in the keychain."
+    record="$(identity_record_for "$requested")" \
+      || die "Could not find requested signing identity '$requested' in the keychain."
     identity="${record%%$'\t'*}"
     label="${record#*$'\t'}"
     validate_identity_matches_channel "$requested" "$label" "$required_prefix"
@@ -274,8 +325,18 @@ resolve_code_sign_identity() {
     return
   fi
 
-  identity="$(find_identity_with_prefix "$required_prefix" || true)"
-  [[ -n "$identity" ]] || die "No '$required_prefix' code signing identity found. PasteBuddy will not build with ad-hoc signing."
+  identity_status=0
+  identity="$(find_unique_identity_with_prefix "$required_prefix")" || identity_status=$?
+  case "$identity_status" in
+    0)
+      ;;
+    1)
+      die "No '$required_prefix' code signing identity found. PasteBuddy will not build with ad-hoc signing."
+      ;;
+    *)
+      return "$identity_status"
+      ;;
+  esac
   printf '%s\n' "$identity"
 }
 
@@ -297,17 +358,6 @@ resolve_sentry_dsn() {
   done
 }
 
-CODESIGN_IDENTITY="$(resolve_code_sign_identity)"
-
-mode_installs_app() {
-  case "$MODE" in
-    run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--install|install|--install-package|install-package)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
 assert_coordinated_install_source() {
   mode_installs_app || return 0
   [[ "$INSTALL_BUNDLE" == "$STABLE_DEVELOPMENT_BUNDLE" ]] || return 0
@@ -320,6 +370,9 @@ assert_coordinated_install_source() {
   [[ "$STAGE_ROOT" == "$DEFAULT_STAGE_ROOT" ]] \
     || die "Refusing shared or caller-controlled staging for $STABLE_DEVELOPMENT_BUNDLE."
 }
+
+assert_coordinated_install_source
+CODESIGN_IDENTITY="$(resolve_code_sign_identity)"
 
 run_coordinated_install_gate_tests() {
   mode_installs_app || return 0
@@ -405,7 +458,6 @@ kill_existing_app() {
   kill -9 "${pids[@]}" >/dev/null 2>&1 || true
 }
 
-assert_coordinated_install_source
 run_coordinated_install_gate_tests
 
 swift build "${SWIFT_PACKAGE_ARGS[@]}"
@@ -449,6 +501,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$APP_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$APP_BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>LSUIElement</key>
@@ -510,6 +566,8 @@ validate_cloudkit_provisioning_profile() {
   CLOUDKIT_PROFILE_TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$decoded" 2>/dev/null || true)"
   [[ -n "$prefix" && -n "$CLOUDKIT_PROFILE_TEAM_ID" ]] \
     || die "CloudKit provisioning profile is missing its application prefix or Team ID."
+  [[ "$CLOUDKIT_PROFILE_TEAM_ID" == "$EXPECTED_TEAM_ID" ]] \
+    || die "CloudKit provisioning profile Team ID '$CLOUDKIT_PROFILE_TEAM_ID' does not match expected Team ID '$EXPECTED_TEAM_ID'."
   app_identifier="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$decoded" 2>/dev/null || true)"
   if [[ "$app_identifier" != "$prefix$BUNDLE_ID" ]]; then
     [[ "$app_identifier" == *"*" && "$prefix$BUNDLE_ID" == "${app_identifier%\*}"* ]] \
@@ -561,7 +619,7 @@ assert_safe_bundle_path() {
 
 verify_code_signature() {
   local bundle="$1"
-  local details
+  local details requirements
   local signed_entitlements="$STAGE_ROOT/signed-entitlements.plist"
 
   /usr/bin/codesign --verify --deep --strict --verbose=4 "$bundle" >/dev/null
@@ -575,6 +633,9 @@ verify_code_signature() {
   fi
   if [[ "$details" == *"TeamIdentifier=not set"* ]]; then
     die "Code signature has no TeamIdentifier for $bundle."
+  fi
+  if [[ "$details" != *"TeamIdentifier=$EXPECTED_TEAM_ID"* ]]; then
+    die "Code signature Team ID does not match expected '$EXPECTED_TEAM_ID'."
   fi
   if [[ -n "$CLOUDKIT_PROFILE_TEAM_ID" && "$details" != *"TeamIdentifier=$CLOUDKIT_PROFILE_TEAM_ID"* ]]; then
     die "Signing identity Team ID does not match the CloudKit provisioning profile."
@@ -597,9 +658,9 @@ verify_code_signature() {
     printf '%s\n' "$details" >&2
     die "Signed bundle identifier does not match expected '$BUNDLE_ID'."
   fi
-  if [[ "$SIGNING_CHANNEL" == "release" ]]; then
-    /usr/sbin/spctl --assess --type execute --verbose=4 "$bundle" >/dev/null
-  fi
+  requirements="$(/usr/bin/codesign -d -r- "$bundle" 2>&1)"
+  [[ "$requirements" == *"identifier \"$BUNDLE_ID\""* ]] \
+    || die "Designated requirement does not bind the signed app to '$BUNDLE_ID'."
 }
 
 sign_app() {
@@ -611,6 +672,10 @@ sign_app() {
   if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
     nested_codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
     codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
+  fi
+  if [[ "$SIGNING_CHANNEL" == "release" ]]; then
+    nested_codesign_args+=(--timestamp --options runtime)
+    codesign_args+=(--timestamp --options runtime)
   fi
   if [[ "$CLOUDKIT_CAPABILITY_CONFIGURED" == true ]]; then
     codesign_args+=(--entitlements "$GENERATED_ENTITLEMENTS")
@@ -624,6 +689,7 @@ sign_app "$APP_BUNDLE"
 
 package_app() {
   local source_bundle="${1:-$APP_BUNDLE}"
+  mkdir -p "$DIST_DIR"
   rm -f "$PACKAGE_ZIP"
   /usr/bin/ditto -c -k --norsrc --noextattr --keepParent "$source_bundle" "$PACKAGE_ZIP"
   printf 'Packaged %s\n' "$PACKAGE_ZIP"
