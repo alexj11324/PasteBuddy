@@ -19,7 +19,9 @@ An unpinned panel therefore follows this state machine:
 3. After mouse-up, a short main-actor retry observes the released button,
    clears protection, restores transient collection behavior, then applies the
    normal lost-focus dismissal policy.
-4. Pinned state bypasses dismissal but never owns drag-session completion.
+4. Focus-loss and outside-click paths also recover a stale session whenever
+   the physical primary button is already released, covering a missed mouse-up.
+5. Pinned state bypasses dismissal but never owns drag-session completion.
 
 Opening-event protection uses the existing exact ignored-target geometry. It
 does not use a blanket timer that would swallow a legitimate fast click-away.

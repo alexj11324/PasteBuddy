@@ -766,6 +766,7 @@ final class ClipboardShelfPanelController: NSObject {
 
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
+        recoverEndedPanelPointerSessionIfNeeded()
         let keyWindow = NSApp.keyWindow
         if let keyWindow, Self.isShelfAuxiliaryWindow(keyWindow) {
             keyWindow.sharingType = panel.sharingType
@@ -803,6 +804,7 @@ final class ClipboardShelfPanelController: NSObject {
 
     private func hideIfOutsideClick(at location: CGPoint) {
         guard let panel, panel.isVisible else { return }
+        recoverEndedPanelPointerSessionIfNeeded()
         if Self.shouldDismissForOutsideClick(
             at: location,
             panelFrame: panel.frame,
@@ -852,6 +854,13 @@ final class ClipboardShelfPanelController: NSObject {
         primaryButtonPressed
     }
 
+    static func shouldRecoverPointerSession(
+        isPointerSessionActive: Bool,
+        primaryButtonPressed: Bool
+    ) -> Bool {
+        isPointerSessionActive && !primaryButtonPressed
+    }
+
     static func shouldDismissForLostFocus(
         isPinned: Bool,
         isDragSessionActive: Bool
@@ -883,6 +892,7 @@ final class ClipboardShelfPanelController: NSObject {
     }
 
     private func hideIfAppLostFocus() {
+        recoverEndedPanelPointerSessionIfNeeded()
         guard Self.shouldDismissForLostFocus(
             isPinned: isPinned,
             isDragSessionActive: isPanelPointerSessionActive
@@ -921,6 +931,14 @@ final class ClipboardShelfPanelController: NSObject {
         if let panel {
             applyCollectionBehavior(to: panel)
         }
+    }
+
+    private func recoverEndedPanelPointerSessionIfNeeded() {
+        guard Self.shouldRecoverPointerSession(
+            isPointerSessionActive: isPanelPointerSessionActive,
+            primaryButtonPressed: (NSEvent.pressedMouseButtons & (1 << 0)) != 0
+        ) else { return }
+        resetPanelPointerSession()
     }
 
     private func schedulePointerSessionEndRetry() {

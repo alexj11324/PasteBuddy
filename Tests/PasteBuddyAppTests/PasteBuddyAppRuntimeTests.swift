@@ -949,6 +949,18 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 primaryButtonPressed: false
             )
         )
+        XCTAssertTrue(
+            ClipboardShelfPanelController.shouldRecoverPointerSession(
+                isPointerSessionActive: true,
+                primaryButtonPressed: false
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldRecoverPointerSession(
+                isPointerSessionActive: true,
+                primaryButtonPressed: true
+            )
+        )
         XCTAssertFalse(
             ClipboardShelfPanelController.shouldDismissForOutsideClick(
                 at: CGPoint(x: 800, y: 500),
