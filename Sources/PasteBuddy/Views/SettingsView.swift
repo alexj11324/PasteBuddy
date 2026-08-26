@@ -23,7 +23,7 @@ struct SettingsView: View {
 
     var body: some View {
         settingsSplitView
-            .frame(width: 640, height: 560)
+            .frame(minWidth: 720, minHeight: 560)
             .onAppear {
                 applyRequestedSettingsDestination()
                 reloadMCPClientCandidates()
@@ -83,22 +83,21 @@ struct SettingsView: View {
     @ViewBuilder
     private var settingsSplitView: some View {
         settingsSplitViewContent
-            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
     }
 
     private var settingsSplitViewContent: some View {
         NavigationSplitView {
             List(SettingsSidebarSection.allCases, selection: $selectedSettingsSection) { section in
                 SettingsSidebarLabel(section: section)
-                .tag(section)
+                    .tag(section)
             }
             .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
+            .navigationSplitViewColumnWidth(min: 196, ideal: 210, max: 240)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             selectedSettingsDetail
                 .navigationTitle(effectiveSettingsSection.titleKey)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -138,31 +137,25 @@ struct SettingsView: View {
                     .disabled(!LaunchAtLoginService.isAvailable)
                 if let launchAtLoginErrorMessage {
                     Text(launchAtLoginErrorMessage)
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Toggle("label.background_running", isOn: backgroundRunningBinding)
                 Toggle("label.enable_icloud_sync", isOn: cloudSyncBinding)
+                Toggle("label.sound_effects", isOn: soundEffectsBinding)
+            } footer: {
                 if store.snapshot.sync.isCloudSyncEnabled,
                    let status = store.snapshot.sync.lastSyncStatusMessage ?? store.lastErrorMessage {
                     Text(status)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-                Toggle("label.sound_effects", isOn: soundEffectsBinding)
             }
 
-            Section("label.paste_items") {
+            Section {
                 Picker("label.paste_destination", selection: pasteDestinationBinding) {
                     Text("label.paste_to_current_application").tag(PasteDestination.activeApplication)
                     Text("label.paste_to_clipboard").tag(PasteDestination.clipboard)
                 }
                 .labelsHidden()
                 .pickerStyle(.radioGroup)
-
-                Text("message.direct_paste_to_current_application")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 Toggle(
                     "action.paste_as_plain_text_by",
@@ -171,11 +164,17 @@ struct SettingsView: View {
                         set: { store.setAlwaysPasteAsPlainText($0) }
                     )
                 )
+            } header: {
+                Text("label.paste_items")
+            } footer: {
+                Text("message.direct_paste_to_current_application")
             }
 
             Section("label.keep_history") {
                 retentionSlider
+            }
 
+            Section("label.appearance") {
                 Picker("label.panel_style", selection: $panelDisplayMode) {
                     Text("label.clipboard_shelf").tag(ClipboardPanelDisplayMode.shelf)
                     Text("label.side_panel").tag(ClipboardPanelDisplayMode.sidePanel)
@@ -190,18 +189,17 @@ struct SettingsView: View {
                             .foregroundStyle(irohStatusColor)
                     }
                     TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
-                        .font(.caption.monospaced())
+                        .font(.body.monospaced())
                         .frame(maxWidth: .infinity)
                 }
             }
         }
-        .formStyle(.grouped)
-        .toggleStyle(.switch)
+        .pasteBuddySettingsForm()
     }
 
     @ViewBuilder
     private var retentionSlider: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             Slider(
                 value: retentionSliderBinding,
                 in: 0...4,
@@ -283,9 +281,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section {
-                SettingsPrivacyRules(store: store)
-            }
+            SettingsPrivacyRules(store: store)
 
             Section("label.capture_and_privacy") {
                 Toggle("label.capture_enabled", isOn: backgroundRunningBinding)
@@ -306,12 +302,14 @@ struct SettingsView: View {
                     )
                 )
                 LabeledContent("label.storage_usage") {
-                    Text(localized("format.items", store.storageUsageReport.itemCount))
-                    Text(ByteCountFormatter.string(
-                        fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
-                        countStyle: .file
-                    ))
-                    .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(localized("format.items", store.storageUsageReport.itemCount))
+                        Text(ByteCountFormatter.string(
+                            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
+                            countStyle: .file
+                        ))
+                        .foregroundStyle(.secondary)
+                    }
                 }
                 LabeledContent("label.storage_limit") {
                     Text(storageLimitDescription)
@@ -336,8 +334,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
-        .toggleStyle(.switch)
+        .pasteBuddySettingsForm()
     }
 
     private var shortcutSettings: some View {
@@ -355,11 +352,8 @@ struct SettingsView: View {
                 SettingsModifierShortcutRow(store: store, titleKey: "label.plain_text_mode", plainText: true)
             }
             Section {
-                HStack {
-                    Spacer()
-                    Button("action.reset_all_shortcuts") {
-                        destructiveConfirmation = .resetShortcuts
-                    }
+                Button("action.reset_all_shortcuts", role: .destructive) {
+                    destructiveConfirmation = .resetShortcuts
                 }
             }
         }
@@ -380,21 +374,19 @@ struct SettingsView: View {
                         detailKey: "message.mcp_local_connection"
                     )
                 }
-                Label(
-                    mcpHTTPServer.status == .listening
-                        ? "label.mcp_server_enabled"
-                        : "label.mcp_server_disabled",
-                    systemImage: "circle.fill"
-                )
-                    .font(.caption)
-                    .foregroundStyle(mcpHTTPServer.status == .listening ? .green : .secondary)
-                    .textSelection(.enabled)
+                LabeledContent("label.status") {
+                    Text(
+                        mcpHTTPServer.status == .listening
+                            ? LocalizedStringKey("label.mcp_server_enabled")
+                            : LocalizedStringKey("label.mcp_server_disabled")
+                    )
+                    .foregroundStyle(mcpHTTPServer.status == .listening ? Color.primary : Color.secondary)
+                }
                 Text(PasteBuddyMCPHTTPServer.endpoint)
-                    .font(.caption.monospaced())
+                    .font(.body.monospaced())
                     .textSelection(.enabled)
                 if case .failed(let message) = mcpHTTPServer.status {
                     Text(message)
-                        .font(.caption)
                         .foregroundStyle(.red)
                 }
             }
@@ -408,7 +400,6 @@ struct SettingsView: View {
                 } else {
                     Text("message.no_connected_ai_tools_yet")
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 56)
                 }
                 Menu {
                     ForEach(mcpClientCandidates) { candidate in
@@ -430,42 +421,38 @@ struct SettingsView: View {
                 .disabled(mcpHTTPServer.configurationToken == nil)
             }
         }
-        .formStyle(.grouped)
-        .toggleStyle(.switch)
+        .pasteBuddySettingsForm()
     }
 
     private var subscriptionSettings: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 36))
-                .foregroundStyle(.tint)
-                .accessibilityHidden(true)
-            Text("label.ai_plans")
-                .font(.system(size: 28, weight: .bold))
-            Text(subscriptionStatusKey)
-                .foregroundStyle(.secondary)
-            Text("message.ai_plan_comparison")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 420)
-            Button("action.restore_purchases") {
-                isRestoringPurchases = true
-                Task {
-                    _ = await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
-                    await store.flushPendingSave()
-                    isRestoringPurchases = false
+        Form {
+            Section {
+                LabeledContent("label.status") {
+                    Text(subscriptionStatusKey)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            } footer: {
+                Text("message.ai_plan_comparison")
+            }
+
+            Section {
+                Button("action.restore_purchases") {
+                    isRestoringPurchases = true
+                    Task {
+                        _ = await store.restorePurchases(using: AppleStoreKitEntitlementProvider())
+                        await store.flushPendingSave()
+                        isRestoringPurchases = false
+                    }
+                }
+                .disabled(isRestoringPurchases)
+                if let statusMessage = restoreStatusMessage ?? store.lastErrorMessage {
+                    Text(statusMessage)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            .disabled(isRestoringPurchases)
-            if let statusMessage = restoreStatusMessage ?? store.lastErrorMessage {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .formStyle(.grouped)
     }
 
     private var launchAtLoginBinding: Binding<Bool> {
@@ -810,7 +797,7 @@ private struct MCPAdvancedSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("action.agent_privacy_and_access") {
+                Section {
                     ForEach(MCPToolName.allCases) { tool in
                         Toggle(
                             tool.displayName,
@@ -820,9 +807,10 @@ private struct MCPAdvancedSettingsSheet: View {
                             )
                         )
                     }
+                } header: {
+                    Text("action.agent_privacy_and_access")
+                } footer: {
                     Text("message.retrieve_item_requires_explicit_mcp_opt_in")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section {
                     Button("action.revoke_mcp_access", role: .destructive) {
@@ -848,9 +836,10 @@ private struct SettingsSidebarLabel: View {
     var body: some View {
         Group {
             if section == .integrations {
-                HStack(spacing: 8) {
-                    MCPBrandIcon()
+                Label {
                     Text(section.titleKey)
+                } icon: {
+                    MCPBrandIcon()
                 }
             } else if let systemImageName = section.systemImageName {
                 Label {
@@ -861,8 +850,6 @@ private struct SettingsSidebarLabel: View {
                 }
             }
         }
-        .font(.system(size: 13))
-        .frame(height: 32)
         .accessibilityLabel(Text(section.titleKey))
     }
 }
@@ -897,7 +884,7 @@ private struct SettingsToggleLabel: View {
     let detailKey: LocalizedStringKey
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(titleKey)
             Text(detailKey)
                 .font(.caption)
@@ -913,7 +900,7 @@ private struct SettingsShortcutRow: View {
     @State private var validationMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             LabeledContent {
                 ShortcutCaptureButton(
                     displayName: currentBinding.isEnabled ? currentBinding.displayName : localized("label.not_set"),
@@ -954,7 +941,7 @@ private struct SettingsModifierShortcutRow: View {
     @State private var validationMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             LabeledContent {
                 ShortcutCaptureButton(
                     displayName: displayName,
@@ -1078,126 +1065,103 @@ private struct MCPClientConfigurationSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Label(guide.target.displayName, systemImage: guide.target.systemImageName)
-                    .font(.title2.weight(.semibold))
-                Spacer()
-                Button("action.close") {
-                    dismiss()
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("label.configuration_location") {
+                        Text(guide.configurationHint)
+                            .font(.body.monospaced())
+                            .textSelection(.enabled)
+                    }
+                    LabeledContent("label.server_command") {
+                        Text(commandSummary)
+                            .font(.body.monospaced())
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                } footer: {
+                    Text("message.paste_mcp_config_into_ai_tool")
                 }
-            }
 
-            Text("message.paste_mcp_config_into_ai_tool")
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("label.configuration_location") {
-                    Text(guide.configurationHint)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                }
-
-                LabeledContent("label.server_command") {
-                    Text(commandSummary)
-                        .font(.caption.monospaced())
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
-            }
-
-            if guide.installationCommand != nil || guide.installationURL != nil {
-                Text("label.client_install")
-                    .font(.headline)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    if let installationCommand = guide.installationCommand {
-                        LabeledContent("label.install_command") {
-                            Text(installationCommand)
-                                .font(.caption.monospaced())
-                                .lineLimit(3)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
+                if guide.installationCommand != nil || guide.installationURL != nil {
+                    Section("label.client_install") {
+                        if let installationCommand = guide.installationCommand {
+                            LabeledContent("label.install_command") {
+                                Text(installationCommand)
+                                    .font(.body.monospaced())
+                                    .lineLimit(3)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        if let installationURL = guide.installationURL {
+                            LabeledContent("label.install_link") {
+                                Text(installationURL)
+                                    .font(.body.monospaced())
+                                    .lineLimit(2)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        if guide.installationCommandParts != nil {
+                            Button {
+                                onRunInstallationCommand()
+                            } label: {
+                                Text(
+                                    isRunningInstallation
+                                        ? LocalizedStringKey("state.installing")
+                                        : LocalizedStringKey("action.run_install_command")
+                                )
+                            }
+                            .disabled(isRunningInstallation)
+                            .keyboardShortcut(.defaultAction)
+                        }
+                        if guide.installationURL != nil {
+                            Button("action.open_install_link") {
+                                onOpenInstallationURL()
+                            }
                         }
                     }
-
-                    if let installationURL = guide.installationURL {
-                        LabeledContent("label.install_link") {
-                            Text(installationURL)
-                                .font(.caption.monospaced())
-                                .lineLimit(2)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
-                        }
-                    }
                 }
 
-                HStack {
-                    if guide.installationCommandParts != nil {
-                        Button {
-                            onRunInstallationCommand()
-                        } label: {
-                            Text(
-                                isRunningInstallation
-                                    ? LocalizedStringKey("state.installing")
-                                    : LocalizedStringKey("action.run_install_command")
-                            )
-                        }
-                        .disabled(isRunningInstallation)
-                        .keyboardShortcut(.defaultAction)
+                Section("label.import_configuration") {
+                    TextEditor(text: .constant(guide.configurationSnippet))
+                        .font(.body.monospaced())
+                        .frame(minHeight: 160)
+                    Button("action.copy_import_configuration") {
+                        onCopyConfiguration()
                     }
-
+                    .keyboardShortcut(guide.installationCommandParts == nil ? .defaultAction : nil)
+                    Button("action.copy_server_command") {
+                        onCopyCommand()
+                    }
+                    if guide.installationCommand != nil {
+                        Button("action.copy_install_command") {
+                            onCopyInstallationCommand()
+                        }
+                    }
                     if guide.installationURL != nil {
-                        Button("action.open_install_link") {
-                            onOpenInstallationURL()
+                        Button("action.copy_install_link") {
+                            onCopyInstallationURL()
                         }
                     }
-
-                    Spacer()
-                }
-            }
-
-            Text("label.import_configuration")
-                .font(.headline)
-
-            TextEditor(text: .constant(guide.configurationSnippet))
-                .font(.caption.monospaced())
-            .frame(minHeight: 160)
-
-            HStack {
-                Button("action.copy_import_configuration") {
-                    onCopyConfiguration()
-                }
-                .keyboardShortcut(guide.installationCommandParts == nil ? .defaultAction : nil)
-
-                Button("action.copy_server_command") {
-                    onCopyCommand()
-                }
-
-                if guide.installationCommand != nil {
-                    Button("action.copy_install_command") {
-                        onCopyInstallationCommand()
+                    if let statusMessage {
+                        Text(statusMessage)
+                            .foregroundStyle(.secondary)
                     }
                 }
-
-                if guide.installationURL != nil {
-                    Button("action.copy_install_link") {
-                        onCopyInstallationURL()
-                    }
-                }
-
-                Spacer()
             }
-
-            if let statusMessage {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .formStyle(.grouped)
+            .navigationTitle(guide.target.displayName)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("action.close") { dismiss() }
+                }
             }
         }
+        .frame(minWidth: 560, minHeight: 520)
         .frame(width: 600)
-        .frame(minHeight: 500)
     }
 
     private var commandSummary: String {
@@ -1220,14 +1184,15 @@ private struct SettingsPrivacyRules: View {
     @State private var mode: SettingsPrivacyRuleMode = .applications
 
     var body: some View {
-        VStack(spacing: 12) {
-            Picker("label.ignore_applications", selection: $mode) {
-                Text("label.by_app").tag(SettingsPrivacyRuleMode.applications)
-                Text("label.other_rules").tag(SettingsPrivacyRuleMode.otherRules)
+        Group {
+            Section {
+                Picker("label.ignore_applications", selection: $mode) {
+                    Text("label.by_app").tag(SettingsPrivacyRuleMode.applications)
+                    Text("label.other_rules").tag(SettingsPrivacyRuleMode.otherRules)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 258)
 
             switch mode {
             case .applications:
@@ -1250,10 +1215,7 @@ private struct SettingsPrivacyRules: View {
     }
 
     private var applicationRules: some View {
-        VStack(spacing: 10) {
-            Text("message.ignore_applications")
-                .font(.headline)
-
+        Section {
             List(selection: $selectedRowID) {
                 ForEach(excludedRows) { row in
                     ExcludedApplicationRowView(row: row)
@@ -1261,7 +1223,7 @@ private struct SettingsPrivacyRules: View {
                 }
             }
             .listStyle(.bordered)
-            .frame(height: 150)
+            .frame(minHeight: 160, maxHeight: 220)
 
             HStack(spacing: 8) {
                 Button {
@@ -1280,11 +1242,16 @@ private struct SettingsPrivacyRules: View {
                 .accessibilityLabel("action.remove")
                 Spacer()
             }
+            .buttonStyle(.borderless)
+        } header: {
+            Text("label.ignore_applications")
+        } footer: {
+            Text("message.ignore_applications")
         }
     }
 
     private var otherRules: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Section {
             Toggle("label.ignore_remote_clipboard", isOn: behaviorBinding(
                 get: \.ignoreRemoteClipboardContent,
                 set: store.setIgnoreRemoteClipboardContent
@@ -1305,26 +1272,29 @@ private struct SettingsPrivacyRules: View {
                 get: \.convertLargeExcelContentToPlainText,
                 set: store.setConvertLargeExcelContentToPlainText
             ))
-            HStack {
-                Text("label.ignore_clipboard_larger_than")
-                TextField(
-                    "",
-                    value: Binding(
-                        get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
-                        set: { store.setMaximumClipboardSizeMegabytes($0) }
-                    ),
-                    format: .number.precision(.fractionLength(1))
-                )
-                .frame(width: 76)
-                .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
-                Text("label.megabytes")
+            LabeledContent("label.ignore_clipboard_larger_than") {
+                HStack(spacing: 8) {
+                    TextField(
+                        "",
+                        value: Binding(
+                            get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
+                            set: { store.setMaximumClipboardSizeMegabytes($0) }
+                        ),
+                        format: .number.precision(.fractionLength(1))
+                    )
+                    .frame(width: 72)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
+                    Text("label.megabytes")
+                        .foregroundStyle(.secondary)
+                }
             }
+        } header: {
+            Text("label.other_rules")
+        } footer: {
             Text("message.zero_disables_size_filter")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .toggleStyle(.checkbox)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func behaviorBinding(
@@ -1974,5 +1944,12 @@ private extension NSEvent {
         if flags.contains(.shift) { modifiers.append(.shift) }
         if flags.contains(.control) { modifiers.append(.control) }
         return ShortcutBinding.normalizedModifiers(modifiers)
+    }
+}
+
+private extension View {
+    func pasteBuddySettingsForm() -> some View {
+        formStyle(.grouped)
+            .toggleStyle(.switch)
     }
 }

@@ -48,7 +48,14 @@ public final class EncryptedSnapshotStore: @unchecked Sendable {
     }
 
     static func persistenceDirectoryName(bundleIdentifier: String?) -> String {
-        bundleIdentifier == "com.alexjiang.PasteBuddy.dev" ? "PasteBuddy Dev" : "PasteBuddy"
+        switch bundleIdentifier {
+        case "com.alexjiang.PasteBuddy.dev":
+            "PasteBuddy Dev"
+        case "com.alexjiang.PasteBuddy", .none:
+            "PasteBuddy"
+        default:
+            "PasteBuddy Isolated"
+        }
     }
 
     public static func defaultStore(

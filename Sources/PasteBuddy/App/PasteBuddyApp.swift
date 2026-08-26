@@ -119,7 +119,8 @@ struct PasteBuddyApp: App {
                 }
             )
         }
-        .defaultSize(width: 640, height: 560)
+        .defaultSize(width: 760, height: 640)
+        .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: true))
     }
 
