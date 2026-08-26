@@ -355,85 +355,6 @@ final class MCPToolServiceTests: XCTestCase {
         }
     }
 
-    func testMCPSemanticSearchBackfillsVisibleResultsAfterPrivacyFiltering() async throws {
-        let harness = try StoreHarness()
-        defer { harness.cleanup() }
-        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
-        let clipboard = ClipboardItemRepository(database: database)
-        let semantic = SemanticIndexRepository(database: database)
-        let blockedItems = (0..<125).map { index in
-            ClipboardItem(
-                sourceAppName: "Blocked App",
-                deviceName: "Test Mac",
-                contentType: .text,
-                title: "Blocked \(index)",
-                payload: ClipboardPayload(text: "blocked private content \(index)")
-            )
-        }
-        let visibleItem = ClipboardItem(
-            sourceAppName: "Notes",
-            deviceName: "Test Mac",
-            contentType: .text,
-            title: "Visible semantic result",
-            payload: ClipboardPayload(text: "permitted content")
-        )
-        let store = PasteBuddyStore(
-            diskStore: harness.snapshotStore,
-            clipboardRepository: clipboard,
-            semanticIndexRepository: semantic
-        )
-        store.snapshot.items = blockedItems + [visibleItem]
-        store.snapshot.semanticIndex.isEnabled = true
-        store.snapshot.entitlement = EntitlementConfiguration(
-            plan: .cloudAnnual,
-            status: .active,
-            currentPeriodEndsAt: Date().addingTimeInterval(60),
-            expiresAt: Date().addingTimeInterval(60)
-        )
-        store.setMCPServerEnabled(true)
-        store.setMCPTool(.semanticSearchHistory, enabled: true)
-        _ = store.addCaptureRule(
-            name: "Block private MCP items",
-            condition: .containsText,
-            pattern: "blocked private content",
-            contentTypes: [.text]
-        )
-        try clipboard.replaceAll(with: store.snapshot)
-        while true {
-            let jobs = try semantic.nextJobs(limit: 16)
-            guard !jobs.isEmpty else { break }
-            for job in jobs {
-                let isVisible = job.itemID == visibleItem.id
-                try semantic.commit(
-                    document: SemanticIndexDocument(
-                        itemID: job.itemID,
-                        contentHash: job.contentHash,
-                        modality: .text,
-                        summary: "needle semantic concept",
-                        modelName: "test",
-                        promptVersion: "test"
-                    ),
-                    embedding: SemanticEmbedding(
-                        id: job.itemID,
-                        modelName: "test",
-                        values: isVisible ? [0.8, 0.2] : [1, 0]
-                    ),
-                    jobID: job.id,
-                    expectedGeneration: job.generation
-                )
-            }
-        }
-        let service = MCPToolService(
-            store: store,
-            hydrateItem: { $0 },
-            semanticEmbeddingProvider: FixedSemanticEmbeddingProvider(values: [1, 0])
-        )
-
-        let response = try await service.semanticSearchHistory(query: "needle", limit: 1)
-
-        XCTAssertEqual(response.items.map(\.id), [visibleItem.id])
-    }
-
     func testMCPCreatePinboardAndPinFirstMatch() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -543,18 +464,6 @@ final class MCPToolServiceTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(try await service.retrieveItem(itemID: item.id, includeImageData: true)) {
             XCTAssertEqual($0 as? MCPToolServiceError, .serverDisabled)
         }
-    }
-}
-
-private struct FixedSemanticEmbeddingProvider: SemanticEmbeddingProviding {
-    var values: [Float]
-
-    func embedDocuments(_ inputs: [SemanticEmbeddingInput]) async throws -> [SemanticEmbedding] {
-        inputs.map { SemanticEmbedding(id: $0.id, modelName: "test", values: values) }
-    }
-
-    func embedQuery(_ query: String) async throws -> SemanticEmbedding {
-        SemanticEmbedding(id: UUID(), modelName: "test", values: values)
     }
 }
 

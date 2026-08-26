@@ -3322,7 +3322,6 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
     case listPinboards = "pastebuddy.list_pinboards"
     case createPinboard = "pastebuddy.create_pinboard"
     case pinFirstMatch = "pastebuddy.pin_first_match"
-    case semanticSearchHistory = "pastebuddy.semantic_search_history"
 
     public var id: String { rawValue }
 
@@ -3337,11 +3336,6 @@ public enum MCPToolName: String, CaseIterable, Codable, Identifiable, Sendable {
         case .listPinboards: "List Pinboards"
         case .createPinboard: "Create Pinboard"
         case .pinFirstMatch: "Pin First Matching Item"
-        case .semanticSearchHistory:
-            PasteBuddyLocalization.string(
-                "mcp.semantic_search_history",
-                defaultValue: "Semantic Search History"
-            )
         }
     }
 }
@@ -3424,10 +3418,14 @@ public struct MCPConfiguration: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         isServerEnabled = try container.decodeIfPresent(Bool.self, forKey: .isServerEnabled) ?? false
-        let decodedTools = try container.decodeIfPresent(Set<MCPToolName>.self, forKey: .enabledTools) ?? MCPToolName.defaultEnabledTools
-        enabledTools = Self.migratedEnabledTools(decodedTools)
+        if let rawTools = try container.decodeIfPresent([String].self, forKey: .enabledTools) {
+            enabledTools = Self.migratedEnabledTools(Set(rawTools.compactMap(MCPToolName.init(rawValue:))))
+        } else {
+            enabledTools = MCPToolName.defaultEnabledTools
+        }
         lastAccessRevokedAt = try container.decodeIfPresent(Date.self, forKey: .lastAccessRevokedAt)
-        accessLog = Array((try container.decodeIfPresent([MCPAccessLogEntry].self, forKey: .accessLog) ?? []).prefix(Self.maxAccessLogEntries))
+        let rawLog = try container.decodeIfPresent([DecodableMCPAccessLogEntry].self, forKey: .accessLog) ?? []
+        accessLog = Array(rawLog.compactMap { $0.entry }.prefix(Self.maxAccessLogEntries))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -3444,6 +3442,33 @@ public struct MCPConfiguration: Codable, Equatable, Sendable {
 
     private static func migratedEnabledTools(_ tools: Set<MCPToolName>) -> Set<MCPToolName> {
         tools == Set(MCPToolName.allCases) ? MCPToolName.defaultEnabledTools : tools
+    }
+}
+
+private struct DecodableMCPAccessLogEntry: Decodable {
+    var id: UUID
+    var accessedAt: Date
+    var tool: String
+    var outcome: MCPAccessOutcome
+    var itemID: UUID?
+    var pinboardID: UUID?
+    var resultCount: Int?
+    var payloadIncluded: Bool?
+    var imageDataIncluded: Bool?
+
+    var entry: MCPAccessLogEntry? {
+        guard let tool = MCPToolName(rawValue: tool) else { return nil }
+        return MCPAccessLogEntry(
+            id: id,
+            accessedAt: accessedAt,
+            tool: tool,
+            outcome: outcome,
+            itemID: itemID,
+            pinboardID: pinboardID,
+            resultCount: resultCount,
+            payloadIncluded: payloadIncluded ?? false,
+            imageDataIncluded: imageDataIncluded ?? false
+        )
     }
 }
 
@@ -3514,7 +3539,6 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
     public var settingsBehavior: SettingsBehaviorConfiguration
     public var shortcuts: ShortcutConfiguration
     public var mcp: MCPConfiguration
-    public var semanticIndex: SemanticIndexConfiguration
     public var security: SecurityConfiguration
 
     public init(
@@ -3532,7 +3556,6 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         settingsBehavior: SettingsBehaviorConfiguration = SettingsBehaviorConfiguration(),
         shortcuts: ShortcutConfiguration = ShortcutConfiguration(),
         mcp: MCPConfiguration = MCPConfiguration(),
-        semanticIndex: SemanticIndexConfiguration = SemanticIndexConfiguration(),
         security: SecurityConfiguration = SecurityConfiguration()
     ) {
         self.schemaVersion = schemaVersion
@@ -3549,7 +3572,6 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         self.settingsBehavior = settingsBehavior
         self.shortcuts = shortcuts
         self.mcp = mcp
-        self.semanticIndex = semanticIndex
         self.security = security
     }
 
@@ -3568,7 +3590,6 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         case settingsBehavior
         case shortcuts
         case mcp
-        case semanticIndex
         case security
     }
 
@@ -3591,7 +3612,6 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         ) ?? SettingsBehaviorConfiguration()
         shortcuts = try container.decodeIfPresent(ShortcutConfiguration.self, forKey: .shortcuts) ?? ShortcutConfiguration()
         mcp = try container.decodeIfPresent(MCPConfiguration.self, forKey: .mcp) ?? MCPConfiguration()
-        semanticIndex = try container.decodeIfPresent(SemanticIndexConfiguration.self, forKey: .semanticIndex) ?? SemanticIndexConfiguration()
         security = try container.decodeIfPresent(SecurityConfiguration.self, forKey: .security) ?? SecurityConfiguration()
     }
 }

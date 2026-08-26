@@ -122,16 +122,6 @@ public final class MCPJSONRPCService {
                 ],
                 required: ["query"]
             )
-        case .semanticSearchHistory:
-            return definition(
-                tool,
-                description: "Semantically search PasteBuddy clipboard history. AI-derived index data stays on the device.",
-                properties: [
-                    "query": ["type": "string"],
-                    "limit": ["type": "integer", "minimum": 1, "maximum": 25]
-                ],
-                required: ["query"]
-            )
         }
     }
 
@@ -187,11 +177,6 @@ public final class MCPJSONRPCService {
                     query: requiredString("query", in: arguments),
                     pinboardID: uuidValue("pinboardID", in: arguments),
                     pinboardName: arguments["pinboardName"] as? String
-                )
-            case .semanticSearchHistory:
-                payload = try await service.semanticSearchHistory(
-                    query: requiredString("query", in: arguments),
-                    limit: intValue("limit", in: arguments) ?? 5
                 )
             }
             await store.flushPendingSave()

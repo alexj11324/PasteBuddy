@@ -17,7 +17,6 @@ struct SettingsView: View {
     @State private var isRunningMCPClientInstall = false
     @State private var mcpStatusMessage: String?
     @State private var isRestoringPurchases = false
-    @State private var showingAISetup = false
     @State private var launchAtLoginErrorMessage: String?
     @State private var retentionSliderDraft: Double?
     @State private var retentionSliderIsEditing = false
@@ -79,9 +78,6 @@ struct SettingsView: View {
             .sheet(isPresented: $showingMCPAdvancedSettings) {
                 MCPAdvancedSettingsSheet(store: store)
             }
-            .sheet(isPresented: $showingAISetup) {
-                AISearchSetupSheet(store: store)
-            }
     }
 
     @ViewBuilder
@@ -114,8 +110,6 @@ struct SettingsView: View {
             generalSettings
         case .privacy:
             privacySettings
-        case .aiSearch:
-            aiSearchSettings
         case .shortcuts:
             shortcutSettings
         case .integrations:
@@ -372,95 +366,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    private var aiSearchSettings: some View {
-        Form {
-            Section {
-                LabeledContent("label.current_plan") {
-                    Text(verbatim: store.snapshot.entitlement.plan.displayName)
-                }
-                LabeledContent("label.ai_inference_source") {
-                    Text(aiInferenceSourceKey)
-                }
-                Button {
-                    showingAISetup = true
-                } label: {
-                    Text(aiConfigurationActionKey)
-                }
-            } header: {
-                Text("label.ai_access")
-            } footer: {
-                Text("message.ai_subscription_expiry_boundary")
-            }
-
-            Section {
-                Toggle(
-                    isOn: Binding(
-                        get: { store.snapshot.semanticIndex.isEnabled },
-                        set: { store.setSemanticIndexEnabled($0) }
-                    )
-                ) {
-                    SettingsToggleLabel(
-                        titleKey: "label.enable_ai_search",
-                        detailKey: "message.ai_search_processing_consent"
-                    )
-                }
-                .disabled(!store.snapshot.semanticIndex.isEnabled && !store.canRunConfiguredAISource)
-                Toggle(
-                    isOn: Binding(
-                        get: { store.snapshot.semanticIndex.isPaused },
-                        set: { store.setSemanticIndexPaused($0) }
-                    )
-                ) {
-                    SettingsToggleLabel(
-                        titleKey: "label.pause_ai_indexing",
-                        detailKey: "message.pause_ai_indexing_detail"
-                    )
-                }
-                .disabled(!store.snapshot.semanticIndex.isEnabled)
-            } header: {
-                Text("label.ai_search_controls")
-            } footer: {
-                Text("message.ai_search_local_storage_boundary")
-            }
-
-            Section("label.ai_index_status") {
-                ProgressView(
-                    value: Double(store.semanticIndexStatistics.ready),
-                    total: Double(max(store.semanticIndexStatistics.totalEligible, 1))
-                )
-                .accessibilityLabel(Text("label.ai_index_progress"))
-                LabeledContent("label.ai_index_ready", value: "\(store.semanticIndexStatistics.ready)")
-                LabeledContent("label.ai_index_queued", value: "\(store.semanticIndexStatistics.queued)")
-                LabeledContent("label.ai_index_failed", value: "\(store.semanticIndexStatistics.failed)")
-                LabeledContent("label.ai_index_excluded", value: "\(store.semanticIndexStatistics.suppressed)")
-                HStack {
-                    Button("action.retry_ai_index") {
-                        store.retrySemanticIndexFailures()
-                    }
-                    .disabled(!store.canRunConfiguredAISource || store.semanticIndexStatistics.failed == 0)
-                    Button("action.rebuild_ai_index") {
-                        destructiveConfirmation = .rebuildSemanticIndex
-                    }
-                    .disabled(!store.canRunConfiguredAISource)
-                }
-            }
-
-            Section {
-                Button("action.delete_ai_index", role: .destructive) {
-                    destructiveConfirmation = .deleteAllSemanticIndex
-                }
-                .disabled(
-                    store.semanticIndexStatistics.ready == 0
-                        && store.semanticIndexStatistics.queued == 0
-                        && store.semanticIndexStatistics.failed == 0
-                        && store.semanticIndexStatistics.suppressed == 0
-                )
-            }
-        }
-        .formStyle(.grouped)
-        .toggleStyle(.switch)
-    }
-
     private var integrationSettings: some View {
         Form {
             Section {
@@ -543,12 +448,6 @@ struct SettingsView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 420)
-            Button {
-                showingAISetup = true
-            } label: {
-                Text(subscriptionActionKey)
-            }
-            .buttonStyle(.borderedProminent)
             Button("action.restore_purchases") {
                 isRestoringPurchases = true
                 Task {
@@ -699,20 +598,6 @@ struct SettingsView: View {
             : "message.not_subscribed"
     }
 
-    private var aiInferenceSourceKey: LocalizedStringKey {
-        store.snapshot.semanticIndex.inferenceSource == .pasteBuddyCloud
-            ? "label.pastebuddy_cloud"
-            : "label.bring_your_own_key"
-    }
-
-    private var aiConfigurationActionKey: LocalizedStringKey {
-        store.hasBYOKAccess ? "action.configure_ai_search" : "action.choose_ai_plan"
-    }
-
-    private var subscriptionActionKey: LocalizedStringKey {
-        store.hasBYOKAccess ? "action.manage_ai_plan" : "action.choose_ai_plan"
-    }
-
     private var isShowingDestructiveConfirmation: Binding<Bool> {
         Binding(
             get: { destructiveConfirmation != nil },
@@ -732,18 +617,6 @@ struct SettingsView: View {
             store.updateMaxStorageBytes(bytes)
         case .resetShortcuts:
             store.resetShortcutConfiguration()
-        case .deleteAllSemanticIndex:
-            do {
-                try store.deleteAllSemanticIndexData()
-            } catch {
-                store.lastErrorMessage = error.localizedDescription
-            }
-        case .rebuildSemanticIndex:
-            do {
-                try store.rebuildSemanticIndex()
-            } catch {
-                store.lastErrorMessage = error.localizedDescription
-            }
         }
     }
 
@@ -1645,7 +1518,6 @@ private struct ExcludedApplicationListRow: Identifiable, Hashable {
 private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashable {
     case general
     case privacy
-    case aiSearch
     case shortcuts
     case integrations
     case subscription
@@ -1673,8 +1545,6 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
             "label.general"
         case .privacy:
             "label.privacy"
-        case .aiSearch:
-            "label.ai_search"
         case .shortcuts:
             "label.keyboard_shortcuts"
         case .integrations:
@@ -1690,8 +1560,6 @@ private enum SettingsSidebarSection: String, CaseIterable, Identifiable, Hashabl
             "gearshape"
         case .privacy:
             "hand.raised"
-        case .aiSearch:
-            "sparkles"
         case .shortcuts:
             "keyboard"
         case .integrations:
@@ -1706,8 +1574,6 @@ private enum SettingsDestructiveAction {
     case reduceRetentionDays(Int)
     case reduceStorageLimit(Int)
     case resetShortcuts
-    case deleteAllSemanticIndex
-    case rebuildSemanticIndex
 
     var title: String {
         switch self {
@@ -1717,10 +1583,6 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("dialog.reduce_storage_limit", comment: "")
         case .resetShortcuts:
             NSLocalizedString("dialog.reset_all_shortcuts", comment: "")
-        case .deleteAllSemanticIndex:
-            NSLocalizedString("dialog.delete_ai_index", comment: "")
-        case .rebuildSemanticIndex:
-            NSLocalizedString("dialog.rebuild_ai_index", comment: "")
         }
     }
 
@@ -1740,10 +1602,6 @@ private enum SettingsDestructiveAction {
             )
         case .resetShortcuts:
             NSLocalizedString("message.resetting_shortcuts_restores_every_default", comment: "")
-        case .deleteAllSemanticIndex:
-            NSLocalizedString("message.delete_ai_index_confirmation", comment: "")
-        case .rebuildSemanticIndex:
-            NSLocalizedString("message.rebuild_ai_index_confirmation", comment: "")
         }
     }
 
@@ -1753,10 +1611,6 @@ private enum SettingsDestructiveAction {
             NSLocalizedString("action.apply_storage_limit", comment: "")
         case .resetShortcuts:
             NSLocalizedString("action.reset_all_shortcuts", comment: "")
-        case .deleteAllSemanticIndex:
-            NSLocalizedString("action.delete_ai_index", comment: "")
-        case .rebuildSemanticIndex:
-            NSLocalizedString("action.rebuild_ai_index", comment: "")
         }
     }
 }

@@ -1,12 +1,5 @@
-# Fix intermittent image drag from Shelf / Side Panel
+# 移除应用内 AI 检索（保留 MCP / 时间 / APP 筛选）
 
-## Background
-- Dragging photos from Shelf/Side Panel sometimes fails to drop.
-- Image cards rebuild `NSItemProvider` during SwiftUI `body` (thumbnail/selection refresh).
-- Unpinned panel hides on resign-active while the destination still needs promised PNG/TIFF/file data.
-
-## Plan
-- [x] Red: provider is created inside `onDrag`; unpinned panel must not dismiss during an active pointer/drag session
-- [x] Green: keep panel alive until mouse-up; drop `.transient` while the pointer session is active
-- [x] Tests green (isolated worktree; main tree had concurrent unrelated edits)
-- [ ] Official `script/build_and_run.sh --verify` and runtime drag check (cannot overwrite PasteBuddy Dev.app from a dirty/isolated tree)
+- [x] 协调：避开拖拽修复与筛选按钮 Agent 的文件
+- [x] 删除 embedding / semantic index / AI Search UI / MCP semantic 工具
+- [x] 针对性 `swift test`（MCP、本地化、面板无 AI 入口）通过
