@@ -19,16 +19,22 @@ must determine whether it independently drops legitimate early outside clicks.
 ## Image provider
 
 Shelf and Side Panel both call `PinboardItemDragPayload.itemProvider` at drag
-start. `PasteboardWriter` advertises PNG, TIFF, `NSImage`, and PNG-file
-representations for inline image bytes, and asynchronous equivalents for an
-`imageAssetID` that requires hydration. Runtime verification must distinguish a
-payload failure from the lifecycle failure that dismisses or strands the source
-panel during a cross-app drag.
+start. The card UI chooses `presentationContentType`, while `PasteboardWriter`
+currently chooses the provider from raw `contentType`. A mixed item with an
+image is rendered as an image card but gets a text-first provider containing
+OCR text; external apps may therefore accept text instead of the image.
+
+`PasteboardWriter` advertises PNG, TIFF, `NSImage`, and PNG-file representations
+for inline image bytes, and asynchronous equivalents for an `imageAssetID`.
+Those asynchronous representations currently call the hydration closure
+independently, while `PinboardItemDragPayload` also starts and discards a
+fire-and-forget hydration. This creates avoidable races on the lightweight
+repository items used by Shelf and Side Panel.
 
 ## Minimal correction hypothesis
 
 Use the physical primary-button state as the sole continuation signal for the
 pointer session. After the button is released, clear protection, restore
-transient collection behavior, and then apply lost-focus dismissal. If live
-drag still fails after that correction, instrument the provider's advertised
-and requested representations before changing transfer formats.
+transient collection behavior, and then apply lost-focus dismissal. For an
+image-presented card, publish a pure image provider and share one lazy
+hydration task across all requested image representations.

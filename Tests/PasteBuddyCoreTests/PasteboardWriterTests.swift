@@ -561,6 +561,32 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(data).isEmpty)
     }
 
+    func testImageProviderSharesOneHydrationAcrossRepresentations() async throws {
+        let image = Self.testImage()
+        let lightweightItem = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .image,
+            title: "Screenshot",
+            payload: ClipboardPayload(imageAssetID: "shared-image-asset")
+        )
+        var hydratedItem = lightweightItem
+        hydratedItem.payload.imageData = image.tiffRepresentation
+        var hydrationCount = 0
+        let provider = try XCTUnwrap(
+            PasteboardWriter.itemProviders(for: [lightweightItem]) { _ in
+                hydrationCount += 1
+                return hydratedItem
+            }.first
+        )
+
+        let pngData = try await loadData(from: provider, type: .png)
+        let tiffData = try await loadData(from: provider, type: .tiff)
+        XCTAssertNotNil(pngData)
+        XCTAssertNotNil(tiffData)
+        XCTAssertEqual(hydrationCount, 1)
+    }
+
     func testNativeCopyCommandProviderLazilyHydratesExternalizedRTF() async throws {
         let rtfData = Data("{\\rtf1\\ansi Rich body}".utf8)
         let lightweightItem = ClipboardItem(

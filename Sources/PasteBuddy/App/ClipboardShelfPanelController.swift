@@ -235,7 +235,6 @@ final class ClipboardShelfPanelController: NSObject {
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appResignActiveObserver: NSObjectProtocol?
     private var screenParametersObserver: NSObjectProtocol?
-    private var ignoreOutsideClicksUntil: Date?
     private var isAnimatingPanelOut = false
     private var isPinned = false
     private var panelAnimationGeneration = 0
@@ -291,7 +290,6 @@ final class ClipboardShelfPanelController: NSObject {
         resetPanelPresentationState()
         panelPresentationID = UUID()
         reloadPanelContent(panel)
-        ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = attachedFrame(for: panel)
         PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
         isAnimatingPanelOut = false
@@ -650,6 +648,8 @@ final class ClipboardShelfPanelController: NSObject {
             guard let self, let panel, panel.isVisible else { return event }
             if event.type == .leftMouseDown, event.window === panel {
                 self.beginPanelPointerSession()
+            } else if event.window !== panel {
+                self.resetPanelPointerSession()
             }
             if Self.isShelfAuxiliaryWindow(event.window) {
                 return event
@@ -662,6 +662,7 @@ final class ClipboardShelfPanelController: NSObject {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] _ in
             guard let self, let panel, panel.isVisible else { return }
+            self.resetPanelPointerSession()
             self.hideIfOutsideClick(at: NSEvent.mouseLocation)
         }
 
@@ -692,8 +693,7 @@ final class ClipboardShelfPanelController: NSObject {
             NSEvent.removeMonitor(globalMouseUpMonitor)
             self.globalMouseUpMonitor = nil
         }
-        isPanelPointerSessionActive = false
-        pointerSessionEndRetryGeneration &+= 1
+        resetPanelPointerSession()
     }
 
     private func startFocusMonitoring(for panel: NSPanel) {
@@ -803,10 +803,6 @@ final class ClipboardShelfPanelController: NSObject {
 
     private func hideIfOutsideClick(at location: CGPoint) {
         guard let panel, panel.isVisible else { return }
-        if let ignoreOutsideClicksUntil, Date() < ignoreOutsideClicksUntil {
-            return
-        }
-        ignoreOutsideClicksUntil = nil
         if Self.shouldDismissForOutsideClick(
             at: location,
             panelFrame: panel.frame,
@@ -852,11 +848,8 @@ final class ClipboardShelfPanelController: NSObject {
         return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
     }
 
-    static func shouldKeepPointerSession(
-        primaryButtonPressed: Bool,
-        dragPasteboardHasItems: Bool
-    ) -> Bool {
-        primaryButtonPressed || dragPasteboardHasItems
+    static func shouldKeepPointerSession(primaryButtonPressed: Bool) -> Bool {
+        primaryButtonPressed
     }
 
     static func shouldDismissForLostFocus(
@@ -908,22 +901,26 @@ final class ClipboardShelfPanelController: NSObject {
     private func endPanelPointerSession() {
         guard isPanelPointerSessionActive else { return }
         if Self.shouldKeepPointerSession(
-            primaryButtonPressed: (NSEvent.pressedMouseButtons & (1 << 0)) != 0,
-            dragPasteboardHasItems: !(NSPasteboard(name: .drag).types ?? []).isEmpty
+            primaryButtonPressed: (NSEvent.pressedMouseButtons & (1 << 0)) != 0
         ) {
             schedulePointerSessionEndRetry()
             return
         }
-        pointerSessionEndRetryGeneration &+= 1
-        isPanelPointerSessionActive = false
-        if let panel {
-            applyCollectionBehavior(to: panel)
-        }
+        resetPanelPointerSession()
         guard Self.shouldDismissForLostFocus(
             isPinned: isPinned,
             isDragSessionActive: false
         ) else { return }
         dismissAfterPointerSessionIfNeeded()
+    }
+
+    private func resetPanelPointerSession() {
+        pointerSessionEndRetryGeneration &+= 1
+        guard isPanelPointerSessionActive else { return }
+        isPanelPointerSessionActive = false
+        if let panel {
+            applyCollectionBehavior(to: panel)
+        }
     }
 
     private func schedulePointerSessionEndRetry() {

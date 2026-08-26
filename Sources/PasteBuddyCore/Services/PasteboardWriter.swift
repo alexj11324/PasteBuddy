@@ -160,12 +160,17 @@ public enum PasteboardWriter {
 
     public static func itemProviders(
         for items: [ClipboardItem],
+        preferredContentType: ClipboardContentType? = nil,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) -> [NSItemProvider] {
         guard items.count == 1, let item = items.first else {
             return items.isEmpty ? [] : [NSItemProvider(object: plainText(for: items) as NSString)]
         }
-        return itemProviders(for: item, hydrate: hydrate)
+        return itemProviders(
+            for: item,
+            contentType: preferredContentType ?? item.contentType,
+            hydrate: hydrate
+        )
     }
 
     @discardableResult
@@ -446,9 +451,10 @@ public enum PasteboardWriter {
 
     private static func itemProviders(
         for item: ClipboardItem,
+        contentType: ClipboardContentType,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) -> [NSItemProvider] {
-        switch item.contentType {
+        switch contentType {
         case .text:
             return [textProvider(for: item, hydrate: hydrate)]
         case .url:
@@ -509,11 +515,11 @@ public enum PasteboardWriter {
                 return nil
             }
         } else if item.payload.rtfAssetID != nil {
+            let hydration = ItemHydration(item: item, hydrate: hydrate)
             registerHydratedDataRepresentation(
                 UTType.rtf,
-                for: item,
                 on: provider,
-                hydrate: hydrate,
+                hydration: hydration,
                 data: \.payload.rtfData
             )
         }
@@ -565,26 +571,25 @@ public enum PasteboardWriter {
         on provider: NSItemProvider,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) {
+        let hydration = ItemHydration(item: item, hydrate: hydrate)
         registerHydratedDataRepresentation(
             UTType.png,
-            for: item,
             on: provider,
-            hydrate: hydrate
+            hydration: hydration
         ) { hydratedItem in
             hydratedItem.payload.imageData.flatMap(pngData(from:))
         }
         registerHydratedDataRepresentation(
             UTType.tiff,
-            for: item,
             on: provider,
-            hydrate: hydrate
+            hydration: hydration
         ) { hydratedItem in
             hydratedItem.payload.imageData.flatMap { pngData(from: $0).flatMap(lazyTIFFData(from:)) }
         }
         provider.registerObject(ofClass: NSImage.self, visibility: .all) { completion in
             let progress = Progress(totalUnitCount: 1)
             Task { @MainActor in
-                let png = await hydrate(item).payload.imageData.flatMap(pngData(from:))
+                let png = await hydration.value().payload.imageData.flatMap(pngData(from:))
                 if let png, let image = NSImage(data: png) {
                     completion(image, nil)
                 } else {
@@ -601,7 +606,7 @@ public enum PasteboardWriter {
         ) { completion in
             let progress = Progress(totalUnitCount: 1)
             Task { @MainActor in
-                if let png = await hydrate(item).payload.imageData.flatMap(pngData(from:)) {
+                if let png = await hydration.value().payload.imageData.flatMap(pngData(from:)) {
                     do {
                         completion(try writeTemporaryPNG(png), false, nil)
                     } catch {
@@ -669,7 +674,7 @@ public enum PasteboardWriter {
         return name.lowercased().hasSuffix(".png") ? name : "\(name).png"
     }
 
-    private static func writeTemporaryPNG(_ data: Data) throws -> URL {
+    nonisolated private static func writeTemporaryPNG(_ data: Data) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("PasteBuddyImageDrag", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -679,7 +684,7 @@ public enum PasteboardWriter {
         return url
     }
 
-    private static func pruneTemporaryPNGFiles(in directory: URL) {
+    nonisolated private static func pruneTemporaryPNGFiles(in directory: URL) {
         let fileManager = FileManager.default
         guard let urls = try? fileManager.contentsOfDirectory(
             at: directory,
@@ -723,9 +728,8 @@ public enum PasteboardWriter {
 
     private static func registerHydratedDataRepresentation(
         _ type: UTType,
-        for item: ClipboardItem,
         on provider: NSItemProvider,
-        hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem,
+        hydration: ItemHydration,
         data: @escaping @MainActor (ClipboardItem) -> Data?
     ) {
         provider.registerDataRepresentation(
@@ -734,7 +738,7 @@ public enum PasteboardWriter {
         ) { completion in
             let progress = Progress(totalUnitCount: 1)
             Task { @MainActor in
-                if let hydratedData = data(await hydrate(item)) {
+                if let hydratedData = data(await hydration.value()) {
                     completion(hydratedData, nil)
                 } else {
                     completion(nil, CocoaError(.fileReadNoSuchFile))
@@ -742,6 +746,34 @@ public enum PasteboardWriter {
                 progress.completedUnitCount = 1
             }
             return progress
+        }
+    }
+
+    @MainActor
+    private final class ItemHydration {
+        private let item: ClipboardItem
+        private let hydrate: @MainActor (ClipboardItem) async -> ClipboardItem
+        private var task: Task<ClipboardItem, Never>?
+
+        init(
+            item: ClipboardItem,
+            hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
+        ) {
+            self.item = item
+            self.hydrate = hydrate
+        }
+
+        func value() async -> ClipboardItem {
+            if let task {
+                return await task.value
+            }
+            let item = item
+            let hydrate = hydrate
+            let task = Task { @MainActor in
+                await hydrate(item)
+            }
+            self.task = task
+            return await task.value
         }
     }
 

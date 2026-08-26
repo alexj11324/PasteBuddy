@@ -902,7 +902,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
-    func testUnpinnedPanelDoesNotDismissOrUseTransientBehaviorDuringDrag() {
+    func testUnpinnedPanelDoesNotDismissOrUseTransientBehaviorDuringDrag() throws {
         XCTAssertFalse(
             ClipboardShelfPanelController.shouldDismissForLostFocus(
                 isPinned: false,
@@ -941,20 +941,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
         XCTAssertTrue(
             ClipboardShelfPanelController.shouldKeepPointerSession(
-                primaryButtonPressed: true,
-                dragPasteboardHasItems: false
-            )
-        )
-        XCTAssertTrue(
-            ClipboardShelfPanelController.shouldKeepPointerSession(
-                primaryButtonPressed: false,
-                dragPasteboardHasItems: true
+                primaryButtonPressed: true
             )
         )
         XCTAssertFalse(
             ClipboardShelfPanelController.shouldKeepPointerSession(
-                primaryButtonPressed: false,
-                dragPasteboardHasItems: false
+                primaryButtonPressed: false
             )
         )
         XCTAssertFalse(
@@ -965,6 +957,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
                 isIgnoredDismissalTargetHit: false,
                 isDragSessionActive: true
             )
+        )
+        let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
+        XCTAssertFalse(
+            controllerSource.contains("NSPasteboard(name: .drag)"),
+            "Stale drag pasteboard types must not keep an unpinned panel permanently protected."
+        )
+        XCTAssertFalse(
+            controllerSource.contains("ignoreOutsideClicksUntil"),
+            "Opening the panel must not swallow a legitimate fast click-away."
         )
     }
 
@@ -1467,8 +1468,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(dragSource.contains("struct PinboardItemDragPayload: Codable, Transferable"))
         XCTAssertTrue(dragSource.contains("import CoreTransferable"))
         XCTAssertTrue(dragSource.contains("CodableRepresentation(contentType: .pasteBuddyPinboardItemIDs)"))
-        XCTAssertTrue(dragSource.contains("PasteboardWriter.itemProviders(for: [item], hydrate: hydrate)"))
-        XCTAssertTrue(dragSource.contains("item.contentType != .image"))
+        XCTAssertTrue(dragSource.contains("preferredContentType: item.presentationContentType"))
+        XCTAssertTrue(dragSource.contains("item.presentationContentType != .image"))
         XCTAssertTrue(dragSource.contains("provider.registerDataRepresentation("))
         XCTAssertFalse(dragSource.contains("ProxyRepresentation"))
         XCTAssertFalse(dragSource.contains("ClipboardItemDragProvider"))
@@ -1537,6 +1538,42 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
         let textProvider = try XCTUnwrap(PinboardItemDragPayload.itemProvider(for: textItem) { $0 })
         XCTAssertTrue(textProvider.canLoadObject(ofClass: NSString.self))
+    }
+
+    func testMixedImageCardDragProviderPublishesOnlyPresentedImage() async throws {
+        let image = makeTestImage(width: 2, height: 2) { _, _ in
+            (red: 52, green: 199, blue: 89, alpha: 255)
+        }
+        let pngData = try XCTUnwrap(
+            NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?
+                .representation(using: .png, properties: [:])
+        )
+        let item = ClipboardItem(
+            sourceAppName: "Preview",
+            deviceName: "Test Mac",
+            contentType: .mixed,
+            title: "Image with recognized text",
+            payload: ClipboardPayload(
+                text: "Fallback text that must not win the drag",
+                imageData: pngData,
+                ocrText: "Recognized text that must not be pasted"
+            )
+        )
+        XCTAssertEqual(item.presentationContentType, .image)
+
+        let provider = try XCTUnwrap(PinboardItemDragPayload.itemProvider(for: item) { $0 })
+        let identifiers = provider.registeredTypeIdentifiers
+
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.png.identifier))
+        XCTAssertTrue(provider.canLoadObject(ofClass: NSImage.self))
+        XCTAssertFalse(provider.canLoadObject(ofClass: NSString.self))
+        XCTAssertFalse(identifiers.contains(UTType.utf8PlainText.identifier))
+        XCTAssertFalse(identifiers.contains(UTType.plainText.identifier))
+        let loadedPNG = try await loadData(
+            from: provider,
+            typeIdentifier: UTType.png.identifier
+        )
+        XCTAssertEqual(loadedPNG, pngData)
     }
 
     func testMultiFileCardDragPreservesAllPathsThroughExistingTextRepresentation() async throws {

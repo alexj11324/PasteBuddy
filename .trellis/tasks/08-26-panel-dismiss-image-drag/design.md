@@ -21,13 +21,22 @@ An unpinned panel therefore follows this state machine:
    normal lost-focus dismissal policy.
 4. Pinned state bypasses dismissal but never owns drag-session completion.
 
+Opening-event protection uses the existing exact ignored-target geometry. It
+does not use a blanket timer that would swallow a legitimate fast click-away.
+
 ## Image transfer contract
 
-The drag-start closure must return a provider that already advertises PNG,
-TIFF, `NSImage`, and PNG-file representations. Repository-backed content may
-load bytes asynchronously inside those registered representations, but the
-provider itself must never be empty. Provider-level tests cover inline and
-hydrated items; runtime acceptance proves an external app accepts the payload.
+The drag-start closure must follow `presentationContentType`, because that is
+the content the card promises to the user. A mixed item presented as an image
+must therefore return one image provider without OCR/title plain-text or file
+providers that let an external app choose the wrong payload.
+
+That provider must already advertise PNG, TIFF, `NSImage`, and PNG-file
+representations. Repository-backed content may load bytes asynchronously
+inside those registered representations, but all representations share one
+lazy hydration task for the lifetime of that provider. Provider-level tests
+cover inline, mixed-image, and hydrated items; runtime acceptance proves an
+external app accepts the payload.
 
 ## Compatibility and rollback
 
