@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-26-apple-signing-standardization/prd.md","reason":"Review every AC1-AC11 item against direct runtime, CI, GitHub API, signature, and release evidence."}
+{"file":".trellis/tasks/08-26-apple-signing-standardization/design.md","reason":"Check implementation against trust boundaries, credential lifecycle, protected source rules, and rollback design."}
+{"file":"docs/DEVELOPMENT_SIGNING.md","reason":"Verify the final documentation no longer conflates feature signing, stable Dev promotion, and Developer ID release."}
+{"file":"docs/TESTFLIGHT_CI.md","reason":"Verify the final TestFlight workflow preserves manual-only release while enforcing self-hosted runner and server-side main gates."}
+{"file":"docs/architecture/SUPABASE_ACCEPTANCE_MATRIX.md","reason":"Preserve existing integrated-delivery, stable bundle identity, and release provenance invariants."}

@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-26-apple-signing-standardization/prd.md","reason":"Authoritative requirements, constraints, decisions, and acceptance criteria for signing and CI/CD standardization."}
+{"file":".trellis/tasks/08-26-apple-signing-standardization/design.md","reason":"Approved architecture boundaries for local runners, signing channels, notarization, workflows, and repository governance."}
+{"file":".trellis/tasks/08-26-apple-signing-standardization/implement.md","reason":"Ordered implementation, validation, external inputs, and rollback plan."}
+{"file":"docs/DEVELOPMENT_SIGNING.md","reason":"Existing development and release signing contract that must be migrated without breaking stable Dev/TCC identity."}
+{"file":"docs/TESTFLIGHT_CI.md","reason":"Existing iOS release policy and manual TestFlight workflow contract."}
