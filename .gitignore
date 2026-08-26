@@ -12,3 +12,4 @@ tmp/
 *.xcarchive
 *.xcdistributionlogs/
 PasteBuddyiOS.xcodeproj/project.xcworkspace/
+gha-creds-*.json

@@ -1,15 +1,24 @@
 name: Upload TestFlight
+run-name: TestFlight ${{ inputs.commit_sha }}
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact main commit SHA to upload
+        required: true
+        type: string
+      confirmation:
+        description: Type UPLOAD to approve this exact SHA
+        required: true
+        type: string
 
 concurrency:
   group: testflight-upload
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -26,26 +35,52 @@ env:
 jobs:
   upload:
     name: Build and Upload
-    runs-on: macos-26
+    if: github.actor == github.repository_owner && inputs.confirmation == 'UPLOAD'
+    runs-on: [self-hosted, macOS, ARM64, pastebuddy-release, xcode-27]
     timeout-minutes: 60
+    environment: testflight
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      build_number: ${{ steps.next_build.outputs.build_number }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove protected main source
+        env:
+          APPROVED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$APPROVED_SHA"
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
+          git fetch origin main --force
+          test "$(git rev-parse origin/main)" = "$APPROVED_SHA"
 
       - name: Show toolchain
         run: |
           xcodebuild -version
           swift --version
 
+      - name: Clear stale temporary upload state
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/PasteBuddyiOS.xcarchive" "$RUNNER_TEMP/DerivedData" "$RUNNER_TEMP/TestFlightExport" "$RUNNER_TEMP/ExportOptions.plist"
+
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Restore App Store Connect API key
         env:
@@ -66,6 +101,7 @@ jobs:
           ruby -e 'numbers = `git tag --list "ios-build-*"`.lines.filter_map { |line| line[/\Aios-build-(\d+)\s*\z/, 1]&.to_i }; File.open(ENV.fetch("GITHUB_ENV"), "a") { |file| file.puts("CI_BUILD_NUMBER_FLOOR=#{numbers.max || 0}") }'
 
       - name: Resolve next App Store build number
+        id: next_build
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -73,6 +109,7 @@ jobs:
         run: |
           build_number="$(ruby .github/scripts/next_app_store_build_number.rb)"
           echo "PB_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
           echo "Using App Store build number $build_number"
 
       - name: Run Swift tests
@@ -135,8 +172,34 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
+      - name: Clean temporary upload inputs
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/PasteBuddyiOS.xcarchive" "$RUNNER_TEMP/DerivedData" "$RUNNER_TEMP/TestFlightExport" "$RUNNER_TEMP/ExportOptions.plist"
+
+  persist-build-tag:
+    name: Persist uploaded build tag
+    needs: upload
+    runs-on: [self-hosted, macOS, ARM64, pastebuddy-release, xcode-27]
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      PB_BUILD_NUMBER: ${{ needs.upload.outputs.build_number }}
+      APPROVED_SHA: ${{ inputs.commit_sha }}
+
+    steps:
+      - name: Check out uploaded commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
       - name: Persist uploaded build number
         run: |
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
+          git fetch origin main --force
+          test "$(git rev-parse origin/main)" = "$APPROVED_SHA"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           tag="ios-build-$PB_BUILD_NUMBER"

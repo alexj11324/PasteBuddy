@@ -2157,6 +2157,63 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("set-key-partition-list"))
     }
 
+    func testBuildAndRunFailsClosedForAmbiguousOrWrongTeamSigning() throws {
+        let source = try sourceFileContents("script/build_and_run.sh")
+
+        XCTAssertTrue(source.contains("EXPECTED_TEAM_ID=\"72UN4PF4BL\""))
+        XCTAssertTrue(source.contains("find_unique_identity_with_prefix"))
+        XCTAssertTrue(source.contains("Multiple '$prefix' identities are valid"))
+        XCTAssertTrue(source.contains("Team ID does not match expected"))
+        XCTAssertTrue(source.contains("Designated requirement does not bind"))
+        XCTAssertTrue(source.contains("nested_codesign_args+=(--timestamp --options runtime)"))
+        XCTAssertTrue(source.contains("codesign_args+=(--timestamp --options runtime)"))
+        XCTAssertTrue(source.contains("${SOURCE_COMMIT:0:12}.zip"))
+        XCTAssertTrue(source.contains("Refusing to package an uncommitted source state"))
+        XCTAssertFalse(source.contains("--deep --force --sign"))
+    }
+
+    func testLocalCIRequiresOwnerApprovalForAnExactSHA() throws {
+        let workflow = try sourceFileContents(".github/workflows/ci.yml")
+        let dispatchScript = try sourceFileContents("script/dispatch_local_ci.sh")
+        let ciScript = try sourceFileContents("script/ci.sh")
+
+        XCTAssertTrue(workflow.contains("workflow_dispatch:"))
+        XCTAssertFalse(workflow.contains("pull_request:"))
+        XCTAssertFalse(workflow.contains("push:"))
+        XCTAssertTrue(workflow.contains("github.actor == github.repository_owner"))
+        XCTAssertTrue(workflow.contains("checks: write"))
+        XCTAssertTrue(workflow.contains("-f name='CI / verify'"))
+        XCTAssertTrue(workflow.contains("ref: ${{ inputs.commit_sha }}"))
+        XCTAssertTrue(workflow.contains("runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]"))
+        XCTAssertFalse(workflow.contains("env:\n      GH_TOKEN:"))
+        XCTAssertTrue(dispatchScript.contains("Only repository owner"))
+        XCTAssertTrue(dispatchScript.contains("commits/$TARGET_SHA"))
+        XCTAssertTrue(ciScript.contains("CODE_SIGNING_ALLOWED=NO"))
+        XCTAssertFalse(ciScript.contains("build_and_run.sh"))
+    }
+
+    func testReleaseWorkflowsUseProtectedLocalRunnerAndCompleteAppleTrustChain() throws {
+        let releaseScript = try sourceFileContents("script/release_macos.sh")
+        let macOSWorkflow = try sourceFileContents(".github/workflows/macos-release.yml")
+        let testFlightWorkflow = try sourceFileContents(".github/workflows/testflight.yml")
+
+        XCTAssertTrue(releaseScript.contains("git merge-base --is-ancestor"))
+        XCTAssertTrue(releaseScript.contains("notarytool submit"))
+        XCTAssertTrue(releaseScript.contains("notarytool log"))
+        XCTAssertTrue(releaseScript.contains("stapler staple"))
+        XCTAssertTrue(releaseScript.contains("stapler validate"))
+        XCTAssertTrue(releaseScript.contains("spctl --assess --type execute"))
+        XCTAssertTrue(releaseScript.contains("shasum -a 256"))
+        XCTAssertTrue(macOSWorkflow.contains("environment: macos-production"))
+        XCTAssertTrue(macOSWorkflow.contains("runs-on: [self-hosted, macOS, ARM64, pastebuddy-release, xcode-27]"))
+        XCTAssertTrue(macOSWorkflow.contains("pastebuddy-developer-id-application-p12"))
+        XCTAssertTrue(macOSWorkflow.contains("if: always()"))
+        XCTAssertTrue(testFlightWorkflow.contains("environment: testflight"))
+        XCTAssertTrue(testFlightWorkflow.contains("test \"$GITHUB_REF\" = refs/heads/main"))
+        XCTAssertTrue(testFlightWorkflow.contains("test \"$GITHUB_SHA\" = \"$APPROVED_SHA\""))
+        XCTAssertFalse(testFlightWorkflow.contains("runs-on: macos-26"))
+    }
+
     func testBuildAndRunProtectsStableAppBehindCoordinatedSingleInstanceInstall() throws {
         let source = try sourceFileContents("script/build_and_run.sh")
 
