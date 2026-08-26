@@ -1,189 +1,73 @@
-# CloudKit Sync Plan
+# CloudKit one-time recovery and PowerSync migration
 
-PasteBuddy is local-only by default. CloudKit sync and shared pinboards must be
-explicitly configured before any upload path is allowed.
+## Status
 
-## Current Implementation
+CloudKit is a legacy recovery source, not a sync authority. WP0 creates no
+CloudKit resource, migration code, hosted service, or deletion job. The target
+cloud boundary is PowerSync plus Supabase.
 
-- `SyncConfiguration` stores sync provider, CloudKit container identifier,
-  end-to-end key hierarchy version, Apple capability status, and shared
-  pinboard opt-in.
-- `SyncReadiness` blocks upload unless CloudKit sync is explicitly enabled,
-  a container identifier is present, an end-to-end key hierarchy version is
-  present, and the signed app has the CloudKit capability.
-- `CloudSyncPreflightReport` turns readiness, sharing state, plaintext
-  downgrade prevention, first-sync state, and latest merge conflicts into
-  user-facing diagnostics with recovery recommendations.
-- `CloudSyncPackageBuilder` rejects blocked sync states and produces a
-  `CloudSyncUploadPackage` containing an encrypted snapshot envelope plus
-  non-sensitive routing metadata.
-- `CloudSyncRemoteRecord` is the transport boundary. It carries only encrypted
-  snapshot data plus non-sensitive routing metadata.
-- `CloudKitRecordFactory` converts between `CloudSyncUploadPackage`,
-  `CloudSyncRemoteRecord`, and `PasteBuddyEncryptedSnapshot` `CKRecord`
-  instances.
-- `CloudKitSyncService` builds encrypted upload packages, saves encrypted
-  remote records through an injected transport, fetches the latest encrypted
-  record, and imports it through the merge pipeline.
-- `CloudKitRemoteRecordTransport` defaults to the user's private CloudKit
-  database for history and pinboard sync. Public/shared database usage is
-  reserved for explicit shared-pinboard invitation routing, never raw clipboard
-  history.
-- Tests use an in-memory transport so encrypted upload/download, no-record
-  recovery, and merge rules stay verifiable without an iCloud account.
-- `CloudSyncPackageImporter` decrypts an encrypted package and merges remote
-  history/pinboard data into the local snapshot while keeping device-local
-  privacy and app settings unchanged.
-- Sync import records added/updated entities, kept-local conflict resolutions,
-  last imported package ID, and conflict count for recovery/troubleshooting UI.
-- When no encrypted remote record exists, download returns no result and leaves
-  local encrypted history untouched; the next upload/download can recover
-  without writing plaintext temporary files.
-- Settings surfaces the preflight summary and each diagnostic finding without
-  requiring real iCloud credentials in SwiftPM debug builds.
-- Shared pinboards cannot be enabled while sync readiness is blocked. Once
-  enabled, pinboards can store encrypted sharing metadata, owner state,
-  invitation/link access mode, participant permissions, and stop-sharing state.
-- `PinboardShareKeyExchangeService` creates a Curve25519 owner/participant key
-  agreement flow and stores only wrapped board keys, public keys, and
-  fingerprints in the encrypted snapshot.
-- `PinboardShareInvitationService` publishes public identities, creates
-  recipient-scoped invitation packages, accepts invitations by unwrapping the
-  board key locally, and exposes an injected delivery transport seam. Invitation
-  packages contain public identities, permissions, fingerprints, and wrapped
-  board keys, not plaintext pinboard contents or private key material.
-- `CloudKitPinboardShareInvitationTransport` maps public identities and
-  invitation packages to CloudKit records through
-  `CloudKitPinboardShareRecordFactory`, so production sharing can use the same
-  injected delivery seam as tests.
-- The same factory creates recipient-scoped `CKQuerySubscription` records for
-  invitation delivery. Subscription notifications are silent
-  content-available pushes; user-visible notification text must be generated
-  locally after fetching and accepting encrypted invitation packages.
-- `PinboardShareInvitationInboxRefreshService` turns a silent push/background
-  refresh into a recipient-scoped invitation fetch and writes pending
-  invitations to the encrypted snapshot inbox. Inbox entries track pending,
-  accepted, rejected, and expired states so recovery UI can be built without
-  using plaintext temporary files.
-- `CloudKitPinboardShareInvitationNotificationHandler` validates CloudKit
-  invitation subscription IDs against the current device public-key fingerprint
-  before refreshing the encrypted inbox. Notifications for other devices are
-  ignored locally.
-- Plaintext fallback is not supported by the model.
+The [Cloud Sync and AI Refactor Plan](architecture/PASTEBUDDY_CLOUD_SYNC_AI_REFACTOR_PLAN.md)
+controls migration scope and order; this document controls the CloudKit
+recovery boundary.
 
-## Universal Clipboard Coexistence
+## One-time migration
 
-PasteBuddy sync does not replace or proxy Apple's Universal Clipboard. The app
-captures local pasteboard changes into encrypted history, then syncs that
-encrypted PasteBuddy snapshot through the user's private CloudKit database only
-after explicit opt-in and readiness checks. If Universal Clipboard also places a
-nearby-device copy on the local pasteboard, PasteBuddy treats it as an ordinary
-local capture subject to the same privacy rules, deduplication, OCR, retention,
-and encryption pipeline.
+The migration accepts the newest valid encrypted CloudKit Snapshot available
+to the device. It does not merge arbitrary records or run CloudKit and
+Supabase as dual authorities.
 
-## CloudKit Record Schema
+The fixed order is:
 
-### Encrypted Snapshot
+1. Locate and validate the latest Snapshot using the existing local storage
+   envelope and integrity checks.
+2. Atomically import it into the local PowerSync-managed SQLite database.
+3. Persistently freeze CloudKit writes immediately, before filtering or any
+   PowerSync/Supabase upload.
+4. Apply local content-type, sensitive-content, exclusion, and custom-rule
+   decisions. Sensitive or excluded rows remain local and have zero network
+   path.
+5. If the user has a cloud account and capability, start the normal
+   PowerSync path. The newest 100 eligible items are prioritized, then the
+   remainder continues resumably under the 5,000-item and 250,000,000-byte
+   attachment quotas.
+6. Record local-import and cloud-migration markers separately for macOS and
+   iOS. Overall migration is successful only when both platform marker pairs
+   satisfy their recovery conditions.
 
-Record type: `PasteBuddyEncryptedSnapshot`
+If validation or freezing fails, the pre-import SQLite state is preserved and
+no upload begins. A missing Snapshot leaves local history untouched. Retrying
+the same import is idempotent by package identity and marker state.
 
-- `packageID`: UUID string
-- `createdAt`: package creation date
-- `containerIdentifier`: CloudKit container identifier
-- `schemaVersion`: local snapshot schema version
-- `keyHierarchyVersion`: end-to-end key hierarchy version
-- `envelopeVersion`: encrypted envelope version
-- `envelopeAlgorithm`: encrypted envelope algorithm
-- `keyID`: key identifier only, not key material
-- `encryptedSnapshot`: JSON-encoded encrypted envelope
+Cloud content is service-readable under Supabase Auth and RLS; the migration
+does not claim E2EE or add a custom device-key protocol. Existing local
+encryption remains a local protection and is not a cloud authority.
 
-### Shared Pinboard Public Identity
+## Read-only recovery window
 
-Record type: `PasteBuddyPinboardShareIdentity`
+After a successful migration marker, CloudKit is read-only recovery for 90
+days:
 
-- `identityID`: UUID string
-- `displayName`: user/device display name
-- `publicKeyData`: Curve25519 public key bytes
-- `publicKeyFingerprint`: SHA-256 fingerprint of the public key
-- `createdAt`: identity creation date
-- `publicIdentityData`: JSON-encoded `PinboardSharePublicIdentity`
+- normal sync does not write, update, delete, or subscribe to CloudKit records;
+- an explicit recovery action still imports through SQLite first;
+- newer local or Supabase data cannot be overwritten implicitly;
+- deletion after 90 days is a separate explicit user-authorized decision with
+  its own confirmation and evidence.
 
-### Shared Pinboard Invitation
+There is no dual-write period and no direct CloudKit-to-UI path.
 
-Record type: `PasteBuddyPinboardShareInvitation`
+## Legacy boundary and Iroh
 
-- `invitationID`: UUID string
-- `pinboardID`: UUID string
-- `participantID`: UUID string
-- `permission`: `readOnly` or `canEdit`
-- `ownerPublicKeyFingerprint`: owner public key fingerprint
-- `recipientPublicKeyFingerprint`: recipient public key fingerprint, used for
-  invitation lookup
-- `boardKeyFingerprint`: SHA-256 fingerprint of the unwrapped board key
-- `createdAt`: invitation creation date
-- `expiresAt`: optional expiration date
-- `invitationPackageData`: JSON-encoded `PinboardShareInvitationPackage`
+Existing CloudKit record factories, snapshots, invitations, and user data
+remain as migration inputs. They are not new Supabase schema or sharing
+authority. The Iroh implementation and pairing data remain, while the unified
+Iroh capability stays disabled on macOS, iOS, and extensions.
 
-Invitation records must not include pinboard item contents, unwrapped board
-keys, private key material, raw share-link tokens, or plaintext search/OCR data.
+## WP6 acceptance
 
-### Shared Pinboard Invitation Subscription
-
-Subscription type: `CKQuerySubscription`
-
-- Record type: `PasteBuddyPinboardShareInvitation`
-- Predicate: `recipientPublicKeyFingerprint == <local public key fingerprint>`
-- Subscription ID prefix: `PasteBuddyPinboardShareInvitation.`
-- Options: fires on record creation and update
-- Notification: silent `content-available`; no alert body, clipboard text,
-  pinboard name, OCR text, board key, or private key material
-
-### Local Encrypted Invitation Inbox
-
-Snapshot field: `pinboardInvitationInbox`
-
-- Stored inside the AES-GCM encrypted local snapshot
-- Contains pending invitation packages plus local status, received date,
-  status-updated date, and local error message
-- Status values: `pending`, `accepted`, `rejected`, `expired`
-- Must not be mirrored into plaintext files, logs, notification bodies, or crash
-  reports
-
-## Required Apple Configuration
-
-1. Create an iCloud container, for example `iCloud.com.alexjiang.PasteBuddy`.
-2. Add iCloud + CloudKit capability to the signed macOS target.
-3. Add matching entitlements when producing a signed app bundle.
-4. Provide a matching macOS provisioning profile through
-   `PASTEBUDDY_PROVISIONING_PROFILE`; `script/build_and_run.sh` applies the
-   CloudKit entitlements only when that profile is present.
-5. Encrypted history sync uses the private CloudKit database and a symmetric
-   key stored in synchronizable iCloud Keychain. Users must enable iCloud
-   Keychain on every participating device.
-6. Deploy the CloudKit public database schema for public identities and
-   invitation packages, then wire signed-app identity, push notification
-   entitlements/background modes, system notification callback registration,
-   account error handling, and signed-app account/corruption/lost-key recovery
-   UI before sending real shared-pinboard invitations.
-7. Add account/corruption/lost-key recovery UI before treating shared pinboard
-   invitations as production-ready.
-
-The signed entitlement file is `Support/Entitlements/PasteBuddy.entitlements`.
-
-## Security Rules
-
-- Upload only encrypted record payloads.
-- Use the user's private CloudKit database for encrypted history/pinboard sync.
-  Vendor servers must not receive clipboard history, OCR metadata, search
-  indexes, or pinboard contents.
-- CloudKit adapter code must accept `CloudSyncRemoteRecord` or
-  `CloudSyncUploadPackage`, not raw `PasteBuddySnapshot` or `ClipboardItem`
-  values.
-- Do not write a plaintext search index to CloudKit.
-- Do not sync OCR metadata outside the encrypted payload.
-- Do not send real shared-pinboard invitations until signed-app identity, the
-  CloudKit public-key directory schema, invitation delivery subscription
-  deployment, signed-app push/background registration, and account/corruption
-  recovery UX are wired around the local invitation inbox/key exchange model.
-- Do not silently downgrade to plaintext if CloudKit, keys, or entitlements are
-  missing.
+WP6 must exercise real signed macOS and iOS apps with real encrypted
+Snapshots, relaunch, offline/no-account mode, freeze-before-upload ordering,
+marker persistence, quota continuation, and failure recovery. Evidence is
+bound to the source commit and build and includes screenshots,
+Accessibility trees, relevant window/view frames, and before/after diffs for
+the migration UI. Static source assertions and fake transports are not
+migration evidence.

@@ -152,3 +152,61 @@ This status map covers Linear issues DAY123-26 through DAY123-55 in the
   diagnostics.
 - VoiceOver, high-contrast, Larger Text, and localized UI passes on real macOS,
   iPhone, and iPad builds.
+
+## Cloud Sync and AI Refactor Status
+
+The [Cloud Sync and AI Refactor Plan](architecture/PASTEBUDDY_CLOUD_SYNC_AI_REFACTOR_PLAN.md)
+is the sole authority for implementation scope and order. ADR-002 controls
+architecture decisions, the schema contract controls data boundaries, and the
+acceptance matrix controls proof. V1 acceptance is macOS+iOS only; Android and
+Web are reserved in the service protocol/tenant model and are not implemented
+or counted as WP1-WP7 completion. The target is PowerSync + Supabase +
+RevenueCat; no runtime cloud gate is passed by this document.
+
+| Work package | Scope | Status |
+| --- | --- | --- |
+| WP0 | Documentation architecture reset and contracts | Pass — Coordinator documentation Gate 2026-08-16; no runtime claim |
+| WP1 | Formal Swift PowerSync SDK hard-stop PoC on macOS+iOS | Not run; any failure stops migration |
+| WP2 | Minimum Supabase domain, RLS, Storage, Vault, Edge, Queues/Cron | Not run |
+| WP3 | Auth, login-before-purchase, RevenueCat CustomerInfo reconciliation | Not run |
+| WP4 | Production PowerSync adapter and single main-app owner | Not run |
+| WP5 | Cloud AI, BYOK, ZDR, one active multimodal 1024-dimensional identity across text/image/joint/query vectors, direct image vectors with local OCR exact retrieval, RRF, MCP, and four-slice bake-off | Not run |
+| WP6 | Settings, account switch, CloudKit migration, deletion, visual proof | Not run |
+| WP7 | Release artifact, environment isolation, rollout, Sentry evidence | Not run |
+
+## Hosted legacy Supabase snapshot
+
+The current PasteBuddy Dev hosted legacy migrations are recorded as already
+applied, and the historical check found zero rows in the old domain tables.
+This is a snapshot for planning and inspection only, not teardown authorization
+or evidence that the new architecture is deployed.
+
+No applied migration may be modified or deleted. WP2 may use only a
+forward-only teardown migration after a fresh full manifest and recount;
+any non-zero legacy row count aborts and is reported. The hosted Supabase Dev
+project is the integration-evidence authority. Docker is optional for quick
+SQL checks and is never the runtime dependency or final evidence.
+
+The preceding External Configuration list is retained verbatim as existing
+local, CloudKit, and release integration input. The target cloud configuration
+is additive and remains unverified:
+
+## Cloud Refactor Target Configuration
+
+- Supabase Dev/Prod, PowerSync Cloud Dev/Alpha/Prod, and RevenueCat Dev/Prod
+  are independent environments; hosted Supabase Dev is the integration
+  authority, and Docker is optional SQL smoke support only.
+- OpenRouter ZDR, Resend SMTP, Vault, and existing Sentry are deployment
+  dependencies. RevenueCat webhook, OpenRouter platform, and Resend secrets
+  are injected temporarily from `general-secrets-store`; no secret is stored in
+  this repository.
+- Supabase Pro is required before formal paid launch. Open Edition is
+  source-available, not an OSI full-stack open-source claim; the Cloud Edition
+  versus Open Edition decision is a documented gate at 100 real users.
+- Sentry evidence covers sync latency, upload queue depth, quota rejection, AI
+  cost, Vault errors, Storage errors, and deletion task state/failure, with
+  payload and secret redaction.
+
+The WP0 documentation Gate is the only Gate recorded as passed here. WP1-WP7
+runtime gates remain not run and not passed; a source scan, build, or static
+test cannot replace the real evidence in SUPABASE_ACCEPTANCE_MATRIX.md.

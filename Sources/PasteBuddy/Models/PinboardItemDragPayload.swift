@@ -19,7 +19,11 @@ struct PinboardItemDragPayload: Codable, Transferable {
         for item: ClipboardItem,
         hydrate: @escaping @MainActor (ClipboardItem) async -> ClipboardItem
     ) -> NSItemProvider? {
-        let providers = PasteboardWriter.itemProviders(for: [item], hydrate: hydrate)
+        let providers = PasteboardWriter.itemProviders(
+            for: [item],
+            preferredContentType: item.presentationContentType,
+            hydrate: hydrate
+        )
         guard !providers.isEmpty,
               let payload = try? JSONEncoder().encode(Self(ids: [item.id])) else {
             return nil
@@ -34,7 +38,7 @@ struct PinboardItemDragPayload: Codable, Transferable {
             completion(payload, nil)
             return nil
         }
-        if item.contentType != .image,
+        if item.presentationContentType != .image,
            !provider.registeredTypeIdentifiers.contains(UTType.utf8PlainText.identifier) {
             let text = Data(PasteboardWriter.plainText(for: item).utf8)
             provider.registerDataRepresentation(

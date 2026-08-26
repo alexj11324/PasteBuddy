@@ -52,22 +52,19 @@ public struct ClipboardRepositorySyncSummary: Equatable, Sendable {
     public var deletedItemCount: Int
     public var upsertedPinboardCount: Int
     public var deletedPinboardCount: Int
-    public var enqueuedSemanticItemCount: Int
 
     public init(
         upsertedItemCount: Int = 0,
         reorderedItemCount: Int = 0,
         deletedItemCount: Int = 0,
         upsertedPinboardCount: Int = 0,
-        deletedPinboardCount: Int = 0,
-        enqueuedSemanticItemCount: Int = 0
+        deletedPinboardCount: Int = 0
     ) {
         self.upsertedItemCount = upsertedItemCount
         self.reorderedItemCount = reorderedItemCount
         self.deletedItemCount = deletedItemCount
         self.upsertedPinboardCount = upsertedPinboardCount
         self.deletedPinboardCount = deletedPinboardCount
-        self.enqueuedSemanticItemCount = enqueuedSemanticItemCount
     }
 }
 
@@ -258,6 +255,15 @@ public final class PasteBuddyDatabase: @unchecked Sendable {
         }
         migrator.registerMigration("add semantic index generation") { db in
             try createSemanticIndexControlSchema(db: db)
+        }
+        migrator.registerMigration("drop local semantic clipboard index") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_index_fts")
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_query_embeddings")
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_index_outbox")
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_index_embeddings")
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_index_documents")
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_index_suppressions")
+            try db.execute(sql: "DROP TABLE IF EXISTS semantic_index_control")
         }
         return migrator
     }
@@ -621,7 +627,6 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     public func replaceAll(with snapshot: PasteBuddySnapshot) throws {
         incrementReplaceAllInvocationCount()
         try database.write { db in
-            try db.execute(sql: "DELETE FROM semantic_index_fts")
             try db.execute(sql: "DELETE FROM clipboard_search_fts")
             try db.execute(sql: "DELETE FROM pinboard_items")
             try db.execute(sql: "DELETE FROM pinboards")
@@ -631,9 +636,6 @@ public final class ClipboardItemRepository: @unchecked Sendable {
 
             for (index, item) in snapshot.items.enumerated() {
                 try Self.upsert(item: item, snapshotOrder: index, db: db)
-                if snapshot.semanticIndex.isEnabled && !snapshot.semanticIndex.isPaused {
-                    _ = try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db)
-                }
             }
             for (index, pinboard) in snapshot.pinboards.enumerated() {
                 try Self.insert(pinboard: pinboard, sortOrder: index, db: db)
@@ -664,20 +666,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                         }
                     } else {
                         try Self.upsert(item: item, snapshotOrder: index, db: db)
-                        if snapshot.semanticIndex.isEnabled && !snapshot.semanticIndex.isPaused {
-                            if try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db) {
-                                summary.enqueuedSemanticItemCount += 1
-                            }
-                        }
                         summary.upsertedItemCount += 1
                     }
                 } else {
                     try Self.upsert(item: item, snapshotOrder: index, db: db)
-                    if snapshot.semanticIndex.isEnabled && !snapshot.semanticIndex.isPaused {
-                        if try Self.enqueueSemanticIndex(item: item, priority: snapshot.items.count - index, db: db) {
-                            summary.enqueuedSemanticItemCount += 1
-                        }
-                    }
                     summary.upsertedItemCount += 1
                 }
             }
@@ -790,51 +782,6 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         try database.write { db in
             try Self.deletePinboards(ids, db: db)
         }
-    }
-
-    private static func enqueueSemanticIndex(item: ClipboardItem, priority: Int, db: Database) throws -> Bool {
-        let now = Date().timeIntervalSince1970
-        let itemID = item.id.uuidString
-        let contentHash = item.searchDocument.contentHash
-        let existingHash = try String.fetchOne(
-            db,
-            sql: "SELECT content_hash FROM semantic_index_documents WHERE item_id = ?",
-            arguments: [itemID]
-        )
-        if let existingHash, existingHash != contentHash {
-            try db.execute(sql: "DELETE FROM semantic_index_fts WHERE item_id = ?", arguments: [itemID])
-            try db.execute(sql: "DELETE FROM semantic_index_embeddings WHERE item_id = ?", arguments: [itemID])
-            try db.execute(sql: "DELETE FROM semantic_index_documents WHERE item_id = ?", arguments: [itemID])
-        }
-        try db.execute(
-            sql: "DELETE FROM semantic_index_outbox WHERE item_id = ? AND content_hash <> ?",
-            arguments: [itemID, contentHash]
-        )
-        try db.execute(sql: """
-            INSERT INTO semantic_index_outbox(
-                id, item_id, content_hash, priority, state, attempt_count,
-                next_attempt_at, created_at, updated_at
-            )
-            SELECT ?, ?, ?, ?, ?, 0, ?, ?, ?
-            WHERE NOT EXISTS (
-                SELECT 1 FROM semantic_index_suppressions WHERE item_id = ?
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM semantic_index_documents
-                WHERE item_id = ? AND content_hash = ?
-              )
-            ON CONFLICT(item_id, content_hash) DO UPDATE SET
-                priority = MAX(priority, excluded.priority),
-                state = ?,
-                next_attempt_at = excluded.next_attempt_at,
-                updated_at = excluded.updated_at
-            """, arguments: [
-                UUID().uuidString, itemID, contentHash,
-                priority, SemanticIndexState.queued.rawValue, now, now, now,
-                itemID, itemID, contentHash,
-                SemanticIndexState.queued.rawValue
-            ])
-        return db.changesCount > 0
     }
 
     public func fetchPage(_ request: ClipboardItemPageRequest = ClipboardItemPageRequest()) throws -> [ClipboardItem] {
@@ -1405,37 +1352,6 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         )
         try replaceLabels(for: storedItem, db: db)
         try replaceSearchIndex(for: storedItem, db: db)
-        try invalidateStaleSemanticIndex(
-            itemID: storedItem.id.uuidString,
-            contentHash: storedItem.searchDocument.contentHash,
-            db: db
-        )
-    }
-
-    private static func invalidateStaleSemanticIndex(
-        itemID: String,
-        contentHash: String,
-        db: Database
-    ) throws {
-        let existingHash = try String.fetchOne(
-            db,
-            sql: "SELECT content_hash FROM semantic_index_documents WHERE item_id = ?",
-            arguments: [itemID]
-        )
-        guard existingHash.map({ $0 != contentHash }) == true else {
-            try db.execute(
-                sql: "DELETE FROM semantic_index_outbox WHERE item_id = ? AND content_hash <> ?",
-                arguments: [itemID, contentHash]
-            )
-            return
-        }
-        try db.execute(sql: "DELETE FROM semantic_index_fts WHERE item_id = ?", arguments: [itemID])
-        try db.execute(sql: "DELETE FROM semantic_index_embeddings WHERE item_id = ?", arguments: [itemID])
-        try db.execute(sql: "DELETE FROM semantic_index_documents WHERE item_id = ?", arguments: [itemID])
-        try db.execute(
-            sql: "DELETE FROM semantic_index_outbox WHERE item_id = ? AND content_hash <> ?",
-            arguments: [itemID, contentHash]
-        )
     }
 
     private static func strippedPayloadForDatabase(from payload: ClipboardPayload, db: Database) throws -> ClipboardPayload {
@@ -1567,7 +1483,6 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         for id in ids {
             arguments += [id.uuidString]
         }
-        try db.execute(sql: "DELETE FROM semantic_index_fts WHERE item_id IN (\(placeholders))", arguments: arguments)
         try db.execute(
             sql: "DELETE FROM clipboard_search_fts WHERE item_id IN (\(placeholders))",
             arguments: arguments
@@ -1796,7 +1711,6 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
     var settingsBehavior: SettingsBehaviorConfiguration
     var shortcuts: ShortcutConfiguration
     var mcp: MCPConfiguration
-    var semanticIndex: SemanticIndexConfiguration
     var security: SecurityConfiguration
 
     init(snapshot: PasteBuddySnapshot) {
@@ -1812,7 +1726,6 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
         settingsBehavior = snapshot.settingsBehavior
         shortcuts = snapshot.shortcuts
         mcp = snapshot.mcp
-        semanticIndex = snapshot.semanticIndex
         security = snapshot.security
     }
 
@@ -1833,7 +1746,6 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
         ) ?? SettingsBehaviorConfiguration()
         shortcuts = try container.decode(ShortcutConfiguration.self, forKey: .shortcuts)
         mcp = try container.decode(MCPConfiguration.self, forKey: .mcp)
-        semanticIndex = try container.decodeIfPresent(SemanticIndexConfiguration.self, forKey: .semanticIndex) ?? SemanticIndexConfiguration()
         security = try container.decode(SecurityConfiguration.self, forKey: .security)
     }
 
@@ -1853,7 +1765,6 @@ private struct StoredSnapshotMetadata: Codable, Equatable, Sendable {
             settingsBehavior: settingsBehavior,
             shortcuts: shortcuts,
             mcp: mcp,
-            semanticIndex: semanticIndex,
             security: security
         )
     }

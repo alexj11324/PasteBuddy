@@ -119,7 +119,8 @@ struct PasteBuddyApp: App {
                 }
             )
         }
-        .defaultSize(width: 640, height: 560)
+        .defaultSize(width: 760, height: 640)
+        .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: true))
     }
 
@@ -485,12 +486,6 @@ struct PasteBuddyApp: App {
         if transactionUpdateTask == nil {
             let provider = AppleStoreKitEntitlementProvider()
             store.reconcileCurrentStoreEntitlement(await provider.currentEntitlement())
-            Task { @MainActor [store] in
-                var processed = 0
-                repeat {
-                    processed = await store.processSemanticIndexBatch(limit: 2)
-                } while processed > 0 && !Task.isCancelled
-            }
             transactionUpdateTask = StoreTransactionUpdateObserver(provider: provider).start(
                 onUpdate: { [store] update in
                     await store.applyStoreEntitlementUpdate(update)
@@ -512,28 +507,23 @@ struct PasteBuddyApp: App {
         if PasteBuddyFeatureAvailability.irohClipboardSync {
             irohSync.onItemReceived = { [store] item in
                 guard store.addSyncedItem(item) != nil else { return }
-                Task { @MainActor [store] in
-                    _ = await store.processSemanticIndexBatch(limit: 2)
-                }
             }
             // Peers (iOS) cannot fetch link previews themselves, so re-send items
             // once enrichment upgrades them; the receiver merges via dedupe.
             store.onLinkPreviewMetadataEnriched = { [irohSync] item in
-                Task { @MainActor [store] in
+                Task { @MainActor in
                     await irohSync.sendIfConnected(item)
-                    _ = await store.processSemanticIndexBatch(limit: 2)
                 }
             }
         }
         if monitor == nil {
             let createdMonitor = ClipboardMonitor(
                 store: store,
-                onItemCaptured: { [irohSync, store] item in
+                onItemCaptured: { [irohSync] item in
                     Task { @MainActor in
                         if PasteBuddyFeatureAvailability.irohClipboardSync {
                             await irohSync.sendIfConnected(item)
                         }
-                        _ = await store.processSemanticIndexBatch(limit: 2)
                     }
                 }
             )

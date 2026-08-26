@@ -83,6 +83,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
     var content: (Item, Bool) -> Content
     var previewContent: (Item) -> PreviewContent
     var dragItemProvider: ((Item) -> NSItemProvider?)?
+    var allowsDrag: ((Item) -> Bool)?
     var onSelect: (UUID) -> Void
     var onDoubleClick: (UUID) -> Void
     var onLastItemAppear: () -> Void
@@ -105,6 +106,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         @ViewBuilder content: @escaping (Item, Bool) -> Content,
         @ViewBuilder previewContent: @escaping (Item) -> PreviewContent,
         dragItemProvider: ((Item) -> NSItemProvider?)? = nil,
+        allowsDrag: ((Item) -> Bool)? = nil,
         onSelect: @escaping (UUID) -> Void,
         onDoubleClick: @escaping (UUID) -> Void,
         onLastItemAppear: @escaping () -> Void = {}
@@ -122,6 +124,7 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
         self.content = content
         self.previewContent = previewContent
         self.dragItemProvider = dragItemProvider
+        self.allowsDrag = allowsDrag
         self.onSelect = onSelect
         self.onDoubleClick = onDoubleClick
         self.onLastItemAppear = onLastItemAppear
@@ -185,8 +188,10 @@ struct SwiftUIShelfCollection<Item: Identifiable, Content: View, PreviewContent:
             .id(itemID)
 
         ZStack {
-            if let provider = dragItemProvider?(item) {
-                itemView.onDrag { provider }
+            if dragItemProvider != nil, allowsDrag?(item) ?? true {
+                itemView.onDrag {
+                    dragItemProvider?(item) ?? NSItemProvider()
+                }
             } else {
                 itemView
             }

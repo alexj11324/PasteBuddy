@@ -198,6 +198,7 @@ enum ClipboardPanelHotKeyToggleDecision: Equatable {
 
 @MainActor
 final class ClipboardShelfPanelController: NSObject {
+    private static let dragSessionDismissalDelayNanoseconds: UInt64 = 350_000_000
     private static let shelfEntranceDuration: CFTimeInterval = 0.18
     private static let shelfExitDuration: CFTimeInterval = 0.12
     private static let sidePanelPreferredSize = CGSize(width: 360, height: 697)
@@ -225,12 +226,15 @@ final class ClipboardShelfPanelController: NSObject {
     }
     private var panel: ClipboardShelfPanel?
     private var localMouseDownMonitor: Any?
+    private var localMouseUpMonitor: Any?
     private var localKeyDownMonitor: Any?
     private var globalMouseDownMonitor: Any?
+    private var globalMouseUpMonitor: Any?
+    private var isPanelPointerSessionActive = false
+    private var pointerSessionEndRetryGeneration = 0
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appResignActiveObserver: NSObjectProtocol?
     private var screenParametersObserver: NSObjectProtocol?
-    private var ignoreOutsideClicksUntil: Date?
     private var isAnimatingPanelOut = false
     private var isPinned = false
     private var panelAnimationGeneration = 0
@@ -286,7 +290,6 @@ final class ClipboardShelfPanelController: NSObject {
         resetPanelPresentationState()
         panelPresentationID = UUID()
         reloadPanelContent(panel)
-        ignoreOutsideClicksUntil = Date().addingTimeInterval(0.35)
         let finalFrame = attachedFrame(for: panel)
         PasteBuddyDiagnostics.record(.shelf, "frameCalculated", detail: NSStringFromRect(finalFrame))
         isAnimatingPanelOut = false
@@ -362,7 +365,7 @@ final class ClipboardShelfPanelController: NSObject {
         configurePanelForCurrentMode(panel)
         panel.isFloatingPanel = true
         panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        applyCollectionBehavior(to: panel)
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.animationBehavior = .none
@@ -643,6 +646,11 @@ final class ClipboardShelfPanelController: NSObject {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] event in
             guard let self, let panel, panel.isVisible else { return event }
+            if event.type == .leftMouseDown, event.window === panel {
+                self.beginPanelPointerSession()
+            } else if event.window !== panel {
+                self.resetPanelPointerSession()
+            }
             if Self.isShelfAuxiliaryWindow(event.window) {
                 return event
             }
@@ -654,7 +662,17 @@ final class ClipboardShelfPanelController: NSObject {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self, weak panel] _ in
             guard let self, let panel, panel.isVisible else { return }
+            self.resetPanelPointerSession()
             self.hideIfOutsideClick(at: NSEvent.mouseLocation)
+        }
+
+        localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            self?.endPanelPointerSession()
+            return event
+        }
+
+        globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+            self?.endPanelPointerSession()
         }
     }
 
@@ -667,6 +685,15 @@ final class ClipboardShelfPanelController: NSObject {
             NSEvent.removeMonitor(globalMouseDownMonitor)
             self.globalMouseDownMonitor = nil
         }
+        if let localMouseUpMonitor {
+            NSEvent.removeMonitor(localMouseUpMonitor)
+            self.localMouseUpMonitor = nil
+        }
+        if let globalMouseUpMonitor {
+            NSEvent.removeMonitor(globalMouseUpMonitor)
+            self.globalMouseUpMonitor = nil
+        }
+        resetPanelPointerSession()
     }
 
     private func startFocusMonitoring(for panel: NSPanel) {
@@ -739,12 +766,16 @@ final class ClipboardShelfPanelController: NSObject {
 
     private func hideIfPanelLostFocus() {
         guard let panel, panel.isVisible else { return }
+        recoverEndedPanelPointerSessionIfNeeded()
         let keyWindow = NSApp.keyWindow
         if let keyWindow, Self.isShelfAuxiliaryWindow(keyWindow) {
             keyWindow.sharingType = panel.sharingType
             return
         }
-        guard !isPinned else { return }
+        guard Self.shouldDismissForLostFocus(
+            isPinned: isPinned,
+            isDragSessionActive: isPanelPointerSessionActive
+        ) else { return }
         if shouldIgnoreDismissalAt(NSEvent.mouseLocation) {
             return
         }
@@ -773,16 +804,14 @@ final class ClipboardShelfPanelController: NSObject {
 
     private func hideIfOutsideClick(at location: CGPoint) {
         guard let panel, panel.isVisible else { return }
-        if let ignoreOutsideClicksUntil, Date() < ignoreOutsideClicksUntil {
-            return
-        }
-        ignoreOutsideClicksUntil = nil
+        recoverEndedPanelPointerSessionIfNeeded()
         if Self.shouldDismissForOutsideClick(
             at: location,
             panelFrame: panel.frame,
             isShelfAuxiliaryWindowHit: shelfAuxiliaryWindowContains(location),
             isIgnoredDismissalTargetHit: shouldIgnoreDismissalAt(location),
-            isPinned: isPinned
+            isPinned: isPinned,
+            isDragSessionActive: isPanelPointerSessionActive
         ) {
             hide()
         }
@@ -812,11 +841,42 @@ final class ClipboardShelfPanelController: NSObject {
         panelFrame: CGRect,
         isShelfAuxiliaryWindowHit: Bool,
         isIgnoredDismissalTargetHit: Bool,
-        isPinned: Bool = false
+        isPinned: Bool = false,
+        isDragSessionActive: Bool = false
     ) -> Bool {
         guard !isPinned else { return false }
+        guard !isDragSessionActive else { return false }
         guard !isIgnoredDismissalTargetHit else { return false }
         return !panelFrame.contains(location) && !isShelfAuxiliaryWindowHit
+    }
+
+    static func shouldKeepPointerSession(primaryButtonPressed: Bool) -> Bool {
+        primaryButtonPressed
+    }
+
+    static func shouldRecoverPointerSession(
+        isPointerSessionActive: Bool,
+        primaryButtonPressed: Bool
+    ) -> Bool {
+        isPointerSessionActive && !primaryButtonPressed
+    }
+
+    static func shouldDismissForLostFocus(
+        isPinned: Bool,
+        isDragSessionActive: Bool
+    ) -> Bool {
+        !isPinned && !isDragSessionActive
+    }
+
+    static func panelCollectionBehavior(
+        isPinned: Bool,
+        isDragSessionActive: Bool
+    ) -> NSWindow.CollectionBehavior {
+        var behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        if !isPinned && !isDragSessionActive {
+            behavior.insert(.transient)
+        }
+        return behavior
     }
 
     static func shouldProtectNestedShelfAuxiliaryWindow(
@@ -832,8 +892,91 @@ final class ClipboardShelfPanelController: NSObject {
     }
 
     private func hideIfAppLostFocus() {
-        guard !isPinned else { return }
+        recoverEndedPanelPointerSessionIfNeeded()
+        guard Self.shouldDismissForLostFocus(
+            isPinned: isPinned,
+            isDragSessionActive: isPanelPointerSessionActive
+        ) else { return }
         hideImmediately()
+    }
+
+    private func beginPanelPointerSession() {
+        guard !isPanelPointerSessionActive else { return }
+        isPanelPointerSessionActive = true
+        if let panel {
+            applyCollectionBehavior(to: panel)
+        }
+    }
+
+    private func endPanelPointerSession() {
+        guard isPanelPointerSessionActive else { return }
+        if Self.shouldKeepPointerSession(
+            primaryButtonPressed: (NSEvent.pressedMouseButtons & (1 << 0)) != 0
+        ) {
+            schedulePointerSessionEndRetry()
+            return
+        }
+        resetPanelPointerSession()
+        guard Self.shouldDismissForLostFocus(
+            isPinned: isPinned,
+            isDragSessionActive: false
+        ) else { return }
+        dismissAfterPointerSessionIfNeeded()
+    }
+
+    private func resetPanelPointerSession() {
+        pointerSessionEndRetryGeneration &+= 1
+        guard isPanelPointerSessionActive else { return }
+        isPanelPointerSessionActive = false
+        if let panel {
+            applyCollectionBehavior(to: panel)
+        }
+    }
+
+    private func recoverEndedPanelPointerSessionIfNeeded() {
+        guard Self.shouldRecoverPointerSession(
+            isPointerSessionActive: isPanelPointerSessionActive,
+            primaryButtonPressed: (NSEvent.pressedMouseButtons & (1 << 0)) != 0
+        ) else { return }
+        resetPanelPointerSession()
+    }
+
+    private func schedulePointerSessionEndRetry() {
+        pointerSessionEndRetryGeneration &+= 1
+        let generation = pointerSessionEndRetryGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard let self, self.pointerSessionEndRetryGeneration == generation else { return }
+            self.endPanelPointerSession()
+        }
+    }
+
+    private func dismissAfterPointerSessionIfNeeded() {
+        if NSApp.isActive {
+            hideIfPanelLostFocus()
+            return
+        }
+        let generation = panelAnimationGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.dragSessionDismissalDelayNanoseconds)
+            guard let self, self.panelAnimationGeneration == generation else { return }
+            guard Self.shouldDismissForLostFocus(
+                isPinned: self.isPinned,
+                isDragSessionActive: self.isPanelPointerSessionActive
+            ) else { return }
+            if NSApp.isActive {
+                self.hideIfPanelLostFocus()
+            } else {
+                self.hideImmediately()
+            }
+        }
+    }
+
+    private func applyCollectionBehavior(to panel: NSPanel) {
+        panel.collectionBehavior = Self.panelCollectionBehavior(
+            isPinned: isPinned,
+            isDragSessionActive: isPanelPointerSessionActive
+        )
     }
 
     private func panelPinnedBinding() -> Binding<Bool> {
@@ -848,6 +991,9 @@ final class ClipboardShelfPanelController: NSObject {
     private func setPinned(_ value: Bool) {
         guard isPinned != value else { return }
         isPinned = value
+        if let panel {
+            applyCollectionBehavior(to: panel)
+        }
         PasteBuddyDiagnostics.record(.shelf, "pinChanged", detail: "pinned=\(value)")
     }
 

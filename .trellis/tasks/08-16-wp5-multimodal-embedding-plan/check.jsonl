@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/cloud-ai-search-contracts.md", "reason": "Check the executable WP5 contract and error matrix."}
+{"file": "docs/architecture/SUPABASE_ACCEPTANCE_MATRIX.md", "reason": "Check the WP5 evidence thresholds and Not run status."}
+{"file": "docs/AI_SEMANTIC_SEARCH.md", "reason": "Check candidate/ZDR/RRF and four-slice product invariants."}
+{"file": "docs/SECURITY.md", "reason": "Check zero-network and secret redaction constraints."}
+{"file": "docs/IMPLEMENTATION_STATUS.md", "reason": "Check that no runtime completion is claimed."}
