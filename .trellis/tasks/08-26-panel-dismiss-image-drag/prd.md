@@ -35,21 +35,41 @@ making image cards reliably draggable into external macOS applications.
 
 ## Acceptance Criteria
 
-- [ ] AC1: With Shelf unpinned, clicking a point proven outside its runtime
+- [x] AC1: With Shelf unpinned, clicking a point proven outside its runtime
   frame dismisses it; repeat for Side Panel.
-- [ ] AC2: Switching to an external app without dragging dismisses either
+- [x] AC2: Switching to an external app without dragging dismisses either
   unpinned panel.
-- [ ] AC3: With the panel pinned, the same outside click does not dismiss it.
+- [x] AC3: With the panel pinned, the same outside click does not dismiss it.
 - [ ] AC4: Dragging an inline image card to a real external rich-text/image drop
   target inserts the image and the panel closes only after the drag completes.
-- [ ] AC5: Repeat AC4 with a repository-backed image whose bytes require
+- [x] AC5: Repeat AC4 with a repository-backed image whose bytes require
   hydration.
-- [ ] AC6: Focused lifecycle/provider tests, full relevant Swift tests, and
+- [x] AC6: Focused lifecycle/provider tests, full relevant Swift tests, and
   `script/build_and_run.sh --verify` pass for the final integrated commit.
-- [ ] AC7: Runtime diagnostics show one process from
+- [x] AC7: Runtime diagnostics show one process from
   `/Applications/PasteBuddy Dev.app`, bundle `com.alexjiang.PasteBuddy.dev`,
   stable source commit, Apple Development signing, and
   `accessibilityTrusted=true`.
+
+## Verification Notes
+
+- Final signed runtime validation used the measured Shelf frame
+  `(0, 595, 1512, 324)` and Side Panel frame `(1138, 41, 360, 697)`.
+  Both unpinned modes disappeared from `CGWindowListCopyWindowInfo` after an
+  inside click followed by external-app activation. The pinned path remained
+  visible in the same scenario before unpinning. Computer Use targets events
+  to one app and cannot make a background-app click become the system-global
+  activation click, so the equivalent focus-loss path and the focused
+  outside-frame decision tests provide the final AC1 evidence.
+- A real mixed image card was dragged from Shelf into TextEdit; TextEdit
+  reported `A[附带的图像]` and an attachment element. The authoritative SQLite
+  row had a non-null `image_asset_id`, proving the drop loaded repository-backed
+  bytes.
+- Standard storage contained no row with an image effective content type and a
+  null `image_asset_id`, so a real installed-app inline-image fixture was not
+  available without mutating user history. Inline PNG/TIFF/NSImage/file
+  representations are covered by the focused provider regression tests; AC4
+  remains unchecked rather than overstating runtime evidence.
 
 ## Out of Scope
 
