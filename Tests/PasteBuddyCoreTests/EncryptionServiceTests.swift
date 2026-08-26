@@ -216,6 +216,12 @@ final class EncryptionServiceTests: XCTestCase {
             ),
             "PasteBuddy"
         )
+        XCTAssertEqual(
+            EncryptedSnapshotStore.persistenceDirectoryName(
+                bundleIdentifier: "com.alexjiang.PasteBuddy.settingspreview"
+            ),
+            "PasteBuddy Isolated"
+        )
     }
 
     func testSnapshotStoreMigratesLegacyPlaintextSnapshotIntoEncryptedEnvelope() throws {
