@@ -1,22 +1,56 @@
-# Development Signing
+# Apple signing channels
 
-Use the project run script for macOS development builds:
+PasteBuddy uses separate signing and delivery channels. Signing proves the
+identity of a built artifact; the Git branch controls where that artifact may be
+promoted, not whether Xcode or `codesign` can sign it.
+
+| Channel | Identity | Bundle ID | Allowed source | Destination |
+| --- | --- | --- | --- | --- |
+| Development package | Apple Development, Team `72UN4PF4BL` | `com.alexjiang.PasteBuddy.dev` | Any committed branch | `dist/`, never installed or launched |
+| Stable Dev promotion | Apple Development, Team `72UN4PF4BL` | `com.alexjiang.PasteBuddy.dev` | Clean `codex/integrated-delivery` | `/Applications/PasteBuddy Dev.app` |
+| TestFlight | Apple distribution managed by Xcode | iOS production identifiers | Exact protected `main` SHA | App Store Connect |
+| Developer ID | Developer ID Application, Team `72UN4PF4BL` | `com.alexjiang.PasteBuddy` | Existing `v<semver>` tag contained in protected `main` | Notarized GitHub Release |
+
+Ad-hoc signing, `-`, and Sign to Run Locally are not accepted by any channel.
+
+## Feature branch development package
+
+An arbitrary committed branch can produce a signed package without switching
+to `main` or `codex/integrated-delivery`:
 
 ```bash
-script/build_and_run.sh --verify
+PASTEBUDDY_CODESIGN_IDENTITY=<apple-development-sha1> \
+  script/build_and_run.sh --package
 ```
 
-This is the stable development path. It builds the SwiftPM app, signs a
-`PasteBuddy Dev.app` bundle with an `Apple Development` identity, installs it at
-`/Applications/PasteBuddy Dev.app`, prints runtime diagnostics, and opens the
-fresh app.
+The output name includes the signing channel and source commit. It is not
+installed or launched, so it cannot overwrite the stable Dev app or touch its
+data directory.
 
-## Expected Result
+The configured keychain currently contains more than one valid Apple
+Development identity. That is intentionally treated as ambiguous. Select a
+certificate by its SHA-1 hash from:
 
-A successful run includes:
+```bash
+security find-identity -v -p codesigning "$(security default-keychain -d user | tr -d '\" ')"
+```
+
+Certificate hashes and Team IDs are identifiers, not secrets. Private keys stay
+in Keychain and must never be copied into the repository.
+
+## Stable Dev promotion and TCC validation
+
+Only a clean `codex/integrated-delivery` checkout may run:
+
+```bash
+PASTEBUDDY_CODESIGN_IDENTITY=<apple-development-sha1> \
+  script/build_and_run.sh --verify
+```
+
+This is the only command allowed to replace `/Applications/PasteBuddy Dev.app`.
+A successful runtime acceptance includes:
 
 ```text
-Installed /Applications/PasteBuddy Dev.app signed with <identity> (development, com.alexjiang.PasteBuddy.dev)
 accessibilityTrusted=true
 stableLaunchPathMatched=true
 bundleIdentifier=com.alexjiang.PasteBuddy.dev
@@ -24,60 +58,46 @@ bundlePath=/Applications/PasteBuddy Dev.app
 signingChannel=development
 ```
 
-`PasteBuddyCodeSigningIdentity` in the installed app's `Info.plist` records the
-identity used for that build.
-
-## Keychain Rules
-
-The script must not use ad-hoc signing, a raw SwiftPM executable, or a temporary
-app bundle as proof for Accessibility/TCC behavior.
-
-For development signing, the script resolves identities only from the configured
-code-signing keychain:
-
-1. `PASTEBUDDY_CODESIGN_KEYCHAIN`, when set.
-2. The user default keychain from `security default-keychain -d user`.
-
-It passes that same keychain to `codesign --keychain`, so another project's
-local keychain in the user search list cannot be selected accidentally.
-
-Do not add `security unlock-keychain` or `security set-key-partition-list` to
-this repo script. If macOS asks for a Keychain password during normal
-development builds, treat that as local machine setup drift, not as a build step
-to automate in the repository.
-
-## When The Script Fails
-
-If no signing identity is found, install or select a valid `Apple Development`
-identity in the user default keychain, or point the script at a local keychain:
+The app must also pass:
 
 ```bash
-PASTEBUDDY_CODESIGN_KEYCHAIN=/path/to/local.keychain-db script/build_and_run.sh --verify
+codesign --verify --deep --strict --verbose=4 '/Applications/PasteBuddy Dev.app'
+codesign -dvvv -r- '/Applications/PasteBuddy Dev.app'
 ```
 
-If multiple identities exist, the script still requires a stable non-ad-hoc
-identity. You can pin one for a single run without storing secrets:
+Do not use a temporary bundle, raw SwiftPM executable, or a different path as
+evidence for Accessibility/TCC persistence.
 
-```bash
-PASTEBUDDY_CODESIGN_IDENTITY=<certificate-sha1> script/build_and_run.sh --verify
-```
+## Identity resolution rules
 
-The certificate hash is not a secret. Private keys must stay in Keychain and
-must not be committed to the repository.
+`script/build_and_run.sh` only searches `PASTEBUDDY_CODESIGN_KEYCHAIN`, or the
+user default keychain when that variable is absent. It requires:
 
-## Release Signing
+- the correct certificate class for the selected channel;
+- an available private key;
+- exactly one matching identity unless a SHA-1 hash is provided;
+- Team ID `72UN4PF4BL` after signing;
+- the expected Bundle ID and designated requirement;
+- a matching, currently valid provisioning profile for CloudKit and shared
+  Keychain entitlements.
 
-Development builds use `Apple Development` with:
+Wrong or ambiguous inputs fail closed. Repository scripts do not unlock a
+developer's normal keychain or change its partition list.
 
-- app name: `PasteBuddy Dev`
-- bundle id: `com.alexjiang.PasteBuddy.dev`
-- install path: `/Applications/PasteBuddy Dev.app`
+## Developer ID release
 
-Release or real user-path verification must use:
+Do not use `PASTEBUDDY_SIGNING_CHANNEL=release script/build_and_run.sh --verify`.
+A Developer ID signature alone is not a distributable release. The only formal
+release entrypoint is `.github/workflows/macos-release.yml`, which calls
+`script/release_macos.sh` and requires all of the following to pass:
 
-```bash
-PASTEBUDDY_SIGNING_CHANNEL=release script/build_and_run.sh --verify
-```
+1. nested-code-first signing with `--options runtime --timestamp`;
+2. strict `codesign` verification and Team/Bundle/entitlement checks;
+3. Apple notarization with an accepted result and retrieved log;
+4. ticket stapling and `stapler validate`;
+5. Gatekeeper `spctl --assess`;
+6. SHA-256 and provenance generation;
+7. publication of only the final stapled ZIP to the matching GitHub Release.
 
-Release signing requires a `Developer ID Application` identity. The script must
-fail rather than falling back to ad-hoc signing.
+See `docs/MACOS_RELEASE_AND_RUNNERS.md` for credential provisioning, runner
+setup, rotation, and rollback.

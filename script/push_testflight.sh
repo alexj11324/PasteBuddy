@@ -177,7 +177,9 @@ else
 fi
 
 log "Dispatching TestFlight workflow for $head_sha"
-gh workflow run "$WORKFLOW" --ref "$BRANCH"
+gh workflow run "$WORKFLOW" --ref "$BRANCH" \
+  -f commit_sha="$head_sha" \
+  -f confirmation=UPLOAD
 
 if [[ "$NO_WAIT" -eq 1 ]]; then
   log "Not waiting for TestFlight upload workflow"

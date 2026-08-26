@@ -35,19 +35,20 @@
 
 ## Workstream D — GitHub Actions CI and TestFlight hardening
 
-1. 新增 `.github/workflows/ci.yml`，使用固定 self-hosted labels、最小权限和 concurrency。
-2. 更新 `.github/workflows/testflight.yml`：self-hosted release labels、main SHA gate、environment、权限分离、cleanup。
-3. 更新 `script/push_testflight.sh` 与 workflow 合同测试，保证本地与服务端都 fail closed。
-4. 使用 actionlint（若仓库已有/可安全安装）或等价 YAML/workflow 解析，再运行本地合同测试。
-5. 提交为独立可回滚 concern。
+1. 新增 `.github/workflows/ci.yml`，仅允许 owner 通过 `workflow_dispatch` 放行完整 SHA，使用固定 self-hosted labels、`contents: read` + `checks: write` 和按 SHA concurrency。
+2. 新增 `script/dispatch_local_ci.sh`，验证 SHA 已推送后 dispatch、定位并等待对应 workflow run。
+3. 更新 `.github/workflows/testflight.yml`：self-hosted release labels、main SHA gate、environment、权限分离、cleanup。
+4. 更新 `script/push_testflight.sh` 与 workflow 合同测试，保证本地与服务端都 fail closed。
+5. 使用 actionlint（若仓库已有/可安全安装）或等价 YAML/workflow 解析，再运行本地合同测试。
+6. 提交为独立可回滚 concern。
 
 ## Workstream E — Runner and repository setup
 
 1. 新增/完成可审计 runner setup/uninstall 文档与脚本，registration token 只从 `gh api` 内存传递。
 2. 经系统授权创建/使用专用普通 CI 用户并注册 `pastebuddy-ci` runner service。
 3. 注册按需 `pastebuddy-release` runner；确认普通 CI job 无法匹配 release label。
-4. Push 实施分支并创建/更新 PR；等待 `CI / verify` 在本地 runner 上真实成功。
-5. 记录现有 GitHub protection/environment JSON，然后创建 `testflight`、`macos-production` environments 与 source rules。
+4. Push 实施分支并创建/更新 PR；由 owner 放行该 PR 的精确 head SHA，等待 `CI / verify` 在本地 runner 上真实成功。
+5. 记录现有 GitHub protection/environment JSON，然后创建 `testflight`、`macos-production` environments 与 source rules；若套餐拒绝 reviewer/wait timer，记录 HTTP 422 并保留 owner-only workflow gate，不伪报审批已生效。
 6. 在 required check 已真实出现后配置 main branch protection。
 7. 使用 GitHub API 回读 runners/protection/environments/workflows，证明设置已生效。
 

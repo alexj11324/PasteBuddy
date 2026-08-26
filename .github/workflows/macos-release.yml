@@ -1,0 +1,127 @@
+name: Release notarized macOS app
+run-name: macOS release ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v<semver> tag contained in main
+        required: true
+        type: string
+      confirmation:
+        description: Type RELEASE to publish this tag
+        required: true
+        type: string
+
+concurrency:
+  group: macos-production-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  GCP_PROJECT_ID: general-secrets-store
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/320884539284/locations/global/workloadIdentityPools/github-actions/providers/pastebuddy
+  GCP_SERVICE_ACCOUNT: pastebuddy-github-actions@general-secrets-store.iam.gserviceaccount.com
+  ASC_API_KEY_SECRET: asc-api-key-664UJQLMB2
+  DEVELOPER_ID_P12_SECRET: pastebuddy-developer-id-application-p12
+  DEVELOPER_ID_PASSWORD_SECRET: pastebuddy-developer-id-p12-password
+  DEVELOPER_ID_PROFILE_SECRET: pastebuddy-developer-id-provisioning-profile
+
+jobs:
+  release:
+    name: Sign, notarize, and publish
+    if: github.actor == github.repository_owner && inputs.confirmation == 'RELEASE'
+    runs-on: [self-hosted, macOS, ARM64, pastebuddy-release, xcode-27]
+    timeout-minutes: 90
+    environment: macos-production
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+
+    steps:
+      - name: Validate release input
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+
+      - name: Check out exact tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove tag is contained in main
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          git fetch origin main --tags --force
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor HEAD origin/main
+
+      - name: Clear stale release state
+        run: |
+          security delete-keychain "$RUNNER_TEMP/pastebuddy-release.keychain-db" >/dev/null 2>&1 || true
+          rm -rf "$RUNNER_TEMP/pastebuddy-release-secrets" "$RUNNER_TEMP/pastebuddy-release-output"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Restore ephemeral signing inputs
+        run: |
+          mkdir -p "$RUNNER_TEMP/pastebuddy-release-secrets"
+          gcloud secrets versions access latest --secret="$DEVELOPER_ID_P12_SECRET" --project="$GCP_PROJECT_ID" --out-file="$RUNNER_TEMP/pastebuddy-release-secrets/developer-id.p12"
+          gcloud secrets versions access latest --secret="$DEVELOPER_ID_PASSWORD_SECRET" --project="$GCP_PROJECT_ID" --out-file="$RUNNER_TEMP/pastebuddy-release-secrets/p12-password"
+          gcloud secrets versions access latest --secret="$DEVELOPER_ID_PROFILE_SECRET" --project="$GCP_PROJECT_ID" --out-file="$RUNNER_TEMP/pastebuddy-release-secrets/developer-id.provisionprofile"
+          gcloud secrets versions access latest --secret="$ASC_API_KEY_SECRET" --project="$GCP_PROJECT_ID" --out-file="$RUNNER_TEMP/pastebuddy-release-secrets/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$RUNNER_TEMP/pastebuddy-release-secrets/"*
+
+      - name: Create ephemeral release keychain
+        run: |
+          keychain_path="$RUNNER_TEMP/pastebuddy-release.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          p12_password="$(<"$RUNNER_TEMP/pastebuddy-release-secrets/p12-password")"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 7200 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$RUNNER_TEMP/pastebuddy-release-secrets/developer-id.p12" -k "$keychain_path" -P "$p12_password" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+          echo "PASTEBUDDY_CODESIGN_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "PASTEBUDDY_PROVISIONING_PROFILE=$RUNNER_TEMP/pastebuddy-release-secrets/developer-id.provisionprofile" >> "$GITHUB_ENV"
+          echo "ASC_API_KEY_PATH=$RUNNER_TEMP/pastebuddy-release-secrets/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Sign and notarize
+        env:
+          PASTEBUDDY_RELEASE_OUTPUT_DIR: ${{ runner.temp }}/pastebuddy-release-output
+        run: script/release_macos.sh "${{ inputs.tag }}"
+
+      - name: Publish GitHub Release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" "$RUNNER_TEMP/pastebuddy-release-output/"* \
+            --verify-tag \
+            --title "PasteBuddy $RELEASE_TAG" \
+            --generate-notes
+
+      - name: Clean ephemeral credentials and keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/pastebuddy-release.keychain-db" >/dev/null 2>&1 || true
+          rm -rf "$RUNNER_TEMP/pastebuddy-release-secrets" "$RUNNER_TEMP/pastebuddy-release-output"

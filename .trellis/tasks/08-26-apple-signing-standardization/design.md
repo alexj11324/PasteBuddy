@@ -18,14 +18,14 @@ GitHub Actions 是控制面，负责触发、required checks、environment gate�
 - Label：`self-hosted`, `macOS`, `ARM64`, `pastebuddy-ci`, `xcode-27`。
 - 运行在专用标准 macOS 用户与独立 work 目录。
 - 无 Developer ID、ASC、notary 或生产数据权限；workflow 仅 `contents: read`。
-- 只执行 `pull_request`/`main` 的测试、无签名 simulator build 和静态签名策略测试。
+- 只执行仓库 owner 显式放行的完整 commit SHA，完成测试、无签名 simulator build 和静态签名策略测试；PR 事件本身不会自动调度个人 Mac。
 - 不启动 PasteBuddy，不覆盖 `/Applications/PasteBuddy Dev.app`，不调用发布脚本。
 
 ### 2.2 Release runner
 
 - Label：`self-hosted`, `macOS`, `ARM64`, `pastebuddy-release`, `xcode-27`。
 - 与普通 CI runner 分开注册和使用独立 work 目录；默认离线，需要发布时才启动。
-- 只有引用 `testflight` 或 `macos-production` environment 的 job 才能运行发布步骤。
+- 只有引用 `testflight` 或 `macos-production` environment 且通过 owner-only SHA/tag 确认 gate 的 job 才能运行发布步骤。
 - GitHub OIDC 取得 GCP 短期身份；credential 从 `general-secrets-store` 写入 runner 临时目录或一次性 Keychain，cleanup trap 始终删除。
 - 不复用开发者日常默认 Keychain 作为 CI 正式签名源。
 
@@ -89,18 +89,18 @@ release 脚本不安装 `/Applications/PasteBuddy.app`，不把本地运行当�
 
 ### 4.1 `.github/workflows/ci.yml`
 
-- Trigger：`pull_request`、`push` 到 `main`。
+- Trigger：仅 `workflow_dispatch`，输入 40 位 commit SHA 与显式确认字符串；workflow 校验 actor 是仓库 owner，并确认远端确实存在该 commit。
 - Runner：`[self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]`。
-- Permissions：`contents: read`。
-- Concurrency：按 workflow/ref 分组，PR 新提交取消旧 run。
-- Job：checkout 后运行 `script/ci.sh`；不使用 secrets、不上传常规构建 artifact。
-- 固定 required check context，例如 `CI / verify`。
+- Permissions：`contents: read`, `checks: write`；`checks: write` 只用于在输入 SHA 上创建/完成固定 required check。
+- Concurrency：按输入 SHA 分组，同一 SHA 的新放行取消旧 run。
+- Job：先为输入 SHA 创建 `CI / verify` check，再 checkout 该精确 SHA 并运行 `script/ci.sh`；最终步骤无论成功失败都完成该 check。不使用 secrets、不上传常规构建 artifact。
+- `script/dispatch_local_ci.sh <sha>` 是维护者入口，默认取当前 HEAD，要求 commit 已存在于 origin，然后 dispatch 并等待对应 run。
 
 ### 4.2 Hardened `.github/workflows/testflight.yml`
 
 - 保持 manual-only `workflow_dispatch`，并增加明确的 main ref/SHA gate。
 - Runner 改为 `[self-hosted, macOS, ARM64, pastebuddy-release, xcode-27]`。
-- Job 绑定 `testflight` environment；单人仓库允许发起者确认。
+- Job 绑定来源只允许 `main` 的 `testflight` environment，并使用 owner-only SHA/确认 gate；当前套餐不支持 required reviewer。
 - OIDC/GSM 在 environment gate 之后执行；ASC `.p8` 只在 runner temp 存活。
 - 默认 `contents: read`, `id-token: write`；写 build tag 的独立 job/步骤才提升 `contents: write`。
 - cleanup 使用 `if: always()` 删除 ASC key、archive/export 临时目录。
@@ -119,15 +119,15 @@ release 脚本不安装 `/Applications/PasteBuddy.app`，不把本地运行当�
 ### 5.1 Main protection
 
 - Require pull request before merging，当前单人仓库不要求第二个 approval。
-- Require `CI / verify`，并要求 branch up to date。
+- Require `CI / verify`，并要求 branch up to date；每次 PR head SHA 变化后必须由 owner 重新放行新 SHA，旧 check 不会继承。
 - Block force pushes and deletions；require conversation resolution。
 - 管理员不使用常规 bypass；紧急绕过只作为 GitHub 审计事件，并在文档要求事后补 PR/验证。
 
 ### 5.2 Environments
 
-- `testflight`：仅 `main` 可部署；required reviewer 为 `alexj11324`，允许 self-review 以适配单人仓库；禁止无条件 admin bypass（若当前套餐/API支持）。
-- `macos-production`：仅 `v*` tag；同样使用显式人工确认。
-- 未来出现第二位可信协作者后，将 required reviewer 迁移为双人职责分离并启用 prevent self-review。
+- `testflight`：仅 `main` 可部署；workflow 只接受 owner 的 SHA + `UPLOAD` 显式确认。
+- `macos-production`：仅 `v*` tag；workflow 只接受 owner 的 tag + `RELEASE` 显式确认。
+- GitHub API 已确认当前 private-repository 套餐拒绝 required reviewers/wait timer（HTTP 422）。升级套餐且出现第二位可信协作者后，再加入 reviewer 职责分离与 prevent self-review。
 
 ## 6. Secrets and Certificate Lifecycle
 
@@ -146,7 +146,7 @@ release 脚本不安装 `/Applications/PasteBuddy.app`，不把本地运行当�
 - iOS Bundle IDs、App Groups、CloudKit container、TestFlight product 不变。
 - 不引入自动更新；GitHub Releases 只是发布渠道。
 - 先落地 CI/scripts/tests，再注册 runner 和修改 GitHub protection；避免 protection 指向尚不存在的 required check。
-- 在 CI workflow 的 PR run 首次成功后再启用 main required check。
+- 在 owner 放行 workflow 首次对真实 PR SHA 写回成功后再启用 main required check。
 
 ## 8. Rollback
 

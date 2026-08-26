@@ -1,39 +1,45 @@
 # TestFlight CI
 
-`.github/workflows/testflight.yml` is manual-only. It has no `pull_request` or
-push trigger, so PR updates and ordinary pushes never start an App Store build.
-`script/push_testflight.sh` performs the local verification, pushes the
-approved `main` commit, and explicitly dispatches the workflow for release.
+TestFlight is a manual, protected release workflow. It runs on the local
+`pastebuddy-release` self-hosted macOS runner, so it does not consume GitHub-
+hosted macOS minutes.
 
-The workflow runs on GitHub's `macos-26` image so archives are built with Xcode 26 and the iOS 26 SDK required by App Store Connect.
+The normal entrypoint is:
 
-The workflow:
+```bash
+script/push_testflight.sh
+```
 
-1. Authenticates to Google Cloud with GitHub OIDC.
-2. Restores the App Store Connect API key from Google Secret Manager.
-3. Queries App Store Connect for the latest uploaded build on app `6780560937`.
-4. Compares that number with the highest `ios-build-*` git tag.
-5. Archives `PasteBuddyiOS` with `CURRENT_PROJECT_VERSION` set to the next integer.
-6. Uploads the archive to App Store Connect for TestFlight processing.
-7. Persists the uploaded build number as an `ios-build-<number>` git tag.
+The wrapper verifies the committed `main` HEAD locally, pushes it, and
+dispatches `.github/workflows/testflight.yml` with that exact 40-character SHA
+and an explicit `UPLOAD` confirmation. The workflow independently proves that:
 
-Required GitHub Actions secrets:
+- the actor is the repository owner;
+- the dispatch ref is `refs/heads/main`;
+- `GITHUB_SHA`, checked-out HEAD, the approved input SHA, and `origin/main` are
+  identical;
+- the job passed the protected `testflight` environment gate;
+- runner labels are `self-hosted`, `macOS`, `ARM64`, `pastebuddy-release`, and
+  `xcode-27`.
 
-- `ASC_KEY_ID`: App Store Connect API key ID, currently `664UJQLMB2`.
-- `ASC_ISSUER_ID`: App Store Connect issuer ID.
+Only after those checks does the job use GitHub OIDC to authenticate to Google
+Cloud and restore the App Store Connect `.p8` key from
+`general-secrets-store/asc-api-key-664UJQLMB2`. The key, archive, export, and
+DerivedData live under `RUNNER_TEMP` and are deleted by an `always()` cleanup.
 
-The `.p8` private key is not stored in GitHub. It stays in Google Secret Manager as `asc-api-key-664UJQLMB2` in project `general-secrets-store`.
+The upload job has `contents: read` and `id-token: write`. A separate job gets
+`contents: write` only after successful upload and writes the corresponding
+`ios-build-<number>` tag. Build numbers remain
+`max(App Store Connect latest, highest ios-build tag) + 1`.
 
-GitHub OIDC access is scoped to this provider and service account:
+Required protected-environment secrets are:
 
-- `projects/320884539284/locations/global/workloadIdentityPools/github-actions/providers/pastebuddy`
-- `pastebuddy-github-actions@general-secrets-store.iam.gserviceaccount.com`
+- `ASC_KEY_ID` (`664UJQLMB2` at the time this document was updated);
+- `ASC_ISSUER_ID`.
 
-The Apple team ID and App Store Connect app ID are committed in the workflow because they are identifiers, not secrets:
+The `.p8` value must not be copied into GitHub Secrets, the repository, `.env`,
+or a persistent runner directory.
 
-- Team ID: `72UN4PF4BL`
-- App Store Connect app ID: `6780560937`
-
-The build number is not committed back to the repository. It is resolved at upload time from App Store Connect, then incremented by one.
-
-`ios-build-*` tags store successful CI-uploaded build numbers. The workflow uses `max(App Store Connect latest, highest ios-build tag) + 1`, which avoids a duplicate build number if App Store Connect has accepted an upload but has not listed the new build yet.
+If the release runner is offline, the workflow remains queued. Do not add a
+GitHub-hosted macOS fallback. If an upload fails, inspect that run before
+dispatching again so a successfully accepted build is not duplicated.
