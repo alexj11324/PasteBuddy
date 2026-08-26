@@ -746,6 +746,9 @@ struct ClipboardShelfPanelView: View {
                 for: item,
                 hydrate: store.hydratedItem
             )
+        } allowsDrag: { displayItem in
+            if case .clipboard = displayItem { return true }
+            return false
         } onSelect: { id in
             guard let item = renderedShelfItems.first(where: { $0.id == id }) else { return }
             selectItem(item)

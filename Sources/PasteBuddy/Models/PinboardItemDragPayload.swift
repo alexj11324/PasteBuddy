@@ -34,6 +34,11 @@ struct PinboardItemDragPayload: Codable, Transferable {
             completion(payload, nil)
             return nil
         }
+        if item.payload.imageData == nil, item.payload.hasImageAsset {
+            Task { @MainActor in
+                _ = await hydrate(item)
+            }
+        }
         if item.contentType != .image,
            !provider.registeredTypeIdentifiers.contains(UTType.utf8PlainText.identifier) {
             let text = Data(PasteboardWriter.plainText(for: item).utf8)

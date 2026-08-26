@@ -902,6 +902,72 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         )
     }
 
+    func testUnpinnedPanelDoesNotDismissOrUseTransientBehaviorDuringDrag() {
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldDismissForLostFocus(
+                isPinned: false,
+                isDragSessionActive: true
+            )
+        )
+        XCTAssertTrue(
+            ClipboardShelfPanelController.shouldDismissForLostFocus(
+                isPinned: false,
+                isDragSessionActive: false
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldDismissForLostFocus(
+                isPinned: true,
+                isDragSessionActive: false
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.panelCollectionBehavior(
+                isPinned: false,
+                isDragSessionActive: true
+            ).contains(.transient)
+        )
+        XCTAssertTrue(
+            ClipboardShelfPanelController.panelCollectionBehavior(
+                isPinned: false,
+                isDragSessionActive: false
+            ).contains(.transient)
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.panelCollectionBehavior(
+                isPinned: true,
+                isDragSessionActive: false
+            ).contains(.transient)
+        )
+        XCTAssertTrue(
+            ClipboardShelfPanelController.shouldKeepPointerSession(
+                primaryButtonPressed: true,
+                dragPasteboardHasItems: false
+            )
+        )
+        XCTAssertTrue(
+            ClipboardShelfPanelController.shouldKeepPointerSession(
+                primaryButtonPressed: false,
+                dragPasteboardHasItems: true
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldKeepPointerSession(
+                primaryButtonPressed: false,
+                dragPasteboardHasItems: false
+            )
+        )
+        XCTAssertFalse(
+            ClipboardShelfPanelController.shouldDismissForOutsideClick(
+                at: CGPoint(x: 800, y: 500),
+                panelFrame: CGRect(x: 0, y: 652, width: 1512, height: 330),
+                isShelfAuxiliaryWindowHit: false,
+                isIgnoredDismissalTargetHit: false,
+                isDragSessionActive: true
+            )
+        )
+    }
+
     func testBothPanelModesUseSharedPinStateAndPinnedPastePolicy() throws {
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
         let sources = try [
@@ -911,7 +977,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         XCTAssertEqual(controllerSource.components(separatedBy: "isPinned: panelPinnedBinding()").count - 1, 2)
         XCTAssertTrue(controllerSource.contains("private func panelPinnedBinding() -> Binding<Bool>"))
-        XCTAssertTrue(controllerSource.contains("guard !isPinned else { return }"))
+        XCTAssertTrue(controllerSource.contains("Self.shouldDismissForLostFocus("))
+        XCTAssertTrue(controllerSource.contains("beginPanelPointerSession()"))
+        XCTAssertTrue(controllerSource.contains("endPanelPointerSession()"))
         for source in sources {
             XCTAssertTrue(source.contains("@Binding var isPinned: Bool"))
             XCTAssertTrue(source.contains("setPinned(!effectivePinned)"))
@@ -1323,6 +1391,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(shelfSource.contains("shelfInteraction.dismissPreview(for: id)"))
         XCTAssertTrue(shelfSource.contains("previewContent: { displayItem in"))
         XCTAssertTrue(shelfSource.contains("ClipboardPreparedPreview.prepare(\n                item: item,\n                hydrateItem: store.hydratedItem"))
+        XCTAssertTrue(shelfSource.contains("allowsDrag: { displayItem in"))
         XCTAssertTrue(shelfSource.contains("dragItemProvider: { displayItem in"))
         XCTAssertTrue(shelfSource.contains("PinboardItemDragPayload.itemProvider("))
         XCTAssertFalse(shelfSource.contains("dragPayload: { displayItem in"))
@@ -1370,7 +1439,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(collectionSource.contains("proxy.scrollTo(primarySelectedID)"))
         XCTAssertFalse(collectionSource.contains("anchor: .center"))
         XCTAssertTrue(collectionSource.contains("var dragItemProvider: ((Item) -> NSItemProvider?)?"))
-        XCTAssertTrue(collectionSource.contains(".onDrag { provider }"))
+        XCTAssertTrue(collectionSource.contains("itemView.onDrag {"))
+        XCTAssertTrue(collectionSource.contains("dragItemProvider?(item) ?? NSItemProvider()"))
+        XCTAssertTrue(collectionSource.contains("allowsDrag?(item) ?? true"))
+        XCTAssertFalse(collectionSource.contains("if let provider = dragItemProvider?(item)"))
+        XCTAssertFalse(collectionSource.contains(".onDrag { provider }"))
         XCTAssertFalse(collectionSource.contains(".draggable(payload)"))
         XCTAssertTrue(collectionSource.contains(".onTapGesture(count: 2)"))
         XCTAssertTrue(collectionSource.contains(".simultaneousGesture("))
@@ -2465,33 +2538,26 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testSubscriptionSettingsUsesVerifiedStoreKitInfrastructure() throws {
         let settingsSource = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
-        let plansSource = try sourceFileContents("Sources/PasteBuddy/Views/AISearchSetupSheet.swift")
 
-        XCTAssertTrue(plansSource.contains("action.restore_purchases"))
-        XCTAssertTrue(plansSource.contains("AppleStoreKitEntitlementProvider()"))
-        XCTAssertTrue(plansSource.contains("fetchProducts()"))
-        XCTAssertTrue(plansSource.contains("displayPrice"))
-        XCTAssertTrue(plansSource.contains(".byokAnnual"))
-        XCTAssertTrue(plansSource.contains(".cloudMonthly"))
-        XCTAssertTrue(plansSource.contains(".cloudAnnual"))
-        XCTAssertTrue(settingsSource.contains("AISearchSetupSheet(store: store)"))
-        XCTAssertFalse(plansSource.contains("action.start_trial"))
-        XCTAssertFalse(plansSource.contains("action.cancel_trial"))
-        XCTAssertFalse(plansSource.contains("store.activatePersonalPlan"))
-        XCTAssertFalse(plansSource.contains("lifetime"))
+        XCTAssertTrue(settingsSource.contains("action.restore_purchases"))
+        XCTAssertTrue(settingsSource.contains("AppleStoreKitEntitlementProvider()"))
+        XCTAssertTrue(settingsSource.contains("restorePurchases(using:"))
+        XCTAssertFalse(settingsSource.contains("action.start_trial"))
+        XCTAssertFalse(settingsSource.contains("action.cancel_trial"))
+        XCTAssertFalse(settingsSource.contains("store.activatePersonalPlan"))
+        XCTAssertFalse(settingsSource.contains("lifetime"))
+        XCTAssertFalse(settingsSource.contains("AISearchSetupSheet"))
     }
 
-    func testAISetupAndResultControlsExistOnBothClipboardPanels() throws {
+    func testClipboardPanelsDoNotExposeAISearchControls() throws {
         let shelf = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let side = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
         for source in [shelf, side] {
-            XCTAssertTrue(source.contains("AISearchSetupSheet(store: store)"))
-            XCTAssertTrue(source.contains("store.canRunConfiguredAISource"))
-            XCTAssertTrue(source.contains("label.ai_results_applied"))
-            XCTAssertTrue(source.contains("label.ai_search_failed"))
-            XCTAssertTrue(source.contains("store.invalidateSemanticSearch()"))
-            XCTAssertTrue(source.contains("store.toggleSemanticIndexExclusion"))
+            XCTAssertFalse(source.contains("AISearchSetupSheet"))
+            XCTAssertFalse(source.contains("runSemanticSearch"))
+            XCTAssertFalse(source.contains("action.ai_search"))
+            XCTAssertFalse(source.contains("toggleSemanticIndexExclusion"))
         }
     }
 
@@ -2951,6 +3017,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
         let controllerSource = try sourceFileContents("Sources/PasteBuddy/App/ClipboardShelfPanelController.swift")
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let filtersSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardPanelFiltersMenu.swift")
 
         XCTAssertTrue(source.contains("struct ClipboardSidePanelView"))
         XCTAssertTrue(source.contains(".pasteBuddyBottomSheetSurface(cornerRadius: 28"))
@@ -2976,6 +3043,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("NSApp.activate(ignoringOtherApps: true)"))
         XCTAssertFalse(source.contains("NSApp.setActivationPolicy(.regular)"))
         XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: \"gearshape\")"))
+        XCTAssertTrue(source.contains("ClipboardPanelFiltersMenu(store: store, chrome: .toolbar)"))
+        XCTAssertTrue(filtersSource.contains("ShelfToolbarCircleIcon(systemName: \"line.3.horizontal.decrease\")"))
+        XCTAssertTrue(filtersSource.contains(".frame(width: 42, height: 38)"))
+        XCTAssertTrue(filtersSource.contains(".contentShape(Circle())"))
         XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))
         XCTAssertTrue(source.contains("localized(\"label.clipboard\")"))
@@ -3133,7 +3204,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
-        let dragProvider = try XCTUnwrap(itemSource.range(of: "itemView.onDrag { provider }"))
+        let dragProvider = try XCTUnwrap(itemSource.range(of: "itemView.onDrag {"))
         let doubleTap = try XCTUnwrap(itemSource.range(of: ".onTapGesture(count: 2)"))
         let doubleClick = try XCTUnwrap(itemSource.range(of: "onDoubleClick(itemID)"))
         let simultaneousTap = try XCTUnwrap(itemSource.range(of: ".simultaneousGesture("))
