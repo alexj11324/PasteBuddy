@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
-- **Last Active**: 2026-08-25
+- **Total Sessions**: 2
+- **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~28 | Active |
+| `journal-1.md` | ~52 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-08-26 | Fix panel dismissal and image drag | `2d1c49f`, `b9da6b9`, `925464e`, `f62d816` | `codex/pb-powersync-poc` |
 | 1 | 2026-08-25 | Generate PasteBuddy app icon candidates | `5b6b1c2` | `codex/integrated-delivery` |
 <!-- @@@/auto:session-history -->
 
