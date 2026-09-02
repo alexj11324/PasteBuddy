@@ -46,6 +46,16 @@ public struct ClipboardItemPageRequest: Equatable, Sendable {
     }
 }
 
+public struct ClipboardItemPageAndCount: Equatable, Sendable {
+    public var items: [ClipboardItem]
+    public var totalCount: Int
+
+    public init(items: [ClipboardItem], totalCount: Int) {
+        self.items = items
+        self.totalCount = max(totalCount, items.count)
+    }
+}
+
 public struct ClipboardRepositorySyncSummary: Equatable, Sendable {
     public var upsertedItemCount: Int
     public var reorderedItemCount: Int
@@ -787,6 +797,17 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     public func fetchPage(_ request: ClipboardItemPageRequest = ClipboardItemPageRequest()) throws -> [ClipboardItem] {
         try database.read { db in
             try Self.fetchPage(request, db: db)
+        }
+    }
+
+    public func fetchPageAndCount(
+        _ request: ClipboardItemPageRequest = ClipboardItemPageRequest()
+    ) throws -> ClipboardItemPageAndCount {
+        try database.read { db in
+            ClipboardItemPageAndCount(
+                items: try Self.fetchPage(request, db: db),
+                totalCount: try Self.filteredItemCount(request, db: db)
+            )
         }
     }
 

@@ -129,6 +129,8 @@ struct ClipboardShelfPanelView: View {
     @FocusState private var isShelfFocused: Bool
     @State private var isShowingLaunchAtLoginPrompt = false
     @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardShelfQueryState>()
+    @State private var shelfPageTask: Task<Void, Never>?
+    @State private var isLoadingShelfPage = false
     @State private var shelfInteraction = ShelfInteractionModel()
     @State private var preparedPreview: ClipboardPreparedPreview?
     @State private var previewRequestID: UUID?
@@ -161,6 +163,9 @@ struct ClipboardShelfPanelView: View {
             }
         }
         .onDisappear {
+            shelfPageTask?.cancel()
+            shelfPageTask = nil
+            paging.trimToInitialPage()
             isSearchRailPresented = false
             dismissPreparedPreview()
         }
@@ -549,6 +554,9 @@ struct ClipboardShelfPanelView: View {
                     systemImageName: emptySystemImage
                 )
             ]
+        }
+        if isLoadingShelfPage, shelfScope != .pasteStack {
+            return [.loading]
         }
         if isShowingLaunchAtLoginPrompt {
             return [.launchAtLoginPrompt]
@@ -1144,40 +1152,80 @@ struct ClipboardShelfPanelView: View {
 
     private func refreshShelfItems() {
         let queryID = shelfQueryState
-        let items = store.filteredItemsPage(for: shelfScope, offset: 0)
-        paging.reset(
-            with: items,
-            totalCount: store.filteredItemCount(for: shelfScope),
-            queryID: queryID
-        )
-
+        shelfPageTask?.cancel()
+        paging.beginLoading(queryID: queryID)
         shelfInteraction.replaceItems(
-            items,
+            [],
             storeSelectedIDs: store.selectedItemIDs,
             storePrimarySelectedID: store.selectedItemID
         )
+        isLoadingShelfPage = shelfScope != .pasteStack
+        shelfPageTask = Task { @MainActor in
+            do {
+                let result = try await store.filteredItemsPageAndCount(
+                    for: shelfScope,
+                    offset: 0,
+                    limit: ClipboardPanelHistoryLoadingPolicy.initialPageSize
+                )
+                guard !Task.isCancelled, queryID == shelfQueryState else { return }
+                isLoadingShelfPage = false
+                paging.reset(
+                    with: result.items,
+                    totalCount: result.totalCount,
+                    queryID: queryID
+                )
+                shelfInteraction.replaceItems(
+                    result.items,
+                    storeSelectedIDs: store.selectedItemIDs,
+                    storePrimarySelectedID: store.selectedItemID
+                )
+            } catch {
+                guard !Task.isCancelled, queryID == shelfQueryState else { return }
+                isLoadingShelfPage = false
+                paging.reset(with: [], totalCount: 0, queryID: queryID)
+                shelfInteraction.replaceItems([])
+                store.recordHistoryQueryError(error)
+            }
+            shelfPageTask = nil
+        }
     }
 
     private func loadNextShelfPage() {
-        guard paging.canLoadMore else { return }
+        guard !isLoadingShelfPage, paging.canLoadMore else { return }
         let queryID = shelfQueryState
         guard let request = paging.nextPageRequest(for: queryID) else { return }
-        let page = store.filteredItemsPage(
-            for: shelfScope,
-            offset: request.offset
-        )
-        guard !page.isEmpty else { return }
-        guard paging.append(
-            page,
-            totalCount: store.filteredItemCount(for: shelfScope),
-            for: request,
-            currentQueryID: shelfQueryState
-        ) else { return }
-        shelfInteraction.replaceItems(
-            paging.items,
-            storeSelectedIDs: store.selectedItemIDs,
-            storePrimarySelectedID: store.selectedItemID
-        )
+        let totalCount = paging.totalCount
+        isLoadingShelfPage = true
+        shelfPageTask = Task { @MainActor in
+            do {
+                let page = try await store.filteredItemsPageAsync(
+                    for: shelfScope,
+                    offset: request.offset,
+                    limit: request.limit
+                )
+                guard !Task.isCancelled, queryID == shelfQueryState else { return }
+                isLoadingShelfPage = false
+                guard !page.isEmpty else { return }
+                guard paging.append(
+                    page,
+                    totalCount: totalCount,
+                    for: request,
+                    currentQueryID: shelfQueryState
+                ) else { return }
+                shelfInteraction.replaceItems(
+                    paging.items,
+                    storeSelectedIDs: store.selectedItemIDs,
+                    storePrimarySelectedID: store.selectedItemID
+                )
+            } catch {
+                guard !Task.isCancelled, queryID == shelfQueryState else { return }
+                isLoadingShelfPage = false
+                paging.reset(with: [], totalCount: 0, queryID: queryID)
+                shelfInteraction.replaceItems([])
+                store.recordHistoryQueryError(error)
+            }
+            shelfPageTask = nil
+        }
     }
 }
 

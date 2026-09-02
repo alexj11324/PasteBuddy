@@ -5639,6 +5639,50 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(filtered.allSatisfy { $0.sourceAppName == "Notes" })
     }
 
+    func testAsyncRepositoryPageAndCountUsesSmallInitialPageWithoutLosingTotal() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 6_000_000)
+        let items = (0..<125).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Async Page \(index)",
+                payload: ClipboardPayload(text: "async payload \(index)")
+            )
+        }
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        let firstPage = try await store.filteredItemsPageAndCount(
+            for: .history,
+            offset: 0,
+            limit: 80
+        )
+        XCTAssertEqual(firstPage.items.count, 80)
+        XCTAssertEqual(firstPage.totalCount, 125)
+        XCTAssertEqual(firstPage.items.map(\.id), Array(items.prefix(80)).map(\.id))
+
+        let secondPage = try await store.filteredItemsPageAsync(
+            for: .history,
+            offset: firstPage.items.count,
+            limit: 160
+        )
+        XCTAssertEqual(secondPage.count, 45)
+        XCTAssertEqual(secondPage.map(\.id), Array(items.dropFirst(80)).map(\.id))
+    }
+
     func testQuickPasteKeepsOneThroughNineLimitWithRepositoryBackedHistory() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

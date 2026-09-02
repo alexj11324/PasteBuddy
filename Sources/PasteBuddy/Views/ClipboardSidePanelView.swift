@@ -40,6 +40,8 @@ struct ClipboardSidePanelView: View {
     @FocusState private var isListFocused: Bool
     @State private var sideScope: PasteScope = .history
     @State private var paging = ClipboardPanelPagingState<ClipboardItem, ClipboardSidePanelQueryState>()
+    @State private var sidePageTask: Task<Void, Never>?
+    @State private var isLoadingSidePage = false
     @State private var interaction = ShelfInteractionModel()
     @State private var preparedPreview: ClipboardPreparedPreview?
     @State private var previewRequestID: UUID?
@@ -66,6 +68,9 @@ struct ClipboardSidePanelView: View {
             }
         }
         .onDisappear {
+            sidePageTask?.cancel()
+            sidePageTask = nil
+            paging.trimToInitialPage()
             dismissPreparedPreview()
         }
         .onChange(of: queryState) {
@@ -326,7 +331,13 @@ struct ClipboardSidePanelView: View {
 
     private var itemList: some View {
         VStack(spacing: 8) {
-            if renderedItems.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
+            if isLoadingSidePage, sideScope != .pasteStack {
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                    .accessibilityLabel(localized("label.clipboard"))
+                    .accessibilityValue(localized("state.connecting"))
+            } else if renderedItems.isEmpty, store.isHistoryQueryTransitioning, sideScope != .pasteStack {
                 ProgressView()
                     .controlSize(.large)
                     .frame(maxWidth: .infinity, minHeight: 280)
@@ -506,39 +517,80 @@ struct ClipboardSidePanelView: View {
 
     private func refreshSideItems() {
         let queryID = queryState
-        let items = store.filteredItemsPage(for: sideScope, offset: 0)
-        paging.reset(
-            with: items,
-            totalCount: store.filteredItemCount(for: sideScope),
-            queryID: queryID
-        )
+        sidePageTask?.cancel()
+        paging.beginLoading(queryID: queryID)
         interaction.replaceItems(
-            items,
+            [],
             storeSelectedIDs: store.selectedItemIDs,
             storePrimarySelectedID: store.selectedItemID
         )
+        isLoadingSidePage = sideScope != .pasteStack
+        sidePageTask = Task { @MainActor in
+            do {
+                let result = try await store.filteredItemsPageAndCount(
+                    for: sideScope,
+                    offset: 0,
+                    limit: ClipboardPanelHistoryLoadingPolicy.initialPageSize
+                )
+                guard !Task.isCancelled, queryID == queryState else { return }
+                isLoadingSidePage = false
+                paging.reset(
+                    with: result.items,
+                    totalCount: result.totalCount,
+                    queryID: queryID
+                )
+                interaction.replaceItems(
+                    result.items,
+                    storeSelectedIDs: store.selectedItemIDs,
+                    storePrimarySelectedID: store.selectedItemID
+                )
+            } catch {
+                guard !Task.isCancelled, queryID == queryState else { return }
+                isLoadingSidePage = false
+                paging.reset(with: [], totalCount: 0, queryID: queryID)
+                interaction.replaceItems([])
+                store.recordHistoryQueryError(error)
+            }
+            sidePageTask = nil
+        }
     }
 
     private func loadNextSidePage() {
-        guard paging.canLoadMore else { return }
+        guard !isLoadingSidePage, paging.canLoadMore else { return }
         let queryID = queryState
         guard let request = paging.nextPageRequest(for: queryID) else { return }
-        let page = store.filteredItemsPage(
-            for: sideScope,
-            offset: request.offset
-        )
-        guard !page.isEmpty else { return }
-        guard paging.append(
-            page,
-            totalCount: store.filteredItemCount(for: sideScope),
-            for: request,
-            currentQueryID: queryState
-        ) else { return }
-        interaction.replaceItems(
-            paging.items,
-            storeSelectedIDs: store.selectedItemIDs,
-            storePrimarySelectedID: store.selectedItemID
-        )
+        let totalCount = paging.totalCount
+        isLoadingSidePage = true
+        sidePageTask = Task { @MainActor in
+            do {
+                let page = try await store.filteredItemsPageAsync(
+                    for: sideScope,
+                    offset: request.offset,
+                    limit: request.limit
+                )
+                guard !Task.isCancelled, queryID == queryState else { return }
+                isLoadingSidePage = false
+                guard !page.isEmpty else { return }
+                guard paging.append(
+                    page,
+                    totalCount: totalCount,
+                    for: request,
+                    currentQueryID: queryState
+                ) else { return }
+                interaction.replaceItems(
+                    paging.items,
+                    storeSelectedIDs: store.selectedItemIDs,
+                    storePrimarySelectedID: store.selectedItemID
+                )
+            } catch {
+                guard !Task.isCancelled, queryID == queryState else { return }
+                isLoadingSidePage = false
+                paging.reset(with: [], totalCount: 0, queryID: queryID)
+                interaction.replaceItems([])
+                store.recordHistoryQueryError(error)
+            }
+            sidePageTask = nil
+        }
     }
 
     private func setSideScope(_ scope: PasteScope) {

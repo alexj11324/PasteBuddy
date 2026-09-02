@@ -56,6 +56,18 @@ public actor ClipboardRepositorySyncActor {
         try repository.upsertItem(item, snapshotOrder: snapshotOrder)
     }
 
+    public func fetchPage(
+        _ request: ClipboardItemPageRequest = ClipboardItemPageRequest()
+    ) throws -> [ClipboardItem] {
+        try repository.fetchPage(request)
+    }
+
+    public func fetchPageAndCount(
+        _ request: ClipboardItemPageRequest = ClipboardItemPageRequest()
+    ) throws -> ClipboardItemPageAndCount {
+        try repository.fetchPageAndCount(request)
+    }
+
     public func updateOCRText(_ text: String, for itemID: UUID) throws {
         try repository.updateOCRText(text, for: itemID)
     }

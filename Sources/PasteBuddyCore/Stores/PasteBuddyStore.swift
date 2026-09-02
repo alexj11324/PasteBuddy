@@ -538,6 +538,63 @@ public final class PasteBuddyStore {
         }
     }
 
+    public func filteredItemsPageAndCount(
+        for scope: PasteScope,
+        offset: Int,
+        limit: Int
+    ) async throws -> ClipboardItemPageAndCount {
+        guard !isHistoryAccessLocked else {
+            return ClipboardItemPageAndCount(items: [], totalCount: 0)
+        }
+
+        if scope == .pasteStack || clipboardRepository == nil {
+            return ClipboardItemPageAndCount(
+                items: filteredItemsPage(for: scope, offset: offset, limit: limit),
+                totalCount: filteredItemCount(for: scope)
+            )
+        }
+
+        guard isClipboardRepositoryReadyForHistoryQuery else {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+        guard let repositorySyncActor else {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+
+        guard let request = repositoryPageRequest(for: scope, offset: offset, limit: limit) else {
+            return ClipboardItemPageAndCount(items: [], totalCount: 0)
+        }
+        return try await repositorySyncActor.fetchPageAndCount(request)
+    }
+
+    public func filteredItemsPageAsync(
+        for scope: PasteScope,
+        offset: Int,
+        limit: Int
+    ) async throws -> [ClipboardItem] {
+        guard !isHistoryAccessLocked else { return [] }
+
+        if scope == .pasteStack || clipboardRepository == nil {
+            return filteredItemsPage(for: scope, offset: offset, limit: limit)
+        }
+
+        guard isClipboardRepositoryReadyForHistoryQuery else {
+            throw PasteBuddyDatabaseError.repositoryOutOfSync
+        }
+        guard let repositorySyncActor,
+              let request = repositoryPageRequest(for: scope, offset: offset, limit: limit) else {
+            return []
+        }
+        return try await repositorySyncActor.fetchPage(request)
+    }
+
+    public func recordHistoryQueryError(_ error: any Error) {
+        let message = error.localizedDescription
+        guard !message.isEmpty else { return }
+        historyQueryErrorMessage = message
+        lastErrorMessage = message
+    }
+
     public func filteredItemCount(for scope: PasteScope) -> Int {
         guard !isHistoryAccessLocked else { return 0 }
         return makeFilteredItemCount(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
@@ -3047,19 +3104,15 @@ public final class PasteBuddyStore {
             return nil
         }
         guard isClipboardRepositoryReadyForHistoryQuery else { return [] }
-        let filters = resolvedSearchFilters()
-        guard !filters.isImpossible else { return [] }
+        guard let request = databasePageRequest(
+            pinboardID: pinboardID,
+            offset: offset,
+            limit: limit
+        ) else {
+            return []
+        }
         do {
-            let items = try clipboardRepository.fetchPage(ClipboardItemPageRequest(
-                searchQuery: filters.textQuery,
-                contentType: contentTypeFilter,
-                sourceAppName: filters.sourceAppName,
-                deviceName: deviceFilter,
-                dateFilter: dateFilter,
-                pinboardID: pinboardID,
-                limit: limit,
-                offset: offset
-            ))
+            let items = try clipboardRepository.fetchPage(request)
             return items
         } catch {
             historyQueryErrorMessage = error.localizedDescription
@@ -3073,23 +3126,59 @@ public final class PasteBuddyStore {
             return nil
         }
         guard isClipboardRepositoryReadyForHistoryQuery else { return 0 }
-        let filters = resolvedSearchFilters()
-        guard !filters.isImpossible else { return 0 }
+        guard let request = databasePageRequest(
+            pinboardID: pinboardID,
+            offset: 0,
+            limit: 1
+        ) else {
+            return 0
+        }
         do {
-            let count = try clipboardRepository.filteredItemCount(ClipboardItemPageRequest(
-                searchQuery: filters.textQuery,
-                contentType: contentTypeFilter,
-                sourceAppName: filters.sourceAppName,
-                deviceName: deviceFilter,
-                dateFilter: dateFilter,
-                pinboardID: pinboardID
-            ))
+            let count = try clipboardRepository.filteredItemCount(request)
             return count
         } catch {
             historyQueryErrorMessage = error.localizedDescription
             lastErrorMessage = error.localizedDescription
             return 0
         }
+    }
+
+    private func databasePageRequest(
+        pinboardID: UUID?,
+        offset: Int,
+        limit: Int
+    ) -> ClipboardItemPageRequest? {
+        let filters = resolvedSearchFilters()
+        guard !filters.isImpossible else { return nil }
+        return ClipboardItemPageRequest(
+            searchQuery: filters.textQuery,
+            contentType: contentTypeFilter,
+            sourceAppName: filters.sourceAppName,
+            deviceName: deviceFilter,
+            dateFilter: dateFilter,
+            pinboardID: pinboardID,
+            limit: limit,
+            offset: offset
+        )
+    }
+
+    private func repositoryPageRequest(
+        for scope: PasteScope,
+        offset: Int,
+        limit: Int
+    ) -> ClipboardItemPageRequest? {
+        let pinboardID: UUID?
+        switch scope {
+        case .history, .pasteStack:
+            pinboardID = nil
+        case .pinboard(let id):
+            pinboardID = id
+        }
+        return databasePageRequest(
+            pinboardID: pinboardID,
+            offset: offset,
+            limit: limit
+        )
     }
 
     private func filteredItemsCacheKey() -> PasteBuddyFilteredItemsCacheKey {
