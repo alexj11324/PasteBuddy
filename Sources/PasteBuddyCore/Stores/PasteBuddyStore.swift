@@ -801,10 +801,14 @@ public final class PasteBuddyStore {
         switch selectedScope {
         case .history:
             guard isClipboardRepositoryReadyForHistoryQuery else { return [] }
+            // Unlike `filteredItems` (a small windowed page for lightweight list rendering),
+            // the main list must stay a stable, complete view of history: callers resolve
+            // selection (`setSelectedItemIDs`, `selectedItemsInDisplayOrder`) against it, so an
+            // item outside the small window must still be reachable.
             if let databaseItems = databaseFilteredItems(
                 pinboardID: nil,
                 offset: 0,
-                limit: Self.defaultHistoryPageLimit
+                limit: Self.maxHistoryCacheLimit
             ) {
                 return databaseItems
             }
@@ -816,7 +820,7 @@ public final class PasteBuddyStore {
             if let databaseItems = databaseFilteredItems(
                 pinboardID: id,
                 offset: 0,
-                limit: Self.defaultHistoryPageLimit
+                limit: Self.maxHistoryCacheLimit
             ) {
                 return databaseItems
             }

@@ -360,8 +360,13 @@ final class PasteBuddyStoreTests: XCTestCase {
         )
         reloaded.load()
 
-        XCTAssertEqual(reloaded.snapshot.items.count, 501)
+        // load() intentionally hydrates snapshot.items with only a bounded initial cache
+        // (80 items) when a repository snapshot exists; the full 501 stay reachable through
+        // the repository itself (already proven above) and through mainListItemsSnapshot,
+        // which queries the repository rather than the bounded in-memory cache.
+        XCTAssertEqual(reloaded.snapshot.items.count, 80)
         XCTAssertTrue(reloaded.snapshot.items.contains(where: { $0.id == synced501.id }))
+        XCTAssertTrue(reloaded.mainListItemsSnapshot.contains(where: { $0.id == synced501.id }))
     }
 
     func testDuplicateCapturedItemMovesExistingItemToTopWithoutCreatingNewHistory() throws {
