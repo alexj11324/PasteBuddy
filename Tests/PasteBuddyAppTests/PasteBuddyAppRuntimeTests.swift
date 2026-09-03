@@ -2588,15 +2588,30 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("label.capture_enabled"))
         XCTAssertFalse(source.contains("label.background_running"))
 
-        // Low-frequency rules sit behind a collapsed Advanced group.
-        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $isShowingAdvancedPrivacy)"))
-        XCTAssertTrue(source.contains("@State private var isShowingAdvancedPrivacy = false"))
+        // Low-frequency rules are a plain section. The disclosure group they used to
+        // sit behind only accepted clicks on its chevron, so it hid them behind a
+        // control most of which was dead to the pointer.
+        XCTAssertFalse(source.contains("DisclosureGroup"))
+        XCTAssertFalse(source.contains("isShowingAdvancedPrivacy"))
 
         // Storage is one usage readout plus a preset ceiling, not four controls.
         XCTAssertTrue(source.contains("format.storage_used_of_limit"))
         XCTAssertTrue(source.contains("storageLimitChoices"))
         XCTAssertFalse(source.contains("in: 1...102_400"))
         XCTAssertTrue(source.contains("requestMaxStorageBytesChange"))
+
+        // Ceilings are decimal, so the picker offers 500 MB / 1 GB / 5 GB rather
+        // than the 536.9 MB / 1.07 GB a binary preset formats into.
+        XCTAssertTrue(source.contains("500_000_000"))
+        XCTAssertTrue(source.contains("1_000_000_000"))
+        XCTAssertFalse(source.contains("1_024 * 1_024"))
+
+        // Universal Clipboard content is recorded like anything else; the switch
+        // that skipped it, and the marker behind it, are both gone.
+        let monitorSource = try sourceFileContents("Sources/PasteBuddyCore/Services/ClipboardMonitor.swift")
+        XCTAssertFalse(source.contains("label.ignore_remote_clipboard"))
+        XCTAssertFalse(monitorSource.contains("ignoreRemoteClipboardContent"))
+        XCTAssertFalse(monitorSource.contains("is-remote-clipboard"))
     }
 
     func testPanelLayoutIsNamedByDirectionEverywhereItAppears() throws {
@@ -2652,10 +2667,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("SettingsExcludedApplications"))
         XCTAssertFalse(source.contains("SettingsPrivacyRuleMode"))
         XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
-        XCTAssertTrue(source.contains("label.ignore_remote_clipboard"))
         XCTAssertTrue(source.contains("label.flatten_large_excel_clipboard"))
         XCTAssertTrue(source.contains("setMaximumClipboardSizeMegabytes"))
         XCTAssertTrue(source.contains("store.excludeApplication("))
+
+        // The add/remove pair reads as buttons, and a bundle identifier that
+        // Launch Services can resolve shows the app's name and icon instead of a
+        // raw reverse-DNS string printed twice.
+        XCTAssertTrue(source.contains(".buttonStyle(.bordered)"))
+        XCTAssertTrue(source.contains("urlForApplication(withBundleIdentifier:"))
     }
 
     func testInstalledApplicationCatalogReadsAppsFromLocalBundles() throws {

@@ -1966,11 +1966,6 @@ public final class PasteBuddyStore {
         saveAndFlush()
     }
 
-    public func setIgnoreRemoteClipboardContent(_ isEnabled: Bool) {
-        snapshot.settingsBehavior.ignoreRemoteClipboardContent = isEnabled
-        saveAndFlush()
-    }
-
     public func setIgnoreConcealedContent(_ isEnabled: Bool) {
         snapshot.settingsBehavior.ignoreConcealedContent = isEnabled
         saveAndFlush()

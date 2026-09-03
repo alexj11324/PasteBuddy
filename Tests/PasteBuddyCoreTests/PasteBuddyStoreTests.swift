@@ -2755,6 +2755,53 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(snapshot.migrateIfNeeded())
     }
 
+    func testStorageCeilingMigrationReplacesTheLegacyBinaryDefault() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 2,
+            storage: StorageConfiguration(
+                maxStorageBytes: StorageConfiguration.legacyBinaryDefaultMaxStorageBytes
+            )
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertEqual(snapshot.storage.maxStorageBytes, StorageConfiguration.defaultMaxStorageBytes)
+        XCTAssertEqual(snapshot.schemaVersion, PasteBuddySnapshot.currentSchemaVersion)
+        XCTAssertFalse(snapshot.migrateIfNeeded())
+    }
+
+    func testStorageCeilingMigrationLeavesADeliberateChoiceAlone() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 2,
+            storage: StorageConfiguration(maxStorageBytes: 5_000_000_000)
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertEqual(snapshot.storage.maxStorageBytes, 5_000_000_000)
+    }
+
+    func testMigratingFromV2DoesNotReapplyTheV1SensitiveTextReset() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 2,
+            privacy: PrivacyConfiguration(blockLikelySensitiveText: true)
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertTrue(
+            snapshot.privacy.blockLikelySensitiveText,
+            "A v2 snapshot already went through the reset; a stored true is now a real choice."
+        )
+    }
+
+    /// Ceilings are decimal so `ByteCountFormatter`'s file style prints them as
+    /// the round numbers the picker offers, instead of 536.9 MB / 1.07 GB.
+    func testStorageCeilingDefaultIsARoundDecimalNumber() {
+        XCTAssertEqual(StorageConfiguration().maxStorageBytes % 1_000_000_000, 0)
+        XCTAssertEqual(
+            ByteCountFormatter.string(
+                fromByteCount: Int64(StorageConfiguration.defaultMaxStorageBytes),
+                countStyle: .file
+            ),
+            "1 GB"
+        )
+    }
+
     func testStoreLoadMigratesV1SensitiveBlockingDefault() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }

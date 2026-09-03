@@ -18,7 +18,6 @@ struct SettingsView: View {
     @State private var mcpStatusMessage: String?
     @State private var isRestoringPurchases = false
     @State private var launchAtLoginErrorMessage: String?
-    @State private var isShowingAdvancedPrivacy = false
     @State private var retentionSliderDraft: Double?
     @State private var retentionSliderIsEditing = false
 
@@ -316,73 +315,66 @@ struct SettingsView: View {
                         set: { store.setBiometricHistoryLockEnabled($0) }
                     )
                 )
-                VStack(alignment: .leading, spacing: 6) {
+                Picker("label.storage_limit", selection: storageLimitBinding) {
+                    ForEach(storageLimitChoices, id: \.self) { bytes in
+                        Text(Self.storageLimitTitle(for: bytes))
+                            .tag(bytes)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
                     ProgressView(value: store.storageUsageReport.usageFraction)
                     Text(storageUsageSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .padding(.vertical, 4)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Text("label.storage_usage"))
                 .accessibilityValue(Text(storageUsageSummary))
-                Picker("label.storage_limit", selection: storageLimitBinding) {
-                    ForEach(storageLimitChoices, id: \.self) { bytes in
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
-                            .tag(bytes)
-                    }
-                }
             }
 
             Section {
-                DisclosureGroup(isExpanded: $isShowingAdvancedPrivacy) {
-                    Toggle(isOn: showDuringScreenSharingBinding) {
-                        SettingsToggleLabel(
-                            titleKey: "label.show_during_screen_sharing",
-                            detailKey: "message.show_during_screen_sharing"
-                        )
-                    }
-                    Toggle(isOn: generateLinkPreviewsBinding) {
-                        SettingsToggleLabel(
-                            titleKey: "label.generate_link_previews",
-                            detailKey: "message.generate_link_previews"
-                        )
-                    }
-                    Toggle("label.ignore_remote_clipboard", isOn: Binding(
-                        get: { store.snapshot.settingsBehavior.ignoreRemoteClipboardContent },
-                        set: { store.setIgnoreRemoteClipboardContent($0) }
-                    ))
-                    Toggle("label.ignore_whitespace_clipboard", isOn: Binding(
-                        get: { store.snapshot.settingsBehavior.ignoreWhitespaceOnlyContent },
-                        set: { store.setIgnoreWhitespaceOnlyContent($0) }
-                    ))
-                    Toggle("label.flatten_large_excel_clipboard", isOn: Binding(
-                        get: { store.snapshot.settingsBehavior.convertLargeExcelContentToPlainText },
-                        set: { store.setConvertLargeExcelContentToPlainText($0) }
-                    ))
-                    LabeledContent("label.ignore_clipboard_larger_than") {
-                        HStack(spacing: 8) {
-                            TextField(
-                                "",
-                                value: Binding(
-                                    get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
-                                    set: { store.setMaximumClipboardSizeMegabytes($0) }
-                                ),
-                                format: .number.precision(.fractionLength(1))
-                            )
-                            .frame(width: 72)
-                            .multilineTextAlignment(.trailing)
-                            .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
-                            Text("label.megabytes")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } label: {
-                    Text("label.advanced")
+                Toggle(isOn: showDuringScreenSharingBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.show_during_screen_sharing",
+                        detailKey: "message.show_during_screen_sharing"
+                    )
                 }
+                Toggle(isOn: generateLinkPreviewsBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.generate_link_previews",
+                        detailKey: "message.generate_link_previews"
+                    )
+                }
+                Toggle("label.ignore_whitespace_clipboard", isOn: Binding(
+                    get: { store.snapshot.settingsBehavior.ignoreWhitespaceOnlyContent },
+                    set: { store.setIgnoreWhitespaceOnlyContent($0) }
+                ))
+                Toggle("label.flatten_large_excel_clipboard", isOn: Binding(
+                    get: { store.snapshot.settingsBehavior.convertLargeExcelContentToPlainText },
+                    set: { store.setConvertLargeExcelContentToPlainText($0) }
+                ))
+                LabeledContent("label.ignore_clipboard_larger_than") {
+                    HStack(spacing: 6) {
+                        TextField(
+                            "",
+                            value: Binding(
+                                get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
+                                set: { store.setMaximumClipboardSizeMegabytes($0) }
+                            ),
+                            format: .number.precision(.fractionLength(0...1))
+                        )
+                        .frame(width: 64)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
+                        Text("label.megabytes")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("label.advanced")
             } footer: {
-                if isShowingAdvancedPrivacy {
-                    Text("message.zero_disables_size_filter")
-                }
+                Text("message.zero_disables_size_filter")
             }
         }
         .pasteBuddySettingsForm()
@@ -401,19 +393,28 @@ struct SettingsView: View {
         )
     }
 
-    /// Preset ceilings, plus whatever the store currently holds so an existing
-    /// custom value stays selectable instead of rendering as a blank picker.
+    /// Ceilings a clipboard history plausibly needs, in decimal bytes so each
+    /// one reads back as a round "500 MB" / "5 GB" rather than 536.9 MB.
+    /// Whatever the store currently holds is kept selectable so an older custom
+    /// ceiling does not render as a blank picker.
     private var storageLimitChoices: [Int] {
         let presets = [
-            512 * 1_024 * 1_024,
-            1 * 1_024 * 1_024 * 1_024,
-            5 * 1_024 * 1_024 * 1_024,
-            10 * 1_024 * 1_024 * 1_024,
-            20 * 1_024 * 1_024 * 1_024,
-            100 * 1_024 * 1_024 * 1_024,
+            500_000_000,
+            1_000_000_000,
+            2_000_000_000,
+            5_000_000_000,
+            10_000_000_000,
         ]
         let current = store.snapshot.storage.maxStorageBytes
         return presets.contains(current) ? presets : (presets + [current]).sorted()
+    }
+
+    private static func storageLimitTitle(for bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowsNonnumericFormatting = false
+        formatter.allowedUnits = bytes >= 1_000_000_000 ? [.useGB] : [.useMB]
+        return formatter.string(fromByteCount: Int64(bytes))
     }
 
     private var storageLimitBinding: Binding<Int> {
@@ -1278,20 +1279,27 @@ private struct SettingsExcludedApplications: View {
 
     private var applicationRules: some View {
         Section {
-            List(selection: $selectedRowID) {
-                ForEach(excludedRows) { row in
-                    ExcludedApplicationRowView(row: row)
-                        .tag(row.id)
+            if excludedRows.isEmpty {
+                Text("message.no_ignored_applications")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+            } else {
+                List(selection: $selectedRowID) {
+                    ForEach(excludedRows) { row in
+                        ExcludedApplicationRowView(row: row)
+                            .tag(row.id)
+                    }
                 }
+                .listStyle(.bordered)
+                .frame(minHeight: 140, maxHeight: 220)
             }
-            .listStyle(.bordered)
-            .frame(minHeight: 160, maxHeight: 220)
 
             HStack(spacing: 8) {
                 Button {
                     showingApplicationPicker = true
                 } label: {
                     Image(systemName: "plus")
+                        .frame(width: 16)
                 }
                 .accessibilityLabel("action.add_app")
 
@@ -1299,16 +1307,24 @@ private struct SettingsExcludedApplications: View {
                     removeSelectedRow()
                 } label: {
                     Image(systemName: "minus")
+                        .frame(width: 16)
                 }
                 .disabled(selectedRowID == nil)
                 .accessibilityLabel("action.remove")
                 Spacer()
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         } header: {
-            Text("label.ignore_applications")
-        } footer: {
-            Text("message.ignore_applications")
+            // The explanation belongs above the list it describes; as a footer
+            // it read as "content copied from the applications below" while
+            // sitting underneath them.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("label.ignore_applications")
+                Text("message.ignore_applications")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1334,6 +1350,25 @@ private struct SettingsExcludedApplications: View {
             }
         }
 
+        // Bundle identifiers whose app lives outside the scanned directories —
+        // Keychain Access and friends in /System/Library/CoreServices — still
+        // resolve through Launch Services, so they get a name and an icon
+        // instead of showing as a raw reverse-DNS string with a blank tile.
+        for bundleIdentifier in unmatchedBundleIdentifiers.sorted() {
+            guard let application = Self.resolveApplication(bundleIdentifier: bundleIdentifier) else {
+                continue
+            }
+            unmatchedBundleIdentifiers.remove(bundleIdentifier)
+            unmatchedNames.remove(application.displayName)
+            rows.append(
+                ExcludedApplicationListRow(
+                    application: application,
+                    name: nil,
+                    bundleIdentifier: bundleIdentifier
+                )
+            )
+        }
+
         rows += unmatchedNames.map {
             ExcludedApplicationListRow(application: nil, name: $0, bundleIdentifier: nil)
         }
@@ -1344,6 +1379,17 @@ private struct SettingsExcludedApplications: View {
         return rows.sorted {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
+    }
+
+    private static func resolveApplication(bundleIdentifier: String) -> InstalledApplication? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        return InstalledApplication(
+            url: url,
+            displayName: FileManager.default.displayName(atPath: url.path),
+            bundleIdentifier: bundleIdentifier
+        )
     }
 
     private func loadApplications() {
@@ -1485,8 +1531,11 @@ private struct ExcludedApplicationListRow: Identifiable, Hashable {
         application?.displayName ?? name ?? bundleIdentifier ?? ""
     }
 
+    /// Only worth a second line when it says something the title does not; a
+    /// bundle-identifier-only entry would otherwise print itself twice.
     var detailText: String? {
-        bundleIdentifier ?? application?.bundleIdentifier
+        guard let detail = bundleIdentifier ?? application?.bundleIdentifier else { return nil }
+        return detail == displayName ? nil : detail
     }
 }
 
