@@ -31,5 +31,9 @@
 - `testStorageCeilingDefaultIsARoundDecimalNumber`：默认上限格式化出来是 "1 GB"
 - 契约测试更新：不再有 `DisclosureGroup` / `selectedRowID` / `.listStyle(.bordered)` / `label.ignore_remote_clipboard`
 
-## 待办
-- [ ] 推到 `codex/integrated-delivery`（PR #36 已开着）
+## 这一轮还修的（你后面追加的反馈）
+- [x] **排除列表里有重复、还有没装的 App** —— 根因是出厂默认写了两份平行名单：`defaultExcludedApplicationNames = ["1Password", "Passwords", "Keychain Access"]` 和 5 个 bundle id，而这三个名字对应的 App 早已被 bundle id 覆盖，所以每个都显示两行。更糟的是名字规则比对的是 App 的**本地化名称**，中文系统上 "Passwords"/"Keychain Access" 永远匹配不上，是彻底的死规则。改成出厂不预设任何名字规则（bundle id 覆盖同样的 App，且不受语言影响），schema 4 迁移把老安装里这三个名字删掉；用户自己通过选择器加的名字（存的是 App 自己的显示名）照常生效并与该 App 合并成一行
+- [x] 剩下两个确实没安装的密码管理器（`com.agilebits.onepassword7`、`com.bitwarden.desktop`）行内标注「这台 Mac 上没有安装」，不再让人猜一个没图标的反向域名字符串是干嘛的
+
+## 已完成
+- [x] 推到 `codex/integrated-delivery`（PR #36），`26116a3`；本地 `script/ci.sh` 在这个 commit 上 EXIT=0
