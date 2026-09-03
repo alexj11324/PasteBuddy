@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var mcpStatusMessage: String?
     @State private var isRestoringPurchases = false
     @State private var launchAtLoginErrorMessage: String?
+    @State private var isShowingAdvancedPrivacy = false
     @State private var retentionSliderDraft: Double?
     @State private var retentionSliderIsEditing = false
 
@@ -139,7 +140,12 @@ struct SettingsView: View {
                     Text(launchAtLoginErrorMessage)
                         .foregroundStyle(.secondary)
                 }
-                Toggle("label.background_running", isOn: backgroundRunningBinding)
+                Toggle(isOn: backgroundRunningBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.record_clipboard",
+                        detailKey: "message.record_clipboard"
+                    )
+                }
                 Toggle("label.enable_icloud_sync", isOn: cloudSyncBinding)
                 Toggle("label.sound_effects", isOn: soundEffectsBinding)
             } footer: {
@@ -264,22 +270,27 @@ struct SettingsView: View {
 
     private var privacySettings: some View {
         Form {
-            Section {
-                Toggle(isOn: showDuringScreenSharingBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.show_during_screen_sharing",
-                        detailKey: "message.show_during_screen_sharing"
-                    )
-                }
-                Toggle(isOn: generateLinkPreviewsBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.generate_link_previews",
-                        detailKey: "message.generate_link_previews"
-                    )
-                }
+            Section("label.record_which_content") {
+                Toggle("label.capture_text", isOn: captureTextBinding)
+                Toggle("label.capture_links", isOn: captureURLsBinding)
+                Toggle("label.capture_files", isOn: captureFilesBinding)
+                Toggle("label.capture_images", isOn: captureImagesBinding)
+                Toggle("label.read_text_in_images", isOn: ocrBinding)
+                    .disabled(!store.snapshot.privacy.captureImages)
             }
 
-            Section("label.content_filtering") {
+            Section {
+                Toggle(
+                    isOn: Binding(
+                        get: { store.skipsMarkedTemporaryContent },
+                        set: { store.setSkipsMarkedTemporaryContent($0) }
+                    )
+                ) {
+                    SettingsToggleLabel(
+                        titleKey: "label.skip_password_fields",
+                        detailKey: "message.skip_password_fields"
+                    )
+                }
                 Toggle(
                     isOn: Binding(
                         get: { store.snapshot.privacy.blockLikelySensitiveText },
@@ -287,31 +298,17 @@ struct SettingsView: View {
                     )
                 ) {
                     SettingsToggleLabel(
-                        titleKey: "label.ignore_sensitive_content",
-                        detailKey: "message.ignore_sensitive_content"
+                        titleKey: "label.guess_and_skip_secrets",
+                        detailKey: "message.guess_and_skip_secrets"
                     )
                 }
-                Toggle(isOn: ignoreTransientContentBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.ignore_transient_content",
-                        detailKey: "message.ignore_transient_content"
-                    )
-                }
+            } header: {
+                Text("label.do_not_record")
             }
 
-            SettingsPrivacyRules(store: store)
+            SettingsExcludedApplications(store: store)
 
-            Section("label.capture_and_privacy") {
-                Toggle("label.capture_enabled", isOn: backgroundRunningBinding)
-                Toggle("label.capture_text", isOn: captureTextBinding)
-                Toggle("label.capture_links", isOn: captureURLsBinding)
-                Toggle("label.capture_files", isOn: captureFilesBinding)
-                Toggle("label.capture_images", isOn: captureImagesBinding)
-                Toggle("label.run_local_ocr_after_image_capture", isOn: ocrBinding)
-                    .disabled(!store.snapshot.privacy.captureImages)
-            }
-
-            Section("label.storage_security") {
+            Section("label.storage_and_security") {
                 Toggle(
                     "label.require_touch_id_for_history",
                     isOn: Binding(
@@ -319,40 +316,111 @@ struct SettingsView: View {
                         set: { store.setBiometricHistoryLockEnabled($0) }
                     )
                 )
-                LabeledContent("label.storage_usage") {
-                    HStack(spacing: 8) {
-                        Text(localized("format.items", store.storageUsageReport.itemCount))
-                        Text(ByteCountFormatter.string(
-                            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
-                            countStyle: .file
-                        ))
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: store.storageUsageReport.usageFraction)
+                    Text(storageUsageSummary)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text("label.storage_usage"))
+                .accessibilityValue(Text(storageUsageSummary))
+                Picker("label.storage_limit", selection: storageLimitBinding) {
+                    ForEach(storageLimitChoices, id: \.self) { bytes in
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
+                            .tag(bytes)
                     }
                 }
-                LabeledContent("label.storage_limit") {
-                    Text(storageLimitDescription)
-                }
-                ProgressView(value: store.storageUsageReport.usageFraction)
-                    .accessibilityLabel(Text("label.storage_usage"))
-                    .accessibilityValue(Text(
-                        ByteCountFormatter.string(
-                            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
-                            countStyle: .file
+            }
+
+            Section {
+                DisclosureGroup(isExpanded: $isShowingAdvancedPrivacy) {
+                    Toggle(isOn: showDuringScreenSharingBinding) {
+                        SettingsToggleLabel(
+                            titleKey: "label.show_during_screen_sharing",
+                            detailKey: "message.show_during_screen_sharing"
                         )
+                    }
+                    Toggle(isOn: generateLinkPreviewsBinding) {
+                        SettingsToggleLabel(
+                            titleKey: "label.generate_link_previews",
+                            detailKey: "message.generate_link_previews"
+                        )
+                    }
+                    Toggle("label.ignore_remote_clipboard", isOn: Binding(
+                        get: { store.snapshot.settingsBehavior.ignoreRemoteClipboardContent },
+                        set: { store.setIgnoreRemoteClipboardContent($0) }
                     ))
-                Stepper(
-                    value: Binding(
-                        get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
-                        set: { requestMaxStorageBytesChange($0 * 1_024 * 1_024) }
-                    ),
-                    in: 1...102_400,
-                    step: 50
-                ) {
-                    Text(localized("format.use_up_to", storageLimitDescription))
+                    Toggle("label.ignore_whitespace_clipboard", isOn: Binding(
+                        get: { store.snapshot.settingsBehavior.ignoreWhitespaceOnlyContent },
+                        set: { store.setIgnoreWhitespaceOnlyContent($0) }
+                    ))
+                    Toggle("label.flatten_large_excel_clipboard", isOn: Binding(
+                        get: { store.snapshot.settingsBehavior.convertLargeExcelContentToPlainText },
+                        set: { store.setConvertLargeExcelContentToPlainText($0) }
+                    ))
+                    LabeledContent("label.ignore_clipboard_larger_than") {
+                        HStack(spacing: 8) {
+                            TextField(
+                                "",
+                                value: Binding(
+                                    get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
+                                    set: { store.setMaximumClipboardSizeMegabytes($0) }
+                                ),
+                                format: .number.precision(.fractionLength(1))
+                            )
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                            .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
+                            Text("label.megabytes")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } label: {
+                    Text("label.advanced")
+                }
+            } footer: {
+                if isShowingAdvancedPrivacy {
+                    Text("message.zero_disables_size_filter")
                 }
             }
         }
         .pasteBuddySettingsForm()
+    }
+
+    private var storageUsageSummary: String {
+        let used = ByteCountFormatter.string(
+            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
+            countStyle: .file
+        )
+        return localized(
+            "format.storage_used_of_limit",
+            localized("format.items", store.storageUsageReport.itemCount),
+            used,
+            storageLimitDescription
+        )
+    }
+
+    /// Preset ceilings, plus whatever the store currently holds so an existing
+    /// custom value stays selectable instead of rendering as a blank picker.
+    private var storageLimitChoices: [Int] {
+        let presets = [
+            512 * 1_024 * 1_024,
+            1 * 1_024 * 1_024 * 1_024,
+            5 * 1_024 * 1_024 * 1_024,
+            10 * 1_024 * 1_024 * 1_024,
+            20 * 1_024 * 1_024 * 1_024,
+            100 * 1_024 * 1_024 * 1_024,
+        ]
+        let current = store.snapshot.storage.maxStorageBytes
+        return presets.contains(current) ? presets : (presets + [current]).sorted()
+    }
+
+    private var storageLimitBinding: Binding<Int> {
+        Binding(
+            get: { store.snapshot.storage.maxStorageBytes },
+            set: { requestMaxStorageBytesChange($0) }
+        )
     }
 
     private var shortcutSettings: some View {
@@ -1187,49 +1255,25 @@ private struct MCPClientConfigurationSheet: View {
     }
 }
 
-private enum SettingsPrivacyRuleMode: String, CaseIterable, Identifiable {
-    case applications
-    case otherRules
-
-    var id: String { rawValue }
-}
-
-private struct SettingsPrivacyRules: View {
+private struct SettingsExcludedApplications: View {
     @Bindable var store: PasteBuddyStore
     @State private var applications: [InstalledApplication] = []
     @State private var selectedRowID: String?
     @State private var showingApplicationPicker = false
-    @State private var mode: SettingsPrivacyRuleMode = .applications
 
     var body: some View {
-        Group {
-            Section {
-                Picker("label.ignore_applications", selection: $mode) {
-                    Text("label.by_app").tag(SettingsPrivacyRuleMode.applications)
-                    Text("label.other_rules").tag(SettingsPrivacyRuleMode.otherRules)
+        applicationRules
+            .onAppear(perform: loadApplications)
+            .sheet(isPresented: $showingApplicationPicker) {
+                InstalledApplicationPickerSheet { application in
+                    store.excludeApplication(
+                        named: application.displayName,
+                        bundleIdentifier: application.bundleIdentifier
+                    )
+                    selectedRowID = nil
+                    loadApplications()
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
             }
-
-            switch mode {
-            case .applications:
-                applicationRules
-            case .otherRules:
-                otherRules
-            }
-        }
-        .onAppear(perform: loadApplications)
-        .sheet(isPresented: $showingApplicationPicker) {
-            InstalledApplicationPickerSheet { application in
-                store.excludeApplication(
-                    named: application.displayName,
-                    bundleIdentifier: application.bundleIdentifier
-                )
-                selectedRowID = nil
-                loadApplications()
-            }
-        }
     }
 
     private var applicationRules: some View {
@@ -1266,63 +1310,6 @@ private struct SettingsPrivacyRules: View {
         } footer: {
             Text("message.ignore_applications")
         }
-    }
-
-    private var otherRules: some View {
-        Section {
-            Toggle("label.ignore_remote_clipboard", isOn: behaviorBinding(
-                get: \.ignoreRemoteClipboardContent,
-                set: store.setIgnoreRemoteClipboardContent
-            ))
-            Toggle("label.ignore_concealed_clipboard", isOn: behaviorBinding(
-                get: \.ignoreConcealedContent,
-                set: store.setIgnoreConcealedContent
-            ))
-            Toggle("label.ignore_auto_generated_clipboard", isOn: behaviorBinding(
-                get: \.ignoreAutoGeneratedContent,
-                set: store.setIgnoreAutoGeneratedContent
-            ))
-            Toggle("label.ignore_whitespace_clipboard", isOn: behaviorBinding(
-                get: \.ignoreWhitespaceOnlyContent,
-                set: store.setIgnoreWhitespaceOnlyContent
-            ))
-            Toggle("label.flatten_large_excel_clipboard", isOn: behaviorBinding(
-                get: \.convertLargeExcelContentToPlainText,
-                set: store.setConvertLargeExcelContentToPlainText
-            ))
-            LabeledContent("label.ignore_clipboard_larger_than") {
-                HStack(spacing: 8) {
-                    TextField(
-                        "",
-                        value: Binding(
-                            get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
-                            set: { store.setMaximumClipboardSizeMegabytes($0) }
-                        ),
-                        format: .number.precision(.fractionLength(1))
-                    )
-                    .frame(width: 72)
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
-                    Text("label.megabytes")
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } header: {
-            Text("label.other_rules")
-        } footer: {
-            Text("message.zero_disables_size_filter")
-        }
-        .toggleStyle(.checkbox)
-    }
-
-    private func behaviorBinding(
-        get: KeyPath<SettingsBehaviorConfiguration, Bool>,
-        set: @escaping (Bool) -> Void
-    ) -> Binding<Bool> {
-        Binding(
-            get: { store.snapshot.settingsBehavior[keyPath: get] },
-            set: { value in set(value) }
-        )
     }
 
     private var excludedRows: [ExcludedApplicationListRow] {

@@ -2564,10 +2564,67 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(generalSource.contains("label.iroh_clipboard_sync"))
         XCTAssertTrue(privacySource.contains("label.show_during_screen_sharing"))
         XCTAssertTrue(privacySource.contains("label.capture_images"))
-        XCTAssertTrue(privacySource.contains("label.storage_security"))
+        XCTAssertTrue(privacySource.contains("label.storage_and_security"))
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
+    }
+
+    func testSettingsHideProtocolLevelSwitchesBehindOneUserFacingChoice() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        // The three org.nspasteboard.* markers are one switch in the UI, driven by the
+        // store's merged accessor rather than by three independent toggles.
+        XCTAssertTrue(source.contains("label.skip_password_fields"))
+        XCTAssertTrue(source.contains("store.skipsMarkedTemporaryContent"))
+        XCTAssertTrue(source.contains("store.setSkipsMarkedTemporaryContent"))
+        XCTAssertFalse(source.contains("label.ignore_concealed_clipboard"))
+        XCTAssertFalse(source.contains("label.ignore_auto_generated_clipboard"))
+        XCTAssertFalse(source.contains("label.ignore_transient_content"))
+
+        // "Run in Background" and "Capture Enabled" were the same binding under two
+        // different names; only the General-page one survives, renamed for what it does.
+        XCTAssertTrue(source.contains("label.record_clipboard"))
+        XCTAssertFalse(source.contains("label.capture_enabled"))
+        XCTAssertFalse(source.contains("label.background_running"))
+
+        // Low-frequency rules sit behind a collapsed Advanced group.
+        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $isShowingAdvancedPrivacy)"))
+        XCTAssertTrue(source.contains("@State private var isShowingAdvancedPrivacy = false"))
+
+        // Storage is one usage readout plus a preset ceiling, not four controls.
+        XCTAssertTrue(source.contains("format.storage_used_of_limit"))
+        XCTAssertTrue(source.contains("storageLimitChoices"))
+        XCTAssertFalse(source.contains("in: 1...102_400"))
+        XCTAssertTrue(source.contains("requestMaxStorageBytesChange"))
+    }
+
+    func testPanelLayoutIsNamedByDirectionEverywhereItAppears() throws {
+        let catalog = try sourceFileContents("Sources/PasteBuddy/Resources/Localizable.xcstrings")
+        let strings = try JSONSerialization.jsonObject(
+            with: Data(catalog.utf8)
+        ) as? [String: Any]
+        let table = try XCTUnwrap(strings?["strings"] as? [String: Any])
+
+        func value(_ key: String, _ language: String) throws -> String {
+            let entry = try XCTUnwrap(table[key] as? [String: Any])
+            let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+            let unit = try XCTUnwrap(localizations[language] as? [String: Any])
+            let stringUnit = try XCTUnwrap(unit["stringUnit"] as? [String: Any])
+            return try XCTUnwrap(stringUnit["value"] as? String)
+        }
+
+        // Shelf really is the horizontal collection and Side Panel the vertical one,
+        // so the user-facing names describe direction instead of internal codenames.
+        XCTAssertEqual(try value("label.clipboard_shelf", "en"), "Horizontal Panel")
+        XCTAssertEqual(try value("label.side_panel", "en"), "Vertical Panel")
+        XCTAssertEqual(try value("label.clipboard_shelf", "zh-Hans"), "横向面板")
+        XCTAssertEqual(try value("label.side_panel", "zh-Hans"), "竖向面板")
+
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        XCTAssertTrue(shelfSource.contains("direction: .horizontal"))
+        XCTAssertTrue(sideSource.contains("direction: .vertical"))
     }
 
     func testRetentionSliderSupportsIntermediateDurations() {
@@ -2589,8 +2646,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(iconSource.contains("import QuickLookThumbnailing"))
         XCTAssertTrue(iconSource.contains("representationTypes: [.icon]"))
         XCTAssertTrue(iconSource.contains("representation.cgImage"))
-        XCTAssertTrue(source.contains("SettingsPrivacyRuleMode"))
-        XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
+        // The excluded-application list is its own section now. The segmented
+        // "by app / other rules" switch that used to split the privacy page in half
+        // is gone, and the low-frequency rules moved into the Advanced disclosure.
+        XCTAssertTrue(source.contains("SettingsExcludedApplications"))
+        XCTAssertFalse(source.contains("SettingsPrivacyRuleMode"))
+        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
         XCTAssertTrue(source.contains("label.ignore_remote_clipboard"))
         XCTAssertTrue(source.contains("label.flatten_large_excel_clipboard"))
         XCTAssertTrue(source.contains("setMaximumClipboardSizeMegabytes"))
