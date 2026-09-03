@@ -2802,6 +2802,32 @@ final class PasteBuddyStoreTests: XCTestCase {
         )
     }
 
+    func testSeededApplicationNameRulesAreDroppedByMigration() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 3,
+            privacy: PrivacyConfiguration(
+                excludedApplicationNames: ["1Password", "Passwords", "Keychain Access", "My Notes"],
+                excludedBundleIdentifiers: ["com.apple.keychainaccess"]
+            )
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertEqual(
+            snapshot.privacy.excludedApplicationNames,
+            ["My Notes"],
+            "Only the seeded English names go; a name the user added themselves stays."
+        )
+    }
+
+    /// A name rule is matched against the app's localized name, so seeding
+    /// English names excluded nothing on a non-English system while showing a
+    /// second dead row beside the identifier rule that did the work.
+    func testNothingIsExcludedByApplicationNameOutOfTheBox() {
+        XCTAssertTrue(PrivacyConfiguration().excludedApplicationNames.isEmpty)
+        XCTAssertTrue(
+            PrivacyConfiguration().excludedBundleIdentifiers.contains("com.apple.keychainaccess")
+        )
+    }
+
     func testStoreLoadMigratesV1SensitiveBlockingDefault() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -2844,8 +2870,17 @@ final class PasteBuddyStoreTests: XCTestCase {
         let privacy = PrivacyConfiguration()
 
         XCTAssertTrue(privacy.excludesApplication(named: "Renamed Vault", bundleIdentifier: "com.1password.1password"))
-        XCTAssertTrue(privacy.excludesApplication(named: "Passwords", bundleIdentifier: nil))
         XCTAssertFalse(privacy.excludesApplication(named: "Notes", bundleIdentifier: "com.apple.Notes"))
+
+        // Nothing ships as a name rule. Apple's Passwords app is covered by its
+        // bundle identifier, which holds whatever language the Mac runs in.
+        XCTAssertFalse(privacy.excludesApplication(named: "Passwords", bundleIdentifier: nil))
+        XCTAssertTrue(privacy.excludesApplication(named: "密码", bundleIdentifier: "com.apple.Passwords"))
+
+        // A name the user adds themselves still excludes by name.
+        var edited = privacy
+        edited.excludedApplicationNames.insert("密码")
+        XCTAssertTrue(edited.excludesApplication(named: "密码", bundleIdentifier: nil))
     }
 
     func testCustomCaptureRulesMatchTextSourceBundleURLAndFiles() {

@@ -2179,7 +2179,19 @@ public struct PrivacyConfiguration: Codable, Equatable, Sendable {
     public var runLocalOCRAfterImageCapture: Bool
     public var customCaptureRules: [CaptureRule]
 
-    public static let defaultExcludedApplicationNames: Set<String> = ["1Password", "Passwords", "Keychain Access"]
+    /// Nothing is excluded by name out of the box. Every app worth excluding by
+    /// default is already covered by its bundle identifier below, and a name
+    /// rule is matched against the app's *localized* name — so seeded English
+    /// names never fire on a non-English system and only show up as a second,
+    /// dead row next to the identifier rule that does the work.
+    public static let defaultExcludedApplicationNames: Set<String> = []
+    /// Names the seeded rules above used to carry, kept only so the schema-4
+    /// migration can recognise and drop them.
+    public static let legacySeededExcludedApplicationNames: Set<String> = [
+        "1Password",
+        "Passwords",
+        "Keychain Access"
+    ]
     public static let defaultExcludedBundleIdentifiers: Set<String> = [
         "com.1password.1password",
         "com.agilebits.onepassword7",
@@ -3526,7 +3538,7 @@ public struct SecurityConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
     public var schemaVersion: Int
     public var items: [ClipboardItem]
     public var pinboards: [Pinboard]
@@ -3636,6 +3648,16 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
             // default are moved; a deliberately chosen ceiling is left alone.
             if storage.maxStorageBytes == StorageConfiguration.legacyBinaryDefaultMaxStorageBytes {
                 storage.maxStorageBytes = StorageConfiguration.defaultMaxStorageBytes
+            }
+        }
+        if schemaVersion < 4 {
+            // v4: the seeded English application names duplicated the bundle
+            // identifier rules that already cover the same apps, and never
+            // matched a localized app name anyway. Drop them where the
+            // identifier rule still stands; anything the user typed themselves
+            // is left alone.
+            for name in PrivacyConfiguration.legacySeededExcludedApplicationNames {
+                privacy.excludedApplicationNames.remove(name)
             }
         }
         schemaVersion = Self.currentSchemaVersion

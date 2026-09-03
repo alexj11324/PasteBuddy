@@ -1485,7 +1485,13 @@ private struct ExcludedApplicationRowView: View {
             InstalledApplicationIcon(application: row.application)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.displayName)
-                if let detail = row.detailText {
+                if row.application == nil {
+                    // Says why the row has no icon and no friendlier name: the
+                    // rule stands, the app just is not on this Mac.
+                    Text("message.application_not_installed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let detail = row.detailText {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)

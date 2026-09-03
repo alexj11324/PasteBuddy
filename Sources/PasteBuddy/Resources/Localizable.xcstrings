@@ -21161,6 +21161,12 @@
         }
       }
     },
+    "message.application_not_installed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not installed on this Mac" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "这台 Mac 上没有安装" } }
+      }
+    },
     "message.no_ignored_applications": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "No apps ignored yet." } },
