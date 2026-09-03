@@ -16,11 +16,18 @@ enum ClipboardPanelHistoryAvailability {
     }
 }
 
+enum ClipboardPanelHistoryLoadingPolicy {
+    static let initialPageSize = 80
+    static let backgroundPageSize = 160
+    static let maxResidentItems = 2_000
+}
+
 struct ClipboardPanelPagingState<Item: Identifiable, QueryID: Equatable> where Item.ID == UUID {
     struct Request {
         let generation: Int
         let queryID: QueryID
         let offset: Int
+        let limit: Int
     }
 
     private(set) var items: [Item] = []
@@ -29,18 +36,45 @@ struct ClipboardPanelPagingState<Item: Identifiable, QueryID: Equatable> where I
     private var generation = 0
 
     var nextOffset: Int { items.count }
-    var canLoadMore: Bool { items.count < totalCount }
+    var canLoadMore: Bool {
+        items.count < totalCount
+            && items.count < ClipboardPanelHistoryLoadingPolicy.maxResidentItems
+    }
+
+    mutating func beginLoading(queryID: QueryID) {
+        generation &+= 1
+        items = []
+        totalCount = 0
+        self.queryID = queryID
+    }
+
+    mutating func trimToInitialPage() {
+        guard items.count > ClipboardPanelHistoryLoadingPolicy.initialPageSize else { return }
+        generation &+= 1
+        items = Array(items.prefix(ClipboardPanelHistoryLoadingPolicy.initialPageSize))
+    }
 
     mutating func reset(with page: [Item], totalCount: Int, queryID: QueryID) {
         generation &+= 1
-        items = page
+        items = Array(page.prefix(ClipboardPanelHistoryLoadingPolicy.maxResidentItems))
         self.totalCount = max(totalCount, page.count)
         self.queryID = queryID
     }
 
-    func nextPageRequest(for queryID: QueryID) -> Request? {
+    func nextPageRequest(
+        for queryID: QueryID,
+        limit: Int = ClipboardPanelHistoryLoadingPolicy.backgroundPageSize
+    ) -> Request? {
         guard canLoadMore, self.queryID == queryID else { return nil }
-        return Request(generation: generation, queryID: queryID, offset: nextOffset)
+        let remainingResidentCapacity = ClipboardPanelHistoryLoadingPolicy.maxResidentItems - nextOffset
+        let pageLimit = min(max(limit, 1), remainingResidentCapacity)
+        guard pageLimit > 0 else { return nil }
+        return Request(
+            generation: generation,
+            queryID: queryID,
+            offset: nextOffset,
+            limit: pageLimit
+        )
     }
 
     @discardableResult
@@ -57,7 +91,9 @@ struct ClipboardPanelPagingState<Item: Identifiable, QueryID: Equatable> where I
             return false
         }
         let existingIDs = Set(items.map(\.id))
-        items.append(contentsOf: page.filter { !existingIDs.contains($0.id) })
+        let newItems = page.filter { !existingIDs.contains($0.id) }
+        let remainingResidentCapacity = ClipboardPanelHistoryLoadingPolicy.maxResidentItems - items.count
+        items.append(contentsOf: newItems.prefix(max(remainingResidentCapacity, 0)))
         self.totalCount = max(totalCount, items.count)
         return true
     }

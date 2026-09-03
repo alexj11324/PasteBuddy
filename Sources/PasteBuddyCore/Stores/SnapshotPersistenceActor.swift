@@ -56,6 +56,22 @@ public actor ClipboardRepositorySyncActor {
         try repository.upsertItem(item, snapshotOrder: snapshotOrder)
     }
 
+    public func fetchPage(
+        _ request: ClipboardItemPageRequest = ClipboardItemPageRequest()
+    ) throws -> [ClipboardItem] {
+        try repository.fetchPage(request)
+    }
+
+    public func fetchPageAndCount(
+        _ request: ClipboardItemPageRequest = ClipboardItemPageRequest()
+    ) throws -> ClipboardItemPageAndCount {
+        try repository.fetchPageAndCount(request)
+    }
+
+    public func items(ids: [UUID], hydrateAssets: Bool = false) throws -> [ClipboardItem] {
+        try repository.items(ids: ids, hydrateAssets: hydrateAssets)
+    }
+
     public func updateOCRText(_ text: String, for itemID: UUID) throws {
         try repository.updateOCRText(text, for: itemID)
     }
@@ -64,8 +80,24 @@ public actor ClipboardRepositorySyncActor {
         try repository.deleteItems(ids)
     }
 
+    public func pruneItems(
+        retentionCutoff: Date?,
+        maxStorageBytes: Int,
+        keepingItemIDs: Set<UUID>
+    ) throws -> [UUID] {
+        try repository.pruneItems(
+            retentionCutoff: retentionCutoff,
+            maxStorageBytes: maxStorageBytes,
+            keepingItemIDs: keepingItemIDs
+        )
+    }
+
     public func upsertPinboardMemberships(_ pinboards: [Pinboard]) throws {
         try repository.upsertPinboardMemberships(pinboards)
+    }
+
+    public func synchronizePinboards(with pinboards: [Pinboard]) throws {
+        try repository.synchronizePinboards(with: pinboards)
     }
 
     public func hydrateAssets(for item: ClipboardItem) throws -> ClipboardItem {
@@ -84,8 +116,15 @@ public actor ClipboardRepositorySyncActor {
         try repository.rtfData(for: item)
     }
 
-    public func exportSnapshot(hydrateAssets: Bool = true) throws -> PasteBuddySnapshot {
-        try repository.exportSnapshot(hydrateAssets: hydrateAssets)
+    public func exportSnapshot(
+        hydrateAssets: Bool = true,
+        itemLimit: Int? = nil
+    ) throws -> PasteBuddySnapshot {
+        try repository.exportSnapshot(hydrateAssets: hydrateAssets, itemLimit: itemLimit)
+    }
+
+    public func saveMetadata(from snapshot: PasteBuddySnapshot) throws {
+        try repository.saveMetadata(from: snapshot)
     }
 
     public func hasStoredSnapshot() throws -> Bool {

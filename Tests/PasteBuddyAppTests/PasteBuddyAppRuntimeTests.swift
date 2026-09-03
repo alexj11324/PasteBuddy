@@ -622,6 +622,50 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertEqual(paging.nextOffset, 501)
     }
 
+    func testSharedPanelPagingStateUsesClipasteResidentWindowPolicy() throws {
+        let items = (0..<2_501).map { index in
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Bounded \(index)",
+                payload: ClipboardPayload(text: "payload \(index)")
+            )
+        }
+        var paging = ClipboardPanelPagingState<ClipboardItem, Int>()
+
+        paging.reset(
+            with: Array(items.prefix(ClipboardPanelHistoryLoadingPolicy.initialPageSize)),
+            totalCount: items.count,
+            queryID: 1
+        )
+        XCTAssertEqual(paging.nextOffset, ClipboardPanelHistoryLoadingPolicy.initialPageSize)
+        XCTAssertEqual(
+            try XCTUnwrap(paging.nextPageRequest(for: 1)).limit,
+            ClipboardPanelHistoryLoadingPolicy.backgroundPageSize
+        )
+
+        while let request = paging.nextPageRequest(for: 1) {
+            XCTAssertTrue(paging.append(
+                Array(items.dropFirst(request.offset).prefix(request.limit)),
+                totalCount: items.count,
+                for: request,
+                currentQueryID: 1
+            ))
+        }
+
+        XCTAssertEqual(paging.items.count, ClipboardPanelHistoryLoadingPolicy.maxResidentItems)
+        XCTAssertEqual(paging.totalCount, items.count)
+        XCTAssertFalse(paging.canLoadMore)
+
+        paging.trimToInitialPage()
+        XCTAssertEqual(
+            paging.items.count,
+            ClipboardPanelHistoryLoadingPolicy.initialPageSize
+        )
+        XCTAssertTrue(paging.canLoadMore)
+    }
+
     func testSharedPanelPagingRejectsOldQueryResponseAfterReset() throws {
         let items = (0..<200).map { index in
             ClipboardItem(
@@ -654,7 +698,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
         for source in [shelfSource, sideSource] {
             XCTAssertTrue(source.contains("@State private var paging = ClipboardPanelPagingState<ClipboardItem,"))
-            XCTAssertTrue(source.contains("store.filteredItemsPage("))
+            XCTAssertTrue(source.contains("store.filteredItemsPageAndCount("))
+            XCTAssertTrue(source.contains("ClipboardPanelHistoryLoadingPolicy.initialPageSize"))
             XCTAssertTrue(source.contains("paging.nextPageRequest(for:"))
             XCTAssertTrue(source.contains("for: request,"))
             XCTAssertTrue(source.contains("paging.canLoadMore"))
@@ -3255,9 +3300,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
         let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
 
-        XCTAssertTrue(shelfSource.contains("let items = store.filteredItemsPage(for: shelfScope, offset: 0)"))
-        XCTAssertTrue(sideSource.contains("let items = store.filteredItemsPage(for: sideScope, offset: 0)"))
-        XCTAssertTrue(sideSource.contains("totalCount: store.filteredItemCount(for: sideScope)"))
+        XCTAssertTrue(shelfSource.contains("store.filteredItemsPageAndCount("))
+        XCTAssertTrue(sideSource.contains("store.filteredItemsPageAndCount("))
+        XCTAssertTrue(shelfSource.contains("ClipboardPanelHistoryLoadingPolicy.initialPageSize"))
+        XCTAssertTrue(sideSource.contains("ClipboardPanelHistoryLoadingPolicy.initialPageSize"))
         XCTAssertFalse(shelfSource.contains("store.fullFilteredItems(for: shelfScope)"))
         XCTAssertFalse(sideSource.contains("store.fullFilteredItems(for: sideScope)"))
         XCTAssertFalse(sideSource.contains("totalCount: items.count"))

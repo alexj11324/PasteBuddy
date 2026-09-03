@@ -1,4 +1,9 @@
-# WP1 PowerSync PoC design
+# WP1 PowerSync PoC design (superseded)
+
+> Do not implement this design. The 2026-08-26 product decision removed cloud
+> sync and cloud AI from scope in favor of local-only automatic tagging. This
+> file remains historical evidence until the replacement tagging design is
+> reviewed.
 
 ## Responsibility model
 

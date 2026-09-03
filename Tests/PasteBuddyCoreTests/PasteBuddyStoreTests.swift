@@ -2569,7 +2569,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.snapshot.privacy.captureURLs)
         XCTAssertFalse(reloaded.snapshot.privacy.captureFiles)
         XCTAssertFalse(reloaded.snapshot.privacy.captureImages)
-        XCTAssertFalse(reloaded.snapshot.privacy.blockLikelySensitiveText)
+        XCTAssertTrue(reloaded.snapshot.privacy.blockLikelySensitiveText)
         XCTAssertTrue(reloaded.snapshot.privacy.excludedApplicationNames.contains("Password Vault"))
         XCTAssertTrue(reloaded.snapshot.privacy.excludedBundleIdentifiers.contains("com.example.password-vault"))
     }
@@ -2640,6 +2640,7 @@ final class PasteBuddyStoreTests: XCTestCase {
         snapshot.privacy = PrivacyConfiguration(
             capturePauseUntil: pauseUntil,
             captureText: false,
+            blockLikelySensitiveText: true,
             customCaptureRules: [payrollRule]
         )
         snapshot.sync = SyncConfiguration(
@@ -2688,6 +2689,103 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertTrue(SensitiveContentDetector.isLikelySensitive("One-time code: 483920"))
         XCTAssertTrue(SensitiveContentDetector.isLikelySensitive("card 4111 1111 1111 1111"))
         XCTAssertFalse(SensitiveContentDetector.isLikelySensitive("Quarterly launch checklist and copy notes"))
+    }
+
+    func testDefaultPrivacyAllowsBareSecretKeyTokens() {
+        // Regression: copying a bare secret-key token must land on top of
+        // history instead of being silently dropped.
+        // NOTE: fixtures are assembled at runtime so no literal secret-shaped
+        // string lands in source (secret scanners flag even fake fixtures).
+        let skLiveToken = "sk_live_" + String(repeating: "4", count: 24)
+        let gitHubToken = "ghp_" + String(repeating: "a", count: 36)
+        let tokens = [
+            "AKIAIOSFODNN7EXAMPLE",
+            gitHubToken,
+            skLiveToken,
+            "sk-proj-abc123XYZabc123XYZabc123XYZabc123",
+            "Bearer abcdefghijklmnop123456",
+            "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+        ]
+        let privacy = PrivacyConfiguration()
+        XCTAssertFalse(privacy.blockLikelySensitiveText)
+        for token in tokens {
+            let item = ClipboardItem(
+                sourceAppName: "Safari",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: token,
+                payload: ClipboardPayload(text: token)
+            )
+            XCTAssertTrue(
+                privacy.captureDecision(for: item).isAllowed,
+                "Bare secret-key token should be captured by default: \(token)"
+            )
+        }
+    }
+
+    func testSensitiveTextBlockingStillAppliesWhenExplicitlyEnabled() {
+        let privacy = PrivacyConfiguration(blockLikelySensitiveText: true)
+        // Assembled at runtime to keep secret-shaped literals out of source.
+        let labeledSecret = "api_key = " + "sk_live_" + String(repeating: "4", count: 24)
+        let item = ClipboardItem(
+            sourceAppName: "Safari",
+            deviceName: "Test Mac",
+            contentType: .text,
+            title: "api_key",
+            payload: ClipboardPayload(text: labeledSecret)
+        )
+        let decision = privacy.captureDecision(for: item)
+        XCTAssertFalse(decision.isAllowed)
+        XCTAssertEqual(decision.blockReason, .sensitiveText)
+    }
+
+    func testSensitiveBlockingMigrationFromSchemaV1() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 1,
+            privacy: PrivacyConfiguration(blockLikelySensitiveText: true)
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertFalse(snapshot.privacy.blockLikelySensitiveText)
+        XCTAssertEqual(snapshot.schemaVersion, PasteBuddySnapshot.currentSchemaVersion)
+        XCTAssertFalse(snapshot.migrateIfNeeded())
+    }
+
+    func testStoreLoadMigratesV1SensitiveBlockingDefault() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        var v1 = PasteBuddySnapshot()
+        v1.schemaVersion = 1
+        v1.privacy.blockLikelySensitiveText = true
+        try harness.snapshotStore.save(v1)
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+        store.load()
+
+        XCTAssertFalse(store.snapshot.privacy.blockLikelySensitiveText)
+        XCTAssertEqual(store.snapshot.schemaVersion, PasteBuddySnapshot.currentSchemaVersion)
+    }
+
+    func testRepositoryLoadMigratesV1SensitiveBlockingAndWritesBack() throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        var v1 = PasteBuddySnapshot()
+        v1.schemaVersion = 1
+        v1.privacy.blockLikelySensitiveText = true
+        try repository.saveMetadata(from: v1)
+
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore, clipboardRepository: repository)
+        store.load()
+
+        XCTAssertFalse(store.snapshot.privacy.blockLikelySensitiveText)
+        XCTAssertEqual(store.snapshot.schemaVersion, PasteBuddySnapshot.currentSchemaVersion)
+
+        let stored = try repository.exportSnapshot(hydrateAssets: false, itemLimit: 10)
+        XCTAssertFalse(stored.privacy.blockLikelySensitiveText)
+        XCTAssertEqual(stored.schemaVersion, PasteBuddySnapshot.currentSchemaVersion)
     }
 
     func testPrivacyConfigurationExcludesSensitiveAppsByBundleIdentifier() {
@@ -5637,6 +5735,50 @@ final class PasteBuddyStoreTests: XCTestCase {
         let filtered = allPages(in: .history)
         XCTAssertEqual(filtered.count, 251)
         XCTAssertTrue(filtered.allSatisfy { $0.sourceAppName == "Notes" })
+    }
+
+    func testAsyncRepositoryPageAndCountUsesSmallInitialPageWithoutLosingTotal() async throws {
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+
+        let database = try PasteBuddyDatabase(fileURL: harness.directory.appendingPathComponent("clipboard.sqlite"))
+        let repository = ClipboardItemRepository(database: database)
+        let now = Date(timeIntervalSince1970: 6_000_000)
+        let items = (0..<125).map { index in
+            ClipboardItem(
+                createdAt: now.addingTimeInterval(TimeInterval(-index)),
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)),
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Async Page \(index)",
+                payload: ClipboardPayload(text: "async payload \(index)")
+            )
+        }
+        try harness.snapshotStore.save(PasteBuddySnapshot(items: items))
+
+        let store = PasteBuddyStore(
+            diskStore: harness.snapshotStore,
+            clipboardRepository: repository
+        )
+        store.load()
+
+        let firstPage = try await store.filteredItemsPageAndCount(
+            for: .history,
+            offset: 0,
+            limit: 80
+        )
+        XCTAssertEqual(firstPage.items.count, 80)
+        XCTAssertEqual(firstPage.totalCount, 125)
+        XCTAssertEqual(firstPage.items.map(\.id), Array(items.prefix(80)).map(\.id))
+
+        let secondPage = try await store.filteredItemsPageAsync(
+            for: .history,
+            offset: firstPage.items.count,
+            limit: 160
+        )
+        XCTAssertEqual(secondPage.count, 45)
+        XCTAssertEqual(secondPage.map(\.id), Array(items.dropFirst(80)).map(\.id))
     }
 
     func testQuickPasteKeepsOneThroughNineLimitWithRepositoryBackedHistory() throws {

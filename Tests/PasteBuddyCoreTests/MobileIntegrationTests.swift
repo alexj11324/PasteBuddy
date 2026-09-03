@@ -428,6 +428,7 @@ final class MobileIntegrationTests: XCTestCase {
         XCTAssertEqual(imported.sourceAppName, "PasteBuddy Share Extension")
         XCTAssertEqual(store.snapshot.pinboards[0].itemIDs, [imported.id])
 
+        store.toggleSensitiveTextBlocking()
         XCTAssertThrowsError(try service.importContent(
             SharedContentInput(
                 text: "api_key = sk_live_51ABCDEF0123456789",

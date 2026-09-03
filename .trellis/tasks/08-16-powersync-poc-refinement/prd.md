@@ -1,4 +1,59 @@
-# PowerSync PoC implementation refinement
+# PowerSync PoC implementation refinement (superseded)
+
+## Planning status
+
+Superseded by the 2026-08-26 product decision: PasteBuddy will not add cloud
+sync, hosted embeddings, or cloud AI for this scope. The replacement outcome is
+local-only automatic tagging of clipboard items on supported Apple Silicon
+devices. The historical PowerSync decomposition below is retained only as
+decision evidence and must not be started.
+
+The replacement tagging plan still needs one product decision: whether automatic
+tags must be chosen from a controlled taxonomy or may be generated as free-form
+labels. The recommended MVP is a controlled, user-editable taxonomy, with
+manual labels preserved and never overwritten by automatic tagging.
+
+## Replacement scope boundary
+
+- On macOS 27 and later, use Apple's on-device Foundation Models general
+  multimodal model as the primary semantic engine for screenshots and images.
+  Provide the image, capture provenance, Vision OCR transcript, and Vision
+  classifications in one bounded request, and require guided structured output.
+- PasteBuddy currently targets macOS 26. The Xcode 27 SDK marks Foundation
+  Models image attachments as macOS 27+, so macOS 26 cannot be represented as
+  the same multimodal path. Its local fallback is Vision OCR/classification plus
+  capture provenance, followed by Foundation Models text reasoning over that
+  evidence. Matching macOS 27 fidelity on arbitrary screenshots would instead
+  require shipping and maintaining a separate local vision-language model.
+- Treat Vision OCR, source URL/application metadata, and
+  `VNClassifyImageRequest` results as authoritative evidence and validation
+  signals, not as the primary semantic decision engine. Do not depend on
+  Photos' private ANSA knowledge graph, people/pet identity clusters, or
+  internal semantic index; PhotoKit does not expose those generated labels on
+  `PHAsset`.
+- Use Foundation Models text understanding for non-image payloads. The
+  specialized content-tagging use case may supply simple topics, actions,
+  objects, and emotions, but it is not the owner of relational screenshot
+  understanding or generated titles.
+- Keep clipboard contents and generated tags on device; make no network request.
+- Reuse the existing `ClipboardItem.labels` normalization, persistence, search,
+  and editing paths.
+- Do not implement PowerSync, Supabase, embeddings, vector search, account sync,
+  or hosted inference.
+
+## Target semantic output
+
+Automatic organization is not limited to a flat tag array. For a screenshot of
+an X profile, the local pipeline should be able to derive separate structured
+facts such as `contentKind=socialProfile`, `platform=X`, `entityName=Shotbase`,
+and `accountHandle=@shotbaseapp`, then produce a readable generated title such
+as `Shotbase X profile` and searchable tags. The multimodal model owns this
+semantic interpretation; OCR text, capture provenance, and deterministic
+platform/layout evidence constrain and validate it. A flat tagger, rules-only
+pipeline, or unconstrained image-only model is not sufficient for this
+acceptance example.
+
+## Historical plan
 
 ## Goal
 
