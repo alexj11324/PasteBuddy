@@ -57,6 +57,13 @@ struct InstalledApplicationCatalog {
         return applications
     }
 
+    /// Reads one bundle's identity with the same rules as a directory scan, for
+    /// apps that live outside the scanned directories and are found by other
+    /// means — a Launch Services lookup, say.
+    func application(at url: URL) -> InstalledApplication? {
+        installedApplication(at: url)
+    }
+
     private func installedApplication(at url: URL) -> InstalledApplication? {
         let bundle = Bundle(url: url)
         let name = stringValue(bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName"))

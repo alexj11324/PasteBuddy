@@ -1385,11 +1385,9 @@ private struct SettingsExcludedApplications: View {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
             return nil
         }
-        return InstalledApplication(
-            url: url,
-            displayName: FileManager.default.displayName(atPath: url.path),
-            bundleIdentifier: bundleIdentifier
-        )
+        // Reuse the catalog's naming rules: FileManager's display name keeps the
+        // ".app" extension when Finder is set to show every extension.
+        return InstalledApplicationCatalog().application(at: url)
     }
 
     private func loadApplications() {
