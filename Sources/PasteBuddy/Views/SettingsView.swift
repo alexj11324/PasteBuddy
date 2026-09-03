@@ -193,8 +193,26 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+
+            Section {
+                Text(appVersionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
         .pasteBuddySettingsForm()
+    }
+
+    private var appVersionSummary: String {
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let buildNumber = info?["CFBundleVersion"] as? String ?? "0"
+        let commit = (info?["PasteBuddySourceCommit"] as? String)?.prefix(8)
+        guard let commit, !commit.isEmpty else {
+            return localized("format.version_build", shortVersion, buildNumber)
+        }
+        return localized("format.version_build_commit", shortVersion, buildNumber, String(commit))
     }
 
     @ViewBuilder
