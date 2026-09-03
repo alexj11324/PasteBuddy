@@ -7836,13 +7836,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add App"
+            "value": "Add App…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "添加应用"
+            "value": "添加 App…"
           }
         }
       }

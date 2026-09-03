@@ -364,7 +364,8 @@ struct SettingsView: View {
                             ),
                             format: .number.precision(.fractionLength(0...1))
                         )
-                        .frame(width: 64)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 72)
                         .multilineTextAlignment(.trailing)
                         .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
                         Text("label.megabytes")
@@ -1259,7 +1260,6 @@ private struct MCPClientConfigurationSheet: View {
 private struct SettingsExcludedApplications: View {
     @Bindable var store: PasteBuddyStore
     @State private var applications: [InstalledApplication] = []
-    @State private var selectedRowID: String?
     @State private var showingApplicationPicker = false
 
     var body: some View {
@@ -1271,7 +1271,6 @@ private struct SettingsExcludedApplications: View {
                         named: application.displayName,
                         bundleIdentifier: application.bundleIdentifier
                     )
-                    selectedRowID = nil
                     loadApplications()
                 }
             }
@@ -1282,39 +1281,29 @@ private struct SettingsExcludedApplications: View {
             if excludedRows.isEmpty {
                 Text("message.no_ignored_applications")
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
-            } else {
-                List(selection: $selectedRowID) {
-                    ForEach(excludedRows) { row in
-                        ExcludedApplicationRowView(row: row)
-                            .tag(row.id)
+            }
+            // Plain form rows, not a bordered List: a fixed-height list inside a
+            // scrolling settings page nests a second box and a second scroller
+            // inside the section's own.
+            ForEach(excludedRows) { row in
+                LabeledContent {
+                    Button {
+                        remove(row)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .symbolRenderingMode(.hierarchical)
+                            .imageScale(.large)
                     }
-                }
-                .listStyle(.bordered)
-                .frame(minHeight: 140, maxHeight: 220)
-            }
-
-            HStack(spacing: 8) {
-                Button {
-                    showingApplicationPicker = true
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("action.remove")
                 } label: {
-                    Image(systemName: "plus")
-                        .frame(width: 16)
+                    ExcludedApplicationRowView(row: row)
                 }
-                .accessibilityLabel("action.add_app")
-
-                Button {
-                    removeSelectedRow()
-                } label: {
-                    Image(systemName: "minus")
-                        .frame(width: 16)
-                }
-                .disabled(selectedRowID == nil)
-                .accessibilityLabel("action.remove")
-                Spacer()
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            Button("action.add_app") {
+                showingApplicationPicker = true
+            }
         } header: {
             // The explanation belongs above the list it describes; as a footer
             // it read as "content copied from the applications below" while
@@ -1394,18 +1383,14 @@ private struct SettingsExcludedApplications: View {
         applications = InstalledApplicationCatalog().applications()
     }
 
-    private func removeSelectedRow() {
-        guard let selectedRowID,
-              let row = excludedRows.first(where: { $0.id == selectedRowID }) else {
-            return
-        }
-        if let name = row.name {
+    private func remove(_ row: ExcludedApplicationListRow) {
+        if let name = row.name ?? row.application?.displayName {
             store.removeExcludedApplication(name)
         }
-        if let bundleIdentifier = row.bundleIdentifier {
+        if let bundleIdentifier = row.bundleIdentifier ?? row.application?.bundleIdentifier {
             store.removeExcludedBundleIdentifier(bundleIdentifier)
         }
-        self.selectedRowID = nil
+        loadApplications()
     }
 }
 

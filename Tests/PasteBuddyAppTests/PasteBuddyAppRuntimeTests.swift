@@ -2671,10 +2671,12 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("setMaximumClipboardSizeMegabytes"))
         XCTAssertTrue(source.contains("store.excludeApplication("))
 
-        // The add/remove pair reads as buttons, and a bundle identifier that
-        // Launch Services can resolve shows the app's name and icon instead of a
-        // raw reverse-DNS string printed twice.
-        XCTAssertTrue(source.contains(".buttonStyle(.bordered)"))
+        // Excluded apps are plain form rows. A bordered List inside the section
+        // put a second box and a second scroller inside the section's own.
+        XCTAssertFalse(source.contains(".listStyle(.bordered)"))
+        XCTAssertFalse(source.contains("selectedRowID"))
+        // A bundle identifier Launch Services can resolve shows the app's name
+        // and icon instead of a raw reverse-DNS string printed twice.
         XCTAssertTrue(source.contains("urlForApplication(withBundleIdentifier:"))
     }
 
@@ -2736,13 +2738,15 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
     }
 
-    func testPrivacySettingsUsesNativeSelectionForExcludedApplications() throws {
+    func testEachExcludedApplicationRemovesItselfWithoutASelectionStep() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
 
-        XCTAssertTrue(source.contains("List(selection: $selectedRowID)"))
+        // Removal lives on the row, so there is no selection to establish first
+        // and no disabled button waiting for one.
+        XCTAssertFalse(source.contains("List(selection: $selectedRowID)"))
+        XCTAssertFalse(source.contains(".disabled(selectedRowID == nil)"))
         XCTAssertTrue(source.contains("store.removeExcludedApplication(name)"))
         XCTAssertTrue(source.contains("store.removeExcludedBundleIdentifier(bundleIdentifier)"))
-        XCTAssertTrue(source.contains(".disabled(selectedRowID == nil)"))
     }
 
     func testPrivacySettingsKeepsStorageGrowthVisibleWithoutAnItemCap() throws {

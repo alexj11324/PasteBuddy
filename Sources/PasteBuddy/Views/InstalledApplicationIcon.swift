@@ -14,7 +14,9 @@ struct InstalledApplicationIcon: View {
                     .resizable()
                     .scaledToFit()
             } else {
-                Image(systemName: "app")
+                // Dashed outline: this entry names an app that is not installed
+                // here, so there is no icon to show rather than a missing one.
+                Image(systemName: "app.dashed")
                     .resizable()
                     .scaledToFit()
                     .foregroundStyle(.secondary)
