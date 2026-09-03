@@ -2197,7 +2197,7 @@ public struct PrivacyConfiguration: Codable, Equatable, Sendable {
         captureURLs: Bool = true,
         captureFiles: Bool = true,
         captureImages: Bool = true,
-        blockLikelySensitiveText: Bool = true,
+        blockLikelySensitiveText: Bool = false,
         runLocalOCRAfterImageCapture: Bool = true,
         customCaptureRules: [CaptureRule] = []
     ) {
@@ -2289,7 +2289,7 @@ public struct PrivacyConfiguration: Codable, Equatable, Sendable {
         captureURLs = try container.decodeIfPresent(Bool.self, forKey: .captureURLs) ?? true
         captureFiles = try container.decodeIfPresent(Bool.self, forKey: .captureFiles) ?? true
         captureImages = try container.decodeIfPresent(Bool.self, forKey: .captureImages) ?? true
-        blockLikelySensitiveText = try container.decodeIfPresent(Bool.self, forKey: .blockLikelySensitiveText) ?? true
+        blockLikelySensitiveText = try container.decodeIfPresent(Bool.self, forKey: .blockLikelySensitiveText) ?? false
         runLocalOCRAfterImageCapture = try container.decodeIfPresent(Bool.self, forKey: .runLocalOCRAfterImageCapture) ?? true
         customCaptureRules = try container.decodeIfPresent([CaptureRule].self, forKey: .customCaptureRules) ?? []
     }
@@ -3525,6 +3525,7 @@ public struct SecurityConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 2
     public var schemaVersion: Int
     public var items: [ClipboardItem]
     public var pinboards: [Pinboard]
@@ -3542,7 +3543,7 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
     public var security: SecurityConfiguration
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = PasteBuddySnapshot.currentSchemaVersion,
         items: [ClipboardItem] = [],
         pinboards: [Pinboard] = [Pinboard(name: "Favorites", colorHex: "#4EA7FC")],
         general: GeneralConfiguration = GeneralConfiguration(),
@@ -3613,6 +3614,21 @@ public struct PasteBuddySnapshot: Codable, Equatable, Sendable {
         shortcuts = try container.decodeIfPresent(ShortcutConfiguration.self, forKey: .shortcuts) ?? ShortcutConfiguration()
         mcp = try container.decodeIfPresent(MCPConfiguration.self, forKey: .mcp) ?? MCPConfiguration()
         security = try container.decodeIfPresent(SecurityConfiguration.self, forKey: .security) ?? SecurityConfiguration()
+    }
+
+    /// One-time migrations for persisted snapshots. Returns true when the
+    /// snapshot was changed and should be saved again.
+    public mutating func migrateIfNeeded() -> Bool {
+        guard schemaVersion < Self.currentSchemaVersion else { return false }
+        // v2: likely-sensitive text is captured by default so copied secret
+        // keys land on top of history. This deliberately resets installs
+        // carrying the old default too: a stored `true` is indistinguishable
+        // from an untouched default, and the product decision is
+        // capture-by-default with filtering one toggle away in Settings.
+        // Anyone relying on blocking can re-enable it there.
+        privacy.blockLikelySensitiveText = false
+        schemaVersion = Self.currentSchemaVersion
+        return true
     }
 }
 

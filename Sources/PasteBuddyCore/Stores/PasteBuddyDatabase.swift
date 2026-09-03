@@ -22,6 +22,7 @@ public struct ClipboardItemPageRequest: Equatable, Sendable {
     public var deviceName: String?
     public var dateFilter: ClipboardDateFilter
     public var pinboardID: UUID?
+    public var excludedItemIDs: Set<UUID>
     public var limit: Int
     public var offset: Int
 
@@ -32,6 +33,7 @@ public struct ClipboardItemPageRequest: Equatable, Sendable {
         deviceName: String? = nil,
         dateFilter: ClipboardDateFilter = .any,
         pinboardID: UUID? = nil,
+        excludedItemIDs: Set<UUID> = [],
         limit: Int = 100,
         offset: Int = 0
     ) {
@@ -41,6 +43,7 @@ public struct ClipboardItemPageRequest: Equatable, Sendable {
         self.deviceName = deviceName
         self.dateFilter = dateFilter
         self.pinboardID = pinboardID
+        self.excludedItemIDs = excludedItemIDs
         self.limit = min(max(limit, 1), 500)
         self.offset = max(offset, 0)
     }
@@ -729,14 +732,17 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             ),
                let existingID = UUID(uuidString: existingIDString) {
                 let now = Date()
+                let nextOrder = try Self.nextRecentSnapshotOrder(db: db)
                 try db.execute(
-                    sql: "UPDATE clipboard_items SET updated_at = ? WHERE id = ?",
-                    arguments: [now.timeIntervalSince1970, existingIDString]
+                    sql: "UPDATE clipboard_items SET snapshot_order = ?, updated_at = ? WHERE id = ?",
+                    arguments: [nextOrder, now.timeIntervalSince1970, existingIDString]
                 )
-                return try Self.fetchItem(id: existingID, db: db) ?? item
+                var existingItem = try Self.fetchItem(id: existingID, db: db, hydrateAssets: false) ?? item
+                existingItem.updatedAt = now
+                return existingItem
             }
 
-            let nextOrder = (try Int.fetchOne(db, sql: "SELECT COALESCE(MIN(snapshot_order), 0) - 1 FROM clipboard_items") ?? 0)
+            let nextOrder = try Self.nextRecentSnapshotOrder(db: db)
             try Self.upsert(item: item, snapshotOrder: nextOrder, db: db)
             return item
         }
@@ -748,7 +754,11 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             if let snapshotOrder {
                 resolvedOrder = snapshotOrder
             } else {
-                resolvedOrder = try Self.nextSnapshotOrder(db: db)
+                resolvedOrder = try Int.fetchOne(
+                    db,
+                    sql: "SELECT snapshot_order FROM clipboard_items WHERE id = ?",
+                    arguments: [item.id.uuidString]
+                ) ?? Self.nextSnapshotOrder(db: db)
             }
             try Self.upsert(item: item, snapshotOrder: resolvedOrder, db: db)
         }
@@ -756,7 +766,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
 
     public func updateOCRText(_ text: String, for itemID: UUID) throws {
         try database.write { db in
-            guard var item = try Self.fetchItem(id: itemID, db: db) else { return }
+            guard var item = try Self.fetchItem(id: itemID, db: db, hydrateAssets: false) else { return }
             item.payload.ocrText = text
             item.ocrState = .completed(Date())
             item.updatedAt = Date()
@@ -776,6 +786,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     }
 
     public func upsertPinboardMemberships(_ pinboards: [Pinboard]) throws {
+        incrementIncrementalSyncInvocationCount()
         try database.write { db in
             for pinboard in pinboards {
                 let sortOrder = try Int.fetchOne(
@@ -784,6 +795,20 @@ public final class ClipboardItemRepository: @unchecked Sendable {
                     arguments: [pinboard.id.uuidString]
                 ) ?? Self.nextPinboardSortOrder(db: db)
                 try Self.insert(pinboard: pinboard, sortOrder: sortOrder, db: db)
+            }
+        }
+    }
+
+    public func synchronizePinboards(with pinboards: [Pinboard]) throws {
+        incrementIncrementalSyncInvocationCount()
+        try database.write { db in
+            let existingIDs = Set(try String.fetchAll(db, sql: "SELECT id FROM pinboards"))
+            let requestedIDs = Set(pinboards.map { $0.id.uuidString })
+            let deletedIDs = existingIDs.subtracting(requestedIDs).compactMap(UUID.init(uuidString:))
+            try Self.deletePinboards(deletedIDs, db: db)
+
+            for (index, pinboard) in pinboards.enumerated() {
+                try Self.insert(pinboard: pinboard, sortOrder: index, db: db)
             }
         }
     }
@@ -811,20 +836,178 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
+    public func items(ids: [UUID], hydrateAssets: Bool = false) throws -> [ClipboardItem] {
+        guard !ids.isEmpty else { return [] }
+        return try database.read { db in
+            var itemsByID: [UUID: ClipboardItem] = [:]
+            for chunkStart in stride(from: 0, to: ids.count, by: 400) {
+                let chunk = Array(ids.dropFirst(chunkStart).prefix(400))
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                var arguments = StatementArguments()
+                for id in chunk {
+                    arguments += [id.uuidString]
+                }
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM clipboard_items WHERE id IN (\(placeholders))",
+                    arguments: arguments
+                )
+                for item in try Self.items(from: rows, db: db, hydrateAssets: hydrateAssets) {
+                    itemsByID[item.id] = item
+                }
+            }
+            return ids.compactMap { itemsByID[$0] }
+        }
+    }
+
     public func item(id: UUID, hydrateAssets: Bool = true) throws -> ClipboardItem? {
         try database.read { db in
-            guard var item = try Self.fetchItem(id: id, db: db) else { return nil }
-            if !hydrateAssets {
-                item.payload.imageData = nil
-                item.payload.rtfData = nil
-            }
-            return item
+            try Self.fetchItem(id: id, db: db, hydrateAssets: hydrateAssets)
         }
     }
 
     public func itemCount() throws -> Int {
         try database.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard_items") ?? 0
+        }
+    }
+
+    public func itemIDs() throws -> [UUID] {
+        try database.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM clipboard_items")
+                .map { value in
+                    guard let id = UUID(uuidString: value) else {
+                        throw PasteBuddyDatabaseError.invalidStoredUUID(value)
+                    }
+                    return id
+                }
+        }
+    }
+
+    public func storageUsageReport(
+        maxStorageBytes: Int,
+        pinnedItemIDs: Set<UUID>
+    ) throws -> StorageUsageReport {
+        try database.read { db in
+            let total = try Row.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) AS item_count, COALESCE(SUM(byte_count), 0) AS byte_count FROM clipboard_items"
+            )
+            let pinned = try Self.usageAggregate(
+                db: db,
+                itemIDs: pinnedItemIDs
+            )
+            let itemCount: Int = total?["item_count"] ?? 0
+            let estimatedBytes: Int = total?["byte_count"] ?? 0
+            return StorageUsageReport(
+                itemCount: itemCount,
+                pinnedItemCount: pinned.itemCount,
+                unpinnedItemCount: max(itemCount - pinned.itemCount, 0),
+                estimatedBytes: estimatedBytes,
+                pinnedEstimatedBytes: pinned.byteCount,
+                unpinnedEstimatedBytes: max(estimatedBytes - pinned.byteCount, 0),
+                maxStorageBytes: maxStorageBytes
+            )
+        }
+    }
+
+    public func pruneItems(
+        retentionCutoff: Date?,
+        maxStorageBytes: Int,
+        keepingItemIDs: Set<UUID>
+    ) throws -> [UUID] {
+        try database.write { db in
+            let protection = try Self.itemProtectionSQL(itemIDs: keepingItemIDs)
+            var deletedIDs: [UUID] = []
+
+            if let retentionCutoff {
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT id
+                        FROM clipboard_items
+                        WHERE \(protection.sql)
+                          AND MAX(created_at, updated_at) < ?
+                        """,
+                    arguments: protection.arguments + [retentionCutoff.timeIntervalSince1970]
+                )
+                deletedIDs.append(contentsOf: try Self.uuidValues(from: rows, column: "id"))
+            }
+
+            if !deletedIDs.isEmpty {
+                try Self.deleteItems(deletedIDs, db: db)
+            }
+
+            var currentBytes = try Int.fetchOne(
+                db,
+                sql: "SELECT COALESCE(SUM(byte_count), 0) FROM clipboard_items"
+            ) ?? 0
+            if currentBytes > maxStorageBytes {
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT id, byte_count
+                        FROM clipboard_items
+                        WHERE \(protection.sql)
+                        ORDER BY created_at ASC, updated_at ASC, snapshot_order DESC, id DESC
+                        """,
+                    arguments: protection.arguments
+                )
+                var storageDeletedIDs: [UUID] = []
+                for row in rows where currentBytes > maxStorageBytes {
+                    let idString: String = row["id"]
+                    guard let id = UUID(uuidString: idString) else {
+                        throw PasteBuddyDatabaseError.invalidStoredUUID(idString)
+                    }
+                    storageDeletedIDs.append(id)
+                    currentBytes -= (row["byte_count"] as Int? ?? 0)
+                }
+                if !storageDeletedIDs.isEmpty {
+                    try Self.deleteItems(storageDeletedIDs, db: db)
+                    deletedIDs.append(contentsOf: storageDeletedIDs)
+                }
+            }
+
+            return deletedIDs
+        }
+    }
+
+    public func itemIDs(for category: SmartPinboardCategory) throws -> [UUID] {
+        try database.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, content_type, payload_json
+                    FROM clipboard_items
+                    ORDER BY created_at DESC, snapshot_order ASC, id ASC
+                    """
+            )
+            var matchingIDs: [UUID] = []
+            matchingIDs.reserveCapacity(rows.count)
+            for row in rows {
+                let idString: String = row["id"]
+                guard let id = UUID(uuidString: idString) else {
+                    throw PasteBuddyDatabaseError.invalidStoredUUID(idString)
+                }
+                let contentType = ClipboardContentType(rawValue: row["content_type"] as String) ?? .text
+                let payloadJSON: String = row["payload_json"]
+                let payload = try JSONDecoder.pasteBuddy.decode(
+                    ClipboardPayload.self,
+                    from: Data(payloadJSON.utf8)
+                )
+                let item = ClipboardItem(
+                    id: id,
+                    sourceAppName: "",
+                    deviceName: "",
+                    contentType: contentType,
+                    title: "",
+                    payload: payload
+                )
+                if category.matches(item) {
+                    matchingIDs.append(id)
+                }
+            }
+            return matchingIDs
         }
     }
 
@@ -858,6 +1041,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
+    public func saveMetadata(from snapshot: PasteBuddySnapshot) throws {
+        try database.write { db in
+            try Self.saveMetadata(StoredSnapshotMetadata(snapshot: snapshot), db: db)
+        }
+    }
+
     public func availableSourceApps() throws -> [String] {
         try database.read { db in
             try String.fetchAll(
@@ -886,10 +1075,23 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
-    public func exportSnapshot(hydrateAssets: Bool = true) throws -> PasteBuddySnapshot {
+    public func exportSnapshot(
+        hydrateAssets: Bool = true,
+        itemLimit: Int? = nil
+    ) throws -> PasteBuddySnapshot {
         try database.read { db in
             let metadata = try Self.fetchMetadata(db: db)
-            let items = try Self.fetchAllItems(db: db, hydrateAssets: hydrateAssets)
+            let items: [ClipboardItem]
+            if let itemLimit {
+                items = itemLimit > 0
+                    ? try Self.fetchPage(
+                        ClipboardItemPageRequest(limit: itemLimit),
+                        db: db
+                    )
+                    : []
+            } else {
+                items = try Self.fetchAllItems(db: db, hydrateAssets: hydrateAssets)
+            }
             let pinboards = try Self.fetchAllPinboards(db: db)
             return metadata.snapshot(items: items, pinboards: pinboards)
         }
@@ -985,6 +1187,14 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             joins.append("JOIN pinboard_items pbi ON pbi.item_id = ci.id")
             predicates.append("pbi.pinboard_id = ?")
             arguments += [pinboardID.uuidString]
+        }
+
+        if !request.excludedItemIDs.isEmpty {
+            let placeholders = Array(repeating: "?", count: request.excludedItemIDs.count).joined(separator: ",")
+            predicates.append("ci.id NOT IN (\(placeholders))")
+            for itemID in request.excludedItemIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+                arguments += [itemID.uuidString]
+            }
         }
 
         let trimmedSearch = request.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1202,6 +1412,14 @@ public final class ClipboardItemRepository: @unchecked Sendable {
     }
 
     private static func fetchItem(id: UUID, db: Database) throws -> ClipboardItem? {
+        try fetchItem(id: id, db: db, hydrateAssets: true)
+    }
+
+    private static func fetchItem(
+        id: UUID,
+        db: Database,
+        hydrateAssets: Bool
+    ) throws -> ClipboardItem? {
         guard let row = try Row.fetchOne(
             db,
             sql: "SELECT * FROM clipboard_items WHERE id = ?",
@@ -1209,7 +1427,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         ) else {
             return nil
         }
-        return try items(from: [row], db: db, hydrateAssets: true).first
+        return try items(from: [row], db: db, hydrateAssets: hydrateAssets).first
     }
 
     private static func items(from rows: [Row], db: Database, hydrateAssets: Bool) throws -> [ClipboardItem] {
@@ -1519,6 +1737,58 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         )
     }
 
+    private static func uuidValues(from rows: [Row], column: String) throws -> [UUID] {
+        try rows.map { row in
+            let value: String = row[column]
+            guard let id = UUID(uuidString: value) else {
+                throw PasteBuddyDatabaseError.invalidStoredUUID(value)
+            }
+            return id
+        }
+    }
+
+    private static func itemProtectionSQL(
+        itemIDs: Set<UUID>
+    ) throws -> (sql: String, arguments: StatementArguments) {
+        guard !itemIDs.isEmpty else {
+            return ("1 = 1", StatementArguments())
+        }
+        let placeholders = Array(repeating: "?", count: itemIDs.count).joined(separator: ",")
+        var arguments = StatementArguments()
+        for id in itemIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            arguments += [id.uuidString]
+        }
+        return ("id NOT IN (\(placeholders))", arguments)
+    }
+
+    private static func usageAggregate(
+        db: Database,
+        itemIDs: Set<UUID>
+    ) throws -> (itemCount: Int, byteCount: Int) {
+        guard !itemIDs.isEmpty else { return (0, 0) }
+        let placeholders = Array(repeating: "?", count: itemIDs.count).joined(separator: ",")
+        var arguments = StatementArguments()
+        for id in itemIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            arguments += [id.uuidString]
+        }
+        guard let row = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) AS item_count,
+                       COALESCE(SUM(byte_count), 0) AS byte_count
+                FROM clipboard_items
+                WHERE id IN (\(placeholders))
+                """,
+            arguments: arguments
+        ) else {
+            return (0, 0)
+        }
+        return (
+            row["item_count"] as Int? ?? 0,
+            row["byte_count"] as Int? ?? 0
+        )
+    }
+
     private static func deletePinboards(_ ids: [UUID], db: Database) throws {
         guard !ids.isEmpty else { return }
         let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
@@ -1534,6 +1804,10 @@ public final class ClipboardItemRepository: @unchecked Sendable {
 
     private static func nextSnapshotOrder(db: Database) throws -> Int {
         (try Int.fetchOne(db, sql: "SELECT COALESCE(MAX(snapshot_order), -1) + 1 FROM clipboard_items") ?? 0)
+    }
+
+    private static func nextRecentSnapshotOrder(db: Database) throws -> Int {
+        (try Int.fetchOne(db, sql: "SELECT COALESCE(MIN(snapshot_order), 0) - 1 FROM clipboard_items") ?? 0)
     }
 
     private static func nextPinboardSortOrder(db: Database) throws -> Int {

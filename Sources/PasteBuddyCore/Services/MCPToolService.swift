@@ -142,7 +142,7 @@ public final class MCPToolService {
     public func retrieveItem(itemID: UUID, includeImageData: Bool = false) async throws -> MCPClipboardItemResponse {
         do {
             try require(.retrieveItem)
-            guard let item = store.snapshot.items.first(where: { $0.id == itemID }) else {
+            guard let item = store.item(withID: itemID) else {
                 throw MCPToolServiceError.noMatchingItem
             }
             try requireMCPVisible(item)
@@ -169,7 +169,8 @@ public final class MCPToolService {
     public func listPinboards() throws -> MCPPinboardListResponse {
         do {
             try require(.listPinboards)
-            let visibleItemIDs = Set(store.snapshot.items.filter(isMCPVisible).map(\.id))
+            let pinboardItemIDs = Array(Set(store.snapshot.pinboards.flatMap(\.itemIDs)))
+            let visibleItemIDs = Set(store.items(withIDs: pinboardItemIDs).filter(isMCPVisible).map(\.id))
             let pinboards = store.snapshot.pinboards.map {
                 MCPPinboardSummary(pinboard: $0, visibleItemIDs: visibleItemIDs)
             }
@@ -239,9 +240,8 @@ public final class MCPToolService {
     }
 
     private func visibleItems(matching query: String, limit: Int) -> [ClipboardItem] {
-        store.snapshot.items
-            .filter { $0.matches(query) && isMCPVisible($0) }
-            .sorted { $0.createdAt > $1.createdAt }
+        store.searchHistoryItems(matching: query, limit: 200)
+            .filter(isMCPVisible)
             .prefix(max(limit, 0))
             .map { $0 }
     }

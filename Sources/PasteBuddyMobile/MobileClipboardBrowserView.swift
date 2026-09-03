@@ -246,7 +246,7 @@ public struct MobileClipboardBrowserView: View {
     private func clipboardItem(for id: UUID) -> ClipboardItem? {
         store.filteredItems.first { $0.id == id }
             ?? store.pasteStackItems.first { $0.id == id }
-            ?? store.snapshot.items.first { $0.id == id }
+            ?? store.item(withID: id)
     }
 }
 

@@ -656,7 +656,7 @@ struct ClipboardSidePanelView: View {
             return true
         case .smartCategory(let category):
             guard ids.contains(where: { id in
-                store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true
+                store.item(withID: id).map(category.matches) == true
             }) else {
                 return false
             }

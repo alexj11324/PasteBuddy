@@ -139,7 +139,7 @@ final class ScreenPinController {
     func restoreMostRecent() {
         guard let store,
               let candidate = registry.recentlyClosed.first,
-              let item = store.snapshot.items.first(where: { $0.id == candidate.itemID }),
+              let item = store.item(withID: candidate.itemID),
               let restored = registry.restoreMostRecent() else {
             showError(NSLocalizedString("message.the_recently_closed_pin_can_no_longer", comment: ""))
             return

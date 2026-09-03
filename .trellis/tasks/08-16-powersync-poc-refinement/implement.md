@@ -1,4 +1,8 @@
-# WP1 PowerSync PoC execution plan
+# WP1 PowerSync PoC execution plan (superseded)
+
+> Do not execute this plan or run `task.py start`. The 2026-08-26 product
+> decision removed cloud sync and cloud AI from scope in favor of local-only
+> automatic tagging. A replacement plan must be reviewed first.
 
 ## Global execution rule
 

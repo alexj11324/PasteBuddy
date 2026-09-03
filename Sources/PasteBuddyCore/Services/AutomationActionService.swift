@@ -169,9 +169,7 @@ public final class AutomationActionService {
         guard !trimmed.isEmpty else { throw AutomationActionError.emptyQuery }
 
         let cappedLimit = min(max(limit, 1), 25)
-        let items = store.snapshot.items
-            .filter { $0.matches(trimmed) }
-            .sorted { $0.createdAt > $1.createdAt }
+        let items = store.searchHistoryItems(matching: trimmed, limit: cappedLimit)
             .prefix(cappedLimit)
             .map(AutomationItemSummary.init(item:))
 
@@ -219,7 +217,7 @@ public final class AutomationActionService {
     public func firstMatchingItem(query: String) throws -> ClipboardItem {
         let result = try searchClipboard(query: query, limit: 1)
         guard let summary = result.items.first,
-              let item = store.snapshot.items.first(where: { $0.id == summary.id }) else {
+              let item = store.item(withID: summary.id) else {
             throw AutomationActionError.noMatchingItem
         }
         return item
