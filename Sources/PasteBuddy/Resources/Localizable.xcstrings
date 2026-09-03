@@ -7836,13 +7836,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add App…"
+            "value": "Add Application…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "添加 App…"
+            "value": "添加应用程序…"
           }
         }
       }
@@ -8204,13 +8204,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connect AI Tool..."
+            "value": "Connect AI Tool…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "连接 AI 工具..."
+            "value": "连接 AI 工具…"
           }
         }
       }
@@ -11638,13 +11638,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Adding PasteBuddy to %@..."
+            "value": "Adding PasteBuddy to %@…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在将 PasteBuddy 添加到 %@..."
+            "value": "正在将 PasteBuddy 添加到 %@…"
           }
         }
       }
@@ -12870,13 +12870,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Capture files"
+            "value": "Record files"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "捕获文件"
+            "value": "记录文件"
           }
         }
       }
@@ -12886,13 +12886,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Capture images"
+            "value": "Record images"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "捕获图片"
+            "value": "记录图片"
           }
         }
       }
@@ -12934,13 +12934,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Capture links"
+            "value": "Record links"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "捕获链接"
+            "value": "记录链接"
           }
         }
       }
@@ -13014,13 +13014,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Capture text"
+            "value": "Record text"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "捕获文本"
+            "value": "记录文本"
           }
         }
       }
@@ -14233,13 +14233,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installed Apps"
+            "value": "Installed Applications"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已安装应用"
+            "value": "已安装的应用程序"
           }
         }
       }
@@ -15893,7 +15893,7 @@
         }
       }
     },
-    "label.require_touch_id_for_history": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Require Touch ID to open history"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "打开历史需要 Touch ID"}}}},
+    "label.require_touch_id_for_history": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Require Touch ID to open history"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "打开历史记录需通过 Touch ID 验证"}}}},
     "label.require_touch_id_to_unlock": {
       "localizations": {
         "en": {
@@ -16059,13 +16059,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search Apps"
+            "value": "Search Applications"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索应用"
+            "value": "搜索应用程序"
           }
         }
       }
@@ -16615,18 +16615,18 @@
         }
       }
     },
-    "label.storage_limit": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Storage ceiling"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "存储上限"}}}},
-    "label.record_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Record clipboard"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录剪贴板内容"}}}},
-    "message.record_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Turn this off to stop saving new copies. Existing history is kept."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭后不再记录新复制的内容，已有历史仍会保留。"}}}},
-    "label.record_which_content": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "What to record"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录哪些内容"}}}},
-    "label.read_text_in_images": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Read text inside images"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "识别图片里的文字"}}}},
-    "label.do_not_record": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "What to skip"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "不记录这些"}}}},
-    "label.skip_password_fields": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Skip password fields and temporary content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "不记录密码框和临时内容"}}}},
-    "message.skip_password_fields": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Password fields, password managers, and some apps mark what they copy. Turn this off if you need keys copied from a password field to show up in history."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "密码输入框、密码管理器和部分 App 会给复制的内容打标记。如果你需要从密码框复制的密钥出现在历史里，关掉这一项。"}}}},
-    "label.guess_and_skip_secrets": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Also skip anything that looks like a secret"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "自动识别并跳过疑似密钥"}}}},
-    "message.guess_and_skip_secrets": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "PasteBuddy guesses from the text itself, so it can occasionally skip something you wanted."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "靠文本内容猜测，偶尔会误伤你想保留的内容。"}}}},
-    "label.storage_and_security": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Storage & security"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "存储与安全"}}}},
-    "label.advanced": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "More rules"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "更多规则"}}}},
+    "label.storage_limit": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Storage limit"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "存储上限"}}}},
+    "label.record_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Record clipboard content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录剪贴板内容"}}}},
+    "message.record_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disable this option to stop recording new content. Existing history is retained."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭后将停止记录新复制的内容，已有历史记录将予以保留。"}}}},
+    "label.record_which_content": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Content to Record"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录的内容"}}}},
+    "label.read_text_in_images": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Recognize text in images"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "识别图片中的文字"}}}},
+    "label.do_not_record": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclusion Rules"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除规则"}}}},
+    "label.skip_password_fields": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclude password fields and temporary content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除密码框与临时内容"}}}},
+    "message.skip_password_fields": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Password fields, password managers, and some applications mark the content they copy. Disable this option to record content copied from a password field."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "密码输入框、密码管理器及部分应用程序会为其复制的内容添加标记。如需记录从密码框复制的内容，请关闭此选项。"}}}},
+    "label.guess_and_skip_secrets": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclude content that appears to be a secret"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除疑似密钥的内容"}}}},
+    "message.guess_and_skip_secrets": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Detection is based on the text itself and may exclude content that should be retained."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "该判定依据文本内容进行，可能误判并排除需要保留的内容。"}}}},
+    "label.storage_and_security": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Storage & Security"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "存储与安全"}}}},
+    "label.advanced": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Advanced Rules"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "高级规则"}}}},
     "format.storage_used_of_limit": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ · %@ used of %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@ · 已用 %@，上限 %@"}}}},
     "label.storage_mode": {
       "localizations": {
@@ -17839,7 +17839,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "还没有 MCP 客户端调用过 PasteBuddy。"
+            "value": "尚无 MCP 客户端调用过 PasteBuddy。"
           }
         }
       }
@@ -17881,13 +17881,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No installed apps were found."
+            "value": "No installed applications were found."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未找到已安装应用。"
+            "value": "未找到已安装的应用程序。"
           }
         }
       }
@@ -17913,13 +17913,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No matching apps."
+            "value": "No matching applications."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有匹配的应用。"
+            "value": "没有匹配的应用程序。"
           }
         }
       }
@@ -17977,13 +17977,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use the client install action when available, or import the configuration below for clients that only support manual MCP setup."
+            "value": "Use the client install action when available. For clients that support manual MCP setup only, import the configuration below."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "优先使用客户端安装操作；只支持手动 MCP 设置的客户端，可导入下方配置。"
+            "value": "请优先使用客户端安装操作；对于仅支持手动配置 MCP 的客户端，可导入下方配置。"
           }
         }
       }
@@ -18217,13 +18217,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retrieving full clipboard payloads is off by default. Turn on Retrieve Clipboard Item only for AI tools you trust."
+            "value": "Retrieving full clipboard payloads is disabled by default. Enable Retrieve Clipboard Item only for AI tools you trust."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "默认不允许读取完整剪贴板内容。仅对你信任的 AI 工具开启“读取剪贴板项目”。"
+            "value": "默认不允许读取完整剪贴板内容。请仅为您信任的 AI 工具启用“读取剪贴板项目”。"
           }
         }
       }
@@ -20636,13 +20636,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installing..."
+            "value": "Installing…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在安装..."
+            "value": "正在安装…"
           }
         }
       }
@@ -20887,19 +20887,19 @@
         }
       }
     },
-    "label.generate_link_previews": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Show previews for links"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "为链接生成预览图"}}}},
+    "label.generate_link_previews": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Generate link previews"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "生成链接预览"}}}},
     "label.ignore_applications": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Never record these apps"
+            "value": "Excluded Applications"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "不记录这些 App"
+            "value": "排除的应用程序"
           }
         }
       }
@@ -20909,13 +20909,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Keep History"
+            "value": "History Retention"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保留历史"
+            "value": "历史保留期"
           }
         }
       }
@@ -21032,7 +21032,7 @@
         }
       }
     },
-    "label.show_during_screen_sharing": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Stay visible while sharing your screen"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "共享屏幕时仍然显示面板"}}}},
+    "label.show_during_screen_sharing": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Display the panel during screen sharing"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "屏幕共享期间显示面板"}}}},
     "label.show_next_pinboard": {
       "localizations": {
         "en": {
@@ -21150,13 +21150,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fetch and persist titles and preview images for URL items."
+            "value": "Fetch and store titles and preview images for URL items."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为 URL 项目抓取标题与预览图并持久化。"
+            "value": "抓取并保存 URL 项目的标题与预览图。"
           }
         }
       }
@@ -21164,13 +21164,13 @@
     "message.application_not_installed": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Not installed on this Mac" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "这台 Mac 上没有安装" } }
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此 Mac 未安装该应用程序" } }
       }
     },
     "message.no_ignored_applications": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "No apps ignored yet." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "还没有忽略任何 App。" } }
+        "en": { "stringUnit": { "state": "translated", "value": "No applications have been excluded." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "尚未排除任何应用程序。" } }
       }
     },
     "message.ignore_applications": {
@@ -21178,13 +21178,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Anything copied from these apps stays out of history."
+            "value": "Content copied from these applications is not recorded."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从这些 App 复制的内容不会进入历史。"
+            "value": "从这些应用程序复制的内容将不会被记录。"
           }
         }
       }
@@ -21269,7 +21269,7 @@
         }
       }
     },
-    "message.show_during_screen_sharing": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Turn this off to hide PasteBuddy from screen sharing and recordings."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭后，屏幕共享和录屏中不会出现 PasteBuddy 面板。"}}}},
+    "message.show_during_screen_sharing": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disable this option to hide the PasteBuddy panel from screen sharing and recordings."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭后，PasteBuddy 面板将不会出现在屏幕共享与录屏中。"}}}},
     "message.subscription_active": {
       "localizations": {
         "en": {
@@ -21292,9 +21292,9 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "根据 App" } }
       }
     },
-    "label.flatten_large_excel_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Keep only plain text for large spreadsheets"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "大段表格只保留纯文本"}}}},
-    "label.ignore_clipboard_larger_than": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Skip anything larger than"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "跳过大于此体积的内容"}}}},
-    "label.ignore_whitespace_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Skip blank content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "不记录只有空格和空行的内容"}}}},
+    "label.flatten_large_excel_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Retain plain text only for large spreadsheets"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "大型表格仅保留纯文本"}}}},
+    "label.ignore_clipboard_larger_than": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclude content larger than"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除超过此大小的内容"}}}},
+    "label.ignore_whitespace_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclude blank content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除仅含空格与空行的内容"}}}},
     "label.local_stdio_server": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Local stdio server · PasteBuddyMCP" } },
@@ -21307,7 +21307,7 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "MB" } }
       }
     },
-    "message.zero_disables_size_filter": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Set to 0 to keep content of any size."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "设为 0 表示不限制体积。"}}}},
+    "message.zero_disables_size_filter": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Set to 0 to impose no size limit."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "设为 0 表示不限制大小。"}}}},
     "action.launch_paste": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Launch Paste" } },
