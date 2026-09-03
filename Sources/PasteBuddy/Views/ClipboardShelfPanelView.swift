@@ -555,7 +555,7 @@ struct ClipboardShelfPanelView: View {
                 )
             ]
         }
-        if isLoadingShelfPage, shelfScope != .pasteStack {
+        if isLoadingShelfPage, shelfScope != .pasteStack, renderedShelfItems.isEmpty {
             return [.loading]
         }
         if isShowingLaunchAtLoginPrompt {
@@ -1153,12 +1153,6 @@ struct ClipboardShelfPanelView: View {
     private func refreshShelfItems() {
         let queryID = shelfQueryState
         shelfPageTask?.cancel()
-        paging.beginLoading(queryID: queryID)
-        shelfInteraction.replaceItems(
-            [],
-            storeSelectedIDs: store.selectedItemIDs,
-            storePrimarySelectedID: store.selectedItemID
-        )
         isLoadingShelfPage = shelfScope != .pasteStack
         shelfPageTask = Task { @MainActor in
             do {

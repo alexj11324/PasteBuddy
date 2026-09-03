@@ -360,8 +360,13 @@ final class PasteBuddyStoreTests: XCTestCase {
         )
         reloaded.load()
 
-        XCTAssertEqual(reloaded.snapshot.items.count, 501)
+        // load() intentionally hydrates snapshot.items with only a bounded initial cache
+        // (80 items) when a repository snapshot exists; the full 501 stay reachable through
+        // the repository itself (already proven above) and through mainListItemsSnapshot,
+        // which queries the repository rather than the bounded in-memory cache.
+        XCTAssertEqual(reloaded.snapshot.items.count, 80)
         XCTAssertTrue(reloaded.snapshot.items.contains(where: { $0.id == synced501.id }))
+        XCTAssertTrue(reloaded.mainListItemsSnapshot.contains(where: { $0.id == synced501.id }))
     }
 
     func testDuplicateCapturedItemMovesExistingItemToTopWithoutCreatingNewHistory() throws {
@@ -2750,6 +2755,79 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(snapshot.migrateIfNeeded())
     }
 
+    func testStorageCeilingMigrationReplacesTheLegacyBinaryDefault() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 2,
+            storage: StorageConfiguration(
+                maxStorageBytes: StorageConfiguration.legacyBinaryDefaultMaxStorageBytes
+            )
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertEqual(snapshot.storage.maxStorageBytes, StorageConfiguration.defaultMaxStorageBytes)
+        XCTAssertEqual(snapshot.schemaVersion, PasteBuddySnapshot.currentSchemaVersion)
+        XCTAssertFalse(snapshot.migrateIfNeeded())
+    }
+
+    func testStorageCeilingMigrationLeavesADeliberateChoiceAlone() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 2,
+            storage: StorageConfiguration(maxStorageBytes: 5_000_000_000)
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertEqual(snapshot.storage.maxStorageBytes, 5_000_000_000)
+    }
+
+    func testMigratingFromV2DoesNotReapplyTheV1SensitiveTextReset() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 2,
+            privacy: PrivacyConfiguration(blockLikelySensitiveText: true)
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertTrue(
+            snapshot.privacy.blockLikelySensitiveText,
+            "A v2 snapshot already went through the reset; a stored true is now a real choice."
+        )
+    }
+
+    /// Ceilings are decimal so `ByteCountFormatter`'s file style prints them as
+    /// the round numbers the picker offers, instead of 536.9 MB / 1.07 GB.
+    func testStorageCeilingDefaultIsARoundDecimalNumber() {
+        XCTAssertEqual(StorageConfiguration().maxStorageBytes % 1_000_000_000, 0)
+        XCTAssertEqual(
+            ByteCountFormatter.string(
+                fromByteCount: Int64(StorageConfiguration.defaultMaxStorageBytes),
+                countStyle: .file
+            ),
+            "1 GB"
+        )
+    }
+
+    func testSeededApplicationNameRulesAreDroppedByMigration() {
+        var snapshot = PasteBuddySnapshot(
+            schemaVersion: 3,
+            privacy: PrivacyConfiguration(
+                excludedApplicationNames: ["1Password", "Passwords", "Keychain Access", "My Notes"],
+                excludedBundleIdentifiers: ["com.apple.keychainaccess"]
+            )
+        )
+        XCTAssertTrue(snapshot.migrateIfNeeded())
+        XCTAssertEqual(
+            snapshot.privacy.excludedApplicationNames,
+            ["My Notes"],
+            "Only the seeded English names go; a name the user added themselves stays."
+        )
+    }
+
+    /// A name rule is matched against the app's localized name, so seeding
+    /// English names excluded nothing on a non-English system while showing a
+    /// second dead row beside the identifier rule that did the work.
+    func testNothingIsExcludedByApplicationNameOutOfTheBox() {
+        XCTAssertTrue(PrivacyConfiguration().excludedApplicationNames.isEmpty)
+        XCTAssertTrue(
+            PrivacyConfiguration().excludedBundleIdentifiers.contains("com.apple.keychainaccess")
+        )
+    }
+
     func testStoreLoadMigratesV1SensitiveBlockingDefault() throws {
         let harness = try StoreHarness()
         defer { harness.cleanup() }
@@ -2792,8 +2870,17 @@ final class PasteBuddyStoreTests: XCTestCase {
         let privacy = PrivacyConfiguration()
 
         XCTAssertTrue(privacy.excludesApplication(named: "Renamed Vault", bundleIdentifier: "com.1password.1password"))
-        XCTAssertTrue(privacy.excludesApplication(named: "Passwords", bundleIdentifier: nil))
         XCTAssertFalse(privacy.excludesApplication(named: "Notes", bundleIdentifier: "com.apple.Notes"))
+
+        // Nothing ships as a name rule. Apple's Passwords app is covered by its
+        // bundle identifier, which holds whatever language the Mac runs in.
+        XCTAssertFalse(privacy.excludesApplication(named: "Passwords", bundleIdentifier: nil))
+        XCTAssertTrue(privacy.excludesApplication(named: "密码", bundleIdentifier: "com.apple.Passwords"))
+
+        // A name the user adds themselves still excludes by name.
+        var edited = privacy
+        edited.excludedApplicationNames.insert("密码")
+        XCTAssertTrue(edited.excludesApplication(named: "密码", bundleIdentifier: nil))
     }
 
     func testCustomCaptureRulesMatchTextSourceBundleURLAndFiles() {
@@ -5838,6 +5925,43 @@ final class PasteBuddyStoreTests: XCTestCase {
         XCTAssertFalse(store.snapshot.settingsBehavior.generateLinkPreviews)
         XCTAssertFalse(store.snapshot.settingsBehavior.ignoreTransientContent)
         XCTAssertEqual(screenSharingChanges, [true])
+
+        let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
+        reloaded.load()
+        XCTAssertEqual(reloaded.snapshot.settingsBehavior, store.snapshot.settingsBehavior)
+    }
+
+    func testSkippingMarkedTemporaryContentDrivesAllThreePasteboardMarkers() async throws {
+        // Settings presents concealed / transient / auto-generated as a single switch,
+        // because which marker an app used is a pasteboard-protocol detail, not a user
+        // choice. The three must therefore move together.
+        let harness = try StoreHarness()
+        defer { harness.cleanup() }
+        let store = PasteBuddyStore(diskStore: harness.snapshotStore)
+
+        XCTAssertTrue(store.skipsMarkedTemporaryContent)
+
+        store.setSkipsMarkedTemporaryContent(false)
+        await store.flushPendingSave()
+
+        XCTAssertFalse(store.skipsMarkedTemporaryContent)
+        XCTAssertFalse(store.snapshot.settingsBehavior.ignoreConcealedContent)
+        XCTAssertFalse(store.snapshot.settingsBehavior.ignoreTransientContent)
+        XCTAssertFalse(store.snapshot.settingsBehavior.ignoreAutoGeneratedContent)
+
+        store.setSkipsMarkedTemporaryContent(true)
+        await store.flushPendingSave()
+
+        XCTAssertTrue(store.snapshot.settingsBehavior.ignoreConcealedContent)
+        XCTAssertTrue(store.snapshot.settingsBehavior.ignoreTransientContent)
+        XCTAssertTrue(store.snapshot.settingsBehavior.ignoreAutoGeneratedContent)
+
+        // A snapshot left in a mixed state by an older build still reads as "on", so the
+        // switch never silently under-reports an active filter.
+        store.setIgnoreTransientContent(false)
+        store.setIgnoreAutoGeneratedContent(false)
+        XCTAssertTrue(store.snapshot.settingsBehavior.ignoreConcealedContent)
+        XCTAssertTrue(store.skipsMarkedTemporaryContent)
 
         let reloaded = PasteBuddyStore(diskStore: harness.snapshotStore)
         reloaded.load()

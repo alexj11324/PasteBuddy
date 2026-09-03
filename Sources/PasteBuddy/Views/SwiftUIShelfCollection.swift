@@ -41,13 +41,6 @@ struct ClipboardPanelPagingState<Item: Identifiable, QueryID: Equatable> where I
             && items.count < ClipboardPanelHistoryLoadingPolicy.maxResidentItems
     }
 
-    mutating func beginLoading(queryID: QueryID) {
-        generation &+= 1
-        items = []
-        totalCount = 0
-        self.queryID = queryID
-    }
-
     mutating func trimToInitialPage() {
         guard items.count > ClipboardPanelHistoryLoadingPolicy.initialPageSize else { return }
         generation &+= 1

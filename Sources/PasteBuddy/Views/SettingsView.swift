@@ -139,7 +139,18 @@ struct SettingsView: View {
                     Text(launchAtLoginErrorMessage)
                         .foregroundStyle(.secondary)
                 }
-                Toggle("label.background_running", isOn: backgroundRunningBinding)
+                Toggle(isOn: backgroundRunningBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.record_clipboard",
+                        detailKey: "message.record_clipboard"
+                    )
+                }
+                Toggle(isOn: generateLinkPreviewsBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.generate_link_previews",
+                        detailKey: "message.generate_link_previews"
+                    )
+                }
                 Toggle("label.enable_icloud_sync", isOn: cloudSyncBinding)
                 Toggle("label.sound_effects", isOn: soundEffectsBinding)
             } footer: {
@@ -193,8 +204,26 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+
+            Section {
+                Text(appVersionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
         .pasteBuddySettingsForm()
+    }
+
+    private var appVersionSummary: String {
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let buildNumber = info?["CFBundleVersion"] as? String ?? "0"
+        let commit = (info?["PasteBuddySourceCommit"] as? String)?.prefix(8)
+        guard let commit, !commit.isEmpty else {
+            return localized("format.version_build", shortVersion, buildNumber)
+        }
+        return localized("format.version_build_commit", shortVersion, buildNumber, String(commit))
     }
 
     @ViewBuilder
@@ -246,22 +275,27 @@ struct SettingsView: View {
 
     private var privacySettings: some View {
         Form {
-            Section {
-                Toggle(isOn: showDuringScreenSharingBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.show_during_screen_sharing",
-                        detailKey: "message.show_during_screen_sharing"
-                    )
-                }
-                Toggle(isOn: generateLinkPreviewsBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.generate_link_previews",
-                        detailKey: "message.generate_link_previews"
-                    )
-                }
+            Section("label.record_which_content") {
+                Toggle("label.capture_text", isOn: captureTextBinding)
+                Toggle("label.capture_links", isOn: captureURLsBinding)
+                Toggle("label.capture_files", isOn: captureFilesBinding)
+                Toggle("label.capture_images", isOn: captureImagesBinding)
+                Toggle("label.read_text_in_images", isOn: ocrBinding)
+                    .disabled(!store.snapshot.privacy.captureImages)
             }
 
-            Section("label.content_filtering") {
+            Section {
+                Toggle(
+                    isOn: Binding(
+                        get: { store.skipsMarkedTemporaryContent },
+                        set: { store.setSkipsMarkedTemporaryContent($0) }
+                    )
+                ) {
+                    SettingsToggleLabel(
+                        titleKey: "label.skip_password_fields",
+                        detailKey: "message.skip_password_fields"
+                    )
+                }
                 Toggle(
                     isOn: Binding(
                         get: { store.snapshot.privacy.blockLikelySensitiveText },
@@ -269,31 +303,17 @@ struct SettingsView: View {
                     )
                 ) {
                     SettingsToggleLabel(
-                        titleKey: "label.ignore_sensitive_content",
-                        detailKey: "message.ignore_sensitive_content"
+                        titleKey: "label.guess_and_skip_secrets",
+                        detailKey: "message.guess_and_skip_secrets"
                     )
                 }
-                Toggle(isOn: ignoreTransientContentBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.ignore_transient_content",
-                        detailKey: "message.ignore_transient_content"
-                    )
-                }
+            } header: {
+                Text("label.do_not_record")
             }
 
-            SettingsPrivacyRules(store: store)
+            SettingsExcludedApplications(store: store)
 
-            Section("label.capture_and_privacy") {
-                Toggle("label.capture_enabled", isOn: backgroundRunningBinding)
-                Toggle("label.capture_text", isOn: captureTextBinding)
-                Toggle("label.capture_links", isOn: captureURLsBinding)
-                Toggle("label.capture_files", isOn: captureFilesBinding)
-                Toggle("label.capture_images", isOn: captureImagesBinding)
-                Toggle("label.run_local_ocr_after_image_capture", isOn: ocrBinding)
-                    .disabled(!store.snapshot.privacy.captureImages)
-            }
-
-            Section("label.storage_security") {
+            Section("label.security") {
                 Toggle(
                     "label.require_touch_id_for_history",
                     isOn: Binding(
@@ -301,40 +321,113 @@ struct SettingsView: View {
                         set: { store.setBiometricHistoryLockEnabled($0) }
                     )
                 )
-                LabeledContent("label.storage_usage") {
-                    HStack(spacing: 8) {
-                        Text(localized("format.items", store.storageUsageReport.itemCount))
-                        Text(ByteCountFormatter.string(
-                            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
-                            countStyle: .file
-                        ))
-                        .foregroundStyle(.secondary)
+                // Who can see the history, like Touch ID above it — not a rule
+                // about what gets recorded.
+                Toggle(isOn: showDuringScreenSharingBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.show_during_screen_sharing",
+                        detailKey: "message.show_during_screen_sharing"
+                    )
+                }
+            }
+
+            Section("label.storage") {
+                Picker("label.storage_limit", selection: storageLimitBinding) {
+                    ForEach(storageLimitChoices, id: \.self) { bytes in
+                        Text(Self.storageLimitTitle(for: bytes))
+                            .tag(bytes)
                     }
                 }
-                LabeledContent("label.storage_limit") {
-                    Text(storageLimitDescription)
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView(value: store.storageUsageReport.usageFraction)
+                    Text(storageUsageSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                ProgressView(value: store.storageUsageReport.usageFraction)
-                    .accessibilityLabel(Text("label.storage_usage"))
-                    .accessibilityValue(Text(
-                        ByteCountFormatter.string(
-                            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
-                            countStyle: .file
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text("label.storage_usage"))
+                .accessibilityValue(Text(storageUsageSummary))
+            }
+
+            Section {
+                Toggle("label.ignore_whitespace_clipboard", isOn: Binding(
+                    get: { store.snapshot.settingsBehavior.ignoreWhitespaceOnlyContent },
+                    set: { store.setIgnoreWhitespaceOnlyContent($0) }
+                ))
+                Toggle("label.flatten_large_excel_clipboard", isOn: Binding(
+                    get: { store.snapshot.settingsBehavior.convertLargeExcelContentToPlainText },
+                    set: { store.setConvertLargeExcelContentToPlainText($0) }
+                ))
+                LabeledContent("label.ignore_clipboard_larger_than") {
+                    HStack(spacing: 6) {
+                        TextField(
+                            "",
+                            value: Binding(
+                                get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
+                                set: { store.setMaximumClipboardSizeMegabytes($0) }
+                            ),
+                            format: .number.precision(.fractionLength(0...1))
                         )
-                    ))
-                Stepper(
-                    value: Binding(
-                        get: { store.snapshot.storage.maxStorageBytes / (1_024 * 1_024) },
-                        set: { requestMaxStorageBytesChange($0 * 1_024 * 1_024) }
-                    ),
-                    in: 1...102_400,
-                    step: 50
-                ) {
-                    Text(localized("format.use_up_to", storageLimitDescription))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 72)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
+                        Text("label.megabytes")
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            } header: {
+                Text("label.advanced")
+            } footer: {
+                Text("message.zero_disables_size_filter")
             }
         }
         .pasteBuddySettingsForm()
+    }
+
+    private var storageUsageSummary: String {
+        let used = ByteCountFormatter.string(
+            fromByteCount: Int64(store.storageUsageReport.estimatedBytes),
+            countStyle: .file
+        )
+        return localized(
+            "format.storage_used_of_limit",
+            localized("format.items", store.storageUsageReport.itemCount),
+            used,
+            storageLimitDescription
+        )
+    }
+
+    /// Ceilings a clipboard history plausibly needs, in decimal bytes so each
+    /// one reads back as a round "500 MB" / "5 GB" rather than 536.9 MB.
+    /// Whatever the store currently holds is kept selectable so an older custom
+    /// ceiling does not render as a blank picker.
+    private var storageLimitChoices: [Int] {
+        let presets = [
+            500_000_000,
+            1_000_000_000,
+            2_000_000_000,
+            5_000_000_000,
+            10_000_000_000,
+        ]
+        let current = store.snapshot.storage.maxStorageBytes
+        return presets.contains(current) ? presets : (presets + [current]).sorted()
+    }
+
+    private static func storageLimitTitle(for bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowsNonnumericFormatting = false
+        formatter.allowedUnits = bytes >= 1_000_000_000 ? [.useGB] : [.useMB]
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    private var storageLimitBinding: Binding<Int> {
+        Binding(
+            get: { store.snapshot.storage.maxStorageBytes },
+            set: { requestMaxStorageBytesChange($0) }
+        )
     }
 
     private var shortcutSettings: some View {
@@ -1169,142 +1262,64 @@ private struct MCPClientConfigurationSheet: View {
     }
 }
 
-private enum SettingsPrivacyRuleMode: String, CaseIterable, Identifiable {
-    case applications
-    case otherRules
-
-    var id: String { rawValue }
-}
-
-private struct SettingsPrivacyRules: View {
+private struct SettingsExcludedApplications: View {
     @Bindable var store: PasteBuddyStore
     @State private var applications: [InstalledApplication] = []
-    @State private var selectedRowID: String?
     @State private var showingApplicationPicker = false
-    @State private var mode: SettingsPrivacyRuleMode = .applications
 
     var body: some View {
-        Group {
-            Section {
-                Picker("label.ignore_applications", selection: $mode) {
-                    Text("label.by_app").tag(SettingsPrivacyRuleMode.applications)
-                    Text("label.other_rules").tag(SettingsPrivacyRuleMode.otherRules)
+        applicationRules
+            .onAppear(perform: loadApplications)
+            .sheet(isPresented: $showingApplicationPicker) {
+                InstalledApplicationPickerSheet { application in
+                    store.excludeApplication(
+                        named: application.displayName,
+                        bundleIdentifier: application.bundleIdentifier
+                    )
+                    loadApplications()
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
             }
-
-            switch mode {
-            case .applications:
-                applicationRules
-            case .otherRules:
-                otherRules
-            }
-        }
-        .onAppear(perform: loadApplications)
-        .sheet(isPresented: $showingApplicationPicker) {
-            InstalledApplicationPickerSheet { application in
-                store.excludeApplication(
-                    named: application.displayName,
-                    bundleIdentifier: application.bundleIdentifier
-                )
-                selectedRowID = nil
-                loadApplications()
-            }
-        }
     }
 
     private var applicationRules: some View {
         Section {
-            List(selection: $selectedRowID) {
-                ForEach(excludedRows) { row in
+            if excludedRows.isEmpty {
+                Text("message.no_ignored_applications")
+                    .foregroundStyle(.secondary)
+            }
+            // Plain form rows, not a bordered List: a fixed-height list inside a
+            // scrolling settings page nests a second box and a second scroller
+            // inside the section's own.
+            ForEach(excludedRows) { row in
+                LabeledContent {
+                    Button {
+                        remove(row)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .symbolRenderingMode(.hierarchical)
+                            .imageScale(.large)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("action.remove")
+                } label: {
                     ExcludedApplicationRowView(row: row)
-                        .tag(row.id)
                 }
             }
-            .listStyle(.bordered)
-            .frame(minHeight: 160, maxHeight: 220)
-
-            HStack(spacing: 8) {
-                Button {
-                    showingApplicationPicker = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("action.add_app")
-
-                Button {
-                    removeSelectedRow()
-                } label: {
-                    Image(systemName: "minus")
-                }
-                .disabled(selectedRowID == nil)
-                .accessibilityLabel("action.remove")
-                Spacer()
-            }
-            .buttonStyle(.borderless)
-        } header: {
-            Text("label.ignore_applications")
-        } footer: {
-            Text("message.ignore_applications")
-        }
-    }
-
-    private var otherRules: some View {
-        Section {
-            Toggle("label.ignore_remote_clipboard", isOn: behaviorBinding(
-                get: \.ignoreRemoteClipboardContent,
-                set: store.setIgnoreRemoteClipboardContent
-            ))
-            Toggle("label.ignore_concealed_clipboard", isOn: behaviorBinding(
-                get: \.ignoreConcealedContent,
-                set: store.setIgnoreConcealedContent
-            ))
-            Toggle("label.ignore_auto_generated_clipboard", isOn: behaviorBinding(
-                get: \.ignoreAutoGeneratedContent,
-                set: store.setIgnoreAutoGeneratedContent
-            ))
-            Toggle("label.ignore_whitespace_clipboard", isOn: behaviorBinding(
-                get: \.ignoreWhitespaceOnlyContent,
-                set: store.setIgnoreWhitespaceOnlyContent
-            ))
-            Toggle("label.flatten_large_excel_clipboard", isOn: behaviorBinding(
-                get: \.convertLargeExcelContentToPlainText,
-                set: store.setConvertLargeExcelContentToPlainText
-            ))
-            LabeledContent("label.ignore_clipboard_larger_than") {
-                HStack(spacing: 8) {
-                    TextField(
-                        "",
-                        value: Binding(
-                            get: { store.snapshot.settingsBehavior.maximumClipboardSizeMegabytes },
-                            set: { store.setMaximumClipboardSizeMegabytes($0) }
-                        ),
-                        format: .number.precision(.fractionLength(1))
-                    )
-                    .frame(width: 72)
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(Text("label.ignore_clipboard_larger_than"))
-                    Text("label.megabytes")
-                        .foregroundStyle(.secondary)
-                }
+            Button("action.add_app") {
+                showingApplicationPicker = true
             }
         } header: {
-            Text("label.other_rules")
-        } footer: {
-            Text("message.zero_disables_size_filter")
+            // The explanation belongs above the list it describes; as a footer
+            // it read as "content copied from the applications below" while
+            // sitting underneath them.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("label.ignore_applications")
+                Text("message.ignore_applications")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .toggleStyle(.checkbox)
-    }
-
-    private func behaviorBinding(
-        get: KeyPath<SettingsBehaviorConfiguration, Bool>,
-        set: @escaping (Bool) -> Void
-    ) -> Binding<Bool> {
-        Binding(
-            get: { store.snapshot.settingsBehavior[keyPath: get] },
-            set: { value in set(value) }
-        )
     }
 
     private var excludedRows: [ExcludedApplicationListRow] {
@@ -1329,6 +1344,25 @@ private struct SettingsPrivacyRules: View {
             }
         }
 
+        // Bundle identifiers whose app lives outside the scanned directories —
+        // Keychain Access and friends in /System/Library/CoreServices — still
+        // resolve through Launch Services, so they get a name and an icon
+        // instead of showing as a raw reverse-DNS string with a blank tile.
+        for bundleIdentifier in unmatchedBundleIdentifiers.sorted() {
+            guard let application = Self.resolveApplication(bundleIdentifier: bundleIdentifier) else {
+                continue
+            }
+            unmatchedBundleIdentifiers.remove(bundleIdentifier)
+            unmatchedNames.remove(application.displayName)
+            rows.append(
+                ExcludedApplicationListRow(
+                    application: application,
+                    name: nil,
+                    bundleIdentifier: bundleIdentifier
+                )
+            )
+        }
+
         rows += unmatchedNames.map {
             ExcludedApplicationListRow(application: nil, name: $0, bundleIdentifier: nil)
         }
@@ -1341,22 +1375,27 @@ private struct SettingsPrivacyRules: View {
         }
     }
 
+    private static func resolveApplication(bundleIdentifier: String) -> InstalledApplication? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        // Reuse the catalog's naming rules: FileManager's display name keeps the
+        // ".app" extension when Finder is set to show every extension.
+        return InstalledApplicationCatalog().application(at: url)
+    }
+
     private func loadApplications() {
         applications = InstalledApplicationCatalog().applications()
     }
 
-    private func removeSelectedRow() {
-        guard let selectedRowID,
-              let row = excludedRows.first(where: { $0.id == selectedRowID }) else {
-            return
-        }
-        if let name = row.name {
+    private func remove(_ row: ExcludedApplicationListRow) {
+        if let name = row.name ?? row.application?.displayName {
             store.removeExcludedApplication(name)
         }
-        if let bundleIdentifier = row.bundleIdentifier {
+        if let bundleIdentifier = row.bundleIdentifier ?? row.application?.bundleIdentifier {
             store.removeExcludedBundleIdentifier(bundleIdentifier)
         }
-        self.selectedRowID = nil
+        loadApplications()
     }
 }
 
@@ -1451,7 +1490,13 @@ private struct ExcludedApplicationRowView: View {
             InstalledApplicationIcon(application: row.application)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.displayName)
-                if let detail = row.detailText {
+                if row.application == nil {
+                    // Says why the row has no icon and no friendlier name: the
+                    // rule stands, the app just is not on this Mac.
+                    Text("message.application_not_installed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let detail = row.detailText {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1480,8 +1525,11 @@ private struct ExcludedApplicationListRow: Identifiable, Hashable {
         application?.displayName ?? name ?? bundleIdentifier ?? ""
     }
 
+    /// Only worth a second line when it says something the title does not; a
+    /// bundle-identifier-only entry would otherwise print itself twice.
     var detailText: String? {
-        bundleIdentifier ?? application?.bundleIdentifier
+        guard let detail = bundleIdentifier ?? application?.bundleIdentifier else { return nil }
+        return detail == displayName ? nil : detail
     }
 }
 

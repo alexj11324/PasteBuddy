@@ -2051,8 +2051,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("linkPreviewMetadataRequests"))
         XCTAssertTrue(storeSource.contains("enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem)"))
         XCTAssertTrue(storeSource.contains("ClipboardLinkMetadataFetcher.fetch(for: urlString)"))
-        XCTAssertTrue(storeSource.contains("snapshot.items[index].payload.imageData = imageData"))
-        XCTAssertTrue(storeSource.contains("snapshot.items[index].payload.imageByteCount = imageData.count"))
+        XCTAssertTrue(storeSource.contains("currentItem.payload.imageData = imageData"))
+        XCTAssertTrue(storeSource.contains("currentItem.payload.imageByteCount = imageData.count"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.preview(for:"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.cachedPreview(for:"))
         XCTAssertFalse(sourceFileExists("Sources/PasteBuddy/Models/LinkPreviewCache.swift"))
@@ -2094,7 +2094,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("JSONDecoder().decode(PinboardItemDragPayload.self"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
         XCTAssertTrue(source.contains("store.addItemsToPasteStack(ids)"))
-        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+        XCTAssertTrue(source.contains("store.item(withID: id).map(category.matches) == true"))
     }
 
     func testSidePanelCollectionChipsAcceptDraggedClipboardItems() throws {
@@ -2108,7 +2108,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
-        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+        XCTAssertTrue(source.contains("store.item(withID: id).map(category.matches) == true"))
     }
 
     func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
@@ -2344,19 +2344,27 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let dispatchScript = try sourceFileContents("script/dispatch_local_ci.sh")
         let ciScript = try sourceFileContents("script/ci.sh")
 
+        // workflow_dispatch (ad-hoc re-run against an arbitrary SHA) still requires explicit
+        // owner approval; it is no longer the only trigger, since push/pull_request runs are
+        // gated by GitHub's own private-repo write-access model instead (single-collaborator repo).
         XCTAssertTrue(workflow.contains("workflow_dispatch:"))
-        XCTAssertFalse(workflow.contains("pull_request:"))
-        XCTAssertFalse(workflow.contains("push:"))
-        XCTAssertTrue(workflow.contains("github.actor == github.repository_owner"))
+        XCTAssertTrue(workflow.contains("pull_request:"))
+        XCTAssertTrue(workflow.contains("push:"))
+        XCTAssertTrue(workflow.contains("branches: [main]"))
+        XCTAssertTrue(workflow.contains(
+            "(github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.confirmation == 'RUN')"
+        ))
         XCTAssertTrue(workflow.contains("checks: write"))
         XCTAssertTrue(workflow.contains("-f name='CI / verify'"))
-        XCTAssertTrue(workflow.contains("ref: ${{ inputs.commit_sha }}"))
+        XCTAssertTrue(workflow.contains("ref: ${{ env.TARGET_SHA }}"))
+        XCTAssertTrue(workflow.contains("if: github.event_name == 'workflow_dispatch'"))
         XCTAssertTrue(workflow.contains("runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]"))
         XCTAssertFalse(workflow.contains("env:\n      GH_TOKEN:"))
         XCTAssertTrue(dispatchScript.contains("Only repository owner"))
         XCTAssertTrue(dispatchScript.contains("commits/$TARGET_SHA"))
         XCTAssertTrue(ciScript.contains("CODE_SIGNING_ALLOWED=NO"))
         XCTAssertFalse(ciScript.contains("build_and_run.sh"))
+        XCTAssertTrue(ciScript.contains("swift build --product PasteBuddy"))
     }
 
     func testReleaseWorkflowsUseProtectedLocalRunnerAndCompleteAppleTrustChain() throws {
@@ -2556,10 +2564,83 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(generalSource.contains("label.iroh_clipboard_sync"))
         XCTAssertTrue(privacySource.contains("label.show_during_screen_sharing"))
         XCTAssertTrue(privacySource.contains("label.capture_images"))
-        XCTAssertTrue(privacySource.contains("label.storage_security"))
+        XCTAssertTrue(privacySource.contains("label.security"))
+        XCTAssertTrue(privacySource.contains("label.storage"))
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
+    }
+
+    func testSettingsHideProtocolLevelSwitchesBehindOneUserFacingChoice() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+
+        // The three org.nspasteboard.* markers are one switch in the UI, driven by the
+        // store's merged accessor rather than by three independent toggles.
+        XCTAssertTrue(source.contains("label.skip_password_fields"))
+        XCTAssertTrue(source.contains("store.skipsMarkedTemporaryContent"))
+        XCTAssertTrue(source.contains("store.setSkipsMarkedTemporaryContent"))
+        XCTAssertFalse(source.contains("label.ignore_concealed_clipboard"))
+        XCTAssertFalse(source.contains("label.ignore_auto_generated_clipboard"))
+        XCTAssertFalse(source.contains("label.ignore_transient_content"))
+
+        // "Run in Background" and "Capture Enabled" were the same binding under two
+        // different names; only the General-page one survives, renamed for what it does.
+        XCTAssertTrue(source.contains("label.record_clipboard"))
+        XCTAssertFalse(source.contains("label.capture_enabled"))
+        XCTAssertFalse(source.contains("label.background_running"))
+
+        // Low-frequency rules are a plain section. The disclosure group they used to
+        // sit behind only accepted clicks on its chevron, so it hid them behind a
+        // control most of which was dead to the pointer.
+        XCTAssertFalse(source.contains("DisclosureGroup"))
+        XCTAssertFalse(source.contains("isShowingAdvancedPrivacy"))
+
+        // Storage is one usage readout plus a preset ceiling, not four controls.
+        XCTAssertTrue(source.contains("format.storage_used_of_limit"))
+        XCTAssertTrue(source.contains("storageLimitChoices"))
+        XCTAssertFalse(source.contains("in: 1...102_400"))
+        XCTAssertTrue(source.contains("requestMaxStorageBytesChange"))
+
+        // Ceilings are decimal, so the picker offers 500 MB / 1 GB / 5 GB rather
+        // than the 536.9 MB / 1.07 GB a binary preset formats into.
+        XCTAssertTrue(source.contains("500_000_000"))
+        XCTAssertTrue(source.contains("1_000_000_000"))
+        XCTAssertFalse(source.contains("1_024 * 1_024"))
+
+        // Universal Clipboard content is recorded like anything else; the switch
+        // that skipped it, and the marker behind it, are both gone.
+        let monitorSource = try sourceFileContents("Sources/PasteBuddyCore/Services/ClipboardMonitor.swift")
+        XCTAssertFalse(source.contains("label.ignore_remote_clipboard"))
+        XCTAssertFalse(monitorSource.contains("ignoreRemoteClipboardContent"))
+        XCTAssertFalse(monitorSource.contains("is-remote-clipboard"))
+    }
+
+    func testPanelLayoutIsNamedByDirectionEverywhereItAppears() throws {
+        let catalog = try sourceFileContents("Sources/PasteBuddy/Resources/Localizable.xcstrings")
+        let strings = try JSONSerialization.jsonObject(
+            with: Data(catalog.utf8)
+        ) as? [String: Any]
+        let table = try XCTUnwrap(strings?["strings"] as? [String: Any])
+
+        func value(_ key: String, _ language: String) throws -> String {
+            let entry = try XCTUnwrap(table[key] as? [String: Any])
+            let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+            let unit = try XCTUnwrap(localizations[language] as? [String: Any])
+            let stringUnit = try XCTUnwrap(unit["stringUnit"] as? [String: Any])
+            return try XCTUnwrap(stringUnit["value"] as? String)
+        }
+
+        // Shelf really is the horizontal collection and Side Panel the vertical one,
+        // so the user-facing names describe direction instead of internal codenames.
+        XCTAssertEqual(try value("label.clipboard_shelf", "en"), "Horizontal Panel")
+        XCTAssertEqual(try value("label.side_panel", "en"), "Vertical Panel")
+        XCTAssertEqual(try value("label.clipboard_shelf", "zh-Hans"), "横向面板")
+        XCTAssertEqual(try value("label.side_panel", "zh-Hans"), "竖向面板")
+
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        XCTAssertTrue(shelfSource.contains("direction: .horizontal"))
+        XCTAssertTrue(sideSource.contains("direction: .vertical"))
     }
 
     func testRetentionSliderSupportsIntermediateDurations() {
@@ -2581,12 +2662,23 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(iconSource.contains("import QuickLookThumbnailing"))
         XCTAssertTrue(iconSource.contains("representationTypes: [.icon]"))
         XCTAssertTrue(iconSource.contains("representation.cgImage"))
-        XCTAssertTrue(source.contains("SettingsPrivacyRuleMode"))
-        XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
-        XCTAssertTrue(source.contains("label.ignore_remote_clipboard"))
+        // The excluded-application list is its own section now. The segmented
+        // "by app / other rules" switch that used to split the privacy page in half
+        // is gone, and the low-frequency rules moved into the Advanced disclosure.
+        XCTAssertTrue(source.contains("SettingsExcludedApplications"))
+        XCTAssertFalse(source.contains("SettingsPrivacyRuleMode"))
+        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
         XCTAssertTrue(source.contains("label.flatten_large_excel_clipboard"))
         XCTAssertTrue(source.contains("setMaximumClipboardSizeMegabytes"))
         XCTAssertTrue(source.contains("store.excludeApplication("))
+
+        // Excluded apps are plain form rows. A bordered List inside the section
+        // put a second box and a second scroller inside the section's own.
+        XCTAssertFalse(source.contains(".listStyle(.bordered)"))
+        XCTAssertFalse(source.contains("selectedRowID"))
+        // A bundle identifier Launch Services can resolve shows the app's name
+        // and icon instead of a raw reverse-DNS string printed twice.
+        XCTAssertTrue(source.contains("urlForApplication(withBundleIdentifier:"))
     }
 
     func testInstalledApplicationCatalogReadsAppsFromLocalBundles() throws {
@@ -2647,13 +2739,48 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
     }
 
-    func testPrivacySettingsUsesNativeSelectionForExcludedApplications() throws {
+    func testPrivacySectionsEachHoldOneKindOfDecision() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let generalStart = try XCTUnwrap(source.range(of: "private var generalSettings"))
+        let privacyStart = try XCTUnwrap(source.range(of: "private var privacySettings"))
+        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutSettings"))
+        let generalSource = String(source[generalStart.lowerBound..<privacyStart.lowerBound])
+        let privacySource = String(source[privacyStart.lowerBound..<shortcutsStart.lowerBound])
+
+        // The privacy page splits at the first advanced rule; everything before
+        // it is the recording scope, the exclusion rules, and the two sections
+        // about who can reach the history.
+        let advancedRulesStart = try XCTUnwrap(
+            privacySource.range(of: "Toggle(\"label.ignore_whitespace_clipboard\"")
+        )
+        let sectionsAboveAdvanced = String(privacySource[..<advancedRulesStart.lowerBound])
+        let advancedRules = String(privacySource[advancedRulesStart.lowerBound...])
+
+        // Advanced rules decide what gets recorded, and nothing else.
+        XCTAssertTrue(advancedRules.contains("label.flatten_large_excel_clipboard"))
+        XCTAssertTrue(advancedRules.contains("label.ignore_clipboard_larger_than"))
+        XCTAssertFalse(advancedRules.contains("label.show_during_screen_sharing"))
+        XCTAssertFalse(advancedRules.contains("label.generate_link_previews"))
+
+        // Screen-sharing visibility is an access control, so it sits under
+        // Security with Touch ID rather than among the recording rules.
+        XCTAssertTrue(sectionsAboveAdvanced.contains("label.require_touch_id_for_history"))
+        XCTAssertTrue(sectionsAboveAdvanced.contains("label.show_during_screen_sharing"))
+
+        // Link previews are an app behaviour, so they belong on General.
+        XCTAssertTrue(generalSource.contains("label.generate_link_previews"))
+        XCTAssertFalse(privacySource.contains("label.generate_link_previews"))
+    }
+
+    func testEachExcludedApplicationRemovesItselfWithoutASelectionStep() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
 
-        XCTAssertTrue(source.contains("List(selection: $selectedRowID)"))
+        // Removal lives on the row, so there is no selection to establish first
+        // and no disabled button waiting for one.
+        XCTAssertFalse(source.contains("List(selection: $selectedRowID)"))
+        XCTAssertFalse(source.contains(".disabled(selectedRowID == nil)"))
         XCTAssertTrue(source.contains("store.removeExcludedApplication(name)"))
         XCTAssertTrue(source.contains("store.removeExcludedBundleIdentifier(bundleIdentifier)"))
-        XCTAssertTrue(source.contains(".disabled(selectedRowID == nil)"))
     }
 
     func testPrivacySettingsKeepsStorageGrowthVisibleWithoutAnItemCap() throws {
@@ -3195,10 +3322,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("NSApp.activate(ignoringOtherApps: true)"))
         XCTAssertFalse(source.contains("NSApp.setActivationPolicy(.regular)"))
         XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: \"gearshape\")"))
-        XCTAssertTrue(source.contains("ClipboardPanelFiltersMenu(store: store, chrome: .toolbar)"))
-        XCTAssertTrue(filtersSource.contains("ShelfToolbarCircleIcon(systemName: \"line.3.horizontal.decrease\")"))
-        XCTAssertTrue(filtersSource.contains(".frame(width: 42, height: 38)"))
-        XCTAssertTrue(filtersSource.contains(".contentShape(Circle())"))
+        XCTAssertTrue(source.contains("ClipboardPanelFiltersMenu(store: store)"))
+        XCTAssertTrue(filtersSource.contains("Label(\"label.filters\", systemImage: \"line.3.horizontal.decrease\")"))
+        XCTAssertTrue(filtersSource.contains("Button(\"action.clear_filters\")"))
+        XCTAssertTrue(filtersSource.contains(".disabled(!store.hasActiveFilters)"))
         XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))
         XCTAssertTrue(source.contains("localized(\"label.clipboard\")"))
@@ -3374,6 +3501,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(itemSource.contains(".onTapGesture {"))
         XCTAssertFalse(itemSource.contains(".exclusively(before: TapGesture())"))
         XCTAssertTrue(agents.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
+    }
+
+    func testPanelRefreshFunctionsDoNotSynchronouslyClearItemsBeforeReload() throws {
+        // Regression test for a double-click-breaking bug: refreshSideItems()/refreshShelfItems()
+        // used to synchronously blank the rendered items (paging.beginLoading + replaceItems([]))
+        // every time queryState changed, including on data-revision-only refreshes that fire
+        // constantly during normal use (e.g. right after copying something). That tore down the
+        // clicked row's SwiftUI identity between the two clicks of a double-click, so
+        // .onTapGesture(count: 2) never completed and paste-on-double-click silently stopped
+        // working. Refresh must keep old items on screen until the new page is ready
+        // (stale-while-revalidate), not clear-then-refill.
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let pagingSource = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
+
+        func refreshBody(in source: String, functionSignature: String) throws -> String {
+            let start = try XCTUnwrap(source.range(of: functionSignature))
+            let end = try XCTUnwrap(source.range(of: "\n    private func loadNext", range: start.lowerBound..<source.endIndex))
+            return String(source[start.lowerBound..<end.lowerBound])
+        }
+
+        let sideRefresh = try refreshBody(in: sideSource, functionSignature: "private func refreshSideItems()")
+        let shelfRefresh = try refreshBody(in: shelfSource, functionSignature: "private func refreshShelfItems()")
+
+        for body in [sideRefresh, shelfRefresh] {
+            XCTAssertFalse(body.contains(".beginLoading("))
+            XCTAssertFalse(body.contains("replaceItems(\n            [],"))
+        }
+
+        // The clearing helper itself must stay gone, not just unused at these two call sites.
+        XCTAssertFalse(pagingSource.contains("func beginLoading("))
     }
 
     func testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection() throws {

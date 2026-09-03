@@ -13,3 +13,5 @@ tmp/
 *.xcdistributionlogs/
 PasteBuddyiOS.xcodeproj/project.xcworkspace/
 gha-creds-*.json
+.trellis/tasks/08-26-local-ai-auto-annotation/
+Design/AppIconCandidates/2026-09-02/
