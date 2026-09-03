@@ -2051,8 +2051,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("linkPreviewMetadataRequests"))
         XCTAssertTrue(storeSource.contains("enrichLinkPreviewMetadataIfNeeded(for item: ClipboardItem)"))
         XCTAssertTrue(storeSource.contains("ClipboardLinkMetadataFetcher.fetch(for: urlString)"))
-        XCTAssertTrue(storeSource.contains("snapshot.items[index].payload.imageData = imageData"))
-        XCTAssertTrue(storeSource.contains("snapshot.items[index].payload.imageByteCount = imageData.count"))
+        XCTAssertTrue(storeSource.contains("currentItem.payload.imageData = imageData"))
+        XCTAssertTrue(storeSource.contains("currentItem.payload.imageByteCount = imageData.count"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.preview(for:"))
         XCTAssertFalse(shelfSource.contains("LinkPreviewCache.cachedPreview(for:"))
         XCTAssertFalse(sourceFileExists("Sources/PasteBuddy/Models/LinkPreviewCache.swift"))
@@ -2094,7 +2094,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(bridgeSource.contains("JSONDecoder().decode(PinboardItemDragPayload.self"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
         XCTAssertTrue(source.contains("store.addItemsToPasteStack(ids)"))
-        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+        XCTAssertTrue(source.contains("store.item(withID: id).map(category.matches) == true"))
     }
 
     func testSidePanelCollectionChipsAcceptDraggedClipboardItems() throws {
@@ -2108,7 +2108,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .smartCategory(category)) }"))
         XCTAssertTrue(stripSource.contains("onDropPayloads: { dropItems($0, into: .pinboard(pinboard.id)) }"))
         XCTAssertTrue(source.contains("store.pinItems(ids, to: pinboardID)"))
-        XCTAssertTrue(source.contains("store.snapshot.items.first(where: { $0.id == id }).map(category.matches) == true"))
+        XCTAssertTrue(source.contains("store.item(withID: id).map(category.matches) == true"))
     }
 
     func testShelfCollectionChipDoesNotRenderRectangularShadowOutsideCapsule() throws {
@@ -2344,19 +2344,27 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let dispatchScript = try sourceFileContents("script/dispatch_local_ci.sh")
         let ciScript = try sourceFileContents("script/ci.sh")
 
+        // workflow_dispatch (ad-hoc re-run against an arbitrary SHA) still requires explicit
+        // owner approval; it is no longer the only trigger, since push/pull_request runs are
+        // gated by GitHub's own private-repo write-access model instead (single-collaborator repo).
         XCTAssertTrue(workflow.contains("workflow_dispatch:"))
-        XCTAssertFalse(workflow.contains("pull_request:"))
-        XCTAssertFalse(workflow.contains("push:"))
-        XCTAssertTrue(workflow.contains("github.actor == github.repository_owner"))
+        XCTAssertTrue(workflow.contains("pull_request:"))
+        XCTAssertTrue(workflow.contains("push:"))
+        XCTAssertTrue(workflow.contains("branches: [main]"))
+        XCTAssertTrue(workflow.contains(
+            "(github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.confirmation == 'RUN')"
+        ))
         XCTAssertTrue(workflow.contains("checks: write"))
         XCTAssertTrue(workflow.contains("-f name='CI / verify'"))
-        XCTAssertTrue(workflow.contains("ref: ${{ inputs.commit_sha }}"))
+        XCTAssertTrue(workflow.contains("ref: ${{ env.TARGET_SHA }}"))
+        XCTAssertTrue(workflow.contains("if: github.event_name == 'workflow_dispatch'"))
         XCTAssertTrue(workflow.contains("runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]"))
         XCTAssertFalse(workflow.contains("env:\n      GH_TOKEN:"))
         XCTAssertTrue(dispatchScript.contains("Only repository owner"))
         XCTAssertTrue(dispatchScript.contains("commits/$TARGET_SHA"))
         XCTAssertTrue(ciScript.contains("CODE_SIGNING_ALLOWED=NO"))
         XCTAssertFalse(ciScript.contains("build_and_run.sh"))
+        XCTAssertTrue(ciScript.contains("swift build --product PasteBuddy"))
     }
 
     func testReleaseWorkflowsUseProtectedLocalRunnerAndCompleteAppleTrustChain() throws {
@@ -3195,10 +3203,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(source.contains("NSApp.activate(ignoringOtherApps: true)"))
         XCTAssertFalse(source.contains("NSApp.setActivationPolicy(.regular)"))
         XCTAssertTrue(source.contains("ShelfToolbarCircleIcon(systemName: \"gearshape\")"))
-        XCTAssertTrue(source.contains("ClipboardPanelFiltersMenu(store: store, chrome: .toolbar)"))
-        XCTAssertTrue(filtersSource.contains("ShelfToolbarCircleIcon(systemName: \"line.3.horizontal.decrease\")"))
-        XCTAssertTrue(filtersSource.contains(".frame(width: 42, height: 38)"))
-        XCTAssertTrue(filtersSource.contains(".contentShape(Circle())"))
+        XCTAssertTrue(source.contains("ClipboardPanelFiltersMenu(store: store)"))
+        XCTAssertTrue(filtersSource.contains("Label(\"label.filters\", systemImage: \"line.3.horizontal.decrease\")"))
+        XCTAssertTrue(filtersSource.contains("Button(\"action.clear_filters\")"))
+        XCTAssertTrue(filtersSource.contains(".disabled(!store.hasActiveFilters)"))
         XCTAssertFalse(source.contains("store.toggleCapturePaused()"))
         XCTAssertFalse(source.contains("store.undoLastDeletion()"))
         XCTAssertTrue(source.contains("localized(\"label.clipboard\")"))
@@ -3374,6 +3382,37 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(itemSource.contains(".onTapGesture {"))
         XCTAssertFalse(itemSource.contains(".exclusively(before: TapGesture())"))
         XCTAssertTrue(agents.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
+    }
+
+    func testPanelRefreshFunctionsDoNotSynchronouslyClearItemsBeforeReload() throws {
+        // Regression test for a double-click-breaking bug: refreshSideItems()/refreshShelfItems()
+        // used to synchronously blank the rendered items (paging.beginLoading + replaceItems([]))
+        // every time queryState changed, including on data-revision-only refreshes that fire
+        // constantly during normal use (e.g. right after copying something). That tore down the
+        // clicked row's SwiftUI identity between the two clicks of a double-click, so
+        // .onTapGesture(count: 2) never completed and paste-on-double-click silently stopped
+        // working. Refresh must keep old items on screen until the new page is ready
+        // (stale-while-revalidate), not clear-then-refill.
+        let shelfSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardShelfPanelView.swift")
+        let sideSource = try sourceFileContents("Sources/PasteBuddy/Views/ClipboardSidePanelView.swift")
+        let pagingSource = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
+
+        func refreshBody(in source: String, functionSignature: String) throws -> String {
+            let start = try XCTUnwrap(source.range(of: functionSignature))
+            let end = try XCTUnwrap(source.range(of: "\n    private func loadNext", range: start.lowerBound..<source.endIndex))
+            return String(source[start.lowerBound..<end.lowerBound])
+        }
+
+        let sideRefresh = try refreshBody(in: sideSource, functionSignature: "private func refreshSideItems()")
+        let shelfRefresh = try refreshBody(in: shelfSource, functionSignature: "private func refreshShelfItems()")
+
+        for body in [sideRefresh, shelfRefresh] {
+            XCTAssertFalse(body.contains(".beginLoading("))
+            XCTAssertFalse(body.contains("replaceItems(\n            [],"))
+        }
+
+        // The clearing helper itself must stay gone, not just unused at these two call sites.
+        XCTAssertFalse(pagingSource.contains("func beginLoading("))
     }
 
     func testClipboardPanelsUseNativeCopyCommandForTheirLocalSelection() throws {

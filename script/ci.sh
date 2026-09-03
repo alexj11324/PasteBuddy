@@ -19,6 +19,9 @@ python3 script/localization_catalog_workflow.py check
 python3 Tests/test_localization_catalog_workflow.py --quiet
 bash Tests/test_copy_compiled_localizations.sh
 
+echo "==> Compiling macOS app"
+swift build --product PasteBuddy --scratch-path "$CI_TEMP_ROOT/swift-build"
+
 echo "==> Running Swift tests"
 swift test --scratch-path "$CI_TEMP_ROOT/swift-build"
 

@@ -1,5 +1,6 @@
 name: Local CI
-run-name: CI / approve ${{ inputs.commit_sha }}
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('CI / approve {0}', inputs.commit_sha) || 'CI' }}
 
 on:
   workflow_dispatch:
@@ -12,9 +13,13 @@ on:
         description: Type RUN to approve this exact SHA
         required: true
         type: string
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
 
 concurrency:
-  group: local-ci-${{ inputs.commit_sha }}
+  group: local-ci-${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -26,22 +31,36 @@ env:
 
 jobs:
   verify:
-    name: Execute owner-approved SHA
-    if: github.actor == github.repository_owner && inputs.confirmation == 'RUN'
+    name: verify
+    # push/pull_request: repo is private with a single collaborator, so GitHub's own
+    # write-access gate on the repo is the authorization check - no extra approval needed.
+    # workflow_dispatch: kept for ad-hoc re-runs against an arbitrary SHA, still owner-gated.
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.confirmation == 'RUN')
     runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]
     timeout-minutes: 90
     env:
-      TARGET_SHA: ${{ inputs.commit_sha }}
+      TARGET_SHA: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha
+          || github.event_name == 'pull_request' && github.event.pull_request.head.sha
+          || github.sha }}
 
     steps:
       - name: Validate approved commit
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA" --silent
 
+      # push/pull_request runs already get a native check tied to the right commit for free;
+      # only the ad-hoc workflow_dispatch path (which can target a SHA that isn't a branch tip)
+      # needs to post and complete its own check-run manually.
       - name: Create required check on approved SHA
+        if: github.event_name == 'workflow_dispatch'
         id: required_check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,10 +74,10 @@ jobs:
             --jq .id)"
           echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
 
-      - name: Check out approved commit
+      - name: Check out commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.commit_sha }}
+          ref: ${{ env.TARGET_SHA }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -69,7 +88,7 @@ jobs:
         run: script/ci.sh
 
       - name: Complete required check
-        if: always() && steps.required_check.outputs.check_id != ''
+        if: always() && github.event_name == 'workflow_dispatch' && steps.required_check.outputs.check_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
