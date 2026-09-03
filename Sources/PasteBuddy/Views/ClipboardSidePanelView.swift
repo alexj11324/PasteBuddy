@@ -331,7 +331,7 @@ struct ClipboardSidePanelView: View {
 
     private var itemList: some View {
         VStack(spacing: 8) {
-            if isLoadingSidePage, sideScope != .pasteStack {
+            if isLoadingSidePage, sideScope != .pasteStack, renderedItems.isEmpty {
                 ProgressView()
                     .controlSize(.large)
                     .frame(maxWidth: .infinity, minHeight: 280)
@@ -518,12 +518,6 @@ struct ClipboardSidePanelView: View {
     private func refreshSideItems() {
         let queryID = queryState
         sidePageTask?.cancel()
-        paging.beginLoading(queryID: queryID)
-        interaction.replaceItems(
-            [],
-            storeSelectedIDs: store.selectedItemIDs,
-            storePrimarySelectedID: store.selectedItemID
-        )
         isLoadingSidePage = sideScope != .pasteStack
         sidePageTask = Task { @MainActor in
             do {
