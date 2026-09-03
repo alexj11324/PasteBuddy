@@ -16054,6 +16054,12 @@
         }
       }
     },
+    "label.security": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Security" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "安全" } }
+      }
+    },
     "label.search_apps": {
       "localizations": {
         "en": {
@@ -16618,14 +16624,13 @@
     "label.storage_limit": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Storage limit"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "存储上限"}}}},
     "label.record_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Record clipboard content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录剪贴板内容"}}}},
     "message.record_clipboard": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disable this option to stop recording new content. Existing history is retained."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭后将停止记录新复制的内容，已有历史记录将予以保留。"}}}},
-    "label.record_which_content": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Content to Record"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录的内容"}}}},
+    "label.record_which_content": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Recording Scope"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "记录范围"}}}},
     "label.read_text_in_images": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Recognize text in images"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "识别图片中的文字"}}}},
     "label.do_not_record": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclusion Rules"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除规则"}}}},
     "label.skip_password_fields": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclude password fields and temporary content"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除密码框与临时内容"}}}},
     "message.skip_password_fields": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Password fields, password managers, and some applications mark the content they copy. Disable this option to record content copied from a password field."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "密码输入框、密码管理器及部分应用程序会为其复制的内容添加标记。如需记录从密码框复制的内容，请关闭此选项。"}}}},
     "label.guess_and_skip_secrets": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exclude content that appears to be a secret"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "排除疑似密钥的内容"}}}},
     "message.guess_and_skip_secrets": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Detection is based on the text itself and may exclude content that should be retained."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "该判定依据文本内容进行，可能误判并排除需要保留的内容。"}}}},
-    "label.storage_and_security": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Storage & Security"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "存储与安全"}}}},
     "label.advanced": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Advanced Rules"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "高级规则"}}}},
     "format.storage_used_of_limit": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ · %@ used of %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@ · 已用 %@，上限 %@"}}}},
     "label.storage_mode": {
@@ -21150,13 +21155,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fetch and store titles and preview images for URL items."
+            "value": "PasteBuddy visits copied links to retrieve their title and preview image, and stores both locally."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "抓取并保存 URL 项目的标题与预览图。"
+            "value": "PasteBuddy 会访问所复制的链接以获取标题与预览图，并保存在本地。"
           }
         }
       }

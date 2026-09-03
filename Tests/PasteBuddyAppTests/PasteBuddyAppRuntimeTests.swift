@@ -2564,7 +2564,8 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(generalSource.contains("label.iroh_clipboard_sync"))
         XCTAssertTrue(privacySource.contains("label.show_during_screen_sharing"))
         XCTAssertTrue(privacySource.contains("label.capture_images"))
-        XCTAssertTrue(privacySource.contains("label.storage_and_security"))
+        XCTAssertTrue(privacySource.contains("label.security"))
+        XCTAssertTrue(privacySource.contains("label.storage"))
         XCTAssertTrue(appSource.contains("panelDisplayMode: Binding("))
         XCTAssertFalse(source.contains("TabView {"))
         XCTAssertFalse(source.contains(".tabItem"))
@@ -2736,6 +2737,39 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(source.contains("ShortcutModifierToggles"))
         XCTAssertFalse(source.contains("Toggle(modifier.displayName"))
         XCTAssertFalse(source.contains("TextField(\"label.key\""))
+    }
+
+    func testPrivacySectionsEachHoldOneKindOfDecision() throws {
+        let source = try sourceFileContents("Sources/PasteBuddy/Views/SettingsView.swift")
+        let generalStart = try XCTUnwrap(source.range(of: "private var generalSettings"))
+        let privacyStart = try XCTUnwrap(source.range(of: "private var privacySettings"))
+        let shortcutsStart = try XCTUnwrap(source.range(of: "private var shortcutSettings"))
+        let generalSource = String(source[generalStart.lowerBound..<privacyStart.lowerBound])
+        let privacySource = String(source[privacyStart.lowerBound..<shortcutsStart.lowerBound])
+
+        // The privacy page splits at the first advanced rule; everything before
+        // it is the recording scope, the exclusion rules, and the two sections
+        // about who can reach the history.
+        let advancedRulesStart = try XCTUnwrap(
+            privacySource.range(of: "Toggle(\"label.ignore_whitespace_clipboard\"")
+        )
+        let sectionsAboveAdvanced = String(privacySource[..<advancedRulesStart.lowerBound])
+        let advancedRules = String(privacySource[advancedRulesStart.lowerBound...])
+
+        // Advanced rules decide what gets recorded, and nothing else.
+        XCTAssertTrue(advancedRules.contains("label.flatten_large_excel_clipboard"))
+        XCTAssertTrue(advancedRules.contains("label.ignore_clipboard_larger_than"))
+        XCTAssertFalse(advancedRules.contains("label.show_during_screen_sharing"))
+        XCTAssertFalse(advancedRules.contains("label.generate_link_previews"))
+
+        // Screen-sharing visibility is an access control, so it sits under
+        // Security with Touch ID rather than among the recording rules.
+        XCTAssertTrue(sectionsAboveAdvanced.contains("label.require_touch_id_for_history"))
+        XCTAssertTrue(sectionsAboveAdvanced.contains("label.show_during_screen_sharing"))
+
+        // Link previews are an app behaviour, so they belong on General.
+        XCTAssertTrue(generalSource.contains("label.generate_link_previews"))
+        XCTAssertFalse(privacySource.contains("label.generate_link_previews"))
     }
 
     func testEachExcludedApplicationRemovesItselfWithoutASelectionStep() throws {

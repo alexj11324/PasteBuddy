@@ -145,6 +145,12 @@ struct SettingsView: View {
                         detailKey: "message.record_clipboard"
                     )
                 }
+                Toggle(isOn: generateLinkPreviewsBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.generate_link_previews",
+                        detailKey: "message.generate_link_previews"
+                    )
+                }
                 Toggle("label.enable_icloud_sync", isOn: cloudSyncBinding)
                 Toggle("label.sound_effects", isOn: soundEffectsBinding)
             } footer: {
@@ -307,7 +313,7 @@ struct SettingsView: View {
 
             SettingsExcludedApplications(store: store)
 
-            Section("label.storage_and_security") {
+            Section("label.security") {
                 Toggle(
                     "label.require_touch_id_for_history",
                     isOn: Binding(
@@ -315,6 +321,17 @@ struct SettingsView: View {
                         set: { store.setBiometricHistoryLockEnabled($0) }
                     )
                 )
+                // Who can see the history, like Touch ID above it — not a rule
+                // about what gets recorded.
+                Toggle(isOn: showDuringScreenSharingBinding) {
+                    SettingsToggleLabel(
+                        titleKey: "label.show_during_screen_sharing",
+                        detailKey: "message.show_during_screen_sharing"
+                    )
+                }
+            }
+
+            Section("label.storage") {
                 Picker("label.storage_limit", selection: storageLimitBinding) {
                     ForEach(storageLimitChoices, id: \.self) { bytes in
                         Text(Self.storageLimitTitle(for: bytes))
@@ -334,18 +351,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle(isOn: showDuringScreenSharingBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.show_during_screen_sharing",
-                        detailKey: "message.show_during_screen_sharing"
-                    )
-                }
-                Toggle(isOn: generateLinkPreviewsBinding) {
-                    SettingsToggleLabel(
-                        titleKey: "label.generate_link_previews",
-                        detailKey: "message.generate_link_previews"
-                    )
-                }
                 Toggle("label.ignore_whitespace_clipboard", isOn: Binding(
                     get: { store.snapshot.settingsBehavior.ignoreWhitespaceOnlyContent },
                     set: { store.setIgnoreWhitespaceOnlyContent($0) }
