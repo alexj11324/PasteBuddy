@@ -1,6 +1,6 @@
 ---
 name: trellis-spec-bootstrap
-description: "Bootstrap project-specific Trellis coding specs with a platform-neutral single-agent workflow. Use when creating or refreshing .trellis/spec guidelines, analyzing a codebase with GitNexus, ABCoder, or source inspection, decomposing package/layer spec work, and writing real codebase-backed spec docs without placeholder text."
+description: Create or refresh project-specific `.trellis/spec` guidance from the current codebase.
 ---
 
 # Trellis Spec Bootstrap

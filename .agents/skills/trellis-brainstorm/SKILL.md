@@ -1,6 +1,6 @@
 ---
 name: trellis-brainstorm
-description: "Guides collaborative requirements discovery before implementation. Creates task directory, seeds PRD, asks high-value questions one at a time, researches technical choices, and converges on MVP scope. Use when requirements are unclear, there are multiple valid approaches, or the user describes a new feature or complex task."
+description: Clarify requirements and create a Trellis task when a proposed feature has unresolved product or technical choices.
 ---
 
 # Trellis Brainstorm
