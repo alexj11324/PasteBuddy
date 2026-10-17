@@ -1,3 +1,2 @@
 "CFBundleDisplayName" = "PasteBuddy";
 "CFBundleName" = "PasteBuddy";
-"NSCameraUsageDescription" = "PasteBuddy 使用相机扫描 Mac 配对二维码，以进行剪贴板同步。";

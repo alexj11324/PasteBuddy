@@ -21,7 +21,7 @@
 ## Secret-key 拦截修复（2026-09-02）
 - `PrivacyConfiguration.blockLikelySensitiveText` 默认 true 会把 bare token（AKIA/ghp_/sk_live/bearer 等）经 `captureDecision → .sensitiveText` 静默丢弃，面板无任何反馈。改默认 false + `schemaVersion` 1→2 一次性迁移（`PasteBuddySnapshot.migrateIfNeeded`，`load`/`loadAsync` 双路径调用）。
 - 脏分支上不要用 `git checkout -- <file>` 做"基线对照"，会连分支改动一起抹掉（本次靠预存 patch 恢复）。隔离对照应逐行 revert 或用 worktree；动 destructive git 操作前先 `git diff > /tmp/xxx.patch` 留底。
-- 本地 `swift test` 默认 `.build` 的 Sentry/Iroh 二进制 artifact 可能损坏（XCFramework Info.plist 解码失败）；按 `script/ci.sh` 用隔离 scratch-path + `CLANG_MODULE_CACHE_PATH`/`SWIFT_MODULE_CACHE_PATH` 跑，和 CI 一致。
+- 本地 `swift test` 默认 `.build` 的 Sentry 二进制 artifact 可能损坏（XCFramework Info.plist 解码失败）；按 `script/ci.sh` 用隔离 scratch-path + `CLANG_MODULE_CACHE_PATH`/`SWIFT_MODULE_CACHE_PATH` 跑，和 CI 一致。
 - `swift test` 输出用 grep 取失败行时注意管道退出码会被 `head/tail` 掩盖；写日志文件再 grep，并 `echo EXIT=$?` 取真实状态。
 
 ## PR #35 经验（2026-09-03）

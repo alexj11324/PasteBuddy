@@ -105,6 +105,9 @@ final class ShareActionViewController: UIViewController {
                 into: resolvedStore,
                 configuration: MobileItemProviderImportConfiguration(source: source)
             )
+            if resolvedStore.snapshot.sync.readiness.canAttemptCloudSync {
+                await CloudKitClipboardSyncSession().syncNow(store: resolvedStore)
+            }
             showSuccess(result.statusMessage)
         } catch {
             showFailure(error.localizedDescription)

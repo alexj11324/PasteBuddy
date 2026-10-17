@@ -55,12 +55,21 @@ days:
 
 There is no dual-write period and no direct CloudKit-to-UI path.
 
-## Legacy boundary and Iroh
+## Current clipboard sync
+
+Clipboard sync is the encrypted CloudKit private snapshot already implemented
+by `CloudKitSyncService`. macOS, iOS, and the keyboard, share, and action
+extensions use `CloudKitClipboardSyncSession` when the user has enabled iCloud
+sync and the signed CloudKit capability is present. Iroh, its dependency,
+pairing state, and UI are removed.
+
+The migration sections above describe the later PowerSync recovery boundary.
+They do not keep an Iroh implementation in the tree, and they do not disable
+the current CloudKit clipboard sync loop.
 
 Existing CloudKit record factories, snapshots, invitations, and user data
 remain as migration inputs. They are not new Supabase schema or sharing
-authority. The Iroh implementation and pairing data remain, while the unified
-Iroh capability stays disabled on macOS, iOS, and extensions.
+authority.
 
 ## WP6 acceptance
 

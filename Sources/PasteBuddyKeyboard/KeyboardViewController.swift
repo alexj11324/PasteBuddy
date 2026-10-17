@@ -6,7 +6,7 @@ import UIKit
 @MainActor
 final class KeyboardViewController: UIInputViewController {
     private var store: PasteBuddyStore?
-    private var irohSync: IrohClipboardSyncService?
+    private let cloudSync = CloudKitClipboardSyncSession()
     private var hostingController: UIHostingController<MobileKeyboardHistoryView>?
 
     override func viewDidLoad() {
@@ -25,14 +25,6 @@ final class KeyboardViewController: UIInputViewController {
         resolvedStore.setKeyboardExtensionEnabled(true, fullAccess: hasFullAccess)
         store = resolvedStore
 
-        let syncService = PasteBuddyFeatureAvailability.irohClipboardSync
-            ? MobileStoreFactory.makeIrohSyncService()
-            : nil
-        syncService?.onItemReceived = { [resolvedStore] item in
-            _ = resolvedStore.addSyncedItem(item)
-        }
-        irohSync = syncService
-
         let pasteService = MobileKeyboardPasteService { [weak self] text in
             guard let self else { return false }
             textDocumentProxy.insertText(text)
@@ -41,7 +33,10 @@ final class KeyboardViewController: UIInputViewController {
         let rootView = MobileKeyboardHistoryView(
             store: resolvedStore,
             pasteService: pasteService,
-            irohSync: syncService,
+            uploadClipboard: { [weak self] in
+                guard let self, let store = self.store else { return false }
+                return await self.cloudSync.syncNow(store: store, allowsNetwork: self.hasFullAccess)
+            },
             onDeleteBackward: { [weak self] in
                 self?.textDocumentProxy.deleteBackward()
             },
@@ -74,20 +69,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func startSyncIfAllowed() {
-        guard PasteBuddyFeatureAvailability.irohClipboardSync,
-              hasFullAccess,
-              let irohSync else { return }
-        switch irohSync.connectionState {
-        case .connecting, .connected:
-            return
-        case .idle, .binding, .ready, .failed:
-            Task { @MainActor in
-                await irohSync.start()
-                guard !irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    return
-                }
-                await irohSync.connectToPeer()
-            }
-        }
+        guard let store else { return }
+        cloudSync.update(store: store, allowsNetwork: hasFullAccess)
     }
 }

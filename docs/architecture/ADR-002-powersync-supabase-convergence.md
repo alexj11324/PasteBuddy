@@ -169,16 +169,18 @@ credential. Their order and verification evidence are fixed by the schema
 contract and WP1/WP6; no client-visible claim/lease/fence or custom deletion
 DSL is introduced.
 
-### CloudKit, Iroh, and edition boundary
+### CloudKit and edition boundary
 
-CloudKit is used once as a latest encrypted snapshot recovery source. The
-client imports it into local PowerSync SQLite, then permanently freezes
-CloudKit writes before cloud upload. CloudKit is read-only recovery for 90
-days; any later deletion is a separate explicit user action. There is no
-dual-write period.
+CloudKit is used once as a latest encrypted snapshot recovery source after the
+PowerSync migration. The client imports it into local PowerSync SQLite, then
+permanently freezes CloudKit writes before cloud upload. CloudKit is
+read-only recovery for 90 days; any later deletion is a separate explicit user
+action. There is no dual-write period.
 
-The existing Iroh implementation and data remain intact, but the shared
-Iroh capability stays disabled on macOS, iOS, and extensions.
+Until that migration, clipboard sync uses the existing encrypted CloudKit
+private snapshot path on macOS, iOS, and extensions. Iroh has been removed.
+This ADR does not authorize restoring Iroh or hiding the current CloudKit
+clipboard sync behind a disabled flag.
 
 At the first 100 real Cloud users, the Coordinator runs a Cloud Edition versus
 Open Edition gate. Open Edition is source-available, not an OSI full-stack

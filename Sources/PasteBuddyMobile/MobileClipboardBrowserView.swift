@@ -2,19 +2,19 @@ import CoreTransferable
 import PasteBuddyCore
 import SwiftUI
 import UniformTypeIdentifiers
-#if os(iOS) && canImport(VisionKit)
-import VisionKit
-#endif
 
 public struct MobileClipboardBrowserView: View {
     @Bindable private var store: PasteBuddyStore
-    private let irohSync: IrohClipboardSyncService?
+    private let onCloudSyncConfigurationChanged: () -> Void
     @State private var sharingRoute: MobilePinboardSharingRoute?
     @State private var previewRoute: MobilePreviewRoute?
 
-    public init(store: PasteBuddyStore, irohSync: IrohClipboardSyncService? = nil) {
+    public init(
+        store: PasteBuddyStore,
+        onCloudSyncConfigurationChanged: @escaping () -> Void = {}
+    ) {
         self.store = store
-        self.irohSync = PasteBuddyFeatureAvailability.irohClipboardSync ? irohSync : nil
+        self.onCloudSyncConfigurationChanged = onCloudSyncConfigurationChanged
     }
 
     public var body: some View {
@@ -34,13 +34,17 @@ public struct MobileClipboardBrowserView: View {
                 }
 
                 Section("label.setup") {
-                    if let irohSync {
-                        NavigationLink {
-                            MobileIrohClipboardSyncView(store: store, irohSync: irohSync)
-                                .navigationTitle("label.iroh_clipboard_sync")
-                        } label: {
-                            Label("label.iroh_clipboard_sync", systemImage: irohSync.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle")
-                        }
+                    NavigationLink {
+                        MobileICloudClipboardSyncView(
+                            store: store,
+                            onChanged: onCloudSyncConfigurationChanged
+                        )
+                            .navigationTitle("label.icloud_clipboard_sync")
+                    } label: {
+                        Label(
+                            "label.icloud_clipboard_sync",
+                            systemImage: store.snapshot.sync.isCloudSyncEnabled ? "icloud.fill" : "icloud"
+                        )
                     }
 
                     NavigationLink {
@@ -258,175 +262,35 @@ private struct MobilePreviewRoute: Identifiable {
     let id: UUID
 }
 
-private struct MobileIrohClipboardSyncView: View {
+private struct MobileICloudClipboardSyncView: View {
     @Bindable var store: PasteBuddyStore
-    @Bindable var irohSync: IrohClipboardSyncService
-    @State private var isShowingPairingScanner = false
-    @State private var pairingStatusMessage: String?
+    let onChanged: () -> Void
 
     var body: some View {
         Form {
-            Section("label.this_device") {
-                Text(irohSync.endpointId.isEmpty ? NSLocalizedString("state.binding", comment: "") : irohSync.endpointId)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-            }
-
-            Section("label.pair_this_mac") {
-                #if os(iOS) && canImport(VisionKit)
-                Button("action.scan_pairing_qr") {
-                    isShowingPairingScanner = true
-                }
-                .disabled(!IrohPairingScannerView.isAvailable)
-                #endif
-
-                Text("message.scan_pairing_qr_from_mac")
-                    .foregroundStyle(.secondary)
-
-                if let pairingStatusMessage {
-                    Text(pairingStatusMessage)
+            Section {
+                Toggle("label.enable_icloud_sync", isOn: cloudSyncBinding)
+                if let status = store.snapshot.sync.lastSyncStatusMessage ?? store.lastErrorMessage {
+                    Text(status)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } footer: {
+                Text("message.icloud_clipboard_sync_private_database")
             }
-
-            Section("label.peer_endpoint_id") {
-                TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
-                    .font(.system(.caption, design: .monospaced))
-
-                Button("action.connect") {
-                    Task { await irohSync.connectToPeer() }
-                }
-                .disabled(irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            Section("label.actions") {
-                Button("action.sync_current_clipboard") {
-                    if let item = MobilePasteboardWriter.currentClipboardItem() {
-                        let storedItem = store.addCapturedItem(item)
-                        Task { await irohSync.send(storedItem) }
-                    }
-                }
-                .disabled(!irohSync.connectionState.isConnected)
-
-                if let selectedItem = store.selectedItem {
-                    Button("action.send_selected_item") {
-                        Task { await irohSync.send(selectedItem) }
-                    }
-                    .disabled(!irohSync.connectionState.isConnected)
-                }
-            }
-
-            Section("label.status") {
-                Text(statusText)
-                if let lastReceivedTitle = irohSync.lastReceivedTitle {
-                    Text(String(format: NSLocalizedString("format.last_received_item", comment: ""), lastReceivedTitle))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .task { await irohSync.start() }
-        #if os(iOS) && canImport(VisionKit)
-        .sheet(isPresented: $isShowingPairingScanner) {
-            IrohPairingScannerView { code in
-                isShowingPairingScanner = false
-                applyPairingCode(code)
-            }
-        }
-        #endif
-    }
-
-    private var statusText: String {
-        switch irohSync.connectionState {
-        case .idle:
-            NSLocalizedString("state.off", comment: "")
-        case .binding:
-            NSLocalizedString("state.binding", comment: "")
-        case .ready:
-            NSLocalizedString("state.ready", comment: "")
-        case .connecting:
-            NSLocalizedString("state.connecting", comment: "")
-        case .connected(let peerShortId):
-            String(format: NSLocalizedString("format.connected_to_peer", comment: ""), peerShortId)
-        case .failed(let message):
-            message
         }
     }
 
-    private func applyPairingCode(_ code: String) {
-        do {
-            try irohSync.applyPairingCode(code)
-            pairingStatusMessage = NSLocalizedString("message.pairing_qr_saved", comment: "")
-            Task { await irohSync.connectToPeer() }
-        } catch {
-            pairingStatusMessage = error.localizedDescription
-        }
-    }
-}
-
-#if os(iOS) && canImport(VisionKit)
-private struct IrohPairingScannerView: UIViewControllerRepresentable {
-    static var isAvailable: Bool {
-        DataScannerViewController.isSupported && DataScannerViewController.isAvailable
-    }
-
-    let onCode: (String) -> Void
-
-    func makeUIViewController(context: Context) -> DataScannerViewController {
-        let controller = DataScannerViewController(
-            recognizedDataTypes: [.barcode(symbologies: [.qr])],
-            qualityLevel: .balanced,
-            recognizesMultipleItems: false,
-            isHighFrameRateTrackingEnabled: false,
-            isPinchToZoomEnabled: true,
-            isGuidanceEnabled: true,
-            isHighlightingEnabled: true
+    private var cloudSyncBinding: Binding<Bool> {
+        Binding(
+            get: { store.snapshot.sync.isCloudSyncEnabled },
+            set: { isEnabled in
+                CloudKitClipboardSyncSession.setEnabled(isEnabled, on: store)
+                onChanged()
+            }
         )
-        controller.delegate = context.coordinator
-        try? controller.startScanning()
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: DataScannerViewController, context: Context) {}
-
-    static func dismantleUIViewController(_ uiViewController: DataScannerViewController, coordinator: Coordinator) {
-        uiViewController.stopScanning()
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCode: onCode)
-    }
-
-    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        private let onCode: (String) -> Void
-        private var hasMatchedCode = false
-
-        init(onCode: @escaping (String) -> Void) {
-            self.onCode = onCode
-        }
-
-        func dataScanner(
-            _ dataScanner: DataScannerViewController,
-            didAdd addedItems: [RecognizedItem],
-            allItems: [RecognizedItem]
-        ) {
-            handle(addedItems.first)
-        }
-
-        func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) {
-            handle(item)
-        }
-
-        private func handle(_ item: RecognizedItem?) {
-            guard !hasMatchedCode,
-                  case .barcode(let barcode) = item,
-                  let payload = barcode.payloadStringValue else { return }
-            hasMatchedCode = true
-            onCode(payload)
-        }
     }
 }
-#endif
 
 private extension View {
     @ViewBuilder

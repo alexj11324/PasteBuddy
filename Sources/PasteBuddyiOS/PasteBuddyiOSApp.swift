@@ -5,28 +5,21 @@ import SwiftUI
 @main
 struct PasteBuddyiOSApp: App {
     @State private var store: PasteBuddyStore
-    @State private var irohSync: IrohClipboardSyncService
+    @State private var cloudSync = CloudKitClipboardSyncSession()
 
     init() {
         let resolvedStore = MobileStoreFactory.makeStore()
         resolvedStore.load()
         _store = State(initialValue: resolvedStore)
-        _irohSync = State(initialValue: MobileStoreFactory.makeIrohSyncService())
     }
 
     var body: some Scene {
         WindowGroup {
-            MobileClipboardBrowserView(
-                store: store,
-                irohSync: PasteBuddyFeatureAvailability.irohClipboardSync ? irohSync : nil
-            )
+            MobileClipboardBrowserView(store: store) {
+                cloudSync.update(store: store)
+            }
                 .task {
-                    guard PasteBuddyFeatureAvailability.irohClipboardSync else { return }
-                    irohSync.onItemReceived = { [store] item in
-                        guard let storedItem = store.addSyncedItem(item) else { return }
-                        MobilePasteboardWriter.copy(storedItem)
-                    }
-                    await irohSync.start()
+                    cloudSync.update(store: store)
                 }
         }
     }

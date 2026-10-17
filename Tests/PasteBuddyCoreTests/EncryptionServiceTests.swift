@@ -812,10 +812,10 @@ final class EncryptionServiceTests: XCTestCase {
             id: UUID(),
             createdAt: newer,
             updatedAt: newer,
-            sourceAppName: "PasteBuddy Iroh",
+            sourceAppName: "PasteBuddy",
             deviceName: "Local iPhone",
             contentType: .text,
-            title: "Synced via Iroh",
+            title: "Synced from another device",
             payload: ClipboardPayload(text: "same clipboard payload")
         )
         let remoteCloudItem = ClipboardItem(

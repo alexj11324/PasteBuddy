@@ -53,9 +53,10 @@ must not be silently replaced by this plan:
   resumably.
 - PowerSync Cloud is the sync service for Dev/Alpha; Prod uses an independent
   Supabase, PowerSync, and RevenueCat configuration.
-- Deletion uses the fixed bounded business process. CloudKit is a one-time
-  recovery import and read-only for 90 days; Iroh remains implemented but its
-  capability is off.
+- Deletion uses the fixed bounded business process. After the PowerSync
+  migration, CloudKit is a one-time recovery import and read-only for 90 days.
+  Until then, clipboard sync uses the encrypted CloudKit snapshot path. Iroh
+  has been removed.
 - At 100 real Cloud users, the Coordinator makes the documented Cloud Edition
   versus Open Edition decision using the agreed operational and privacy
   evidence.
@@ -106,7 +107,7 @@ acceptance matrix.
 | WP3 | Auth and RevenueCat | Support Apple, Google, and Email Magic Link through Resend SMTP. Require login before purchase; bind the Supabase UUID to the RevenueCat App User ID; preserve existing App Store product IDs/capabilities; use verified signed webhooks only as wakeups, refetch canonical CustomerInfo completely, retry fetch failure without granting, and make Supabase entitlements the cloud/RLS/AI truth. Prove A/B switching and local-only behavior. |
 | WP4 | Production PowerSync client | Move the PoC adapter into the real macOS/iOS apps with one main-app owner, encrypted extension handoff, SQLite-only UI/offline reads, privacy gating, attachment flow, queue settlement, quota continuation, and process/reconnect recovery. |
 | WP5 | Cloud AI | Implement and prove the OpenRouter ZDR fail-closed policy, OpenRouter/Vault BYOK, one active multimodal identity at 1024 dimensions for text/image/joint/query vectors, direct image vectors with local OCR exact retrieval, independent RRF lists, sparkle-only remote search, offline lexical search, MCP before/after revalidation, and the fixed four-slice bake-off. `voyageai/voyage-multimodal-3.5` is a concrete candidate; Gemini/Qwen3-VL remain conditional until routing/1024/ZDR proof. |
-| WP6 | UI, migration, deletion | Implement account-switch confirmation showing count/attachment size, account/sync/backfill/quota/cloud-stat/AI/BYOK/migration/deletion Settings, single-item and all-cloud delete, disable cloud processing, one-time CloudKit import and 90-day read-only recovery, Iroh-off state, and real macOS/iOS visual/runtime acceptance. Freeze the visual matrix before implementation; require screenshots, Accessibility trees, runtime frames, visible-vs-hit geometry review, and before/after diffs. |
+| WP6 | UI, migration, deletion | Implement account-switch confirmation showing count/attachment size, account/sync/backfill/quota/cloud-stat/AI/BYOK/migration/deletion Settings, single-item and all-cloud delete, disable cloud processing, one-time CloudKit import and 90-day read-only recovery, removed Iroh, and real macOS/iOS visual/runtime acceptance. Freeze the visual matrix before implementation; require screenshots, Accessibility trees, runtime frames, visible-vs-hit geometry review, and before/after diffs. |
 | WP7 | Release | Start from clean codex/integrated-delivery; run script/build_and_run.sh --verify and prove bundle/signature/source commit, stable permission identity, one process, exact artifact provenance, real iOS Simulator first, independent Dev/Alpha and Prod Supabase/PowerSync/RevenueCat environments, Sentry metrics, and staged internal -> 20 -> 100 -> 1000 rollout with stop criteria. Open Edition is source-available, not an OSI full-stack open-source claim. Revisit Cloud versus Open Edition at 100 users; Supabase Pro is required before paid launch. Deployment secrets are temporary general-secrets-store injection only. |
 
 WP1 is an independent hard stop, not a formality. If the formal SDK,

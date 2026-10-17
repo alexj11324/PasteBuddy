@@ -90,9 +90,8 @@ struct PasteBuddyApp: App {
     @State private var panelHotKeyController: PasteBuddyPanelHotKeyController?
     @State private var statusItemController: PasteBuddyStatusItemController?
     @State private var frontmostApplicationTracker = FrontmostApplicationTracker()
-    @State private var irohSync = IrohClipboardSyncService()
+    @State private var cloudSync = CloudKitClipboardSyncSession()
     @State private var mcpHTTPServer = PasteBuddyMCPHTTPServer()
-    @State private var cloudSyncTask: Task<Void, Never>?
     @State private var transactionUpdateTask: Task<Void, Never>?
 
     init() {
@@ -108,7 +107,6 @@ struct PasteBuddyApp: App {
         Settings {
             SettingsView(
                 store: store,
-                irohSync: irohSync,
                 panelDisplayMode: Binding(
                     get: { panelDisplayMode },
                     set: { panelDisplayMode = $0 }
@@ -495,7 +493,6 @@ struct PasteBuddyApp: App {
                 }
             )
         }
-        updateCloudSyncRuntime(isEnabled: store.snapshot.sync.isCloudSyncEnabled)
         store.onMCPServerConfigurationChanged = { isEnabled in
             updateMCPHTTPRuntime(isEnabled: isEnabled)
         }
@@ -504,29 +501,8 @@ struct PasteBuddyApp: App {
         }
         updateMCPHTTPRuntime(isEnabled: store.snapshot.mcp.isServerEnabled)
         ScreenPinController.shared.configure(store: store)
-        if PasteBuddyFeatureAvailability.irohClipboardSync {
-            irohSync.onItemReceived = { [store] item in
-                guard store.addSyncedItem(item) != nil else { return }
-            }
-            // Peers (iOS) cannot fetch link previews themselves, so re-send items
-            // once enrichment upgrades them; the receiver merges via dedupe.
-            store.onLinkPreviewMetadataEnriched = { [irohSync] item in
-                Task { @MainActor in
-                    await irohSync.sendIfConnected(item)
-                }
-            }
-        }
         if monitor == nil {
-            let createdMonitor = ClipboardMonitor(
-                store: store,
-                onItemCaptured: { [irohSync] item in
-                    Task { @MainActor in
-                        if PasteBuddyFeatureAvailability.irohClipboardSync {
-                            await irohSync.sendIfConnected(item)
-                        }
-                    }
-                }
-            )
+            let createdMonitor = ClipboardMonitor(store: store)
             createdMonitor.start()
             monitor = createdMonitor
         }
@@ -637,53 +613,11 @@ struct PasteBuddyApp: App {
                 panelHotKeyController?.updateShortcuts(shortcuts)
             }
         }
-        if PasteBuddyFeatureAvailability.irohClipboardSync,
-           irohSync.connectionState != .binding {
-            Task { @MainActor in
-                await irohSync.start()
-            }
-        }
+        cloudSync.update(store: store)
     }
 
     private func updateCloudSyncRuntime(isEnabled: Bool) {
-        guard isEnabled else {
-            cloudSyncTask?.cancel()
-            cloudSyncTask = nil
-            return
-        }
-        guard cloudSyncTask == nil,
-              store.snapshot.sync.readiness.canAttemptCloudSync,
-              let containerIdentifier = store.snapshot.sync.cloudKitContainerIdentifier else {
-            return
-        }
-
-        let service = CloudKitSyncService(
-            transport: CloudKitRemoteRecordTransport(containerIdentifier: containerIdentifier)
-        )
-        cloudSyncTask = Task { @MainActor in
-            var lastUploadedDataRevision: Int?
-            while !Task.isCancelled {
-                let imported = await store.importLatestCloudSyncSnapshot(using: service)
-                guard !Task.isCancelled else { return }
-                guard imported != nil || store.lastErrorMessage == nil else {
-                    do {
-                        try await Task.sleep(for: .seconds(60))
-                    } catch {
-                        return
-                    }
-                    continue
-                }
-                if lastUploadedDataRevision != store.dataRevision,
-                   await store.uploadCloudSyncSnapshot(using: service) != nil {
-                    lastUploadedDataRevision = store.dataRevision
-                }
-                do {
-                    try await Task.sleep(for: .seconds(60))
-                } catch {
-                    return
-                }
-            }
-        }
+        cloudSync.update(store: store, allowsNetwork: isEnabled)
     }
 
     private func updateMCPHTTPRuntime(isEnabled: Bool) {

@@ -26,8 +26,9 @@ concurrency, migration, and runtime questions to the later gates.
 
 ## Scope of this historical note
 
-- Existing code, local data, CloudKit inputs, and Iroh implementation are not
-  deleted by superseding this ADR.
+- Existing code, local data, and CloudKit inputs are not deleted by
+  superseding this ADR. A later explicit removal deleted Iroh clipboard sync;
+  this historical note does not require Iroh to remain in the tree.
 - Names, RPC shapes, crypto wire formats, revision/cursor/counter/fence
   semantics, and phase protocols from the former proposal are not active.
 - No implementation, migration, hosted resource, secret, or acceptance result

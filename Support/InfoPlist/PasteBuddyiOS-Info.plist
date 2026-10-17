@@ -22,8 +22,8 @@
     <false/>
     <key>LSRequiresIPhoneOS</key>
     <true/>
-    <key>NSCameraUsageDescription</key>
-    <string>PasteBuddy uses the camera to scan a Mac pairing QR code for clipboard sync.</string>
+    <key>PasteBuddyCloudKitCapabilityConfigured</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIApplicationSceneManifest</key>
