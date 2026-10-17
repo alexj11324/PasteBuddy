@@ -3482,6 +3482,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
         let agents = try sourceFileContents("AGENTS.md")
+        let contracts = try sourceFileContents("docs/agent-guides/product-runtime-contracts.md")
         let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
@@ -3501,7 +3502,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertLessThan(select.lowerBound, popover.lowerBound)
         XCTAssertFalse(itemSource.contains(".onTapGesture {"))
         XCTAssertFalse(itemSource.contains(".exclusively(before: TapGesture())"))
-        XCTAssertTrue(agents.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
+        // The click contract lives in the Shelf section of the product contracts.
+        // AGENTS.md only routes Shelf / Side Panel work to that file.
+        XCTAssertTrue(agents.contains("docs/agent-guides/product-runtime-contracts.md"))
+        XCTAssertTrue(agents.contains("Shelf, Side Panel"))
+        XCTAssertTrue(contracts.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
     }
 
     func testPanelRefreshFunctionsDoNotSynchronouslyClearItemsBeforeReload() throws {
