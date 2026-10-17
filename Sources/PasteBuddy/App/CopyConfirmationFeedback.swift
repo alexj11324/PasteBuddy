@@ -43,9 +43,61 @@ struct CopyConfirmationFeedbackState {
 }
 
 @MainActor
+protocol CopyConfirmationDismissalScheduling {
+    func schedule(
+        after duration: Duration,
+        action: @escaping @MainActor () -> Void
+    ) -> any CopyConfirmationDismissal
+}
+
+@MainActor
+protocol CopyConfirmationDismissal: AnyObject {
+    func cancel()
+}
+
+@MainActor
+struct TaskCopyConfirmationDismissalScheduler: CopyConfirmationDismissalScheduling {
+    func schedule(
+        after duration: Duration,
+        action: @escaping @MainActor () -> Void
+    ) -> any CopyConfirmationDismissal {
+        TaskCopyConfirmationDismissal(after: duration, action: action)
+    }
+}
+
+@MainActor
+private final class TaskCopyConfirmationDismissal: CopyConfirmationDismissal {
+    private var task: Task<Void, Never>?
+    private var isCancelled = false
+
+    init(after duration: Duration, action: @escaping @MainActor () -> Void) {
+        task = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: duration)
+            } catch {
+                return
+            }
+            guard let self, !self.isCancelled else { return }
+            action()
+        }
+    }
+
+    func cancel() {
+        isCancelled = true
+        task?.cancel()
+        task = nil
+    }
+}
+
+@MainActor
 final class CopyConfirmationFeedbackLifecycle {
     private(set) var state = CopyConfirmationFeedbackState()
-    private var dismissalTask: Task<Void, Never>?
+    private let scheduler: any CopyConfirmationDismissalScheduling
+    private var dismissal: (any CopyConfirmationDismissal)?
+
+    init(scheduler: any CopyConfirmationDismissalScheduling = TaskCopyConfirmationDismissalScheduler()) {
+        self.scheduler = scheduler
+    }
 
     @discardableResult
     func recordCopy(
@@ -57,14 +109,10 @@ final class CopyConfirmationFeedbackLifecycle {
         guard let presentation = state.recordCopy(succeeded: succeeded, itemCount: itemCount) else {
             return nil
         }
-        dismissalTask?.cancel()
-        dismissalTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: duration)
-            } catch {
-                return
-            }
-            guard let self, self.state.dismiss(generation: presentation.generation) else { return }
+        dismissal?.cancel()
+        let generation = presentation.generation
+        dismissal = scheduler.schedule(after: duration) { [weak self] in
+            guard let self, self.state.dismiss(generation: generation) else { return }
             onDismiss()
         }
         return presentation
