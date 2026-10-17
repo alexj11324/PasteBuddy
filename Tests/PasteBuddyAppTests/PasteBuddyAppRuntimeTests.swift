@@ -8,6 +8,43 @@ import XCTest
 
 @MainActor
 final class PasteBuddyAppRuntimeTests: XCTestCase {
+    func testClipboardPanelQuickPasteUsesResidentItemsBeforeStoreFallback() {
+        let items = (0..<12).map { index in
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Test Mac",
+                contentType: .text,
+                title: "Item \(index)",
+                payload: ClipboardPayload(text: "body \(index)")
+            )
+        }
+
+        XCTAssertEqual(ClipboardPanelQuickPaste.item(atOneBasedIndex: 1, in: items)?.title, "Item 0")
+        XCTAssertEqual(ClipboardPanelQuickPaste.item(atOneBasedIndex: 9, in: items)?.title, "Item 8")
+        XCTAssertNil(ClipboardPanelQuickPaste.item(atOneBasedIndex: 10, in: items))
+        XCTAssertNil(ClipboardPanelQuickPaste.item(atOneBasedIndex: 1, in: []))
+
+        var fallbackCalls = 0
+        XCTAssertEqual(
+            ClipboardPanelQuickPaste.item(atOneBasedIndex: 2, in: []) {
+                fallbackCalls += 1
+                return items[1]
+            }?.title,
+            "Item 1"
+        )
+        XCTAssertEqual(fallbackCalls, 1)
+
+        fallbackCalls = 0
+        XCTAssertEqual(
+            ClipboardPanelQuickPaste.item(atOneBasedIndex: 2, in: items) {
+                fallbackCalls += 1
+                return nil
+            }?.title,
+            "Item 1"
+        )
+        XCTAssertEqual(fallbackCalls, 0)
+    }
+
     func testCollectionIndexMoveResolverFindsTheNativeAnimatedMove() {
         let oldOrder: [ClipboardCollectionID] = [
             .smart(.images),
@@ -1735,7 +1772,10 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("panelPresentationID = UUID()"))
         XCTAssertTrue(controllerSource.contains(".id(panelPresentationID)"))
         XCTAssertTrue(controllerSource.contains("resetPanelPresentationState()"))
-        XCTAssertTrue(controllerSource.contains("store.selectSingleItem(store.filteredItems(for: store.selectedScope).first?.id)"))
+        XCTAssertTrue(controllerSource.contains("store.selectSingleItem(store.firstFilteredItemID(for: store.selectedScope))"))
+        XCTAssertTrue(controllerSource.contains("if !store.searchQuery.isEmpty"))
+        XCTAssertTrue(shelfSource.contains("ClipboardPanelQuickPaste.item(atOneBasedIndex: index, in: renderedShelfItems)"))
+        XCTAssertTrue(sideSource.contains("ClipboardPanelQuickPaste.item(atOneBasedIndex: index, in: renderedItems)"))
         XCTAssertTrue(controllerSource.contains("closeShelfAuxiliaryWindows()"))
         XCTAssertTrue(controllerSource.contains("for window in NSApp.windows where Self.isShelfAuxiliaryWindow(window)"))
     }

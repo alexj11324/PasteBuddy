@@ -1017,6 +1017,12 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         }
     }
 
+    public func firstItemID(_ request: ClipboardItemPageRequest) throws -> UUID? {
+        try database.read { db in
+            try Self.firstItemID(request, db: db)
+        }
+    }
+
     public func hasStoredSnapshot() throws -> Bool {
         try database.read { db in
             try Bool.fetchOne(
@@ -1245,9 +1251,7 @@ public final class ClipboardItemRepository: @unchecked Sendable {
         let whereClause = filter.predicates.isEmpty
             ? ""
             : "WHERE \(filter.predicates.joined(separator: " AND "))"
-        let orderClause = request.pinboardID == nil
-            ? "ci.created_at DESC, ci.snapshot_order ASC, ci.id ASC"
-            : "pbi.sort_order ASC, ci.id ASC"
+        let orderClause = Self.pageOrderClause(pinboardID: request.pinboardID)
         var arguments = filter.arguments
         arguments += [request.limit, request.offset]
 
@@ -1264,6 +1268,36 @@ public final class ClipboardItemRepository: @unchecked Sendable {
             arguments: arguments
         )
         return try items(from: rows, db: db, hydrateAssets: false)
+    }
+
+    private static func firstItemID(_ request: ClipboardItemPageRequest, db: Database) throws -> UUID? {
+        let filter = filterSQL(request)
+        let whereClause = filter.predicates.isEmpty
+            ? ""
+            : "WHERE \(filter.predicates.joined(separator: " AND "))"
+        let id = try String.fetchOne(
+            db,
+            sql: """
+                SELECT ci.id
+                FROM clipboard_items ci
+                \(filter.joins.joined(separator: "\n"))
+                \(whereClause)
+                ORDER BY \(Self.pageOrderClause(pinboardID: request.pinboardID))
+                LIMIT 1
+                """,
+            arguments: filter.arguments
+        )
+        guard let id else { return nil }
+        guard let uuid = UUID(uuidString: id) else {
+            throw PasteBuddyDatabaseError.invalidStoredUUID(id)
+        }
+        return uuid
+    }
+
+    private static func pageOrderClause(pinboardID: UUID?) -> String {
+        pinboardID == nil
+            ? "ci.created_at DESC, ci.snapshot_order ASC, ci.id ASC"
+            : "pbi.sort_order ASC, ci.id ASC"
     }
 
     private static func filteredItemCount(
