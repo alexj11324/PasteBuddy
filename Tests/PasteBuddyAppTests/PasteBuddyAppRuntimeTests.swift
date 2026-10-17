@@ -2345,8 +2345,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let ciScript = try sourceFileContents("script/ci.sh")
 
         // workflow_dispatch (ad-hoc re-run against an arbitrary SHA) still requires explicit
-        // owner approval; it is no longer the only trigger, since push/pull_request runs are
-        // gated by GitHub's own private-repo write-access model instead (single-collaborator repo).
+        // owner approval. push and pull_request run script/ci.sh on GitHub-hosted xcode-27.
         XCTAssertTrue(workflow.contains("workflow_dispatch:"))
         XCTAssertTrue(workflow.contains("pull_request:"))
         XCTAssertTrue(workflow.contains("push:"))
@@ -2358,7 +2357,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(workflow.contains("-f name='CI / verify'"))
         XCTAssertTrue(workflow.contains("ref: ${{ env.TARGET_SHA }}"))
         XCTAssertTrue(workflow.contains("if: github.event_name == 'workflow_dispatch'"))
-        XCTAssertTrue(workflow.contains("runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]"))
+        XCTAssertTrue(workflow.contains("runs-on: xcode-27"))
+        XCTAssertFalse(workflow.contains("self-hosted"))
+        XCTAssertFalse(workflow.contains("pastebuddy-ci"))
         XCTAssertFalse(workflow.contains("env:\n      GH_TOKEN:"))
         XCTAssertTrue(dispatchScript.contains("Only repository owner"))
         XCTAssertTrue(dispatchScript.contains("commits/$TARGET_SHA"))
@@ -3481,6 +3482,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
     func testShelfSingleClickSelectionIsImmediateAndOnlyDoubleClickPastes() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/Views/SwiftUIShelfCollection.swift")
         let agents = try sourceFileContents("AGENTS.md")
+        let contracts = try sourceFileContents("docs/agent-guides/product-runtime-contracts.md")
         let itemStart = try XCTUnwrap(source.range(of: "private func collectionItem"))
         let itemEnd = try XCTUnwrap(source.range(of: "\n    private var itemIDs", range: itemStart.lowerBound..<source.endIndex))
         let itemSource = String(source[itemStart.lowerBound..<itemEnd.lowerBound])
@@ -3500,7 +3502,11 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertLessThan(select.lowerBound, popover.lowerBound)
         XCTAssertFalse(itemSource.contains(".onTapGesture {"))
         XCTAssertFalse(itemSource.contains(".exclusively(before: TapGesture())"))
-        XCTAssertTrue(agents.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
+        // The click contract lives in the Shelf section of the product contracts.
+        // AGENTS.md only routes Shelf / Side Panel work to that file.
+        XCTAssertTrue(agents.contains("docs/agent-guides/product-runtime-contracts.md"))
+        XCTAssertTrue(agents.contains("Shelf, Side Panel"))
+        XCTAssertTrue(contracts.contains("Shelf / Side Panel 卡片必须单击立即选中，只有双击执行粘贴"))
     }
 
     func testPanelRefreshFunctionsDoNotSynchronouslyClearItemsBeforeReload() throws {
