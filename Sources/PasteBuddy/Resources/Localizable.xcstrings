@@ -35,6 +35,7 @@
     "label.embedding_base_url": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Embedding Base URL" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "向量模型基础 URL" } } } },
     "label.embedding_model": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Embedding Model" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "向量模型" } } } },
     "label.embedding_provider": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Embedding Provider" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "向量模型服务商" } } } },
+    "label.icloud_clipboard_sync": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "iCloud Clipboard Sync" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "iCloud 剪贴板同步" } } } },
     "label.multimodal_model": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Multimodal Model" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "多模态模型" } } } },
     "label.organization_id": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Organization ID" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "组织 ID" } } } },
     "label.pastebuddy_cloud": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "PasteBuddy Cloud" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "PasteBuddy 云端" } } } },
@@ -72,7 +73,9 @@
     "message.cloud_monthly_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Monthly PasteBuddy Cloud access, including BYOK." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按月使用 PasteBuddy 云端，同时包含 BYOK。" } } } },
     "message.cloud_monthly_option_detail": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Monthly subscription with PasteBuddy Cloud inference and BYOK." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "按月订阅 PasteBuddy 云端推理并包含 BYOK。" } } } },
     "message.cloud_subscription_unlock": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Unlocks Cloud and BYOK while the subscription remains active." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅有效期间解锁云端和 BYOK。" } } } },
+    "message.icloud_clipboard_sync_private_database": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Clipboard history syncs through your private iCloud database when iCloud sync is on." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "开启 iCloud 同步后，剪贴板历史会通过你的 iCloud 私有数据库同步。" } } } },
     "message.team_purchase_positioning": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Team is a business plan distinct from personal BYOK and Cloud subscriptions, with seat billing and admin-visible license state." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "团队版是独立于个人 BYOK 和云端订阅的商业套餐，提供席位计费和管理员可见的授权状态。" } } } },
+    "mobile.keyboard_sync.enable_icloud_in_app": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Turn on iCloud sync in the PasteBuddy app to sync this keyboard." } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "在 PasteBuddy App 中开启 iCloud 同步后，这个键盘才会同步。" } } } },
     "state.testing_connection": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Testing connection…" } }, "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在测试连接…" } } } },
     "mcp.semantic_search_history": {
       "localizations": {
@@ -8183,22 +8186,6 @@
         }
       }
     },
-    "action.connect": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connect"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "连接"
-          }
-        }
-      }
-    },
     "action.connect_ai_tool": {
       "localizations": {
         "en": {
@@ -10119,22 +10106,6 @@
         }
       }
     },
-    "action.scan_pairing_qr": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scan Pairing QR"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "扫描配对二维码"
-          }
-        }
-      }
-    },
     "action.send_latest_clipboard_item": {
       "localizations": {
         "en": {
@@ -10147,22 +10118,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "发送最新剪贴板项目"
-          }
-        }
-      }
-    },
-    "action.send_selected_item": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Send Selected Item"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "发送所选项目"
           }
         }
       }
@@ -10483,22 +10438,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "停止分享"
-          }
-        }
-      }
-    },
-    "action.sync_current_clipboard": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sync Current Clipboard"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "同步当前剪贴板"
           }
         }
       }
@@ -11425,22 +11364,6 @@
         }
       }
     },
-    "format.connected_to_peer": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connected to %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已连接到 %@"
-          }
-        }
-      }
-    },
     "format.direct_paste_clipboard_payloads_unavailable": {
       "localizations": {
         "en": {
@@ -11709,22 +11632,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "，标签：%@"
-          }
-        }
-      }
-    },
-    "format.last_received_item": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last received: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上次收到：%@"
           }
         }
       }
@@ -12317,22 +12224,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "辅助功能权限"
-          }
-        }
-      }
-    },
-    "label.actions": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Actions"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "操作"
           }
         }
       }
@@ -14276,22 +14167,6 @@
         }
       }
     },
-    "label.iroh_clipboard_sync": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Iroh Clipboard Sync"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Iroh 剪贴板同步"
-          }
-        }
-      }
-    },
     "label.items": {
       "localizations": {
         "en": {
@@ -15284,22 +15159,6 @@
         }
       }
     },
-    "label.pair_this_mac": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pair This Mac"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配对这台 Mac"
-          }
-        }
-      }
-    },
     "label.panel_style": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Panel Layout"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "面板方向"}}}},
     "label.participants": {
       "localizations": {
@@ -15441,22 +15300,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已暂停"
-          }
-        }
-      }
-    },
-    "label.peer_endpoint_id": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Peer endpoint ID"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "对端 endpoint ID"
           }
         }
       }
@@ -16825,22 +16668,6 @@
         }
       }
     },
-    "label.this_device": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This Device"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本设备"
-          }
-        }
-      }
-    },
     "label.this_mac": {
       "localizations": {
         "en": {
@@ -17657,22 +17484,6 @@
         }
       }
     },
-    "message.iroh_clipboard_sync_local_peer": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uses iroh peer-to-peer transport. Clipboard payloads are sent only to the connected peer."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "使用 iroh 点对点传输。剪贴板内容只会发送给已连接的对端。"
-          }
-        }
-      }
-    },
     "message.items_stay_in_clipboard_history_only_this": {
       "localizations": {
         "en": {
@@ -17957,22 +17768,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "从菜单栏打开。无需启动剪贴板工作流程，即可在下方使用相关设置部分。"
-          }
-        }
-      }
-    },
-    "message.pairing_qr_saved": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pairing code saved. Connecting..."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已保存配对码，正在连接..."
           }
         }
       }
@@ -18309,38 +18104,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在将共享内容保存到历史记录..."
-          }
-        }
-      }
-    },
-    "message.scan_pairing_qr_from_iphone": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scan this code from PasteBuddy on iPhone to pair with this Mac."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "用 iPhone 上的 PasteBuddy 扫描此二维码，即可与这台 Mac 配对。"
-          }
-        }
-      }
-    },
-    "message.scan_pairing_qr_from_mac": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scan the QR code shown in PasteBuddy on your Mac."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "扫描 Mac 版 PasteBuddy 中显示的二维码。"
           }
         }
       }
@@ -19801,22 +19564,6 @@
         }
       }
     },
-    "mobile.keyboard_sync.configure_peer_in_app": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pair a Mac endpoint in the PasteBuddy app first."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请先在 PasteBuddy App 中配对 Mac endpoint。"
-          }
-        }
-      }
-    },
     "mobile.keyboard_sync.full_access_required": {
       "localizations": {
         "en": {
@@ -20568,22 +20315,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "可用"
-          }
-        }
-      }
-    },
-    "state.binding": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Binding"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "绑定中"
           }
         }
       }

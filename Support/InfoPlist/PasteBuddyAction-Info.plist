@@ -18,6 +18,10 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <key>PasteBuddyCloudKitCapabilityConfigured</key>
+    <true/>
+    <key>PasteBuddyKeychainAccessGroup</key>
+    <string>72UN4PF4BL.com.alexjiang.PasteBuddy.shared</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>

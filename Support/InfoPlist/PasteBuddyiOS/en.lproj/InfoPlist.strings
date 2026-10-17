@@ -1,3 +1,2 @@
 "CFBundleDisplayName" = "PasteBuddy";
 "CFBundleName" = "PasteBuddy";
-"NSCameraUsageDescription" = "PasteBuddy uses the camera to scan a Mac pairing QR code for clipboard sync.";

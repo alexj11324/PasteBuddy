@@ -70,6 +70,12 @@ public struct CloudSyncUploadResult: Equatable, Sendable {
     }
 }
 
+public enum CloudSyncImportStatus: Sendable {
+    case imported(CloudSyncDownloadResult)
+    case unchanged
+    case failed
+}
+
 public struct CloudSyncDownloadResult: Equatable, Sendable {
     public var snapshot: PasteBuddySnapshot
     public var report: CloudSyncMergeReport
@@ -175,8 +181,16 @@ public final class CloudKitRemoteRecordTransport: CloudSyncRemoteRecordTransport
     }
 
     public func save(_ record: CloudSyncRemoteRecord) async throws -> CloudSyncRemoteRecord {
-        let savedRecord = try await saveRecord(factory.makeRecord(from: record))
-        return try factory.makeRemoteRecord(from: savedRecord)
+        let ckRecord = try factory.makeRecord(from: record)
+        let uploadURL = CloudKitRecordFactory.uploadAssetURL(in: ckRecord)
+        do {
+            _ = try await saveRecord(ckRecord)
+            CloudKitRecordFactory.discardUploadAsset(at: uploadURL)
+            return record
+        } catch {
+            CloudKitRecordFactory.discardUploadAsset(at: uploadURL)
+            throw error
+        }
     }
 
     public func fetchLatest(limit: Int = 1) async throws -> [CloudSyncRemoteRecord] {
@@ -184,9 +198,7 @@ public final class CloudKitRemoteRecordTransport: CloudSyncRemoteRecordTransport
             recordType: CloudKitRecordFactory.encryptedSnapshotRecordType,
             predicate: NSPredicate(value: true)
         )
-        query.sortDescriptors = [
-            NSSortDescriptor(key: CloudKitRecordFactory.createdAtField, ascending: false)
-        ]
+        query.sortDescriptors = CloudKitSnapshotRevision.latestFirstSortDescriptors()
         let records = try await perform(query, limit: limit)
         return try records.map { try factory.makeRemoteRecord(from: $0) }
     }
@@ -220,8 +232,11 @@ public final class CloudKitRemoteRecordTransport: CloudSyncRemoteRecordTransport
                         let records = try response.matchResults.map { _, recordResult in
                             try recordResult.get()
                         }
-                        let sortedRecords = records.sorted {
-                            Self.createdAt(from: $0) > Self.createdAt(from: $1)
+                        let sortedRecords = records.sorted { lhs, rhs in
+                            CloudKitSnapshotRevision.prefers(
+                                CloudKitSnapshotRevision(serverModificationDate: lhs.modificationDate),
+                                over: CloudKitSnapshotRevision(serverModificationDate: rhs.modificationDate)
+                            )
                         }
                         continuation.resume(returning: sortedRecords)
                     } catch {
@@ -234,14 +249,5 @@ public final class CloudKitRemoteRecordTransport: CloudSyncRemoteRecordTransport
         }
     }
 
-    private static func createdAt(from record: CKRecord) -> Date {
-        if let date = record[CloudKitRecordFactory.createdAtField] as? Date {
-            return date
-        }
-        if let date = record[CloudKitRecordFactory.createdAtField] as? NSDate {
-            return date as Date
-        }
-        return .distantPast
-    }
 }
 #endif

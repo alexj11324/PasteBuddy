@@ -207,7 +207,7 @@ private struct MobileGuidanceCardRow: View {
 public struct MobileKeyboardHistoryView: View {
     @Bindable private var store: PasteBuddyStore
     private let pasteService: MobileKeyboardPasteService?
-    private let irohSync: IrohClipboardSyncService?
+    private let uploadClipboard: () async -> Bool
     private let onDeleteBackward: (() -> Void)?
     private let onInsertReturn: (() -> Void)?
     private let onAdvanceToNextInputMode: (() -> Void)?
@@ -216,14 +216,14 @@ public struct MobileKeyboardHistoryView: View {
     public init(
         store: PasteBuddyStore,
         pasteService: MobileKeyboardPasteService? = nil,
-        irohSync: IrohClipboardSyncService? = nil,
+        uploadClipboard: @escaping () async -> Bool = { false },
         onDeleteBackward: (() -> Void)? = nil,
         onInsertReturn: (() -> Void)? = nil,
         onAdvanceToNextInputMode: (() -> Void)? = nil
     ) {
         self.store = store
         self.pasteService = pasteService
-        self.irohSync = PasteBuddyFeatureAvailability.irohClipboardSync ? irohSync : nil
+        self.uploadClipboard = uploadClipboard
         self.onDeleteBackward = onDeleteBackward
         self.onInsertReturn = onInsertReturn
         self.onAdvanceToNextInputMode = onAdvanceToNextInputMode
@@ -238,13 +238,11 @@ public struct MobileKeyboardHistoryView: View {
                 MobileGuidanceCardRow(card: keyboardCard)
             }
 
-            if let irohSync {
-                MobileKeyboardIrohSyncStrip(
-                    store: store,
-                    irohSync: irohSync,
-                    statusMessage: $statusMessage
-                )
-            }
+            MobileKeyboardICloudSyncStrip(
+                store: store,
+                statusMessage: $statusMessage,
+                uploadClipboard: uploadClipboard
+            )
 
             if let statusMessage {
                 Text(statusMessage)
@@ -448,29 +446,20 @@ public struct MobileKeyboardHistoryView: View {
     }
 }
 
-private struct MobileKeyboardIrohSyncStrip: View {
+private struct MobileKeyboardICloudSyncStrip: View {
     @Bindable var store: PasteBuddyStore
-    @Bindable var irohSync: IrohClipboardSyncService
     @Binding var statusMessage: String?
+    let uploadClipboard: () async -> Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Label(irohStatusText, systemImage: irohStatusIcon)
+                Label(statusText, systemImage: statusIcon)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(irohStatusColor)
+                    .foregroundStyle(statusColor)
                     .lineLimit(1)
 
                 Spacer(minLength: 8)
-
-                Button {
-                    connect()
-                } label: {
-                    Image(systemName: "bolt.horizontal.circle")
-                        .frame(width: 30, height: 28)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!canUseSyncNetwork || trimmedPeerEndpointId.isEmpty)
 
                 Button {
                     syncCurrentClipboard()
@@ -479,7 +468,8 @@ private struct MobileKeyboardIrohSyncStrip: View {
                         .frame(width: 34, height: 28)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canUseSyncNetwork || trimmedPeerEndpointId.isEmpty)
+                .disabled(!canSync)
+                .accessibilityLabel("label.icloud_clipboard_sync")
             }
 
             if !canUseSyncNetwork {
@@ -487,8 +477,8 @@ private struct MobileKeyboardIrohSyncStrip: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-            } else if trimmedPeerEndpointId.isEmpty {
-                Text("mobile.keyboard_sync.configure_peer_in_app")
+            } else if !store.snapshot.sync.isCloudSyncEnabled {
+                Text("mobile.keyboard_sync.enable_icloud_in_app")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -500,14 +490,8 @@ private struct MobileKeyboardIrohSyncStrip: View {
         store.snapshot.mobile.hasKeyboardFullAccess
     }
 
-    private var trimmedPeerEndpointId: String {
-        irohSync.peerEndpointId.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func connect() {
-        Task { @MainActor in
-            await irohSync.connectToPeer()
-        }
+    private var canSync: Bool {
+        canUseSyncNetwork && store.snapshot.sync.isCloudSyncEnabled
     }
 
     private func syncCurrentClipboard() {
@@ -518,12 +502,9 @@ private struct MobileKeyboardIrohSyncStrip: View {
             )
             return
         }
-        let storedItem = store.addCapturedItem(item)
+        _ = store.addCapturedItem(item)
         Task { @MainActor in
-            if !irohSync.connectionState.isConnected {
-                await irohSync.connectToPeer()
-            }
-            statusMessage = await irohSync.send(storedItem)
+            statusMessage = await uploadClipboard()
                 ? PasteBuddyLocalization.string(
                     "mobile.keyboard_sync.sent_current_clipboard",
                     defaultValue: "Synced current clipboard."
@@ -535,47 +516,34 @@ private struct MobileKeyboardIrohSyncStrip: View {
         }
     }
 
-    private var irohStatusText: String {
-        switch irohSync.connectionState {
-        case .idle:
-            PasteBuddyLocalization.string("state.idle", defaultValue: "Idle")
-        case .binding:
-            PasteBuddyLocalization.string("state.binding", defaultValue: "Binding")
-        case .ready:
-            PasteBuddyLocalization.string("state.ready", defaultValue: "Ready")
-        case .connecting:
-            PasteBuddyLocalization.string("state.connecting", defaultValue: "Connecting")
-        case .connected(let peerShortId):
-            PasteBuddyLocalization.format("format.connected_to_peer", defaultValue: "Connected to %@", peerShortId)
-        case .failed(let message):
-            message
+    private var statusText: String {
+        if canSync, let status = store.snapshot.sync.lastSyncStatusMessage, !status.isEmpty {
+            return status
         }
+        return PasteBuddyLocalization.string(
+            "label.icloud_clipboard_sync",
+            defaultValue: "iCloud Clipboard Sync"
+        )
     }
 
-    private var irohStatusIcon: String {
-        switch irohSync.connectionState {
-        case .connected:
-            "bolt.horizontal.circle.fill"
-        case .failed:
-            "exclamationmark.triangle"
-        case .connecting, .binding:
-            "bolt.horizontal.circle"
-        case .idle, .ready:
-            "bolt.horizontal"
+    private var statusIcon: String {
+        if !canSync {
+            return "icloud.slash"
         }
+        if store.lastErrorMessage != nil {
+            return "exclamationmark.triangle"
+        }
+        return store.snapshot.sync.lastSyncAt == nil ? "icloud" : "icloud.fill"
     }
 
-    private var irohStatusColor: Color {
-        switch irohSync.connectionState {
-        case .connected:
-            .green
-        case .failed:
-            .orange
-        case .connecting, .binding:
-            .secondary
-        case .idle, .ready:
-            .secondary
+    private var statusColor: Color {
+        if store.snapshot.sync.isCloudSyncEnabled && store.lastErrorMessage != nil {
+            return .orange
         }
+        if canSync {
+            return .green
+        }
+        return .secondary
     }
 }
 

@@ -21,15 +21,13 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.5.0"),
-        .package(url: "https://github.com/n0-computer/iroh-ffi.git", from: "1.0.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "8.0.0")
     ],
     targets: [
         .target(
             name: "PasteBuddyCore",
             dependencies: [
-                .product(name: "GRDB", package: "GRDB.swift"),
-                .product(name: "IrohLib", package: "iroh-ffi")
+                .product(name: "GRDB", package: "GRDB.swift")
             ],
             swiftSettings: pasteBuddySwiftSettings,
             linkerSettings: [

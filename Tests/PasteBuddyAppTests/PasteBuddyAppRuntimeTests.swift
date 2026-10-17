@@ -2121,21 +2121,26 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertFalse(chipSource.contains(".shadow("))
     }
 
-    func testIrohSyncForwardsEnrichedLinkMetadataToPeers() throws {
-        let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
+    func testClipboardSyncUsesCloudKitOnMacOSIOSAndExtensions() throws {
+        let hosts = [
+            "Sources/PasteBuddy/App/PasteBuddyApp.swift",
+            "Sources/PasteBuddyiOS/PasteBuddyiOSApp.swift",
+            "Sources/PasteBuddyKeyboard/KeyboardViewController.swift",
+            "Sources/PasteBuddyShareAction/ShareActionViewController.swift"
+        ]
+        for path in hosts {
+            let source = try sourceFileContents(path)
+            XCTAssertTrue(source.contains("CloudKitClipboardSyncSession"), path)
+            XCTAssertFalse(source.localizedCaseInsensitiveContains("iroh"), path)
+        }
 
-        XCTAssertTrue(appSource.contains("store.onLinkPreviewMetadataEnriched = { [irohSync] item in"))
-        XCTAssertTrue(appSource.contains("await irohSync.sendIfConnected(item)"))
-    }
-
-    func testIrohSyncReceiversRoutePeerItemsThroughPrivacyGate() throws {
-        let macAppSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
-        let iosAppSource = try sourceFileContents("Sources/PasteBuddyiOS/PasteBuddyiOSApp.swift")
-        let keyboardSource = try sourceFileContents("Sources/PasteBuddyKeyboard/KeyboardViewController.swift")
-
-        XCTAssertTrue(macAppSource.contains("store.addSyncedItem(item)"))
-        XCTAssertTrue(iosAppSource.contains("store.addSyncedItem(item)"))
-        XCTAssertTrue(keyboardSource.contains("resolvedStore.addSyncedItem(item)"))
+        let mobileBrowser = try sourceFileContents("Sources/PasteBuddyMobile/MobileClipboardBrowserView.swift")
+        let keyboardView = try sourceFileContents("Sources/PasteBuddyMobile/MobileExtensionViews.swift")
+        XCTAssertTrue(mobileBrowser.contains("label.icloud_clipboard_sync"))
+        XCTAssertTrue(mobileBrowser.contains("CloudKitClipboardSyncSession.setEnabled"))
+        XCTAssertTrue(keyboardView.contains("MobileKeyboardICloudSyncStrip"))
+        XCTAssertFalse(mobileBrowser.localizedCaseInsensitiveContains("iroh"))
+        XCTAssertFalse(keyboardView.localizedCaseInsensitiveContains("iroh"))
     }
 
     func testMenuBarStatusItemOwnsClickableMenuInsteadOfSwiftUIMenuBarExtra() throws {
@@ -2562,7 +2567,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(generalSource.contains("label.panel_style"))
         XCTAssertTrue(generalSource.contains("action.paste_as_plain_text_by"))
         XCTAssertTrue(generalSource.contains("label.keep_history"))
-        XCTAssertTrue(generalSource.contains("label.iroh_clipboard_sync"))
+        XCTAssertTrue(generalSource.contains("label.enable_icloud_sync"))
+        XCTAssertFalse(generalSource.contains("label.iroh_clipboard_sync"))
+        XCTAssertFalse(source.contains("IrohClipboardSyncService"))
         XCTAssertTrue(privacySource.contains("label.show_during_screen_sharing"))
         XCTAssertTrue(privacySource.contains("label.capture_images"))
         XCTAssertTrue(privacySource.contains("label.security"))
@@ -2869,15 +2876,36 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildSource = try sourceFileContents("script/build_and_run.sh")
         let entitlements = try sourceFileContents("Support/Entitlements/PasteBuddy.entitlements")
+        let syncSource = try sourceFileContents("Sources/PasteBuddyCore/Services/CloudKitClipboardSyncSession.swift")
 
         XCTAssertTrue(settingsSource.contains("Contents/MacOS/PasteBuddyMCP"))
         XCTAssertTrue(buildSource.contains("MCP_BUILD_BINARY"))
         XCTAssertTrue(buildSource.contains("$APP_MACOS/PasteBuddyMCP"))
         XCTAssertTrue(buildSource.contains("--entitlements"))
         XCTAssertTrue(entitlements.contains("iCloud.com.alexjiang.PasteBuddy"))
-        XCTAssertTrue(appSource.contains("CloudKitRemoteRecordTransport"))
-        XCTAssertTrue(appSource.contains("importLatestCloudSyncSnapshot"))
-        XCTAssertTrue(appSource.contains("uploadCloudSyncSnapshot"))
+        XCTAssertTrue(entitlements.contains("com.apple.developer.icloud-container-environment"))
+        XCTAssertTrue(appSource.contains("CloudKitClipboardSyncSession"))
+        XCTAssertTrue(syncSource.contains("CloudKitRemoteRecordTransport"))
+        XCTAssertTrue(syncSource.contains("importLatestCloudSyncSnapshot"))
+        XCTAssertTrue(syncSource.contains("uploadCloudSyncSnapshot"))
+    }
+
+    func testIOSTargetsBindCloudKitContainerEnvironment() throws {
+        let project = try sourceFileContents("PasteBuddyiOS.xcodeproj/project.pbxproj")
+        let development = try XCTUnwrap(project.range(of: "CloudKitContainerEnvironment = Development;"))
+        let production = try XCTUnwrap(project.range(of: "CloudKitContainerEnvironment = Production;"))
+        XCTAssertLessThan(development.lowerBound, production.lowerBound)
+
+        for path in [
+            "Support/Entitlements/PasteBuddy-iOS.entitlements",
+            "Support/Entitlements/PasteBuddyKeyboard.entitlements",
+            "Support/Entitlements/PasteBuddyShareAction.entitlements"
+        ] {
+            let entitlements = try sourceFileContents(path)
+            XCTAssertTrue(entitlements.contains("com.apple.developer.icloud-container-environment"), path)
+            XCTAssertTrue(entitlements.contains("$(CloudKitContainerEnvironment)"), path)
+            XCTAssertTrue(entitlements.contains("iCloud.com.alexjiang.PasteBuddy"), path)
+        }
     }
 
     func testPanelHotKeyMatcherSeparatesSidePanelAndShelfActions() {
@@ -3177,19 +3205,17 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
 
     func testRuntimeInstallsConfiguredHotKeysBeforeStartingNetworkSync() throws {
         let source = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
-        let syncSource = try sourceFileContents("Sources/PasteBuddyCore/Services/IrohClipboardSyncService.swift")
+        let syncSource = try sourceFileContents("Sources/PasteBuddyCore/Services/CloudKitClipboardSyncSession.swift")
         let runtimeStart = try XCTUnwrap(source.range(of: "private func startRuntimeIfNeeded() async"))
         let runtimeSource = source[runtimeStart.lowerBound...]
         let hotKeyInstallation = try XCTUnwrap(runtimeSource.range(of: "panelHotKeyController = PasteBuddyPanelHotKeyController("))
-        let networkStart = try XCTUnwrap(
-            runtimeSource.range(of: "Task { @MainActor in\n                await irohSync.start()")
-        )
+        let networkStart = try XCTUnwrap(runtimeSource.range(of: "cloudSync.update(store: store)"))
 
         XCTAssertLessThan(hotKeyInstallation.lowerBound, networkStart.lowerBound)
         XCTAssertTrue(runtimeSource.contains("sidePanelShortcut: store.snapshot.shortcuts.showHidePanel"))
         XCTAssertTrue(runtimeSource.contains("store.onShortcutConfigurationChanged"))
-        XCTAssertTrue(runtimeSource.contains("irohSync.connectionState != .binding"))
-        XCTAssertTrue(syncSource.contains("guard endpoint == nil, connectionState != .binding else { return }"))
+        XCTAssertTrue(syncSource.contains("store.snapshot.sync.readiness.canAttemptCloudSync"))
+        XCTAssertFalse(runtimeSource.localizedCaseInsensitiveContains("iroh"))
     }
 
     func testImagePreviewRejectsStaleAsyncResultsAfterDismissOrItemChange() throws {

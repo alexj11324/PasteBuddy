@@ -812,10 +812,10 @@ final class EncryptionServiceTests: XCTestCase {
             id: UUID(),
             createdAt: newer,
             updatedAt: newer,
-            sourceAppName: "PasteBuddy Iroh",
+            sourceAppName: "PasteBuddy",
             deviceName: "Local iPhone",
             contentType: .text,
-            title: "Synced via Iroh",
+            title: "Synced from another device",
             payload: ClipboardPayload(text: "same clipboard payload")
         )
         let remoteCloudItem = ClipboardItem(
@@ -931,6 +931,8 @@ final class EncryptionServiceTests: XCTestCase {
         let package = try CloudSyncPackageBuilder(encryptor: service)
             .makeUploadPackage(from: snapshot)
         let record = try CloudKitRecordFactory().makeRecord(from: package)
+        let uploadURL = CloudKitRecordFactory.uploadAssetURL(in: record)
+        defer { CloudKitRecordFactory.discardUploadAsset(at: uploadURL) }
 
         XCTAssertEqual(record.recordType, CloudKitRecordFactory.encryptedSnapshotRecordType)
         XCTAssertEqual(record[CloudKitRecordFactory.keyIDField] as? String, "test-key")
@@ -939,7 +941,9 @@ final class EncryptionServiceTests: XCTestCase {
             "iCloud.com.example.PasteBuddy"
         )
 
-        let envelopeData = try XCTUnwrap(record[CloudKitRecordFactory.encryptedSnapshotField] as? Data)
+        XCTAssertNil(record[CloudKitRecordFactory.encryptedSnapshotField])
+        let asset = try XCTUnwrap(record[CloudKitRecordFactory.encryptedSnapshotAssetField] as? CKAsset)
+        let envelopeData = try Data(contentsOf: XCTUnwrap(asset.fileURL))
         let envelopeString = String(decoding: envelopeData, as: UTF8.self)
 
         XCTAssertFalse(envelopeString.contains("CloudKit Record Secret"))
@@ -958,6 +962,56 @@ final class EncryptionServiceTests: XCTestCase {
         XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.algorithm, package.encryptedSnapshot.algorithm)
         XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.keyID, package.encryptedSnapshot.keyID)
         XCTAssertEqual(roundTrippedPackage.encryptedSnapshot.sealedData, package.encryptedSnapshot.sealedData)
+    }
+
+    func testCloudKitRecordDecodesLegacyInlineSnapshot() throws {
+        let service = EncryptionService(
+            service: "com.pastebuddy.tests",
+            account: UUID().uuidString,
+            keyID: "test-key"
+        )
+        defer { try? service.deleteKeyForTesting() }
+        let snapshot = PasteBuddySnapshot(
+            items: [
+                ClipboardItem(
+                    sourceAppName: "Notes",
+                    deviceName: "Test Mac",
+                    contentType: .text,
+                    title: "Legacy Inline Secret",
+                    payload: ClipboardPayload(text: "inline bytes stay readable")
+                )
+            ],
+            sync: SyncConfiguration(
+                provider: .cloudKit,
+                isCloudSyncEnabled: true,
+                cloudKitContainerIdentifier: "iCloud.com.example.PasteBuddy",
+                keyHierarchyVersion: 1,
+                isCloudKitCapabilityConfigured: true
+            )
+        )
+        let package = try CloudSyncPackageBuilder(encryptor: service)
+            .makeUploadPackage(from: snapshot)
+        let inlineData = try JSONEncoder.pasteBuddy.encode(package.encryptedSnapshot)
+        let record = CKRecord(
+            recordType: CloudKitRecordFactory.encryptedSnapshotRecordType,
+            recordID: CKRecord.ID(recordName: package.id.uuidString)
+        )
+        record[CloudKitRecordFactory.packageIDField] = package.id.uuidString as NSString
+        record[CloudKitRecordFactory.createdAtField] = package.createdAt as NSDate
+        record[CloudKitRecordFactory.containerIdentifierField] = package.containerIdentifier as NSString
+        record[CloudKitRecordFactory.schemaVersionField] = NSNumber(value: package.schemaVersion)
+        record[CloudKitRecordFactory.keyHierarchyVersionField] = NSNumber(value: package.keyHierarchyVersion)
+        record[CloudKitRecordFactory.envelopeVersionField] = NSNumber(value: package.encryptedSnapshot.version)
+        record[CloudKitRecordFactory.envelopeAlgorithmField] = package.encryptedSnapshot.algorithm as NSString
+        record[CloudKitRecordFactory.keyIDField] = package.encryptedSnapshot.keyID as NSString
+        record[CloudKitRecordFactory.encryptedSnapshotField] = inlineData as NSData
+
+        let remoteRecord = try CloudKitRecordFactory().makeRemoteRecord(from: record)
+
+        XCTAssertEqual(remoteRecord.packageID, package.id)
+        XCTAssertEqual(remoteRecord.encryptedSnapshot.sealedData, package.encryptedSnapshot.sealedData)
+        let decrypted = try service.decrypt(PasteBuddySnapshot.self, from: remoteRecord.encryptedSnapshot)
+        XCTAssertEqual(decrypted.items.first?.payload.text, "inline bytes stay readable")
     }
     #endif
 }

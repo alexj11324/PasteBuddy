@@ -15,9 +15,9 @@ below when the task enters that branch.
 - User-visible strings use semantic keys in
   `Sources/PasteBuddy/Resources/Localizable.xcstrings`. Read the localization
   section of the product contracts before changing copy or catalogs.
-- Iroh clipboard sync remains disabled through the shared capability while its
-  implementation and user data stay intact. Read the Iroh section before
-  changing sync availability.
+- Clipboard sync uses the encrypted CloudKit private-database path. Iroh has
+  been removed, including its implementation, dependency, pairing state, and
+  UI. Read the iCloud clipboard sync section before changing sync availability.
 - Secrets use the configured `gsm` / `general-secrets-store` workflow and
   never enter tracked files or long-lived plaintext configuration.
 

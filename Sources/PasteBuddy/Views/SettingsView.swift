@@ -5,7 +5,6 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @Bindable var store: PasteBuddyStore
-    @Bindable var irohSync: IrohClipboardSyncService
     @Binding var panelDisplayMode: ClipboardPanelDisplayMode
     @Bindable var mcpHTTPServer: PasteBuddyMCPHTTPServer
     let onCloudSyncConfigurationChanged: (Bool) -> Void
@@ -191,18 +190,6 @@ struct SettingsView: View {
                     Text("label.side_panel").tag(ClipboardPanelDisplayMode.sidePanel)
                 }
                 .pickerStyle(.radioGroup)
-            }
-
-            if PasteBuddyFeatureAvailability.irohClipboardSync {
-                Section("label.iroh_clipboard_sync") {
-                    LabeledContent("label.status") {
-                        Text(irohStatusText)
-                            .foregroundStyle(irohStatusColor)
-                    }
-                    TextField("label.peer_endpoint_id", text: $irohSync.peerEndpointId)
-                        .font(.body.monospaced())
-                        .frame(maxWidth: .infinity)
-                }
             }
 
             Section {
@@ -571,17 +558,7 @@ struct SettingsView: View {
         Binding(
             get: { store.snapshot.sync.isCloudSyncEnabled },
             set: { isEnabled in
-                if isEnabled {
-                    store.configureCloudKitSync(
-                        containerIdentifier: store.snapshot.sync.cloudKitContainerIdentifier
-                            ?? "iCloud.com.alexjiang.PasteBuddy",
-                        capabilityConfigured: Bundle.main.object(
-                            forInfoDictionaryKey: "PasteBuddyCloudKitCapabilityConfigured"
-                        ) as? Bool == true
-                    )
-                } else {
-                    store.disableCloudSync()
-                }
+                CloudKitClipboardSyncSession.setEnabled(isEnabled, on: store)
                 onCloudSyncConfigurationChanged(isEnabled)
             }
         )
@@ -725,34 +702,6 @@ struct SettingsView: View {
             fromByteCount: Int64(store.snapshot.storage.maxStorageBytes),
             countStyle: .file
         )
-    }
-
-    private var irohStatusText: String {
-        switch irohSync.connectionState {
-        case .idle:
-            localized("state.off")
-        case .binding:
-            localized("state.binding")
-        case .ready:
-            localized("state.ready")
-        case .connecting:
-            localized("state.connecting")
-        case .connected(let peerShortId):
-            localized("format.connected_to_peer", peerShortId)
-        case .failed(let message):
-            message
-        }
-    }
-
-    private var irohStatusColor: Color {
-        switch irohSync.connectionState {
-        case .connected:
-            .green
-        case .failed:
-            .orange
-        default:
-            .secondary
-        }
     }
 
     private func reloadMCPClientCandidates() {

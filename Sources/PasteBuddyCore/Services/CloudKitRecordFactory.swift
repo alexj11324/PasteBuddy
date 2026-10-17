@@ -35,7 +35,10 @@ public struct CloudKitRecordFactory: Sendable {
     public static let envelopeVersionField = "envelopeVersion"
     public static let envelopeAlgorithmField = "envelopeAlgorithm"
     public static let keyIDField = "keyID"
+    /// Legacy inline bytes. CloudKit cannot change this field to an asset once
+    /// a record has used it, and non-asset fields are limited to 1 MB.
     public static let encryptedSnapshotField = "encryptedSnapshot"
+    public static let encryptedSnapshotAssetField = "encryptedSnapshotAsset"
 
     public init() {}
 
@@ -57,13 +60,31 @@ public struct CloudKitRecordFactory: Sendable {
         record[Self.envelopeVersionField] = NSNumber(value: remoteRecord.encryptedSnapshot.version)
         record[Self.envelopeAlgorithmField] = remoteRecord.encryptedSnapshot.algorithm as NSString
         record[Self.keyIDField] = remoteRecord.encryptedSnapshot.keyID as NSString
+        let envelopeData: Data
         do {
-            record[Self.encryptedSnapshotField] = try JSONEncoder.pasteBuddy
-                .encode(remoteRecord.encryptedSnapshot) as NSData
+            envelopeData = try JSONEncoder.pasteBuddy.encode(remoteRecord.encryptedSnapshot)
         } catch {
             throw CloudKitRecordFactoryError.envelopeEncodingFailed(error)
         }
+        let assetURL: URL
+        do {
+            assetURL = try Self.writeUploadAsset(envelopeData)
+        } catch {
+            throw CloudKitRecordFactoryError.envelopeEncodingFailed(error)
+        }
+        record[Self.encryptedSnapshotAssetField] = CKAsset(fileURL: assetURL)
         return record
+    }
+
+    public static func uploadAssetURL(in record: CKRecord) -> URL? {
+        (record[encryptedSnapshotAssetField] as? CKAsset)?.fileURL
+    }
+
+    /// Deletes only files this factory wrote for an upload. CloudKit's downloaded
+    /// asset cache lives outside that directory and must stay in place.
+    public static func discardUploadAsset(at fileURL: URL?) {
+        guard let fileURL, isManagedUploadAsset(fileURL) else { return }
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
     public func makeRemoteRecord(from record: CKRecord) throws -> CloudSyncRemoteRecord {
@@ -75,7 +96,7 @@ public struct CloudKitRecordFactory: Sendable {
         guard let packageID = UUID(uuidString: packageIDString) else {
             throw CloudKitRecordFactoryError.invalidField(Self.packageIDField)
         }
-        let encryptedSnapshotData = try dataField(Self.encryptedSnapshotField, in: record)
+        let encryptedSnapshotData = try encryptedSnapshotData(in: record)
         let encryptedSnapshot: EncryptedEnvelope
         do {
             encryptedSnapshot = try JSONDecoder.pasteBuddy.decode(
@@ -136,9 +157,20 @@ public struct CloudKitRecordFactory: Sendable {
         throw CloudKitRecordFactoryError.invalidField(field)
     }
 
-    private func dataField(_ field: String, in record: CKRecord) throws -> Data {
-        guard let value = record[field] else {
-            throw CloudKitRecordFactoryError.missingField(field)
+    private func encryptedSnapshotData(in record: CKRecord) throws -> Data {
+        if let asset = record[Self.encryptedSnapshotAssetField] as? CKAsset {
+            guard let fileURL = asset.fileURL else {
+                throw CloudKitRecordFactoryError.missingField(Self.encryptedSnapshotAssetField)
+            }
+            do {
+                return try Data(contentsOf: fileURL)
+            } catch {
+                throw CloudKitRecordFactoryError.envelopeDecodingFailed(error)
+            }
+        }
+
+        guard let value = record[Self.encryptedSnapshotField] else {
+            throw CloudKitRecordFactoryError.missingField(Self.encryptedSnapshotAssetField)
         }
         if let data = value as? Data {
             return data
@@ -146,7 +178,26 @@ public struct CloudKitRecordFactory: Sendable {
         if let data = value as? NSData {
             return data as Data
         }
-        throw CloudKitRecordFactoryError.invalidField(field)
+        throw CloudKitRecordFactoryError.invalidField(Self.encryptedSnapshotField)
+    }
+
+    private static func writeUploadAsset(_ data: Data) throws -> URL {
+        let directory = uploadAssetDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("snapshot-\(UUID().uuidString).ckasset")
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+
+    private static func uploadAssetDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("PasteBuddyCloudKitUploads", isDirectory: true)
+    }
+
+    private static func isManagedUploadAsset(_ fileURL: URL) -> Bool {
+        let managedRoot = uploadAssetDirectory().standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = fileURL.standardizedFileURL.resolvingSymlinksInPath()
+        return candidate.path.hasPrefix(managedRoot.path + "/")
     }
 }
 #endif

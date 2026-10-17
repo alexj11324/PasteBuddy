@@ -109,9 +109,12 @@ acceptance matrix controls proof. WP1 is a hard stop before migration.
 
 Cloud quotas are 5,000 clipboard items and 250,000,000 attachment bytes.
 Backfill prioritizes the newest 100 eligible items and continues resumably.
-CloudKit is a one-time latest-Snapshot recovery input and read-only for 90
-days; it is not a second sync authority. Iroh remains implemented as a
-migration input while its unified capability is off.
+Clipboard sync uses encrypted CloudKit private-database snapshots in
+`iCloud.com.alexjiang.PasteBuddy`. The user turns iCloud sync on explicitly,
+and macOS, iOS, and the keyboard, share, and action extensions share that
+path. Iroh has been removed. Once the PowerSync migration is in place, those
+CloudKit snapshots become a one-time recovery input and stay read-only for 90
+days; they are not a second authority beside PowerSync.
 
 ## Shortcuts
 
