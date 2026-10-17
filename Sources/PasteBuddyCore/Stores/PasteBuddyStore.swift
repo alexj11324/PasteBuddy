@@ -2703,34 +2703,34 @@ public final class PasteBuddyStore {
     @discardableResult
     public func importLatestCloudSyncSnapshot(
         using service: CloudKitSyncService
-    ) async -> CloudSyncDownloadResult? {
+    ) async -> CloudSyncImportStatus {
         let expectedSync = snapshot.sync
         do {
             guard let result = try await service.downloadLatest(into: snapshot) else {
                 guard snapshot.sync.isCloudSyncEnabled,
                       snapshot.sync.lastImportedPackageID == nil,
                       snapshot.sync.lastSyncStatusMessage != "No encrypted CloudKit records found." else {
-                    return nil
+                    return .unchanged
                 }
                 snapshot.sync.lastSyncStatusMessage = "No encrypted CloudKit records found."
                 lastErrorMessage = nil
                 save()
-                return nil
+                return .unchanged
             }
             guard snapshot.sync.isCloudSyncEnabled,
                   snapshot.sync.cloudKitContainerIdentifier == expectedSync.cloudKitContainerIdentifier,
                   snapshot.sync.keyHierarchyVersion == expectedSync.keyHierarchyVersion,
                   snapshot.sync.isCloudKitCapabilityConfigured == expectedSync.isCloudKitCapabilityConfigured else {
-                return nil
+                return .unchanged
             }
             snapshot = result.snapshot
             lastErrorMessage = nil
             selectSingleItem(filteredItems.first?.id)
             save()
-            return result
+            return .imported(result)
         } catch {
             lastErrorMessage = error.localizedDescription
-            return nil
+            return .failed
         }
     }
 

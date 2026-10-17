@@ -8,6 +8,7 @@ struct PasteBuddyiOSApp: App {
     @State private var cloudSync = CloudKitClipboardSyncSession()
 
     init() {
+        LegacyClipboardPairingResidueCleanup.removeLeftoverStateIfNeeded()
         let resolvedStore = MobileStoreFactory.makeStore()
         resolvedStore.load()
         _store = State(initialValue: resolvedStore)

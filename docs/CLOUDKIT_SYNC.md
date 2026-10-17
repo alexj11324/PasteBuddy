@@ -61,7 +61,22 @@ Clipboard sync is the encrypted CloudKit private snapshot already implemented
 by `CloudKitSyncService`. macOS, iOS, and the keyboard, share, and action
 extensions use `CloudKitClipboardSyncSession` when the user has enabled iCloud
 sync and the signed CloudKit capability is present. Iroh, its dependency,
-pairing state, and UI are removed.
+pairing state, and UI are removed. An upgraded install clears the leftover
+pairing secret and peer-endpoint preference once per process.
+
+The encrypted snapshot is written to the CloudKit asset field
+`encryptedSnapshotAsset`, so a payload larger than the 1 MB non-asset record
+limit can still upload. Records that already stored those bytes inline in
+`encryptedSnapshot` remain readable. CloudKit cannot change a field from bytes
+to an asset, so new uploads do not reuse that legacy field. Polling chooses
+the newest snapshot by CloudKit's server modification time, not the client
+`createdAt`.
+
+iOS app, keyboard, share, and action entitlements set
+`com.apple.developer.icloud-container-environment` to
+`$(CloudKitContainerEnvironment)`. The iOS project sets that build setting to
+Development for Debug and Production for Release. macOS keeps the same
+entitlement key and fills it from the provisioning profile at sign time.
 
 The migration sections above describe the later PowerSync recovery boundary.
 They do not keep an Iroh implementation in the tree, and they do not disable

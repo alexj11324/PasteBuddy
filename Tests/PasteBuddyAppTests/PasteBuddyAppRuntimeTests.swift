@@ -2875,15 +2875,36 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let appSource = try sourceFileContents("Sources/PasteBuddy/App/PasteBuddyApp.swift")
         let buildSource = try sourceFileContents("script/build_and_run.sh")
         let entitlements = try sourceFileContents("Support/Entitlements/PasteBuddy.entitlements")
+        let syncSource = try sourceFileContents("Sources/PasteBuddyCore/Services/CloudKitClipboardSyncSession.swift")
 
         XCTAssertTrue(settingsSource.contains("Contents/MacOS/PasteBuddyMCP"))
         XCTAssertTrue(buildSource.contains("MCP_BUILD_BINARY"))
         XCTAssertTrue(buildSource.contains("$APP_MACOS/PasteBuddyMCP"))
         XCTAssertTrue(buildSource.contains("--entitlements"))
         XCTAssertTrue(entitlements.contains("iCloud.com.alexjiang.PasteBuddy"))
-        XCTAssertTrue(appSource.contains("CloudKitRemoteRecordTransport"))
-        XCTAssertTrue(appSource.contains("importLatestCloudSyncSnapshot"))
-        XCTAssertTrue(appSource.contains("uploadCloudSyncSnapshot"))
+        XCTAssertTrue(entitlements.contains("com.apple.developer.icloud-container-environment"))
+        XCTAssertTrue(appSource.contains("CloudKitClipboardSyncSession"))
+        XCTAssertTrue(syncSource.contains("CloudKitRemoteRecordTransport"))
+        XCTAssertTrue(syncSource.contains("importLatestCloudSyncSnapshot"))
+        XCTAssertTrue(syncSource.contains("uploadCloudSyncSnapshot"))
+    }
+
+    func testIOSTargetsBindCloudKitContainerEnvironment() throws {
+        let project = try sourceFileContents("PasteBuddyiOS.xcodeproj/project.pbxproj")
+        let development = try XCTUnwrap(project.range(of: "CloudKitContainerEnvironment = Development;"))
+        let production = try XCTUnwrap(project.range(of: "CloudKitContainerEnvironment = Production;"))
+        XCTAssertLessThan(development.lowerBound, production.lowerBound)
+
+        for path in [
+            "Support/Entitlements/PasteBuddy-iOS.entitlements",
+            "Support/Entitlements/PasteBuddyKeyboard.entitlements",
+            "Support/Entitlements/PasteBuddyShareAction.entitlements"
+        ] {
+            let entitlements = try sourceFileContents(path)
+            XCTAssertTrue(entitlements.contains("com.apple.developer.icloud-container-environment"), path)
+            XCTAssertTrue(entitlements.contains("$(CloudKitContainerEnvironment)"), path)
+            XCTAssertTrue(entitlements.contains("iCloud.com.alexjiang.PasteBuddy"), path)
+        }
     }
 
     func testPanelHotKeyMatcherSeparatesSidePanelAndShelfActions() {

@@ -67,15 +67,95 @@ final class CloudKitClipboardSyncSessionTests: XCTestCase {
         )
 
         var lastUploadedDataRevision: Int?
-        let shouldContinue = await harness.runtime.syncOnce(
+        let succeeded = await harness.runtime.syncOnce(
             store: harness.store,
             lastUploadedDataRevision: &lastUploadedDataRevision
         )
 
-        XCTAssertTrue(shouldContinue)
+        XCTAssertFalse(succeeded)
         XCTAssertEqual(await harness.transport.saveCount(), 0)
         XCTAssertNil(lastUploadedDataRevision)
         XCTAssertEqual(harness.store.lastErrorMessage, CloudSyncSessionTestError.fetchFailed.localizedDescription)
+    }
+
+    func testSyncOnceReturnsFalseWhenUploadFails() async throws {
+        let harness = try CloudSyncHarness()
+        defer { harness.cleanup() }
+        await harness.transport.setSaveError(CloudSyncSessionTestError.saveFailed)
+        harness.store.addCapturedItem(
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Local Mac",
+                contentType: .text,
+                title: "Should Stay Local",
+                payload: ClipboardPayload(text: "do not report success after a failed upload")
+            )
+        )
+
+        var lastUploadedDataRevision: Int?
+        let succeeded = await harness.runtime.syncOnce(
+            store: harness.store,
+            lastUploadedDataRevision: &lastUploadedDataRevision
+        )
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(await harness.transport.saveCount(), 1)
+        XCTAssertTrue(await harness.transport.records().isEmpty)
+        XCTAssertNil(lastUploadedDataRevision)
+        XCTAssertEqual(harness.store.lastErrorMessage, CloudSyncSessionTestError.saveFailed.localizedDescription)
+    }
+
+    func testSyncOnceUploadsWhenAnOlderErrorIsUnchanged() async throws {
+        let harness = try CloudSyncHarness()
+        defer { harness.cleanup() }
+        var sync = harness.store.snapshot.sync
+        sync.lastImportedPackageID = UUID()
+        sync.lastSyncStatusMessage = "No encrypted CloudKit records found."
+        harness.store.snapshot.sync = sync
+        harness.store.lastErrorMessage = "Previous paste failed."
+        harness.store.addCapturedItem(
+            ClipboardItem(
+                sourceAppName: "Notes",
+                deviceName: "Local Mac",
+                contentType: .text,
+                title: "Local After Old Error",
+                payload: ClipboardPayload(text: "an old error is not a fetch failure")
+            )
+        )
+
+        var lastUploadedDataRevision: Int?
+        let succeeded = await harness.runtime.syncOnce(
+            store: harness.store,
+            lastUploadedDataRevision: &lastUploadedDataRevision
+        )
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(await harness.transport.saveCount(), 1)
+        XCTAssertEqual(lastUploadedDataRevision, harness.store.dataRevision)
+    }
+
+    func testSnapshotOrderingUsesServerModificationTime() throws {
+        let earlier = CloudKitSnapshotRevision(serverModificationDate: Date(timeIntervalSince1970: 10))
+        let later = CloudKitSnapshotRevision(serverModificationDate: Date(timeIntervalSince1970: 30))
+        let missing = CloudKitSnapshotRevision(serverModificationDate: nil)
+        let serverDated = CloudKitSnapshotRevision(serverModificationDate: Date(timeIntervalSince1970: 20))
+
+        XCTAssertTrue(CloudKitSnapshotRevision.prefers(later, over: earlier))
+        XCTAssertFalse(CloudKitSnapshotRevision.prefers(earlier, over: later))
+        XCTAssertTrue(CloudKitSnapshotRevision.prefers(earlier, over: missing))
+        XCTAssertFalse(CloudKitSnapshotRevision.prefers(missing, over: serverDated))
+        XCTAssertFalse(CloudKitSnapshotRevision.prefers(missing, over: missing))
+        XCTAssertFalse(CloudKitSnapshotRevision.prefers(earlier, over: earlier))
+
+        let descriptors = CloudKitSnapshotRevision.latestFirstSortDescriptors()
+        XCTAssertEqual(descriptors.map(\.key), [CloudKitSnapshotRevision.serverModificationSortKey])
+        XCTAssertEqual(descriptors.first?.ascending, false)
+        XCTAssertNotEqual(CloudKitSnapshotRevision.serverModificationSortKey, "createdAt")
+
+        let source = try sourceFileContents("Sources/PasteBuddyCore/Services/CloudKitSyncService.swift")
+        XCTAssertTrue(source.contains("CloudKitSnapshotRevision.latestFirstSortDescriptors()"))
+        XCTAssertTrue(source.contains("lhs.modificationDate"))
+        XCTAssertFalse(source.contains("createdAtField, ascending: false"))
     }
 
     func testSessionStartsOnlyWhenICloudSyncIsReady() async throws {
@@ -102,24 +182,35 @@ final class CloudKitClipboardSyncSessionTests: XCTestCase {
 }
 
 private struct CloudSyncSessionTestError: LocalizedError {
-    static let fetchFailed = CloudSyncSessionTestError()
+    static let fetchFailed = CloudSyncSessionTestError(message: "Simulated CloudKit fetch failed.")
+    static let saveFailed = CloudSyncSessionTestError(message: "Simulated CloudKit save failed.")
+
+    var message: String
 
     var errorDescription: String? {
-        "Simulated CloudKit fetch failed."
+        message
     }
 }
 
 private actor CloudSyncSessionTransport: CloudSyncRemoteRecordTransport {
     private var storedRecords: [CloudSyncRemoteRecord] = []
     private var fetchError: Error?
+    private var saveError: Error?
     private var saves = 0
 
     func setFetchError(_ error: Error?) {
         fetchError = error
     }
 
+    func setSaveError(_ error: Error?) {
+        saveError = error
+    }
+
     func save(_ record: CloudSyncRemoteRecord) async throws -> CloudSyncRemoteRecord {
         saves += 1
+        if let saveError {
+            throw saveError
+        }
         storedRecords.removeAll { $0.packageID == record.packageID }
         storedRecords.append(record)
         return record
@@ -185,4 +276,16 @@ private final class CloudSyncHarness {
         try? encryptionService.deleteKeyForTesting()
         try? FileManager.default.removeItem(at: directory)
     }
+}
+
+private func sourceFileContents(_ relativePath: String) throws -> String {
+    var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    for _ in 0..<8 {
+        let candidate = directory.appendingPathComponent(relativePath)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return String(decoding: try Data(contentsOf: candidate), as: UTF8.self)
+        }
+        directory.deleteLastPathComponent()
+    }
+    throw XCTSkip("Could not locate \(relativePath) from \(FileManager.default.currentDirectoryPath)")
 }

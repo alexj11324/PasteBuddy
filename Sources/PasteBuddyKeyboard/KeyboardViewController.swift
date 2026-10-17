@@ -20,6 +20,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureKeyboard() {
+        LegacyClipboardPairingResidueCleanup.removeLeftoverStateIfNeeded()
         let resolvedStore = MobileStoreFactory.makeStore()
         resolvedStore.load()
         resolvedStore.setKeyboardExtensionEnabled(true, fullAccess: hasFullAccess)

@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        LegacyClipboardPairingResidueCleanup.removeLeftoverStateIfNeeded()
         PasteBuddyDiagnostics.recordAccessibilityTrust(
             .directPaste,
             "accessibilityTrustCheckedAtLaunch"

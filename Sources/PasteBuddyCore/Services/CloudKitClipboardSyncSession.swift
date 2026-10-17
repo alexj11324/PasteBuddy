@@ -37,11 +37,11 @@ public final class CloudKitClipboardSyncRuntime {
             guard let self else { return }
             var lastUploadedDataRevision: Int?
             while !Task.isCancelled {
-                let shouldContinue = await self.syncOnce(
+                _ = await self.syncOnce(
                     store: store,
                     lastUploadedDataRevision: &lastUploadedDataRevision
                 )
-                guard shouldContinue, !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return }
                 do {
                     try await Task.sleep(for: self.pollInterval)
                 } catch {
@@ -57,7 +57,8 @@ public final class CloudKitClipboardSyncRuntime {
     }
 
     /// Imports the latest private snapshot, then uploads when local data changed.
-    /// A failed import keeps the loop alive so the next pass can retry.
+    /// True means this pass succeeded. The poll loop retries after false; a
+    /// one-shot caller uses false to report that nothing was uploaded.
     @discardableResult
     public func syncOnce(
         store: PasteBuddyStore,
@@ -65,14 +66,17 @@ public final class CloudKitClipboardSyncRuntime {
     ) async -> Bool {
         let imported = await store.importLatestCloudSyncSnapshot(using: service)
         guard !Task.isCancelled else { return false }
-        guard imported != nil || store.lastErrorMessage == nil else {
+        if case .failed = imported {
+            return false
+        }
+        guard lastUploadedDataRevision != store.dataRevision else {
             return true
         }
-        if lastUploadedDataRevision != store.dataRevision,
-           await store.uploadCloudSyncSnapshot(using: service) != nil {
-            lastUploadedDataRevision = store.dataRevision
+        guard await store.uploadCloudSyncSnapshot(using: service) != nil else {
+            return false
         }
-        return !Task.isCancelled
+        lastUploadedDataRevision = store.dataRevision
+        return true
     }
 }
 

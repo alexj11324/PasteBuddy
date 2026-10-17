@@ -77,6 +77,7 @@ final class ShareActionViewController: UIViewController {
     }
 
     private func importSharedContent() async {
+        LegacyClipboardPairingResidueCleanup.removeLeftoverStateIfNeeded()
         retryButton.isHidden = true
         activityIndicator.startAnimating()
         messageLabel.text = localized("message.saving_shared_content_to_history")

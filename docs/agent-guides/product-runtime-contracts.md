@@ -22,7 +22,7 @@
 
 ## iCloud 剪贴板同步（IMPORTANT）
 - IMPORTANT: 剪贴板跨设备同步使用现有加密 CloudKit 私有数据库快照（`CloudKitClipboardSyncSession` / `CloudKitSyncService`），容器为 `iCloud.com.alexjiang.PasteBuddy`。macOS、iOS，以及键盘、分享、操作扩展，在用户显式开启 iCloud 同步且签名后的 CloudKit capability 已配置时走这条路径。
-- IMPORTANT: Iroh 剪贴板同步已经删除，包括实现、依赖、配对状态和界面。禁止用 feature flag、禁用 capability 或隐藏入口把 Iroh 留在仓库里。
+- IMPORTANT: Iroh 剪贴板同步已经删除，包括实现、依赖、配对状态和界面。禁止用 feature flag、禁用 capability 或隐藏入口把 Iroh 留在仓库里。升级安装由 `LegacyClipboardPairingResidueCleanup` 在 macOS、iOS、键盘和分享/操作扩展各自进程里清一次残留：钥匙串 generic password（service `com.alexjiang.PasteBuddy.iroh`，account `clipboard-sync-secret-key`）和 `pastebuddy.iroh.peerEndpointId`（标准 UserDefaults 与 `group.com.alexjiang.PasteBuddy`）。不要把这些残留接回同步。
 - IMPORTANT: 未开启 iCloud 同步时，剪贴板只留在本机。不要绕过 `SyncConfiguration` 的显式 opt-in 和 readiness gate。
 
 ## macOS UI/HID 验证（IMPORTANT）
