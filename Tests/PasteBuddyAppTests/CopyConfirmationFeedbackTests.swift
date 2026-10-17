@@ -64,8 +64,9 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
         )
     }
 
-    func testRepeatedCopiesCoalesceAndOnlyLatestTimerDismisses() async throws {
-        let lifecycle = CopyConfirmationFeedbackLifecycle()
+    func testRepeatedCopiesCoalesceAndOnlyLatestTimerDismisses() {
+        let scheduler = ManualCopyConfirmationDismissalScheduler()
+        let lifecycle = CopyConfirmationFeedbackLifecycle(scheduler: scheduler)
         var dismissals: [Int] = []
 
         lifecycle.recordCopy(
@@ -74,7 +75,6 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
             dismissAfter: .milliseconds(80),
             onDismiss: { dismissals.append(1) }
         )
-        try await Task.sleep(for: .milliseconds(10))
         lifecycle.recordCopy(
             succeeded: true,
             itemCount: 4,
@@ -83,7 +83,15 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
         )
 
         XCTAssertEqual(lifecycle.state.presentation?.itemCount, 4)
-        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(scheduler.dismissals.map(\.duration), [.milliseconds(80), .milliseconds(40)])
+        XCTAssertTrue(scheduler.dismissals[0].isCancelled)
+        XCTAssertEqual(scheduler.active.map(\.duration), [.milliseconds(40)])
+
+        scheduler.dismissals[0].fire()
+        XCTAssertEqual(lifecycle.state.presentation?.itemCount, 4)
+        XCTAssertEqual(dismissals, [])
+
+        scheduler.active[0].fire()
         XCTAssertNil(lifecycle.state.presentation)
         XCTAssertEqual(dismissals, [4])
     }
@@ -180,7 +188,49 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
         XCTAssertEqual(reportedCounts, [1, 2])
     }
 
-    private func localizationValues(locale: String) throws -> [String: String] {
+}
+
+@MainActor
+private final class ManualCopyConfirmationDismissal: CopyConfirmationDismissal {
+    let duration: Duration
+    private let action: @MainActor () -> Void
+    private(set) var isCancelled = false
+
+    init(duration: Duration, action: @escaping @MainActor () -> Void) {
+        self.duration = duration
+        self.action = action
+    }
+
+    func cancel() {
+        isCancelled = true
+    }
+
+    func fire() {
+        guard !isCancelled else { return }
+        action()
+    }
+}
+
+@MainActor
+private final class ManualCopyConfirmationDismissalScheduler: CopyConfirmationDismissalScheduling {
+    private(set) var dismissals: [ManualCopyConfirmationDismissal] = []
+
+    func schedule(
+        after duration: Duration,
+        action: @escaping @MainActor () -> Void
+    ) -> any CopyConfirmationDismissal {
+        let dismissal = ManualCopyConfirmationDismissal(duration: duration, action: action)
+        dismissals.append(dismissal)
+        return dismissal
+    }
+
+    var active: [ManualCopyConfirmationDismissal] {
+        dismissals.filter { !$0.isCancelled }
+    }
+}
+
+private extension CopyConfirmationFeedbackTests {
+    func localizationValues(locale: String) throws -> [String: String] {
         var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         for _ in 0..<8 {
             let candidate = directory
@@ -205,7 +255,7 @@ final class CopyConfirmationFeedbackTests: XCTestCase {
         throw CocoaError(.fileNoSuchFile)
     }
 
-    private func loadReceipt(from provider: NSItemProvider) async throws -> Data? {
+    func loadReceipt(from provider: NSItemProvider) async throws -> Data? {
         try await withCheckedThrowingContinuation { continuation in
             provider.loadDataRepresentation(
                 forTypeIdentifier: ClipboardNativeCopyFeedbackReceipt.pasteboardType.rawValue

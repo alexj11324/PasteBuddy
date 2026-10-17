@@ -1,4 +1,4 @@
-name: Local CI
+name: CI
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch' && format('CI / approve {0}', inputs.commit_sha) || 'CI' }}
 
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Full 40-character commit SHA to execute on the local runner
+        description: Full 40-character commit SHA to execute on the GitHub-hosted runner
         required: true
         type: string
       confirmation:
@@ -19,7 +19,7 @@ on:
     branches: [main]
 
 concurrency:
-  group: local-ci-${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || github.sha }}
+  group: ci-${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -32,14 +32,13 @@ env:
 jobs:
   verify:
     name: verify
-    # push/pull_request: repo is private with a single collaborator, so GitHub's own
-    # write-access gate on the repo is the authorization check - no extra approval needed.
-    # workflow_dispatch: kept for ad-hoc re-runs against an arbitrary SHA, still owner-gated.
+    # push and pull_request run script/ci.sh on GitHub-hosted xcode-27 with no secrets.
+    # workflow_dispatch re-runs one exact SHA and stays owner-gated.
     if: >-
       github.event_name == 'push' ||
       github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.confirmation == 'RUN')
-    runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]
+    runs-on: xcode-27
     timeout-minutes: 90
     env:
       TARGET_SHA: >-
