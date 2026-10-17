@@ -1,47 +1,54 @@
-# Local CI runners and macOS release
+# CI runners and macOS release
 
 ## Trust model
 
-GitHub Actions is the control plane; the local Apple Silicon Mac is the build
-plane. A self-hosted runner can execute repository code with the permissions of
-its macOS account, so pull-request events never automatically run on this
-personal machine.
+Ordinary CI runs on GitHub-hosted `xcode-27` runners. Pull requests and pushes
+to `main` run `script/ci.sh` there. That job has no release credentials and
+only `contents: read` plus `checks: write`.
 
-Ordinary CI requires the repository owner to approve one exact commit SHA:
+A self-hosted runner can execute repository code with the permissions of its
+macOS account. Release jobs stay on that machine, and only through an
+owner-confirmed `workflow_dispatch`. Do not point ordinary pull-request CI at
+the personal Mac. Stop any existing `pastebuddy-ci` runner so it cannot pick up
+repository code.
+
+`workflow_dispatch` can re-run ordinary CI for one exact commit SHA. The
+repository owner approves it:
 
 ```bash
 script/dispatch_local_ci.sh [commit-or-HEAD]
 ```
 
-The workflow creates a check named `CI / verify` on that exact SHA, runs
-`script/ci.sh`, and completes the same check. A changed PR head needs a new
-approval. The ordinary CI job has no release credentials and only
-`contents: read` plus `checks: write`.
+The workflow creates a check named `CI / verify` on that SHA, runs
+`script/ci.sh`, and completes the same check.
 
 ## Runner accounts and labels
 
-Use two separate standard macOS accounts and work directories. Do not run either
-runner as an administrator or from the daily developer account.
+Ordinary CI uses the GitHub-hosted label `xcode-27` (macOS 27, Xcode 27). No
+repository runner is required for pull requests or pushes to `main`.
 
-| Runner | Lifecycle | Custom labels | Credentials |
+Release still uses one standard macOS account and work directory. Do not run
+that runner as an administrator or from the daily developer account.
+
+| Runner | Lifecycle | Labels | Credentials |
 | --- | --- | --- | --- |
-| Ordinary CI | Persistent service | `pastebuddy-ci`, `xcode-27` | None |
-| Release | Offline by default; start only for an approved release | `pastebuddy-release`, `xcode-27` | Temporary Keychain and OIDC-restored files only |
+| Ordinary CI | GitHub-hosted | `xcode-27` | None |
+| Release | Offline by default; start only for an approved release | `self-hosted`, `macOS`, `ARM64`, `pastebuddy-release`, `xcode-27` | Temporary Keychain and OIDC-restored files only |
 
-For each account:
+For the release account:
 
 1. Open GitHub repository **Settings → Actions → Runners → New self-hosted
    runner** and select macOS/ARM64.
 2. Follow GitHub's generated download and checksum commands from that page; do
    not copy a stale runner URL from this repository.
-3. Configure with the repository URL, a unique runner name, and the custom
+3. Configure with the repository URL, a unique runner name, and the release
    labels from the table. Keep default `self-hosted`, `macOS`, and `ARM64`.
 4. Ensure Xcode 27, `gh`, `gcloud`, Swift, Ruby, and Python 3 are available to
    that account. Accept the Xcode license before starting the runner.
-5. Install ordinary CI as a service. Start release with `run.sh` only when a
-   protected release is waiting, then stop it afterward.
+5. Start release with `run.sh` only when a protected release is waiting, then
+   stop it afterward.
 
-Never give ordinary CI access to the developer's Keychain,
+Never give the release runner access to the developer's Keychain,
 `~/Library/Application Support/PasteBuddy*`, or `/Applications/PasteBuddy
 Dev.app`. The canonical CI command only uses a fresh temporary directory and
 does not install or launch the app.
@@ -61,7 +68,7 @@ Create these protected environments:
 - `testflight`: deployments only from `main`;
 - `macos-production`: deployments only from tags matching `v*`.
 
-The current private-repository plan supports deployment source policies but
+The repository's GitHub plan supports deployment source policies but
 rejects required reviewers and wait timers. The live repository therefore uses
 the source restrictions above plus owner-only dispatch and confirmation inputs.
 Treat environment reviewer approval as pending a GitHub plan upgrade; do not

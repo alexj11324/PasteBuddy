@@ -2345,8 +2345,7 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         let ciScript = try sourceFileContents("script/ci.sh")
 
         // workflow_dispatch (ad-hoc re-run against an arbitrary SHA) still requires explicit
-        // owner approval; it is no longer the only trigger, since push/pull_request runs are
-        // gated by GitHub's own private-repo write-access model instead (single-collaborator repo).
+        // owner approval. push and pull_request run script/ci.sh on GitHub-hosted xcode-27.
         XCTAssertTrue(workflow.contains("workflow_dispatch:"))
         XCTAssertTrue(workflow.contains("pull_request:"))
         XCTAssertTrue(workflow.contains("push:"))
@@ -2358,7 +2357,9 @@ final class PasteBuddyAppRuntimeTests: XCTestCase {
         XCTAssertTrue(workflow.contains("-f name='CI / verify'"))
         XCTAssertTrue(workflow.contains("ref: ${{ env.TARGET_SHA }}"))
         XCTAssertTrue(workflow.contains("if: github.event_name == 'workflow_dispatch'"))
-        XCTAssertTrue(workflow.contains("runs-on: [self-hosted, macOS, ARM64, pastebuddy-ci, xcode-27]"))
+        XCTAssertTrue(workflow.contains("runs-on: xcode-27"))
+        XCTAssertFalse(workflow.contains("self-hosted"))
+        XCTAssertFalse(workflow.contains("pastebuddy-ci"))
         XCTAssertFalse(workflow.contains("env:\n      GH_TOKEN:"))
         XCTAssertTrue(dispatchScript.contains("Only repository owner"))
         XCTAssertTrue(dispatchScript.contains("commits/$TARGET_SHA"))

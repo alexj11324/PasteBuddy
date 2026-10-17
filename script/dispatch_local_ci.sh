@@ -22,12 +22,12 @@ TARGET_SHA="$(git rev-parse --verify "$REQUESTED_REF^{commit}")"
 REPOSITORY="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 OWNER="${REPOSITORY%%/*}"
 ACTOR="$(gh api user --jq .login)"
-[[ "$ACTOR" == "$OWNER" ]] || die "Only repository owner '$OWNER' may approve code for the local self-hosted runner."
+[[ "$ACTOR" == "$OWNER" ]] || die "Only repository owner '$OWNER' may approve a workflow_dispatch re-run."
 gh api "repos/$REPOSITORY/commits/$TARGET_SHA" --silent \
-  || die "Commit $TARGET_SHA is not available from GitHub. Push it before approving local CI."
+  || die "Commit $TARGET_SHA is not available from GitHub. Push it before approving CI."
 
 RUN_TITLE="CI / approve $TARGET_SHA"
-echo "Dispatching owner-approved local CI for $TARGET_SHA"
+echo "Dispatching owner-approved CI for $TARGET_SHA"
 gh workflow run "$WORKFLOW" --ref main \
   -f commit_sha="$TARGET_SHA" \
   -f confirmation=RUN
