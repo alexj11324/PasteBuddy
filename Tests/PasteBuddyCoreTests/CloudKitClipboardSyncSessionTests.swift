@@ -72,8 +72,9 @@ final class CloudKitClipboardSyncSessionTests: XCTestCase {
             lastUploadedDataRevision: &lastUploadedDataRevision
         )
 
+        let saveCount = await harness.transport.saveCount()
         XCTAssertFalse(succeeded)
-        XCTAssertEqual(await harness.transport.saveCount(), 0)
+        XCTAssertEqual(saveCount, 0)
         XCTAssertNil(lastUploadedDataRevision)
         XCTAssertEqual(harness.store.lastErrorMessage, CloudSyncSessionTestError.fetchFailed.localizedDescription)
     }
@@ -98,9 +99,11 @@ final class CloudKitClipboardSyncSessionTests: XCTestCase {
             lastUploadedDataRevision: &lastUploadedDataRevision
         )
 
+        let saveCount = await harness.transport.saveCount()
+        let savedRecords = await harness.transport.records()
         XCTAssertFalse(succeeded)
-        XCTAssertEqual(await harness.transport.saveCount(), 1)
-        XCTAssertTrue(await harness.transport.records().isEmpty)
+        XCTAssertEqual(saveCount, 1)
+        XCTAssertTrue(savedRecords.isEmpty)
         XCTAssertNil(lastUploadedDataRevision)
         XCTAssertEqual(harness.store.lastErrorMessage, CloudSyncSessionTestError.saveFailed.localizedDescription)
     }
@@ -129,8 +132,9 @@ final class CloudKitClipboardSyncSessionTests: XCTestCase {
             lastUploadedDataRevision: &lastUploadedDataRevision
         )
 
+        let saveCount = await harness.transport.saveCount()
         XCTAssertTrue(succeeded)
-        XCTAssertEqual(await harness.transport.saveCount(), 1)
+        XCTAssertEqual(saveCount, 1)
         XCTAssertEqual(lastUploadedDataRevision, harness.store.dataRevision)
     }
 
