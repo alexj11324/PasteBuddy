@@ -1,5 +1,10 @@
 # Lessons
 
+## Menu bar panel query cost
+- Opening the shelf, applying a filter, or resolving selection used `filteredItems`, which runs `SELECT ci.* ... LIMIT 100` and decodes every payload on the main actor just to read `.first?.id`. Use `firstFilteredItemID` (`SELECT ci.id ... LIMIT 1`) for that. Command-1…9 on an open panel must use the cards already on screen; `store.quickPasteItem` loads that same page again.
+- `clearFilters()` assigned every filter even when it was already empty, and each `didSet` bumped `queryRevision`. A panel open with no active filters therefore invalidated the shelf query four extra times. Skip unchanged writes, and coalesce a real clear into one revision bump.
+- Shift-arrow called `setSelectedItemIDs(_:primaryID:in:)`, which loaded the first repository page to validate a primary the panel had already resolved. A primary past that 100-item window was dropped. When the caller passes a primary that is in the selected set, keep it and do not query.
+
 ## Image drag/paste
 - OCR text is search metadata, not a paste representation. Advertising `public.utf8-plain-text` on an image `NSItemProvider` makes text fields (Cursor, Electron, NSTextView) take OCR instead of the image. Type identifier order does not win; the destination picks the type it prefers.
 - `NSImage.writeObjects` / `tiffRepresentation` turns stored PNG into a huge uncompressed TIFF. Write stored PNG/TIFF bytes through. Convert only when the bytes are neither.

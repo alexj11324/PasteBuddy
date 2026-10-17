@@ -1,6 +1,22 @@
 import PasteBuddyCore
 import SwiftUI
 
+enum ClipboardPanelQuickPaste {
+    static func item(
+        atOneBasedIndex index: Int,
+        in residentItems: [ClipboardItem],
+        fallback: () -> ClipboardItem? = { nil }
+    ) -> ClipboardItem? {
+        guard (1...9).contains(index) else { return nil }
+        let zeroBasedIndex = index - 1
+        if residentItems.indices.contains(zeroBasedIndex) {
+            return residentItems[zeroBasedIndex]
+        }
+        guard residentItems.isEmpty else { return nil }
+        return fallback()
+    }
+}
+
 enum ClipboardPanelHistoryAvailability {
     static func allowsActions(scope: PasteScope, errorMessage: String?) -> Bool {
         scope == .pasteStack || errorMessage == nil

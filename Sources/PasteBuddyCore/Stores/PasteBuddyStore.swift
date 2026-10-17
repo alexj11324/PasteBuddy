@@ -65,6 +65,7 @@ public final class PasteBuddyStore {
     @ObservationIgnored private var presentationCache = PasteBuddyPresentationCache()
     @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
     @ObservationIgnored private var isRepositorySyncInFlight = false
+    @ObservationIgnored private var isCoalescingQueryRevision = false
     @ObservationIgnored private var repositoryNeedsBootstrap: Bool
     @ObservationIgnored private var repositoryUsesBoundedHistoryCache = false
     @ObservationIgnored private var repositoryWriteFailed = false
@@ -105,6 +106,7 @@ public final class PasteBuddyStore {
     }
 
     private func bumpQueryRevision() {
+        guard !isCoalescingQueryRevision else { return }
         queryRevision &+= 1
         historyQueryErrorMessage = nil
         bumpPresentationRevision()
@@ -244,8 +246,7 @@ public final class PasteBuddyStore {
                     }
                 }
             }
-            selectedItemID = filteredItems.first?.id
-            selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            selectFirstFilteredItem()
             if repairedShortcutConfiguration || didMigrateSnapshot {
                 save()
             }
@@ -334,8 +335,7 @@ public final class PasteBuddyStore {
                     markClipboardRepositorySynced(to: dataRevision)
                 }
             }
-            selectedItemID = filteredItems.first?.id
-            selectedItemIDs = selectedItemID.map { [$0] } ?? []
+            selectFirstFilteredItem()
             if repairedShortcutConfiguration || didMigrateSnapshot {
                 save()
             }
@@ -607,6 +607,33 @@ public final class PasteBuddyStore {
             return filteredItems
         }
         return makeFilteredItems(scope: scope, isHistoryAccessLocked: isHistoryAccessLocked)
+    }
+
+    public func firstFilteredItemID(for scope: PasteScope) -> UUID? {
+        guard !isHistoryAccessLocked else { return nil }
+        if scope == .pasteStack || clipboardRepository == nil {
+            return filteredItems(for: scope).first?.id
+        }
+        return databaseFirstFilteredItemID(for: scope)
+    }
+
+    private func selectFirstFilteredItem() {
+        selectSingleItem(firstFilteredItemID(for: selectedScope))
+    }
+
+    private func databaseFirstFilteredItemID(for scope: PasteScope) -> UUID? {
+        guard let clipboardRepository else { return nil }
+        guard isClipboardRepositoryReadyForHistoryQuery else { return nil }
+        guard let request = repositoryPageRequest(for: scope, offset: 0, limit: 1) else {
+            return nil
+        }
+        do {
+            return try clipboardRepository.firstItemID(request)
+        } catch {
+            historyQueryErrorMessage = error.localizedDescription
+            lastErrorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     public func filteredItemsPage(
@@ -1055,6 +1082,13 @@ public final class PasteBuddyStore {
         primaryID: UUID? = nil,
         in scope: PasteScope? = nil
     ) {
+        if let primaryID, ids.contains(primaryID) {
+            guard selectedItemIDs != ids || selectedItemID != primaryID else { return }
+            selectedItemIDs = ids
+            selectedItemID = primaryID
+            return
+        }
+
         let items = scope.map { filteredItems(for: $0) } ?? mainListItemsSnapshot
         let resolvedPrimaryID = primaryID.flatMap { candidate in
             items.contains(where: { $0.id == candidate }) && ids.contains(candidate) ? candidate : nil
@@ -1270,8 +1304,7 @@ public final class PasteBuddyStore {
             if didAuthenticate {
                 historyUnlockedAt = Date()
                 lastErrorMessage = nil
-                selectedItemID = filteredItems.first?.id
-                selectedItemIDs = selectedItemID.map { [$0] } ?? []
+                selectFirstFilteredItem()
             }
             return didAuthenticate
         } catch {
@@ -1374,10 +1407,24 @@ public final class PasteBuddyStore {
     }
 
     public func clearFilters() {
+        let hadFilter = contentTypeFilter != nil
+            || sourceAppFilter != nil
+            || deviceFilter != nil
+            || dateFilter != .any
+        guard hadFilter else {
+            if historyQueryErrorMessage != nil {
+                bumpQueryRevision()
+            }
+            return
+        }
+
+        isCoalescingQueryRevision = true
         contentTypeFilter = nil
         sourceAppFilter = nil
         deviceFilter = nil
         dateFilter = .any
+        isCoalescingQueryRevision = false
+        bumpQueryRevision()
     }
 
     public func clearFilter(_ kind: ClipboardFilterKind) {
@@ -1404,7 +1451,7 @@ public final class PasteBuddyStore {
         case .date:
             dateFilter = ClipboardDateFilter(rawValue: suggestion.value) ?? .any
         }
-        selectSingleItem(filteredItems.first?.id)
+        selectFirstFilteredItem()
     }
 
     public func filterSuggestions(matching query: String, limit: Int = 8) -> [ClipboardFilterDescriptor] {
@@ -1469,7 +1516,7 @@ public final class PasteBuddyStore {
             searchQuery = queryParts.textQuery
         }
         sourceAppFilter = appName
-        selectSingleItem(filteredItems.first?.id)
+        selectFirstFilteredItem()
     }
 
     @discardableResult
@@ -1789,7 +1836,7 @@ public final class PasteBuddyStore {
         guard snapshot.pinboards[pinboardIndex].itemIDs.count != originalCount else { return }
         snapshot.pinboards[pinboardIndex].updatedAt = Date()
         if selectedScope == .pinboard(pinboardID), selectedItemID == itemID {
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
         }
         save()
     }
@@ -1812,7 +1859,7 @@ public final class PasteBuddyStore {
         snapshot.pinboards[sourceIndex].updatedAt = now
         snapshot.pinboards[destinationIndex].updatedAt = now
         if selectedScope == .pinboard(sourcePinboardID), selectedItemID == itemID {
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
         }
         save()
     }
@@ -1865,7 +1912,7 @@ public final class PasteBuddyStore {
         }
         selectedItemIDs.subtract(deletedIDs)
         if selectedItemID.map(deletedIDs.contains) == true {
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
         }
         if clipboardRepository != nil {
             markClipboardRepositorySynced(to: dataRevision)
@@ -2574,7 +2621,7 @@ public final class PasteBuddyStore {
                 pasteStackItems.removeAll { item in
                     !remainingIDs.contains(item.id)
                 }
-                selectSingleItem(filteredItems.first?.id)
+                selectFirstFilteredItem()
                 refreshExistingSmartPinboards()
             }
             repositoryWriteFailed = false
@@ -2609,7 +2656,7 @@ public final class PasteBuddyStore {
         pasteStackItems.removeAll { item in
             !remainingIDs.contains(item.id)
         }
-        selectSingleItem(filteredItems.first?.id)
+        selectFirstFilteredItem()
         refreshExistingSmartPinboards()
         saveAndFlush()
     }
@@ -2675,7 +2722,7 @@ public final class PasteBuddyStore {
             let result = try importer.importPackage(package, into: snapshot)
             snapshot = result.snapshot
             lastErrorMessage = nil
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
             save()
         } catch {
             lastErrorMessage = error.localizedDescription
@@ -2725,7 +2772,7 @@ public final class PasteBuddyStore {
             }
             snapshot = result.snapshot
             lastErrorMessage = nil
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
             save()
             return result
         } catch {
@@ -3240,7 +3287,7 @@ public final class PasteBuddyStore {
         pasteStackItems.removeAll { $0.id == id }
         selectedItemIDs.remove(id)
         if selectedItemID == id {
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
         }
     }
 
@@ -3265,7 +3312,7 @@ public final class PasteBuddyStore {
             item = pasteStackItems.removeLast()
         }
         if selectedScope == .pasteStack {
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
         }
         return item
     }
@@ -3448,7 +3495,7 @@ public final class PasteBuddyStore {
             !remainingIDs.contains(stackItem.id)
         }
         if let selectedItemID, !remainingIDs.contains(selectedItemID) {
-            selectSingleItem(filteredItems.first?.id)
+            selectFirstFilteredItem()
         } else {
             let pasteStackIDs = Set(pasteStackItems.map(\.id))
             selectedItemIDs = Set(selectedItemIDs.filter { id in

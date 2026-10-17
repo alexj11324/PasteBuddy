@@ -220,10 +220,7 @@ struct ClipboardShelfPanelView: View {
                       scope: shelfScope,
                       errorMessage: store.historyQueryErrorMessage
                   ),
-                  let item = store.quickPasteItem(
-                      atOneBasedIndex: request.oneBasedIndex,
-                      in: shelfScope
-                  ) else { return }
+                  let item = quickPasteItem(atOneBasedIndex: request.oneBasedIndex) else { return }
             request.markHandled()
             pasteItem(item, format: request.format)
         }
@@ -543,6 +540,14 @@ struct ClipboardShelfPanelView: View {
             scope: shelfScope,
             errorMessage: store.historyQueryErrorMessage
         )
+    }
+
+    private func quickPasteItem(atOneBasedIndex index: Int) -> ClipboardItem? {
+        if let item = ClipboardPanelQuickPaste.item(atOneBasedIndex: index, in: renderedShelfItems) {
+            return item
+        }
+        guard renderedShelfItems.isEmpty else { return nil }
+        return store.quickPasteItem(atOneBasedIndex: index, in: shelfScope)
     }
 
     private var shelfDisplayItems: [ClipboardShelfDisplayItem] {
@@ -1042,7 +1047,7 @@ struct ClipboardShelfPanelView: View {
                    scope: shelfScope,
                    errorMessage: store.historyQueryErrorMessage
                ),
-               let item = store.quickPasteItem(atOneBasedIndex: index, in: shelfScope) {
+               let item = quickPasteItem(atOneBasedIndex: index) {
                 pasteItem(item, format: store.defaultPasteFormat)
                 return .handled
             }

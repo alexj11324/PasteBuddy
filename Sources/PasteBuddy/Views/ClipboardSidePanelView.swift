@@ -118,10 +118,7 @@ struct ClipboardSidePanelView: View {
                       scope: sideScope,
                       errorMessage: store.historyQueryErrorMessage
                   ),
-                  let item = store.quickPasteItem(
-                      atOneBasedIndex: request.oneBasedIndex,
-                      in: sideScope
-                  ) else { return }
+                  let item = quickPasteItem(atOneBasedIndex: request.oneBasedIndex) else { return }
             request.markHandled()
             pasteItem(item, format: request.format)
         }
@@ -460,6 +457,14 @@ struct ClipboardSidePanelView: View {
         )
     }
 
+    private func quickPasteItem(atOneBasedIndex index: Int) -> ClipboardItem? {
+        if let item = ClipboardPanelQuickPaste.item(atOneBasedIndex: index, in: renderedItems) {
+            return item
+        }
+        guard renderedItems.isEmpty else { return nil }
+        return store.quickPasteItem(atOneBasedIndex: index, in: sideScope)
+    }
+
     private var selectedItemsInDisplayOrder: [ClipboardItem] {
         let ids = interaction.selectedIDs
         guard !ids.isEmpty else {
@@ -743,7 +748,7 @@ struct ClipboardSidePanelView: View {
                    scope: sideScope,
                    errorMessage: store.historyQueryErrorMessage
                ),
-               let item = store.quickPasteItem(atOneBasedIndex: index, in: sideScope) {
+               let item = quickPasteItem(atOneBasedIndex: index) {
                 pasteItem(item, format: store.defaultPasteFormat)
                 return .handled
             }
